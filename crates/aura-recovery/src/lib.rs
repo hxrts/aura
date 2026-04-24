@@ -140,7 +140,7 @@ pub use guardian_setup::GuardianSetupCoordinator;
 // Re-export consensus-based ceremony
 pub use guardian_ceremony::{
     CeremonyId, CeremonyResponse, CeremonyResult, CeremonyState, CeremonyStatus,
-    GuardianCeremonyExecutor, GuardianCeremonyManager, GuardianRotationOp, GuardianState,
+    GuardianCeremonyExecutor, GuardianRotationOp, GuardianState,
 };
 
 // Re-export new recovery protocol

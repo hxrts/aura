@@ -32,10 +32,10 @@
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use aura_core::FlowCost;
-use aura_core::Hash32;
 use aura_guards::types;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::capabilities::{
     AuthenticationCapability, GuardianAuthCapability, RecoveryAuthorizationCapability,
@@ -106,6 +106,15 @@ pub struct GuardSnapshot {
     /// Owner-provided freshness nonce for request/session identifiers.
     pub freshness_nonce: [u8; 16],
 
+    /// Pending challenge/session identifiers reserved by the caller.
+    pub pending_session_ids: HashSet<String>,
+
+    /// Active session identifiers already issued by the caller.
+    pub active_session_ids: HashSet<String>,
+
+    /// Pending guardian approval request identifiers reserved by the caller.
+    pub pending_guardian_request_ids: HashSet<String>,
+
     /// Whether this is an emergency operation (bypasses some checks)
     pub is_emergency: bool,
 }
@@ -131,6 +140,9 @@ impl GuardSnapshot {
             epoch,
             now_ms,
             freshness_nonce,
+            pending_session_ids: HashSet::new(),
+            active_session_ids: HashSet::new(),
+            pending_guardian_request_ids: HashSet::new(),
             is_emergency: false,
         }
     }
@@ -150,19 +162,15 @@ impl GuardSnapshot {
     pub fn has_budget(&self, cost: FlowCost) -> bool {
         self.flow_budget_remaining >= cost
     }
-}
 
-fn snapshot_freshness_id(prefix: &str, snapshot: &GuardSnapshot) -> String {
-    let mut material = Vec::with_capacity(prefix.len() + 16 + 32 + 32 + 8);
-    material.extend_from_slice(prefix.as_bytes());
-    material.extend_from_slice(&snapshot.freshness_nonce);
-    material.extend_from_slice(&snapshot.authority_id.to_bytes());
-    if let Some(context_id) = snapshot.context_id {
-        material.extend_from_slice(&context_id.to_bytes());
+    pub fn session_id_available(&self, session_id: &str) -> bool {
+        !self.pending_session_ids.contains(session_id)
+            && !self.active_session_ids.contains(session_id)
     }
-    material.extend_from_slice(&snapshot.epoch.to_le_bytes());
-    let digest = Hash32::new(aura_core::hash::hash(&material));
-    format!("{prefix}_{}", digest.to_hex())
+
+    pub fn guardian_request_id_available(&self, request_id: &str) -> bool {
+        !self.pending_guardian_request_ids.contains(request_id)
+    }
 }
 
 // =============================================================================
@@ -176,6 +184,8 @@ pub enum GuardRequest {
     ChallengeRequest {
         /// Scope of requested authentication
         scope: SessionScope,
+        /// Explicit caller-generated challenge/session identifier
+        session_id: String,
     },
 
     /// Submit identity proof for verification
@@ -198,6 +208,8 @@ pub enum GuardRequest {
         scope: SessionScope,
         /// Duration in seconds
         duration_seconds: u64,
+        /// Explicit caller-generated session identifier
+        session_id: String,
     },
 
     /// Request guardian approval for recovery
@@ -208,6 +220,8 @@ pub enum GuardRequest {
         operation_type: RecoveryOperationType,
         /// Required number of guardian approvals
         required_guardians: u32,
+        /// Explicit caller-generated guardian approval request identifier
+        request_id: String,
     },
 
     /// Submit guardian approval decision
@@ -395,6 +409,18 @@ pub struct GuardReject {
     pub message: &'static str,
 }
 
+const DUPLICATE_SESSION_ID: GuardReject = GuardReject {
+    code: "duplicate-session-id",
+    category: "auth",
+    message: "Session or challenge identifier is already pending or active",
+};
+
+const DUPLICATE_GUARDIAN_REQUEST_ID: GuardReject = GuardReject {
+    code: "duplicate-guardian-request-id",
+    category: "auth",
+    message: "Guardian approval request identifier is already pending",
+};
+
 impl std::fmt::Display for GuardReject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}:{}] {}", self.category, self.code, self.message)
@@ -551,7 +577,10 @@ pub fn check_capability_and_flow_budget(
 /// feature workflow shaping, stable id generation, and auth fact construction.
 pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
     match request {
-        GuardRequest::ChallengeRequest { scope: _ } => {
+        GuardRequest::ChallengeRequest {
+            scope: _,
+            session_id,
+        } => {
             if let Some(outcome) = check_capability_and_flow_budget(
                 snapshot,
                 &AuthenticationCapability::Request.as_name(),
@@ -560,8 +589,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 return outcome;
             }
 
-            // Generate session ID and challenge
-            let session_id = snapshot_freshness_id("session", snapshot);
+            if !snapshot.session_id_available(session_id) {
+                return deny(DUPLICATE_SESSION_ID);
+            }
             let expires_at_ms = snapshot.now_ms + 300_000; // 5 minutes
 
             GuardOutcome::allowed(vec![
@@ -569,7 +599,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                     cost: costs::CHALLENGE_REQUEST_COST,
                 },
                 EffectCommand::GenerateChallenge {
-                    session_id,
+                    session_id: session_id.clone(),
                     expires_at_ms,
                 },
             ])
@@ -626,6 +656,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
         GuardRequest::SessionCreation {
             scope,
             duration_seconds,
+            session_id,
         } => {
             if let Some(outcome) = check_capability_and_flow_budget(
                 snapshot,
@@ -640,7 +671,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 return outcome;
             }
 
-            let session_id = snapshot_freshness_id("session", snapshot);
+            if !snapshot.session_id_available(session_id) {
+                return deny(DUPLICATE_SESSION_ID);
+            }
             let expires_at_ms = snapshot.now_ms + (duration_seconds * 1000);
 
             GuardOutcome::allowed(vec![
@@ -648,7 +681,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                     cost: costs::SESSION_CREATION_COST,
                 },
                 EffectCommand::IssueSessionTicket {
-                    session_id,
+                    session_id: session_id.clone(),
                     scope: scope.clone(),
                     expires_at_ms,
                 },
@@ -659,6 +692,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             account_id,
             operation_type,
             required_guardians,
+            request_id,
         } => {
             if let Some(outcome) = check_capability_and_flow_budget(
                 snapshot,
@@ -675,7 +709,9 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 return outcome;
             }
 
-            let request_id = snapshot_freshness_id("guardian_req", snapshot);
+            if !snapshot.guardian_request_id_available(request_id) {
+                return deny(DUPLICATE_GUARDIAN_REQUEST_ID);
+            }
 
             GuardOutcome::allowed(vec![
                 EffectCommand::ChargeFlowBudget {
@@ -692,7 +728,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                 EffectCommand::NotifyPeer {
                     peer: *account_id,
                     event_type: "guardian_approval_request".to_string(),
-                    event_data: request_id.into_bytes(),
+                    event_data: request_id.as_bytes().to_vec(),
                 },
             ])
         }
@@ -832,6 +868,7 @@ mod tests {
         let snapshot = standard_guard_snapshot();
         let request = GuardRequest::ChallengeRequest {
             scope: protocol_scope("test"),
+            session_id: "challenge_session_1".to_string(),
         };
 
         let outcome = evaluate_request(&snapshot, &request);
@@ -847,6 +884,42 @@ mod tests {
         let request = GuardRequest::SessionCreation {
             scope: protocol_scope("test"),
             duration_seconds: 100_000, // > 24 hours
+            session_id: "session_1".to_string(),
+        };
+
+        let outcome = evaluate_request(&snapshot, &request);
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_evaluate_challenge_request_rejects_duplicate_session_id() {
+        let mut snapshot = standard_guard_snapshot();
+        snapshot
+            .pending_session_ids
+            .insert("challenge_session_1".to_string());
+        let request = GuardRequest::ChallengeRequest {
+            scope: protocol_scope("test"),
+            session_id: "challenge_session_1".to_string(),
+        };
+
+        let outcome = evaluate_request(&snapshot, &request);
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_evaluate_guardian_request_rejects_duplicate_request_id() {
+        let mut snapshot = standard_guard_snapshot();
+        snapshot
+            .capabilities
+            .push(GuardianAuthCapability::RequestApproval.as_name());
+        snapshot
+            .pending_guardian_request_ids
+            .insert("guardian_req_1".to_string());
+        let request = GuardRequest::GuardianApprovalRequest {
+            account_id: aura_testkit::test_builders::authority_id(4),
+            operation_type: RecoveryOperationType::DeviceKeyRecovery,
+            required_guardians: 2,
+            request_id: "guardian_req_1".to_string(),
         };
 
         let outcome = evaluate_request(&snapshot, &request);

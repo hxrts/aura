@@ -11,6 +11,7 @@
 use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use crate::core::default_context_id_for_authority;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::services::bootstrap_broker::{
     fetch_remote_candidates, register_remote_candidate, send_remote_invitation,
@@ -36,6 +37,7 @@ use aura_core::effects::secure::{
 };
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
+use aura_core::secrets::SecretExportContext;
 use aura_core::service::{EstablishPath, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{AuraError, OwnershipCategory};
@@ -466,9 +468,7 @@ impl RendezvousManager {
                             .lan_discovered_peers
                             .insert(peer.authority_id, peer.clone());
                         registry.cache_descriptor(peer.descriptor.clone()).await;
-                        let local_context =
-                            aura_core::context::EffectContext::with_authority(local_authority_id)
-                                .context_id();
+                        let local_context = default_context_id_for_authority(local_authority_id);
                         let mut local_descriptor = peer.descriptor.clone();
                         local_descriptor.context_id = local_context;
                         registry.cache_descriptor(local_descriptor).await;
@@ -1754,7 +1754,12 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 
     match effects.secure_retrieve(&location, &caps).await {
         Ok(bytes) => {
-            if let Ok(pkg) = SingleSignerKeyPackage::from_bytes(&bytes) {
+            if let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
+                &bytes,
+                SecretExportContext::secure_storage(
+                    "aura-agent::runtime::services::rendezvous_manager::retrieve_identity_keys",
+                ),
+            ) {
                 let signing_key = pkg.signing_key().try_into().unwrap_or([0u8; 32]);
                 let verifying_key = pkg.verifying_key().try_into().unwrap_or([0u8; 32]);
                 Some((signing_key, verifying_key))

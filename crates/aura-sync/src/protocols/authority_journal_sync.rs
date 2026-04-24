@@ -31,16 +31,11 @@ pub struct AuthorityJournalSyncConfig {
 }
 
 /// Explicit signature verification policy for authority journal sync.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AuthorityJournalSignaturePolicy {
     /// Incoming facts must carry valid authority signatures.
+    #[default]
     Required,
-}
-
-impl Default for AuthorityJournalSignaturePolicy {
-    fn default() -> Self {
-        Self::Required
-    }
 }
 
 impl Default for AuthorityJournalSyncConfig {

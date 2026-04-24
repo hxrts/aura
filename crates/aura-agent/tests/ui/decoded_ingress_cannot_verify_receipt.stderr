@@ -1,3 +1,11 @@
+error[E0560]: struct `aura_sync::protocols::receipts::Receipt` has no field named `public_key`
+  --> tests/ui/decoded_ingress_cannot_verify_receipt.rs:56:13
+   |
+56 |             public_key: vec![0; 32],
+   |             ^^^^^^^^^^ `aura_sync::protocols::receipts::Receipt` does not have this field
+   |
+   = note: available fields are: `context_id`, `operation`, `protocol_version`, `previous_receipt_hash`
+
 error[E0308]: mismatched types
   --> tests/ui/decoded_ingress_cannot_verify_receipt.rs:65:37
    |

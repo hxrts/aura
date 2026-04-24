@@ -28,8 +28,8 @@ use aura_core::effects::{
     reactive::{ReactiveEffects, Signal},
 };
 use aura_core::query::{
-    ConsensusId, DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability,
-    QueryIsolation, QueryStats,
+    ConsensusId, DatalogBindings, DatalogProgram, FactPredicate, Query, QueryAccessPolicy,
+    QueryCapability, QueryIsolation, QueryStats,
 };
 use aura_core::{Hash32, ResourceScope};
 
@@ -757,15 +757,27 @@ impl QueryHandler {
         self.wait_for_consensus(&pending_ids).await
     }
 
+    async fn authorize_query<Q: Query>(&self, query: &Q) -> Result<(), QueryError> {
+        match query.access_policy() {
+            QueryAccessPolicy::Protected {
+                primary,
+                mut additional,
+            } => {
+                let mut required = vec![primary];
+                required.append(&mut additional);
+                self.check_capabilities(&required).await
+            }
+            QueryAccessPolicy::Public(_) => Ok(()),
+        }
+    }
+
     /// Execute a query against a specific snapshot.
     async fn execute_snapshot_query<Q: Query>(
         &self,
         query: &Q,
         prestate_hash: &Hash32,
     ) -> Result<Q::Result, QueryError> {
-        // Check capabilities first
-        let required = query.required_capabilities();
-        self.check_capabilities(&required).await?;
+        self.authorize_query(query).await?;
 
         // Get the snapshot
         let snapshot = {
@@ -855,9 +867,8 @@ impl Clone for QueryHandler {
 #[async_trait]
 impl QueryEffects for QueryHandler {
     async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
-        // Step 1: Check capabilities
-        let required = query.required_capabilities();
-        self.check_capabilities(&required).await?;
+        // Step 1: Check authorization policy
+        self.authorize_query(query).await?;
 
         // Step 2: Compile query to Datalog
         let program = query.to_datalog();
@@ -867,10 +878,6 @@ impl QueryEffects for QueryHandler {
 
         // Step 4: Parse results
         Q::parse(bindings).map_err(QueryError::from)
-    }
-
-    async fn query_raw(&self, program: &DatalogProgram) -> Result<DatalogBindings, QueryError> {
-        self.execute_program(program).await
     }
 
     fn subscribe<Q: Query>(&self, query: &Q) -> QuerySubscription<Q::Result> {
@@ -898,6 +905,12 @@ impl QueryEffects for QueryHandler {
     }
 
     async fn check_capabilities(&self, capabilities: &[QueryCapability]) -> Result<(), QueryError> {
+        if capabilities.is_empty() {
+            return Err(QueryError::authorization_failed(
+                "query capability checks require at least one capability; public queries must use explicit PublicQuery metadata",
+            ));
+        }
+
         let checker = self.capabilities.read().await;
 
         for cap in capabilities {
@@ -1021,6 +1034,44 @@ impl QueryEffects for QueryHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::query::{
+        DatalogFact, DatalogProgram, DatalogRule, DatalogValue, PublicQuery, QueryAccessPolicy,
+        QueryParseError,
+    };
+
+    #[derive(Clone)]
+    struct PublicContactQuery;
+
+    impl Query for PublicContactQuery {
+        type Result = usize;
+
+        fn to_datalog(&self) -> DatalogProgram {
+            DatalogProgram::new(vec![DatalogRule::new(DatalogFact::new(
+                "result",
+                vec![DatalogValue::var("name")],
+            ))
+            .when(DatalogFact::new("user", vec![DatalogValue::var("name")]))])
+        }
+
+        fn access_policy(&self) -> QueryAccessPolicy {
+            QueryAccessPolicy::public(
+                PublicQuery::new(
+                    "aura_effects.query.handler.tests",
+                    "contact_directory",
+                    "test-only query proves explicit public-query allowlisting",
+                )
+                .expect("test public-query metadata should be valid"),
+            )
+        }
+
+        fn dependencies(&self) -> Vec<FactPredicate> {
+            vec![FactPredicate::new("user")]
+        }
+
+        fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
+            Ok(bindings.rows.len())
+        }
+    }
 
     #[tokio::test]
     async fn test_handler_creation() {
@@ -1067,12 +1118,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_capabilities_empty() {
+    async fn test_check_capabilities_empty_requires_explicit_public_policy() {
         let handler = QueryHandler::default();
 
-        // Empty capabilities should pass (no restrictions)
         let result = handler.check_capabilities(&[]).await;
-        assert!(result.is_ok());
+        assert!(matches!(
+            result,
+            Err(QueryError::AuthorizationFailed { .. })
+        ));
     }
 
     #[tokio::test]
@@ -1094,6 +1147,16 @@ mod tests {
         // Should pass now
         let result = handler.check_capabilities(&[cap]).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_explicit_public_query_allowlist_executes_without_capabilities() {
+        let handler = QueryHandler::default();
+        handler.add_fact("user", vec!["alice".to_string()]).await;
+
+        let result = handler.query(&PublicContactQuery).await.unwrap();
+
+        assert_eq!(result, 1);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

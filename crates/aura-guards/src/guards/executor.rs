@@ -341,17 +341,28 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             return true;
         }
 
-        let (token_b64, root_pk_b64) = match require_biscuit_metadata(effect_system) {
-            Ok(values) => values,
-            Err(err) => {
-                warn!(
-                    operation = %request.operation,
-                    error = %err,
-                    "Missing Biscuit metadata; denying authorization"
-                );
-                return false;
-            }
-        };
+        let (token_b64, root_pk_b64, issuer_authority) =
+            match require_biscuit_metadata(effect_system) {
+                Ok(values) => values,
+                Err(err) => {
+                    warn!(
+                        operation = %request.operation,
+                        error = %err,
+                        "Missing Biscuit metadata; denying authorization"
+                    );
+                    return false;
+                }
+            };
+
+        if issuer_authority != effect_system.authority_id().to_string() {
+            warn!(
+                operation = %request.operation,
+                issuer_authority,
+                trusted_authority = %effect_system.authority_id(),
+                "Cached Biscuit issuer metadata does not match trusted authority"
+            );
+            return false;
+        }
 
         let root_bytes = match BASE64.decode(&root_pk_b64) {
             Ok(bytes) => bytes,

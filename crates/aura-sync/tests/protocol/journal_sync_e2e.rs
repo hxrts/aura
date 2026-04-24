@@ -12,6 +12,9 @@ use aura_core::time::PhysicalTime;
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{FlowBudget, FlowCost, Journal};
 use aura_guards::GuardContextProvider;
+use aura_journal::commitment_tree::TreeState;
+use aura_protocol::effects::tree::{Cut, Snapshot};
+use aura_protocol::effects::TreeEffects;
 use aura_sync::protocols::{JournalSyncConfig, JournalSyncProtocol};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -182,6 +185,80 @@ impl PhysicalTimeEffects for TestEffects {
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         self.time_ms.fetch_add(ms, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+#[async_trait]
+impl TreeEffects for TestEffects {
+    async fn get_current_state(&self) -> Result<TreeState, aura_core::AuraError> {
+        Ok(TreeState::new())
+    }
+
+    async fn get_current_commitment(&self) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        Ok(aura_core::Hash32::zero())
+    }
+
+    async fn get_current_epoch(&self) -> Result<aura_core::Epoch, aura_core::AuraError> {
+        Ok(aura_core::Epoch::initial())
+    }
+
+    async fn apply_attested_op(
+        &self,
+        _op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal(
+            "test-only apply_attested_op",
+        ))
+    }
+
+    async fn verify_aggregate_sig(
+        &self,
+        _op: &aura_core::AttestedOp,
+        _state: &TreeState,
+    ) -> Result<bool, aura_core::AuraError> {
+        Ok(false)
+    }
+
+    async fn add_leaf(
+        &self,
+        _leaf: aura_core::LeafNode,
+        _under: aura_core::NodeIndex,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only add_leaf"))
+    }
+
+    async fn remove_leaf(
+        &self,
+        _leaf_id: aura_core::LeafId,
+        _reason: u8,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only remove_leaf"))
+    }
+
+    async fn change_policy(
+        &self,
+        _node: aura_core::NodeIndex,
+        _new_policy: aura_core::Policy,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only change_policy"))
+    }
+
+    async fn rotate_epoch(
+        &self,
+        _affected: Vec<aura_core::NodeIndex>,
+    ) -> Result<aura_core::TreeOpKind, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only rotate_epoch"))
+    }
+
+    async fn propose_snapshot(
+        &self,
+        _cut: Cut,
+    ) -> Result<aura_core::tree::ProposalId, aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only propose_snapshot"))
+    }
+
+    async fn apply_snapshot(&self, _snapshot: &Snapshot) -> Result<(), aura_core::AuraError> {
+        Err(aura_core::AuraError::internal("test-only apply_snapshot"))
     }
 }
 

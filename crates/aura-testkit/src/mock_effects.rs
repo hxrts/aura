@@ -41,6 +41,7 @@ use aura_core::effects::{
     JournalEffects, NetworkCoreEffects, NetworkExtendedEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
 };
+use aura_core::secrets::SecretExportContext;
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
 use aura_core::types::flow::{FlowBudget, Receipt};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -464,11 +465,15 @@ impl CryptoExtendedEffects for MockEffects {
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes().map_err(|e| {
-                    aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "key package serialization: {e}"
+                key_packages: vec![key_package
+                    .export_for_secure_storage(SecretExportContext::secure_storage(
+                        "aura-testkit::mock_effects::generate_signing_keys",
                     ))
-                })?],
+                    .map_err(|e| {
+                        aura_core::effects::crypto::CryptoError::invalid(format!(
+                            "key package serialization: {e}"
+                        ))
+                    })?],
                 public_key_package: public_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
                         "public package serialization: {e}"
@@ -500,7 +505,13 @@ impl CryptoExtendedEffects for MockEffects {
     ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
         match mode {
             SigningMode::SingleSigner => {
-                let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
+                let package = SingleSignerKeyPackage::import_from_secure_storage(
+                    key_package,
+                    SecretExportContext::secure_storage(
+                        "aura-testkit::mock_effects::sign_with_key",
+                    ),
+                )
+                .map_err(|e| {
                     aura_core::AuraError::invalid(format!(
                         "Invalid single-signer key package: {e}"
                     ))
@@ -1040,19 +1051,30 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         key_type: &str,
         _capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<aura_core::effects::SecureGeneratedKey, AuraError> {
-        // Generate a deterministic key based on location and type
-        let key_bytes: Vec<u8> = match key_type {
-            "ed25519" => vec![1u8; 32],
-            "frost-share" => vec![2u8; 64],
-            _ => vec![0u8; 32],
+        let (key_bytes, generated) = match key_type {
+            "ed25519" => (
+                vec![1u8; 32],
+                aura_core::effects::SecureGeneratedKey::PublicMaterial(vec![3u8; 32]),
+            ),
+            "frost-share" => (
+                vec![2u8; 32],
+                aura_core::effects::SecureGeneratedKey::OpaqueHandle(location.full_path()),
+            ),
+            "symmetric" | "aes256" | "xchacha20poly1305" => (
+                vec![4u8; 32],
+                aura_core::effects::SecureGeneratedKey::OpaqueHandle(location.full_path()),
+            ),
+            other => {
+                return Err(AuraError::invalid(format!(
+                    "unsupported secure key type: {other}"
+                )));
+            }
         };
         // Store private key
         let key = format!("secure_{}", location.full_path());
         let mut state = self.state.lock().unwrap();
         state.storage.insert(key, key_bytes);
-        Ok(aura_core::effects::SecureGeneratedKey::OpaqueHandle(
-            location.full_path(),
-        ))
+        Ok(generated)
     }
 
     async fn secure_create_time_bound_token(

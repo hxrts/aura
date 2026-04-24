@@ -43,10 +43,7 @@ use aura_core::effects::{
     query::{QueryEffects, QueryError, QuerySubscription},
     reactive::{ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream},
 };
-use aura_core::query::{
-    DatalogBindings, DatalogProgram, FactPredicate, Query, QueryCapability, QueryIsolation,
-    QueryStats,
-};
+use aura_core::query::{FactPredicate, Query, QueryCapability, QueryIsolation, QueryStats};
 
 use crate::effects::query::{CapabilityPolicy, QueryHandler};
 use crate::effects::reactive::ReactiveHandler;
@@ -196,13 +193,6 @@ impl UnifiedHandler {
     ///
     /// If no capability context is set, queries execute without authorization.
     pub async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
-        // Check capabilities if context is set
-        if self.capability_context.is_some() {
-            let required = query.required_capabilities();
-            self.query.check_capabilities(&required).await?;
-        }
-
-        // Execute the query
         self.query.query(query).await
     }
 
@@ -212,11 +202,6 @@ impl UnifiedHandler {
         _token: &[u8],
         query: &Q,
     ) -> Result<Q::Result, QueryError> {
-        // Check required capabilities
-        let required = query.required_capabilities();
-        self.query.check_capabilities(&required).await?;
-
-        // Execute the query
         self.query.query(query).await
     }
 
@@ -329,10 +314,6 @@ impl Clone for UnifiedHandler {
 impl QueryEffects for UnifiedHandler {
     async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
         self.query.query(query).await
-    }
-
-    async fn query_raw(&self, program: &DatalogProgram) -> Result<DatalogBindings, QueryError> {
-        self.query.query_raw(program).await
     }
 
     fn subscribe<Q: Query>(&self, query: &Q) -> QuerySubscription<Q::Result> {
@@ -449,7 +430,10 @@ impl ReactiveEffects for UnifiedHandler {
 mod tests {
     use super::*;
     use aura_core::effects::reactive::Signal;
-    use aura_core::query::{DatalogFact, DatalogProgram, DatalogRule, DatalogValue};
+    use aura_core::query::{
+        DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, PublicQuery,
+        QueryAccessPolicy,
+    };
 
     #[derive(Clone)]
     struct ContactQuery;
@@ -469,8 +453,15 @@ mod tests {
             DatalogProgram::new(vec![DatalogRule { head, body }])
         }
 
-        fn required_capabilities(&self) -> Vec<QueryCapability> {
-            vec![]
+        fn access_policy(&self) -> QueryAccessPolicy {
+            QueryAccessPolicy::public(
+                PublicQuery::new(
+                    "aura_app.effects.unified_handler.tests",
+                    "contact_directory",
+                    "test-only contact query exercises explicit public-query metadata",
+                )
+                .expect("test public query metadata should be valid"),
+            )
         }
 
         fn dependencies(&self) -> Vec<FactPredicate> {
@@ -485,14 +476,16 @@ mod tests {
                 let a = row
                     .get("arg0")
                     .and_then(|v| match v {
-                        DatalogValue::String(s) | DatalogValue::Symbol(s) => Some(s.clone()),
+                        DatalogValue::String(s) => Some(s.clone()),
+                        DatalogValue::Symbol(s) => Some(s.as_str().to_string()),
                         _ => None,
                     })
                     .unwrap_or_default();
                 let b = row
                     .get("arg1")
                     .and_then(|v| match v {
-                        DatalogValue::String(s) | DatalogValue::Symbol(s) => Some(s.clone()),
+                        DatalogValue::String(s) => Some(s.clone()),
+                        DatalogValue::Symbol(s) => Some(s.as_str().to_string()),
                         _ => None,
                     })
                     .unwrap_or_default();

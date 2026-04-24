@@ -50,10 +50,10 @@ regex = "1.11"
 nix = "0.26"
 which = "6"
 ctrlc = "3.4"
+tempfile = { workspace = true }
 patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "f1ef699f1c0c43063382af41de0509c18dea6d0c", optional = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["net"] }
 serial_test = "3.0"
 

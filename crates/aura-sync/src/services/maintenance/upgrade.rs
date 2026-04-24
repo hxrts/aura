@@ -25,7 +25,7 @@ impl SecurityTranscript for UpgradeProposalTranscript<'_> {
             version: self.proposal.version,
             artifact_hash: self.proposal.artifact_hash,
             kind: self.proposal.kind,
-            activation_fence: self.proposal.activation_fence.clone(),
+            activation_fence: self.proposal.activation_fence,
         }
     }
 }

@@ -26,8 +26,10 @@ fn main() {
         AuthResponse {
             challenge_id: "challenge".to_string(),
             signature: vec![0; 64],
-            public_key: vec![0; 32],
             auth_method: AuthMethod::DeviceKey,
+            authority_id: authority,
+            device_id: Some(DeviceId::new_from_entropy([4; 32])),
+            threshold_epoch: None,
         },
         metadata,
     );

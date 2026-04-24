@@ -636,7 +636,6 @@ pub(crate) fn verify_partial_signature(
     let group_commitment_share = signing_package
         .signing_commitment(&signer_id)
         .ok_or_else(|| AuraError::crypto("Missing signing commitment for signer"))?
-        .clone()
         .to_group_commitment_share(binding_factor);
     let verifying_share = frost_pkg
         .verifying_shares()

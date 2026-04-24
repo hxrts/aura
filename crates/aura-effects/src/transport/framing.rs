@@ -409,4 +409,85 @@ mod tests {
 
         assert!(matches!(error, TransportError::Protocol(_)));
     }
+
+    #[test]
+    fn helper_constructors_set_canonical_payload_lengths() {
+        let handler = FramingHandler::new(128);
+        let data = handler.create_data_frame(vec![1, 2, 3], 1);
+        let control = handler.create_control_frame(vec![4, 5], 2);
+        let heartbeat = handler.create_heartbeat_frame(3);
+
+        assert_eq!(data.header.payload_length(), 3);
+        assert_eq!(control.header.payload_length(), 2);
+        assert_eq!(heartbeat.header.payload_length(), 0);
+    }
+
+    #[test]
+    fn serialize_frame_rejects_shorter_advertised_payload_length() {
+        let handler = FramingHandler::new(128);
+        let frame = Frame {
+            header: FrameHeader {
+                frame_type: FrameType::Data,
+                payload_length: 2,
+                flags: 0,
+                sequence: 9,
+            },
+            payload: vec![1, 2, 3],
+        };
+
+        let error = handler
+            .serialize_frame(&frame)
+            .expect_err("shorter advertised payload length must fail");
+        assert!(matches!(error, TransportError::Protocol(_)));
+    }
+
+    #[test]
+    fn serialize_frame_rejects_longer_advertised_payload_length() {
+        let handler = FramingHandler::new(128);
+        let frame = Frame {
+            header: FrameHeader {
+                frame_type: FrameType::Data,
+                payload_length: 4,
+                flags: 0,
+                sequence: 10,
+            },
+            payload: vec![1, 2, 3],
+        };
+
+        let error = handler
+            .serialize_frame(&frame)
+            .expect_err("longer advertised payload length must fail");
+        assert!(matches!(error, TransportError::Protocol(_)));
+    }
+
+    #[test]
+    fn deserialize_frame_rejects_trailing_byte_smuggling() {
+        let handler = FramingHandler::new(128);
+        let mut encoded = handler
+            .serialize_frame(&handler.create_data_frame(vec![1, 2, 3], 11))
+            .unwrap();
+        encoded.extend_from_slice(&[99, 100]);
+
+        let error = handler
+            .deserialize_frame(&encoded)
+            .expect_err("trailing bytes must fail canonical decode");
+        assert!(matches!(error, TransportError::Protocol(_)));
+    }
+
+    #[test]
+    fn deserialize_frame_rejects_concatenated_frames_as_noncanonical_single_buffer() {
+        let handler = FramingHandler::new(128);
+        let first = handler
+            .serialize_frame(&handler.create_data_frame(vec![1, 2, 3], 12))
+            .unwrap();
+        let second = handler
+            .serialize_frame(&handler.create_data_frame(vec![4, 5, 6], 13))
+            .unwrap();
+        let concatenated = [first, second].concat();
+
+        let error = handler
+            .deserialize_frame(&concatenated)
+            .expect_err("concatenated frames must fail single-buffer decode");
+        assert!(matches!(error, TransportError::Protocol(_)));
+    }
 }

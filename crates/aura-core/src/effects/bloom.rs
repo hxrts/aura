@@ -21,7 +21,7 @@
 //! - No direct access to original data through filter
 
 use crate::AuraError;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub const MAX_BLOOM_BITS_BYTES: usize = 1_048_576;
 
@@ -29,7 +29,7 @@ pub const MAX_BLOOM_BITS_BYTES: usize = 1_048_576;
 pub type BloomError = AuraError;
 
 /// Configuration for Bloom filter parameters
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BloomConfig {
     /// Expected number of elements to be inserted
     pub expected_elements: u64,
@@ -39,6 +39,59 @@ pub struct BloomConfig {
     pub num_hash_functions: u32,
     /// Size of the bit vector in bits
     pub bit_vector_size: u64,
+}
+
+impl Serialize for BloomConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        #[derive(Serialize)]
+        struct WireBloomConfig<'a> {
+            expected_elements: u64,
+            false_positive_rate: &'a str,
+            num_hash_functions: u32,
+            bit_vector_size: u64,
+        }
+
+        let false_positive_rate = self.false_positive_rate.to_string();
+        WireBloomConfig {
+            expected_elements: self.expected_elements,
+            false_positive_rate: &false_positive_rate,
+            num_hash_functions: self.num_hash_functions,
+            bit_vector_size: self.bit_vector_size,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for BloomConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WireBloomConfig {
+            expected_elements: u64,
+            false_positive_rate: String,
+            num_hash_functions: u32,
+            bit_vector_size: u64,
+        }
+
+        let wire = WireBloomConfig::deserialize(deserializer)?;
+        let false_positive_rate = wire
+            .false_positive_rate
+            .parse::<f64>()
+            .map_err(serde::de::Error::custom)?;
+        let config = Self {
+            expected_elements: wire.expected_elements,
+            false_positive_rate,
+            num_hash_functions: wire.num_hash_functions,
+            bit_vector_size: wire.bit_vector_size,
+        };
+        config.validate().map_err(serde::de::Error::custom)?;
+        Ok(config)
+    }
 }
 
 impl BloomConfig {
@@ -98,7 +151,7 @@ impl BloomConfig {
 }
 
 /// Bloom filter data structure
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BloomFilter {
     /// Bit vector for the filter
     pub bits: Vec<u8>,
@@ -159,6 +212,13 @@ impl BloomFilter {
     /// Validate invariants after deserializing a peer-provided Bloom filter.
     pub fn validate_wire(&self) -> Result<(), BloomError> {
         self.config.validate()?;
+        if self.bits.len() > MAX_BLOOM_BITS_BYTES {
+            return Err(BloomError::invalid(format!(
+                "Bloom filter exceeds maximum wire size: {} > {}",
+                self.bits.len(),
+                MAX_BLOOM_BITS_BYTES
+            )));
+        }
         let expected_bytes = self.config.bit_vector_size.div_ceil(8) as usize;
         if self.bits.len() != expected_bytes {
             return Err(BloomError::invalid(format!(
@@ -173,6 +233,29 @@ impl BloomFilter {
             ));
         }
         Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for BloomFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct WireBloomFilter {
+            bits: Vec<u8>,
+            config: BloomConfig,
+            element_count: u64,
+        }
+
+        let wire = WireBloomFilter::deserialize(deserializer)?;
+        let filter = BloomFilter {
+            bits: wire.bits,
+            config: wire.config,
+            element_count: wire.element_count,
+        };
+        filter.validate_wire().map_err(serde::de::Error::custom)?;
+        Ok(filter)
     }
 }
 
@@ -214,6 +297,14 @@ impl BloomFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct WireBloomFilter {
+        bits: Vec<u8>,
+        config: BloomConfig,
+        element_count: u64,
+    }
 
     #[test]
     fn test_bloom_config_optimal() {
@@ -328,5 +419,90 @@ mod tests {
         // Excessive load should trigger rebuild
         filter.element_count = 300;
         assert!(filter.should_rebuild());
+    }
+
+    #[test]
+    fn test_validate_wire_rejects_zero_bit_vector_size() {
+        let filter = BloomFilter {
+            bits: vec![0; 8],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 3,
+                bit_vector_size: 0,
+            },
+            element_count: 0,
+        };
+        assert!(filter.validate_wire().is_err());
+    }
+
+    #[test]
+    fn test_validate_wire_rejects_oversized_bits() {
+        let filter = BloomFilter {
+            bits: vec![0; MAX_BLOOM_BITS_BYTES + 1],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 3,
+                bit_vector_size: ((MAX_BLOOM_BITS_BYTES + 1) * 8) as u64,
+            },
+            element_count: 0,
+        };
+        assert!(filter.validate_wire().is_err());
+    }
+
+    #[test]
+    fn test_validate_wire_rejects_mismatched_bit_vector_length() {
+        let filter = BloomFilter {
+            bits: vec![0; 7],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 3,
+                bit_vector_size: 64,
+            },
+            element_count: 0,
+        };
+        assert!(filter.validate_wire().is_err());
+    }
+
+    #[test]
+    fn test_validate_wire_rejects_excessive_hash_count() {
+        let encoded = crate::util::serialization::to_vec(&WireBloomFilter {
+            bits: vec![0u8; 8],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 64,
+                bit_vector_size: 64,
+            },
+            element_count: 0,
+        })
+        .unwrap();
+        let decoded = crate::util::serialization::from_slice::<BloomFilter>(&encoded);
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn test_validate_wire_rejects_huge_element_count() {
+        let filter = BloomFilter {
+            bits: vec![0; 8],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 3,
+                bit_vector_size: 64,
+            },
+            element_count: 100,
+        };
+        assert!(filter.validate_wire().is_err());
+    }
+
+    #[test]
+    fn test_deserialize_valid_wire_bloom_filter() {
+        let filter = BloomFilter::new(BloomConfig::for_sync(10)).unwrap();
+        let encoded = crate::util::serialization::to_vec(&filter).unwrap();
+        let decoded = crate::util::serialization::from_slice::<BloomFilter>(&encoded).unwrap();
+        assert_eq!(decoded, filter);
     }
 }

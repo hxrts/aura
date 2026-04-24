@@ -2,6 +2,8 @@ use super::vm_loop::{
     handle_invitation_vm_step, handle_invitation_vm_wait_status, map_invitation_vm_timeout,
 };
 use super::*;
+#[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
+use aura_invitation::InvitationResponse;
 
 fn invitation_internal_error(prefix: &'static str, error: impl std::fmt::Display) -> AgentError {
     let mut detail = String::from(prefix);

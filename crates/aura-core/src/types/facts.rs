@@ -406,6 +406,24 @@ pub fn try_decode_fact_compatible<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ciborium::{
+        ser::into_writer as cbor_into_writer,
+        value::{CanonicalValue, Value as CborValue},
+    };
+
+    fn encode_noncanonical_map<T: Serialize>(value: &T) -> Vec<u8> {
+        let CborValue::Map(mut entries) =
+            CborValue::serialized(value).expect("serialize test value")
+        else {
+            panic!("expected map-encoded test value");
+        };
+        entries.sort_by(|(left, _), (right, _)| {
+            CanonicalValue::from(right.clone()).cmp(&CanonicalValue::from(left.clone()))
+        });
+        let mut bytes = Vec::new();
+        cbor_into_writer(&CborValue::Map(entries), &mut bytes).expect("encode noncanonical bytes");
+        bytes
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
     struct TestFact {
@@ -559,5 +577,51 @@ mod tests {
         let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, 1, &bytes);
 
         assert!(matches!(result, Err(FactError::PayloadTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_try_decode_fact_rejects_noncanonical_envelope_encoding() {
+        let type_id = FactTypeId::new("test/v1");
+        let fact = TestFact {
+            value: 42,
+            name: "test".to_string(),
+        };
+
+        let canonical = try_encode_fact(&type_id, 1, &fact).unwrap();
+        let envelope: FactEnvelope = crate::util::serialization::from_slice(&canonical).unwrap();
+        let noncanonical = encode_noncanonical_map(&envelope);
+        assert_ne!(canonical, noncanonical);
+
+        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, 1, &noncanonical);
+        let err = result.expect_err("reject noncanonical fact envelope");
+        assert!(matches!(err, FactError::Serialization(_)));
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
+    }
+
+    #[test]
+    fn test_try_decode_fact_rejects_noncanonical_dag_cbor_payload() {
+        let type_id = FactTypeId::new("test/v1");
+        let fact = TestFact {
+            value: 42,
+            name: "test".to_string(),
+        };
+
+        let noncanonical_payload = encode_noncanonical_map(&fact);
+        let envelope = FactEnvelope {
+            type_id: type_id.clone(),
+            schema_version: 1,
+            encoding: FactEncoding::DagCbor,
+            payload: noncanonical_payload,
+        };
+        let bytes = crate::util::serialization::to_vec(&envelope).unwrap();
+
+        let result: Result<TestFact, _> = try_decode_fact(&type_id, 1, 1, &bytes);
+        let err = result.expect_err("reject noncanonical fact payload");
+        assert!(matches!(err, FactError::Serialization(_)));
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
     }
 }

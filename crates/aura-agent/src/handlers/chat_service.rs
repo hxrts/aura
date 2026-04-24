@@ -23,7 +23,6 @@ use aura_chat::{
 };
 use aura_core::effects::amp::{
     AmpChannelEffects, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
-    ChannelSendParams,
 };
 use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
@@ -36,14 +35,13 @@ use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{
-    commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
-    AmpJournalEffects,
+    commit_bump_with_consensus, emit_proposed_bump, get_channel_state, prepare_send,
+    AmpChannelCoordinator, AmpJournalEffects,
 };
 use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_social::{is_user_banned, is_user_muted};
-use base64::Engine;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -93,35 +91,23 @@ impl ChatServiceApi {
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
-        let Some(cache) = self.effects.biscuit_cache() else {
-            return Ok(None);
-        };
-
-        let engine = base64::engine::general_purpose::STANDARD;
-        let token_bytes = engine
-            .decode(cache.token_b64)
-            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
-        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
-            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
-        })?;
-        let root_public_key =
-            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
-                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
-            })?;
-        let biscuit =
-            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
-                .map_err(|error| {
-                    AgentError::effects(format!("parse biscuit token cache: {error}"))
-                })?;
-        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
-            root_public_key,
-            self.effects.authority_id(),
-        );
-        Ok(Some((biscuit, bridge)))
+        self.effects
+            .verified_biscuit_frontier()
+            .map_err(|error| AgentError::effects(format!("decode biscuit frontier cache: {error}")))
     }
 
     async fn build_chat_capabilities(&self, now_ms: u64) -> AgentResult<Vec<CapabilityName>> {
-        let Some((token, bridge)) = self.decode_biscuit_frontier()? else {
+        let Some((token, bridge)) = (match self.decode_biscuit_frontier() {
+            Ok(frontier) => frontier,
+            Err(error) => {
+                tracing::warn!(
+                    authority = %self.effects.authority_id(),
+                    error = %error,
+                    "failed to decode Biscuit frontier for chat guard snapshot"
+                );
+                return Ok(Vec::new());
+            }
+        }) else {
             tracing::debug!(
                 authority = %self.effects.authority_id(),
                 "no Biscuit frontier available for chat guard snapshot"
@@ -859,17 +845,9 @@ impl ChatServiceApi {
             .map_err(map_amp_state_error)?;
         let epoch_hint = Some(channel_state.chan_epoch as u32);
 
-        // Validate the AMP channel exists (created in create_group)
-        // Transport-layer encryption will use AMP when syncing to peers
-        let amp = self.amp_coordinator();
-        let _amp_ciphertext = amp
-            .send_message(ChannelSendParams {
-                context: context_id,
-                channel: channel_id,
-                sender: sender_id,
-                plaintext: content.clone().into_bytes(),
-                reply_to: None,
-            })
+        // Validate the AMP channel exists and that the runtime can derive the
+        // current AEAD send path for this channel before we persist plaintext.
+        let _ = prepare_send(self.effects.as_ref(), context_id, channel_id)
             .await
             .map_err(|e| AgentError::effects(format!("AMP channel validation failed: {e}")))?;
 
@@ -1387,6 +1365,7 @@ mod tests {
         let engine = base64::engine::general_purpose::STANDARD;
         effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
             token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: authority,
             root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
         });
     }
@@ -1425,6 +1404,37 @@ mod tests {
         let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
 
         effects.clear_biscuit_cache();
+
+        let snapshot = service
+            .build_snapshot(creator, context_id, Some(channel_id))
+            .await
+            .unwrap();
+
+        assert!(snapshot.capabilities.is_empty());
+    }
+
+    #[tokio::test]
+    async fn build_snapshot_with_mismatched_biscuit_issuer_has_empty_chat_capabilities() {
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let creator = authority(31);
+        let group_id = group_id(32);
+        let context_id = ChatServiceApi::context_id_for_group(&group_id);
+        let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
+        let issuer = aura_authorization::TokenAuthority::new(effects.authority_id());
+        let token = issuer
+            .create_token(
+                effects.authority_id(),
+                vec![ChatCapability::MessageSend.as_name()],
+            )
+            .expect("chat test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: authority(99),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
 
         let snapshot = service
             .build_snapshot(creator, context_id, Some(channel_id))

@@ -44,6 +44,24 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
     )
 }
 
+async fn encode_signed_invite_code(invitation: &ShareableInvitation) -> TestResult<String> {
+    let crypto =
+        RealCryptoHandler::for_simulation_seed(hash(invitation.invitation_id.as_str().as_bytes()));
+    let (private_key, public_key) = crypto.ed25519_generate_keypair().await?;
+    let signature = aura_signature::sign_ed25519_transcript(
+        &crypto,
+        &invitation.signing_transcript(),
+        &private_key,
+    )
+    .await?;
+    Ok(invitation.to_signed_code(ShareableInvitationSenderProof {
+        scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+        public_key,
+        signature,
+        sender_device_id: None,
+    })?)
+}
+
 /// Helper to create a test agent with a specific authority
 async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -137,9 +155,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
 
     // User A exports invitation as shareable code
-    let code = invitation_service_a
-        .export_code(&invitation.invitation_id)
-        .await?;
+    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
     assert!(code.starts_with("aura:v1:"));
 
@@ -324,9 +340,7 @@ async fn test_complete_beta_flow() -> TestResult {
         .await?;
 
     // === Step 2: Alice exports invite code ===
-    let code = alice_invitations
-        .export_code(&invitation.invitation_id)
-        .await?;
+    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
     // === Step 3: Bob imports the code (out-of-band transfer simulation) ===
     let shareable = InvitationServiceApi::import_code(&code)?;
@@ -400,7 +414,7 @@ async fn test_guardian_invitation() -> TestResult {
     assert!(invitation.expires_at.is_some());
 
     // Export and verify
-    let code = invitations.export_code(&invitation.invitation_id).await?;
+    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
     let shareable = InvitationServiceApi::import_code(&code)?;
 
@@ -447,7 +461,7 @@ async fn test_channel_invitation() -> TestResult {
         .await?;
 
     // Export and verify
-    let code = invitations.export_code(&invitation.invitation_id).await?;
+    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
     let shareable = InvitationServiceApi::import_code(&code)?;
 

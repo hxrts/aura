@@ -9,6 +9,7 @@
 #[cfg(target_arch = "wasm32")]
 use crate::storage::FilesystemStorageHandler;
 use async_trait::async_trait;
+use aura_core::crypto::{ed25519_verifying_key, Ed25519SigningKey};
 use aura_core::effects::{
     SecureGeneratedKey, SecureStorageCapability, SecureStorageEffects, SecureStorageError,
     SecureStorageLocation,
@@ -29,7 +30,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 #[cfg(any(
     target_os = "macos",
@@ -53,6 +54,8 @@ cfg_if! {
 const FALLBACK_RECORD_MAGIC: &[u8] = b"AURA-FS-FALLBACK-SECURE-V1";
 #[cfg(not(target_arch = "wasm32"))]
 const FALLBACK_NONCE_LEN: usize = 12;
+#[cfg(not(target_arch = "wasm32"))]
+const FALLBACK_WRAPPING_KEY_FILENAME: &str = ".filesystem-fallback-wrap-key";
 #[cfg(not(target_arch = "wasm32"))]
 const SECURE_ACCESS_TOKEN_VERSION: u8 = 1;
 #[cfg(not(target_arch = "wasm32"))]
@@ -116,8 +119,49 @@ struct SecureAccessTokenEnvelope {
 #[cfg(not(target_arch = "wasm32"))]
 fn generate_secret_key() -> [u8; 32] {
     let mut key = [0u8; 32];
-    getrandom::getrandom(&mut key).expect("secure storage requires OS randomness");
+    if let Err(error) = getrandom::getrandom(&mut key) {
+        panic!("secure storage requires OS randomness: {error}");
+    }
     key
+}
+
+fn generate_secret_bytes(len: usize) -> Result<Vec<u8>, SecureStorageError> {
+    let mut bytes = vec![0u8; len];
+    getrandom::getrandom(&mut bytes).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    Ok(bytes)
+}
+
+fn generate_secure_key_material(
+    key_type: &str,
+) -> Result<(Vec<u8>, Option<Vec<u8>>), SecureStorageError> {
+    match key_type {
+        "ed25519" => {
+            let signing_key_bytes = generate_secret_bytes(32)?;
+            let signing_key = Ed25519SigningKey::try_from(signing_key_bytes.as_slice())
+                .map_err(|e| SecureStorageError::invalid(e.to_string()))?;
+            let verifying_key = ed25519_verifying_key(&signing_key)
+                .map_err(|e| SecureStorageError::invalid(e.to_string()))?
+                .to_bytes()
+                .to_vec();
+            Ok((signing_key_bytes, Some(verifying_key)))
+        }
+        "frost-share" | "symmetric" | "aes256" | "xchacha20poly1305" => {
+            Ok((generate_secret_bytes(32)?, None))
+        }
+        other => Err(SecureStorageError::invalid(format!(
+            "unsupported secure key type: {other}"
+        ))),
+    }
+}
+
+fn generated_key_result(
+    location: &SecureStorageLocation,
+    public_material: Option<Vec<u8>>,
+) -> SecureGeneratedKey {
+    match public_material {
+        Some(public_material) => SecureGeneratedKey::PublicMaterial(public_material),
+        None => SecureGeneratedKey::OpaqueHandle(location.full_path()),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -171,7 +215,7 @@ fn create_authenticated_access_token(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn verify_authenticated_access_token(
+async fn verify_authenticated_access_token(
     token_key: &[u8; 32],
     audience: &str,
     token: &[u8],
@@ -213,9 +257,7 @@ fn verify_authenticated_access_token(
             "secure access token expired",
         ));
     }
-    let mut used = used_tokens
-        .lock()
-        .map_err(|_| SecureStorageError::storage("secure token replay cache is poisoned"))?;
+    let mut used = used_tokens.lock().await;
     if !used.insert(token_id) {
         return Err(SecureStorageError::permission_denied(
             "secure access token has already been used",
@@ -750,16 +792,13 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
     async fn secure_generate_key(
         &self,
         location: &SecureStorageLocation,
-        context: &str,
+        key_type: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<SecureGeneratedKey, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Write)?;
-        let mut key = [0u8; 32];
-        getrandom::getrandom(&mut key).map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        let mut material = key.to_vec();
-        material.extend_from_slice(context.as_bytes());
-        self.secure_store(location, &material, caps).await?;
-        Ok(SecureGeneratedKey::OpaqueHandle(location.full_path()))
+        let (secret_material, public_material) = generate_secure_key_material(key_type)?;
+        self.secure_store(location, &secret_material, caps).await?;
+        Ok(generated_key_result(location, public_material))
     }
 
     async fn secure_create_time_bound_token(
@@ -789,7 +828,8 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
             token,
             location,
             &self.used_tokens,
-        )?;
+        )
+        .await?;
         self.secure_retrieve(location, &capabilities).await
     }
 
@@ -846,13 +886,14 @@ impl FilesystemFallbackSecureStorageHandler {
     ///
     /// The secure storage files will be placed in `base_path/secure_store/`.
     pub fn with_base_path(base_path: PathBuf) -> Self {
+        let secure_store_path = base_path.join("secure_store");
         #[cfg(not(target_arch = "wasm32"))]
-        let wrapping_key = generate_secret_key();
+        let wrapping_key = Self::load_or_create_wrapping_key(&secure_store_path);
         #[cfg(not(target_arch = "wasm32"))]
         let token_key = generate_secret_key();
         Self {
             platform_config: "filesystem-fallback".to_string(),
-            base_path: base_path.join("secure_store"),
+            base_path: secure_store_path,
             #[cfg(not(target_arch = "wasm32"))]
             wrapping_key,
             #[cfg(not(target_arch = "wasm32"))]
@@ -868,6 +909,46 @@ impl FilesystemFallbackSecureStorageHandler {
         let suffix = fastrand::u64(..);
         let temp_dir = std::env::temp_dir().join(format!("aura-secure-test-{suffix}"));
         Self::with_base_path(temp_dir)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn wrapping_key_path(secure_store_path: &std::path::Path) -> PathBuf {
+        secure_store_path.join(FALLBACK_WRAPPING_KEY_FILENAME)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_or_create_wrapping_key(secure_store_path: &std::path::Path) -> [u8; 32] {
+        let key_path = Self::wrapping_key_path(secure_store_path);
+        if let Ok(bytes) = fs::read(&key_path) {
+            if bytes.len() == 32 {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                return key;
+            }
+            tracing::warn!(
+                path = %key_path.display(),
+                len = bytes.len(),
+                "Filesystem fallback secure-storage wrapping key had invalid length; regenerating"
+            );
+        }
+
+        let wrapping_key = generate_secret_key();
+        if let Err(error) = fs::create_dir_all(secure_store_path) {
+            tracing::warn!(
+                path = %secure_store_path.display(),
+                err = %error,
+                "Failed to create filesystem fallback secure-storage directory; using ephemeral wrapping key"
+            );
+            return wrapping_key;
+        }
+        if let Err(error) = write_private_file(&key_path, &wrapping_key) {
+            tracing::warn!(
+                path = %key_path.display(),
+                err = %error,
+                "Failed to persist filesystem fallback wrapping key; reopen may not decrypt prior records"
+            );
+        }
+        wrapping_key
     }
 
     fn require_capability(
@@ -1013,7 +1094,7 @@ impl FilesystemFallbackSecureStorageHandler {
         for byte in component.bytes() {
             match byte {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
-                    encoded.push(byte as char)
+                    encoded.push(byte as char);
                 }
                 _ => {
                     encoded.push('%');
@@ -1212,16 +1293,13 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
     async fn secure_generate_key(
         &self,
         location: &SecureStorageLocation,
-        context: &str,
+        key_type: &str,
         caps: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<SecureGeneratedKey, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Write)?;
-        let mut key = [0u8; 32];
-        getrandom::getrandom(&mut key).map_err(|e| SecureStorageError::storage(e.to_string()))?;
-        let mut material = key.to_vec();
-        material.extend_from_slice(context.as_bytes());
-        self.secure_store(location, &material, caps).await?;
-        Ok(SecureGeneratedKey::OpaqueHandle(location.full_path()))
+        let (secret_material, public_material) = generate_secure_key_material(key_type)?;
+        self.secure_store(location, &secret_material, caps).await?;
+        Ok(generated_key_result(location, public_material))
     }
 
     async fn secure_create_time_bound_token(
@@ -1270,7 +1348,8 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
                 token,
                 location,
                 &self.used_tokens,
-            )?;
+            )
+            .await?;
             self.secure_retrieve(location, &capabilities).await
         }
     }
@@ -1346,12 +1425,11 @@ mod tests {
                 "filesystem fallback secure record stored wrapping key bytes"
             );
             assert!(
-                !temp
-                    .path()
+                temp.path()
                     .join("secure_store")
-                    .join(".filesystem-fallback-wrap-key")
+                    .join(FALLBACK_WRAPPING_KEY_FILENAME)
                     .exists(),
-                "filesystem fallback must not persist wrapping key material"
+                "filesystem fallback must persist wrapping key material for reopen"
             );
         }
         let data = handler
@@ -1428,6 +1506,32 @@ mod tests {
                 .unwrap(),
             vec!["key:one".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn filesystem_fallback_secure_storage_reopens_with_same_wrapping_key() {
+        let temp = tempdir().expect("tempdir");
+        let location = SecureStorageLocation::new("persist", "primary");
+        let capabilities = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        let writer =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        writer
+            .secure_store(&location, b"persisted-secret", &capabilities)
+            .await
+            .expect("store secret");
+
+        let reader =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        let loaded = reader
+            .secure_retrieve(&location, &capabilities)
+            .await
+            .expect("retrieve persisted secret after reopen");
+
+        assert_eq!(loaded, b"persisted-secret");
     }
 
     #[tokio::test]
@@ -1537,5 +1641,75 @@ mod tests {
             .secure_access_with_token(&wrong_capability, &location)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn secure_generate_key_returns_only_public_material_for_ed25519() {
+        let temp = tempdir().expect("tempdir");
+        let handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        let location = SecureStorageLocation::new("keys", "ed25519");
+        let caps = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        let generated = handler
+            .secure_generate_key(&location, "ed25519", &caps)
+            .await
+            .expect("generate ed25519 key");
+        let stored = handler
+            .secure_retrieve(&location, &caps)
+            .await
+            .expect("retrieve generated secret");
+
+        let public_material = match generated {
+            SecureGeneratedKey::PublicMaterial(public_material) => public_material,
+            other => panic!("expected public material, got {other:?}"),
+        };
+        assert_eq!(public_material.len(), 32);
+        assert_eq!(stored.len(), 32);
+        assert_ne!(stored, public_material);
+        assert!(
+            !stored
+                .windows("ed25519".len())
+                .any(|window| window == b"ed25519"),
+            "stored secret material must not include key type metadata"
+        );
+    }
+
+    #[tokio::test]
+    async fn secure_generate_key_returns_only_handles_for_secret_key_types() {
+        let temp = tempdir().expect("tempdir");
+        let handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        let caps = vec![
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+
+        for key_type in ["frost-share", "symmetric"] {
+            let location = SecureStorageLocation::new("keys", key_type);
+            let generated = handler
+                .secure_generate_key(&location, key_type, &caps)
+                .await
+                .unwrap_or_else(|err| panic!("generate {key_type} key: {err}"));
+            let stored = handler
+                .secure_retrieve(&location, &caps)
+                .await
+                .unwrap_or_else(|err| panic!("retrieve {key_type} secret: {err}"));
+
+            assert_eq!(
+                generated,
+                SecureGeneratedKey::OpaqueHandle(location.full_path())
+            );
+            assert_eq!(stored.len(), 32);
+            assert!(
+                !stored
+                    .windows(key_type.len())
+                    .any(|window| window == key_type.as_bytes()),
+                "stored {key_type} secret material must not include type metadata"
+            );
+        }
     }
 }

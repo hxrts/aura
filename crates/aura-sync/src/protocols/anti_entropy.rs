@@ -42,30 +42,35 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use hex;
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
 use crate::core::{
     binary_serialize, exchange_json_with_peer, json_serialize, send_bytes_to_peer,
-    sync_biscuit_guard_error, sync_serialization_error, sync_session_error, SyncResult,
+    sync_biscuit_guard_error, sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
-use crate::protocols::journal_apply::{JournalApplyService, RemoteCoreJournalDelta};
+use crate::protocols::journal_apply::JournalApplyService;
 use aura_authorization::{BiscuitTokenManager, VerifiedBiscuitToken};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::types::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{
-    hash, AttestedOp, AuraError, AuraResult, ContextId, DeviceId, FlowBudget, FlowCost, Journal,
+    hash, AttestedOp, AuraError, AuraResult, ContextId, DeviceId, FlowBudget, FlowCost, Hash32,
+    Journal,
 };
 use aura_guards::{
-    BiscuitGuardEvaluator, DecodedIngress, GuardContextProvider, GuardError, VerifiedIngress,
+    BiscuitGuardEvaluator, DecodedIngress, GuardContextProvider, GuardError, IngressSource,
+    IngressVerificationError, IngressVerificationEvidence, VerifiedIngress,
+    VerifiedIngressMetadata, REQUIRED_INGRESS_VERIFICATION_CHECKS,
 };
+use aura_journal::commitment_tree::apply_verified_sync;
+use aura_protocol::effects::TreeEffects;
 
 const ANTI_ENTROPY_OPERATION_ID: &str = "anti_entropy";
 const ANTI_ENTROPY_AUTHZ_OPERATION_ID: &str = "anti_entropy.authorize";
 const ANTI_ENTROPY_PROGRESS_OPERATION_ID: &str = "anti_entropy.progress";
+const ANTI_ENTROPY_SCHEMA_VERSION: u16 = 1;
 
 // =============================================================================
 // Types
@@ -137,6 +142,35 @@ pub struct AntiEntropyRequest {
 
     /// Specific operation fingerprints that are missing (for targeted requests)
     pub missing_operations: Vec<OperationFingerprint>,
+}
+
+/// Remote anti-entropy operations that have passed batch-level verification and
+/// are eligible for the canonical apply boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VerifiedRemoteOpsBatch {
+    ops: Vec<AttestedOp>,
+}
+
+impl VerifiedRemoteOpsBatch {
+    #[must_use]
+    pub fn new(ops: Vec<AttestedOp>) -> Self {
+        Self { ops }
+    }
+
+    #[must_use]
+    pub fn ops(&self) -> &[AttestedOp] {
+        &self.ops
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
+    }
 }
 
 /// Result of merging operations into a journal
@@ -615,7 +649,8 @@ impl AntiEntropyProtocol {
             + Send
             + Sync
             + PhysicalTimeEffects
-            + GuardContextProvider,
+            + GuardContextProvider
+            + TreeEffects,
     {
         let authority_id = effects.authority_id();
         // Check authorization before starting sync
@@ -692,7 +727,7 @@ impl AntiEntropyProtocol {
         peer: DeviceId,
     ) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + TreeEffects + Send + Sync,
     {
         // Step 1: Get local journal state and operations
         let local_journal = effects
@@ -816,7 +851,7 @@ impl AntiEntropyProtocol {
         remote_digest: &JournalDigest,
     ) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + TreeEffects + Send + Sync,
     {
         // Plan the request
         let request = self
@@ -847,9 +882,14 @@ impl AntiEntropyProtocol {
             let remote_ops = crate::protocols::ingress::verified_device_payload(
                 peer,
                 peer_sync_context(peer),
-                1,
+                ANTI_ENTROPY_SCHEMA_VERSION,
                 remote_ops,
             )?;
+            let remote_ops = self
+                .verify_remote_operation_batch(effects, peer, remote_ops)
+                .await?;
+            let remote_ops =
+                JournalApplyService::new().accept_verified_relational_facts(remote_ops)?;
 
             tracing::debug!(
                 operation_id = ANTI_ENTROPY_OPERATION_ID,
@@ -885,13 +925,14 @@ impl AntiEntropyProtocol {
             }
 
             let mut total_result = AntiEntropyResult::default();
-            for (chunk_index, chunk) in remote_ops.payload().chunks(merge_chunk_size).enumerate() {
-                let verified_chunk = crate::protocols::ingress::verified_device_payload(
-                    peer,
-                    peer_sync_context(peer),
-                    1,
-                    chunk.to_vec(),
-                )?;
+            for (chunk_index, chunk) in remote_ops
+                .payload()
+                .ops()
+                .chunks(merge_chunk_size)
+                .enumerate()
+            {
+                let verified_chunk =
+                    verified_remote_ops_batch(remote_ops.evidence().metadata(), chunk.to_vec())?;
                 let merge_result = self.merge_batch(&mut local_ops, verified_chunk)?;
 
                 tracing::debug!(
@@ -933,42 +974,196 @@ impl AntiEntropyProtocol {
         pull_future.await
     }
 
-    /// Convert applied operations to journal delta for persistence
-    async fn convert_operations_to_remote_delta<E>(
+    async fn verify_remote_operation_batch<E>(
         &self,
-        _effects: &E,
-        applied_ops: &[AttestedOp],
-    ) -> SyncResult<RemoteCoreJournalDelta>
+        effects: &E,
+        peer: DeviceId,
+        incoming: VerifiedIngress<Vec<AttestedOp>>,
+    ) -> SyncResult<VerifiedIngress<VerifiedRemoteOpsBatch>>
     where
-        E: JournalEffects + Send + Sync,
+        E: JournalEffects + TreeEffects + Send + Sync,
     {
-        let mut facts_delta = aura_core::Fact::new();
+        let (incoming, evidence) = incoming.into_parts();
+        let metadata = evidence.metadata().clone();
+        let expected_context = peer_sync_context(peer);
 
-        for op in applied_ops {
-            let fp = fingerprint(op).map_err(|e| {
-                sync_serialization_error(
-                    "op_fingerprint",
-                    format!("Failed to fingerprint applied op: {e}"),
-                )
-            })?;
-            let serialized = binary_serialize("op_serialize", "applied op", op)?;
-
-            facts_delta.insert_with_context(
-                format!("attested_op:{}", hex::encode(fp)),
-                aura_core::FactValue::Bytes(serialized),
-                aura_core::ActorId::synthetic("anti-entropy"),
-                aura_core::FactTimestamp::new(0),
-                None,
-            )?;
+        if metadata.source() != IngressSource::Device(peer) {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!(
+                    "verified ingress source {:?} does not match authenticated peer {}",
+                    metadata.source(),
+                    peer
+                ),
+                peer,
+            ));
         }
 
-        tracing::debug!(
-            operation_id = ANTI_ENTROPY_OPERATION_ID,
-            applied_ops = applied_ops.len(),
-            "Created journal delta from applied operations"
-        );
+        if metadata.context_id() != expected_context {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!(
+                    "verified ingress context {} does not match expected sync namespace {}",
+                    metadata.context_id(),
+                    expected_context
+                ),
+                peer,
+            ));
+        }
 
-        Ok(RemoteCoreJournalDelta::from_facts(facts_delta))
+        if metadata.schema_version() != ANTI_ENTROPY_SCHEMA_VERSION {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!(
+                    "unsupported anti-entropy schema version {}; expected {}",
+                    metadata.schema_version(),
+                    ANTI_ENTROPY_SCHEMA_VERSION
+                ),
+                peer,
+            ));
+        }
+
+        effects.get_journal().await.map_err(|error| {
+            crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!("journal load failed before remote batch verification: {error}"),
+                peer,
+            )
+        })?;
+
+        let mut shadow_state = effects.get_current_state().await.map_err(|error| {
+            crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!("tree state load failed before remote batch verification: {error}"),
+                peer,
+            )
+        })?;
+
+        let mut seen_fingerprints = HashSet::with_capacity(incoming.len());
+        for (index, op) in incoming.iter().enumerate() {
+            let fingerprint = fingerprint(op).map_err(|error| {
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("fingerprint remote operation {index} failed: {error}"),
+                    peer,
+                )
+            })?;
+
+            if !seen_fingerprints.insert(fingerprint) {
+                return Err(crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!(
+                        "remote operation batch replayed fingerprint {} at index {}",
+                        hex::encode(fingerprint),
+                        index
+                    ),
+                    peer,
+                ));
+            }
+
+            let signature_valid = effects
+                .verify_aggregate_sig(op, &shadow_state)
+                .await
+                .map_err(|error| {
+                    crate::core::errors::sync_protocol_with_peer(
+                        "anti_entropy",
+                        format!("remote operation {index} signature verification failed: {error}"),
+                        peer,
+                    )
+                })?;
+            if !signature_valid {
+                return Err(crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("remote operation {index} failed signature verification"),
+                    peer,
+                ));
+            }
+
+            apply_verified_sync(&mut shadow_state, op).map_err(|error| {
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!(
+                        "remote operation {index} failed causal or parent verification: {error}"
+                    ),
+                    peer,
+                )
+            })?;
+        }
+
+        verified_remote_ops_batch(&metadata, incoming)
+    }
+
+    async fn verify_and_apply_remote_operation<E>(
+        &self,
+        effects: &E,
+        peer: DeviceId,
+        op: &AttestedOp,
+    ) -> SyncResult<bool>
+    where
+        E: TreeEffects + Send + Sync,
+    {
+        let current_state = effects.get_current_state().await.map_err(|error| {
+            crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!("Tree state load failed before remote op verification: {error}"),
+                peer,
+            )
+        })?;
+        let current_commitment = Hash32(current_state.current_commitment());
+
+        if op.op.parent_epoch != current_state.current_epoch() {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!(
+                    "Remote operation epoch {} does not match current epoch {}",
+                    op.op.parent_epoch,
+                    current_state.current_epoch()
+                ),
+                peer,
+            ));
+        }
+        if Hash32(op.op.parent_commitment) != current_commitment {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                format!(
+                    "Remote operation parent commitment {:?} does not match current commitment {:?}",
+                    Hash32(op.op.parent_commitment),
+                    current_commitment
+                ),
+                peer,
+            ));
+        }
+
+        let signature_valid = effects
+            .verify_aggregate_sig(op, &current_state)
+            .await
+            .map_err(|error| {
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Remote operation signature verification failed: {error}"),
+                    peer,
+                )
+            })?;
+        if !signature_valid {
+            return Err(crate::core::errors::sync_protocol_with_peer(
+                "anti_entropy",
+                "Remote operation aggregate signature is invalid".to_string(),
+                peer,
+            ));
+        }
+
+        let updated_commitment = effects
+            .apply_attested_op(op.clone())
+            .await
+            .map_err(|error| {
+                crate::core::errors::sync_protocol_with_peer(
+                    "anti_entropy",
+                    format!("Canonical remote op application failed: {error}"),
+                    peer,
+                )
+            })?;
+
+        Ok(updated_commitment != current_commitment)
     }
 
     async fn persist_applied_operations_chunk<E>(
@@ -978,97 +1173,36 @@ impl AntiEntropyProtocol {
         applied_ops: &[AttestedOp],
     ) -> SyncResult<()>
     where
-        E: JournalEffects + Send + Sync,
+        E: TreeEffects + Send + Sync,
     {
-        let remote_delta = self
-            .convert_operations_to_remote_delta(effects, applied_ops)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    operation_id = ANTI_ENTROPY_OPERATION_ID,
-                    peer_id = %peer,
-                    applied_ops = applied_ops.len(),
-                    error = %e,
-                    "Failed to convert operations to journal delta"
-                );
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Delta conversion failed: {e}"),
-                    peer,
-                )
-            })?;
-
-        let current_journal = effects.get_journal().await.map_err(|e| {
-            tracing::error!(
-                operation_id = ANTI_ENTROPY_OPERATION_ID,
-                peer_id = %peer,
-                error = %e,
-                "Failed to get current journal; refusing to merge remote data into empty state"
-            );
-            crate::core::errors::sync_protocol_with_peer(
-                "anti_entropy",
-                format!("Journal load failed before remote apply: {e}"),
-                peer,
-            )
-        })?;
-
-        let metadata = crate::protocols::ingress::verified_device_payload(
-            peer,
-            peer_sync_context(peer),
-            1,
-            remote_delta,
-        )?;
-        let (delta, evidence) = metadata.into_parts();
-        let verified_delta = DecodedIngress::new(delta, evidence.metadata().clone())
-            .verify(evidence)
-            .map_err(|e| {
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Journal delta verification failed: {e}"),
-                    peer,
-                )
-            })?;
-
-        let (updated_journal, _outcome) = JournalApplyService::new()
-            .apply_verified_core_delta(current_journal, verified_delta)
-            .map_err(|e| {
-                tracing::error!(
-                    operation_id = ANTI_ENTROPY_OPERATION_ID,
-                    peer_id = %peer,
-                    applied_ops = applied_ops.len(),
-                    error = %e,
-                    "Failed to merge journal facts"
-                );
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Journal merge failed: {e}"),
-                    peer,
-                )
-            })?;
-
-        effects
-            .persist_journal(&updated_journal)
-            .await
-            .map_err(|e| {
-                tracing::error!(
-                    operation_id = ANTI_ENTROPY_OPERATION_ID,
-                    peer_id = %peer,
-                    applied_ops = applied_ops.len(),
-                    error = %e,
-                    "Failed to persist journal after sync"
-                );
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Journal persistence failure: {e}"),
-                    peer,
-                )
-            })?;
+        let mut newly_applied = 0usize;
+        let mut duplicates = 0usize;
+        for op in applied_ops {
+            match self
+                .verify_and_apply_remote_operation(effects, peer, op)
+                .await
+            {
+                Ok(true) => newly_applied += 1,
+                Ok(false) => duplicates += 1,
+                Err(error) => {
+                    tracing::error!(
+                        operation_id = ANTI_ENTROPY_OPERATION_ID,
+                        peer_id = %peer,
+                        error = %error,
+                        "Failed to verify or apply remote operation through canonical tree path"
+                    );
+                    return Err(error);
+                }
+            }
+        }
 
         tracing::debug!(
             operation_id = ANTI_ENTROPY_OPERATION_ID,
             peer_id = %peer,
             applied_ops = applied_ops.len(),
-            "Successfully updated journal with bounded anti-entropy merge batch"
+            newly_applied,
+            duplicates,
+            "Successfully applied bounded anti-entropy merge batch through canonical tree path"
         );
 
         Ok(())
@@ -1122,7 +1256,7 @@ impl AntiEntropyProtocol {
         remote_digest: &JournalDigest,
     ) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + TreeEffects + Send + Sync,
     {
         tracing::warn!(
             operation_id = ANTI_ENTROPY_OPERATION_ID,
@@ -1228,10 +1362,10 @@ impl AntiEntropyProtocol {
     pub fn merge_batch(
         &self,
         local_ops: &mut Vec<AttestedOp>,
-        incoming: VerifiedIngress<Vec<AttestedOp>>,
+        incoming: VerifiedIngress<VerifiedRemoteOpsBatch>,
     ) -> SyncResult<AntiEntropyResult> {
         let (incoming, _) = incoming.into_parts();
-        if incoming.is_empty() {
+        if incoming.ops.is_empty() {
             return Ok(AntiEntropyResult::default());
         }
 
@@ -1246,7 +1380,7 @@ impl AntiEntropyProtocol {
         let mut duplicates = 0;
         let mut applied_ops = Vec::new();
 
-        for op in incoming {
+        for op in incoming.ops {
             let fp = fingerprint(&op)
                 .map_err(|e| sync_session_error(format!("Failed to fingerprint: {e}")))?;
             if seen.insert(fp) {
@@ -1299,6 +1433,38 @@ fn fingerprint(op: &AttestedOp) -> AuraResult<OperationFingerprint> {
     hash_serialized(op)
 }
 
+fn verified_remote_ops_batch(
+    metadata: &VerifiedIngressMetadata,
+    ops: Vec<AttestedOp>,
+) -> SyncResult<VerifiedIngress<VerifiedRemoteOpsBatch>> {
+    let batch = VerifiedRemoteOpsBatch::new(ops);
+    let payload_hash = Hash32::from_value(&batch).map_err(|error| {
+        sync_session_error(format!("hash verified anti-entropy batch payload: {error}"))
+    })?;
+    let metadata = VerifiedIngressMetadata::new(
+        metadata.source(),
+        metadata.context_id(),
+        metadata.session_id(),
+        payload_hash,
+        metadata.schema_version(),
+    );
+    let evidence =
+        IngressVerificationEvidence::new(metadata.clone(), REQUIRED_INGRESS_VERIFICATION_CHECKS)
+            .map_err(|error: IngressVerificationError| {
+                sync_session_error(format!(
+                    "build verified anti-entropy batch ingress evidence: {error}"
+                ))
+            })?;
+
+    DecodedIngress::new(batch, metadata)
+        .verify(evidence)
+        .map_err(|error| {
+            sync_session_error(format!(
+                "promote verified anti-entropy batch ingress: {error}"
+            ))
+        })
+}
+
 // =============================================================================
 // Convenience Functions
 // =============================================================================
@@ -1335,7 +1501,165 @@ pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> SyncResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Epoch, TreeOp, TreeOpKind};
+    use async_trait::async_trait;
+    use aura_core::{AuthorityId, Epoch, FlowBudget, FlowCost, TreeOp, TreeOpKind};
+    use aura_journal::commitment_tree::TreeState;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct VerificationTestEffects {
+        state: Arc<Mutex<TreeState>>,
+        journal_result: Result<Journal, AuraError>,
+        applied: Arc<Mutex<Vec<AttestedOp>>>,
+    }
+
+    impl VerificationTestEffects {
+        fn healthy() -> Self {
+            Self {
+                state: Arc::new(Mutex::new(TreeState::new())),
+                journal_result: Ok(Journal::default()),
+                applied: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn failing_journal_load(error: AuraError) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(TreeState::new())),
+                journal_result: Err(error),
+                applied: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl JournalEffects for VerificationTestEffects {
+        async fn merge_facts(
+            &self,
+            target: Journal,
+            _delta: Journal,
+        ) -> Result<Journal, AuraError> {
+            Ok(target)
+        }
+
+        async fn refine_caps(
+            &self,
+            target: Journal,
+            _refinement: Journal,
+        ) -> Result<Journal, AuraError> {
+            Ok(target)
+        }
+
+        async fn get_journal(&self) -> Result<Journal, AuraError> {
+            self.journal_result.clone()
+        }
+
+        async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
+            Ok(())
+        }
+
+        async fn get_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(FlowBudget::new(100, Epoch::initial()))
+        }
+
+        async fn update_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            budget: &FlowBudget,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(budget.clone())
+        }
+
+        async fn charge_flow_budget(
+            &self,
+            _context: &ContextId,
+            _peer: &AuthorityId,
+            _cost: FlowCost,
+        ) -> Result<FlowBudget, AuraError> {
+            Ok(FlowBudget::new(100, Epoch::initial()))
+        }
+    }
+
+    #[async_trait]
+    impl TreeEffects for VerificationTestEffects {
+        async fn get_current_state(&self) -> Result<TreeState, AuraError> {
+            Ok(self.state.lock().unwrap().clone())
+        }
+
+        async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
+            Ok(Hash32::new(self.state.lock().unwrap().current_commitment()))
+        }
+
+        async fn get_current_epoch(&self) -> Result<Epoch, AuraError> {
+            Ok(self.state.lock().unwrap().current_epoch())
+        }
+
+        async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
+            let mut state = self.state.lock().unwrap();
+            apply_verified_sync(&mut state, &op)
+                .map_err(|error| AuraError::invalid(format!("apply attested op: {error}")))?;
+            let commitment = Hash32(state.current_commitment());
+            self.applied.lock().unwrap().push(op);
+            Ok(commitment)
+        }
+
+        async fn verify_aggregate_sig(
+            &self,
+            op: &AttestedOp,
+            _state: &TreeState,
+        ) -> Result<bool, AuraError> {
+            Ok(!op.agg_sig.is_empty())
+        }
+
+        async fn add_leaf(
+            &self,
+            _leaf: aura_core::LeafNode,
+            _under: aura_core::NodeIndex,
+        ) -> Result<aura_core::TreeOpKind, AuraError> {
+            Err(AuraError::internal("test-only add_leaf"))
+        }
+
+        async fn remove_leaf(
+            &self,
+            _leaf_id: aura_core::LeafId,
+            _reason: u8,
+        ) -> Result<aura_core::TreeOpKind, AuraError> {
+            Err(AuraError::internal("test-only remove_leaf"))
+        }
+
+        async fn change_policy(
+            &self,
+            _node: aura_core::NodeIndex,
+            _new_policy: aura_core::Policy,
+        ) -> Result<aura_core::TreeOpKind, AuraError> {
+            Err(AuraError::internal("test-only change_policy"))
+        }
+
+        async fn rotate_epoch(
+            &self,
+            _affected: Vec<aura_core::NodeIndex>,
+        ) -> Result<aura_core::TreeOpKind, AuraError> {
+            Err(AuraError::internal("test-only rotate_epoch"))
+        }
+
+        async fn propose_snapshot(
+            &self,
+            _cut: aura_protocol::effects::tree::Cut,
+        ) -> Result<aura_core::tree::ProposalId, AuraError> {
+            Err(AuraError::internal("test-only propose_snapshot"))
+        }
+
+        async fn apply_snapshot(
+            &self,
+            _snapshot: &aura_protocol::effects::tree::Snapshot,
+        ) -> Result<(), AuraError> {
+            Err(AuraError::internal("test-only apply_snapshot"))
+        }
+    }
 
     fn sample_journal() -> Journal {
         // Minimal journal for digest tests; facts/caps remain default
@@ -1353,6 +1677,43 @@ mod tests {
             agg_sig: vec![],
             signer_count: 1,
         }
+    }
+
+    fn valid_verified_batch(peer: DeviceId, count: usize) -> VerifiedIngress<Vec<AttestedOp>> {
+        let mut state = TreeState::new();
+        let mut ops = Vec::with_capacity(count);
+        for ordinal in 0..count {
+            let op = AttestedOp {
+                op: TreeOp {
+                    parent_epoch: state.current_epoch(),
+                    parent_commitment: state.current_commitment(),
+                    op: TreeOpKind::RotateEpoch {
+                        affected: vec![aura_core::NodeIndex(0)],
+                    },
+                    version: ANTI_ENTROPY_SCHEMA_VERSION,
+                },
+                agg_sig: vec![1, ordinal as u8],
+                signer_count: 1,
+            };
+            apply_verified_sync(&mut state, &op).expect("test op should reduce");
+            ops.push(op);
+        }
+
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Device(peer),
+            peer_sync_context(peer),
+            None,
+            Hash32::from_value(&ops).expect("hash remote ops"),
+            ANTI_ENTROPY_SCHEMA_VERSION,
+        );
+        let evidence = IngressVerificationEvidence::new(
+            metadata.clone(),
+            REQUIRED_INGRESS_VERIFICATION_CHECKS,
+        )
+        .expect("complete ingress evidence");
+        DecodedIngress::new(ops, metadata)
+            .verify(evidence)
+            .expect("verified remote ops")
     }
 
     #[test]
@@ -1425,19 +1786,157 @@ mod tests {
         let mut local_ops = vec![sample_op(1)];
         let incoming = vec![sample_op(1), sample_op(2), sample_op(3)];
         let peer = DeviceId::new_from_entropy([7u8; 32]);
-        let incoming = crate::protocols::ingress::verified_device_payload(
-            peer,
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Device(peer),
             peer_sync_context(peer),
-            1,
-            incoming,
-        )
-        .unwrap();
+            None,
+            Hash32::from_value(&incoming).expect("hash incoming ops"),
+            ANTI_ENTROPY_SCHEMA_VERSION,
+        );
+        let incoming = verified_remote_ops_batch(&metadata, incoming).unwrap();
 
         let result = protocol.merge_batch(&mut local_ops, incoming).unwrap();
 
         assert_eq!(result.applied, 2);
         assert_eq!(result.duplicates, 1);
         assert_eq!(local_ops.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn verify_remote_operation_batch_accepts_valid_verified_sync_batch() {
+        let protocol = AntiEntropyProtocol::default();
+        let peer = DeviceId::new_from_entropy([41u8; 32]);
+        let effects = VerificationTestEffects::healthy();
+
+        let verified = protocol
+            .verify_remote_operation_batch(&effects, peer, valid_verified_batch(peer, 2))
+            .await
+            .expect("valid batch should verify");
+
+        assert_eq!(verified.payload().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn verify_remote_operation_batch_rejects_forged_remote_operations() {
+        let protocol = AntiEntropyProtocol::default();
+        let peer = DeviceId::new_from_entropy([42u8; 32]);
+        let effects = VerificationTestEffects::healthy();
+        let mut incoming = valid_verified_batch(peer, 1);
+        let (mut ops, metadata) = incoming.into_parts();
+        ops[0].agg_sig.clear();
+        incoming = DecodedIngress::new(ops, metadata.metadata().clone())
+            .verify(metadata)
+            .expect("re-wrapped batch");
+
+        let error = protocol
+            .verify_remote_operation_batch(&effects, peer, incoming)
+            .await
+            .expect_err("forged signature should fail");
+
+        assert!(error.to_string().contains("signature verification"));
+    }
+
+    #[tokio::test]
+    async fn verify_remote_operation_batch_rejects_unauthorized_namespace_context() {
+        let protocol = AntiEntropyProtocol::default();
+        let peer = DeviceId::new_from_entropy([43u8; 32]);
+        let effects = VerificationTestEffects::healthy();
+        let incoming = valid_verified_batch(peer, 1);
+        let (ops, _) = incoming.into_parts();
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Device(peer),
+            ContextId::new_from_entropy([99u8; 32]),
+            None,
+            Hash32::from_value(&ops).expect("hash incoming ops"),
+            ANTI_ENTROPY_SCHEMA_VERSION,
+        );
+        let evidence = IngressVerificationEvidence::new(
+            metadata.clone(),
+            REQUIRED_INGRESS_VERIFICATION_CHECKS,
+        )
+        .expect("complete ingress evidence");
+        let wrong_namespace = DecodedIngress::new(ops, metadata)
+            .verify(evidence)
+            .expect("verified wrong-namespace batch");
+
+        let error = protocol
+            .verify_remote_operation_batch(&effects, peer, wrong_namespace)
+            .await
+            .expect_err("wrong namespace should fail");
+
+        assert!(error.to_string().contains("sync namespace"));
+    }
+
+    #[tokio::test]
+    async fn verify_remote_operation_batch_rejects_replayed_fingerprints() {
+        let protocol = AntiEntropyProtocol::default();
+        let peer = DeviceId::new_from_entropy([44u8; 32]);
+        let effects = VerificationTestEffects::healthy();
+        let incoming = valid_verified_batch(peer, 1);
+        let (ops, _) = incoming.into_parts();
+        let replayed = verified_remote_ops_batch(
+            &VerifiedIngressMetadata::new(
+                IngressSource::Device(peer),
+                peer_sync_context(peer),
+                None,
+                Hash32::from_value(&ops).expect("hash replayed ops"),
+                ANTI_ENTROPY_SCHEMA_VERSION,
+            ),
+            vec![ops[0].clone(), ops[0].clone()],
+        )
+        .expect("replayed batch ingress");
+
+        let error = protocol
+            .verify_remote_operation_batch(&effects, peer, {
+                let (batch, metadata) = replayed.into_parts();
+                let ops = batch.ops().to_vec();
+                let metadata = VerifiedIngressMetadata::new(
+                    metadata.metadata().source(),
+                    metadata.metadata().context_id(),
+                    metadata.metadata().session_id(),
+                    Hash32::from_value(&ops).expect("hash ops"),
+                    metadata.metadata().schema_version(),
+                );
+                let evidence = IngressVerificationEvidence::new(
+                    metadata.clone(),
+                    REQUIRED_INGRESS_VERIFICATION_CHECKS,
+                )
+                .expect("complete ingress evidence");
+                DecodedIngress::new(ops, metadata)
+                    .verify(evidence)
+                    .expect("verified replayed ops")
+            })
+            .await
+            .expect_err("replayed fingerprint should fail");
+
+        assert!(error.to_string().contains("replayed fingerprint"));
+    }
+
+    #[tokio::test]
+    async fn verify_remote_operation_batch_fails_closed_on_journal_load_error() {
+        let protocol = AntiEntropyProtocol::default();
+        let peer = DeviceId::new_from_entropy([45u8; 32]);
+        let effects =
+            VerificationTestEffects::failing_journal_load(AuraError::storage("boom".to_string()));
+
+        let error = protocol
+            .verify_remote_operation_batch(&effects, peer, valid_verified_batch(peer, 1))
+            .await
+            .expect_err("journal load failure should fail closed");
+
+        assert!(error.to_string().contains("journal load failed"));
+    }
+
+    #[test]
+    fn malformed_remote_operations_json_is_rejected() {
+        let error = crate::core::json_deserialize::<Vec<AttestedOp>>(
+            "operations",
+            "anti-entropy operations",
+            br#"{"not":"a-batch"}"#,
+        )
+        .expect_err("malformed payload should fail");
+
+        assert!(error.to_string().contains("Failed to deserialize"));
     }
 
     #[test]

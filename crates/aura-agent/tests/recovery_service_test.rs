@@ -420,8 +420,6 @@ async fn test_recovery_execution_requires_consensus_in_production(
     let mut config = AgentConfig::default();
     config.storage.base_path =
         std::env::temp_dir().join(format!("aura-test-recovery-{}", authority_id));
-    config.storage.encryption_policy =
-        aura_agent::core::config::StorageEncryptionPolicy::PlaintextForTests;
 
     let effects = AuraEffectSystem::production_for_authority(config, authority_id)?;
     let device_id = DeviceId::new_from_entropy([121u8; 32]);

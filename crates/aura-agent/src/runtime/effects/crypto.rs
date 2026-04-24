@@ -413,6 +413,19 @@ impl CryptoExtendedEffects for AuraEffectSystem {
             .await
     }
 
+    async fn aes_gcm_encrypt_with_aad(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .handler()
+            .aes_gcm_encrypt_with_aad(plaintext, key, nonce, aad)
+            .await
+    }
+
     async fn aes_gcm_decrypt(
         &self,
         ciphertext: &[u8],
@@ -422,6 +435,19 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         self.crypto
             .handler()
             .aes_gcm_decrypt(ciphertext, key, nonce)
+            .await
+    }
+
+    async fn aes_gcm_decrypt_with_aad(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .handler()
+            .aes_gcm_decrypt_with_aad(ciphertext, key, nonce, aad)
             .await
     }
 

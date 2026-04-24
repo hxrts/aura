@@ -2,11 +2,11 @@ error[E0308]: mismatched types
   --> tests/ui/decoded_ingress_cannot_merge_batch.rs:18:50
    |
 18 |     let _ = protocol.merge_batch(&mut local_ops, decoded);
-   |                      -----------                 ^^^^^^^ expected `VerifiedIngress<Vec<AttestedOp>>`, found `DecodedIngress<Vec<AttestedOp>>`
+   |                      -----------                 ^^^^^^^ expected `VerifiedIngress<VerifiedRemoteOpsBatch>`, found `DecodedIngress<Vec<AttestedOp>>`
    |                      |
    |                      arguments to this method are incorrect
    |
-   = note: expected struct `VerifiedIngress<Vec<AttestedOp>>`
+   = note: expected struct `VerifiedIngress<VerifiedRemoteOpsBatch>`
               found struct `DecodedIngress<Vec<AttestedOp>>`
 note: method defined here
   --> $WORKSPACE/crates/aura-sync/src/protocols/anti_entropy.rs

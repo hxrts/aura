@@ -27,6 +27,7 @@
 //! let valid = crypto.verify_signature(&message, &sig, &pubkey, SigningMode::SingleSigner).await?;
 //! ```
 
+use crate::secrets::{PrivateKeyBytes, SecretExportContext, SecretExportKind};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_SINGLE_SIGNER_VERIFYING_KEY_BYTES: usize = 32;
@@ -84,13 +85,19 @@ impl std::fmt::Display for SigningMode {
 /// - Stored via `SecureStorageEffects`
 /// - Zeroized when no longer needed
 /// - Never logged or transmitted
-// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md transitional single-signer package; finding 40 tracks migration to PrivateKeyBytes with redacted Debug and zeroization.
-#[derive(Clone, Serialize, Deserialize)]
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md Encoded single-signer packages exist only behind explicit secure export/import boundaries.
+#[derive(Serialize, Deserialize)]
+struct EncodedSingleSignerKeyPackage {
+    signing_key: Vec<u8>,
+    verifying_key: Vec<u8>,
+}
+
+// aura-security: secret-derive-justified owner=security-refactor expires=before-release remediation=work/2.md transitional single-signer package; finding 49 tracks migration to PrivateKeyBytes with redacted Debug and zeroization.
 pub struct SingleSignerKeyPackage {
     /// 32-byte Ed25519 signing key (private).
     ///
     /// This is the secret scalar used for signing operations.
-    signing_key: Vec<u8>,
+    signing_key: PrivateKeyBytes,
 
     /// 32-byte Ed25519 verifying key (public).
     ///
@@ -113,7 +120,7 @@ impl SingleSignerKeyPackage {
         assert_eq!(signing_key.len(), 32, "Signing key must be 32 bytes");
         assert_eq!(verifying_key.len(), 32, "Verifying key must be 32 bytes");
         Self {
-            signing_key,
+            signing_key: PrivateKeyBytes::import(signing_key),
             verifying_key,
         }
     }
@@ -124,7 +131,7 @@ impl SingleSignerKeyPackage {
     pub fn try_new(signing_key: Vec<u8>, verifying_key: Vec<u8>) -> Option<Self> {
         if signing_key.len() == 32 && verifying_key.len() == 32 {
             Some(Self {
-                signing_key,
+                signing_key: PrivateKeyBytes::import(signing_key),
                 verifying_key,
             })
         } else {
@@ -138,7 +145,7 @@ impl SingleSignerKeyPackage {
     ///
     /// Handle with care - this is secret key material.
     pub fn signing_key(&self) -> &[u8] {
-        &self.signing_key
+        self.signing_key.expose_private_key()
     }
 
     /// Get the verifying key bytes (public).
@@ -153,16 +160,79 @@ impl SingleSignerKeyPackage {
         }
     }
 
-    /// Serialize to bytes using DAG-CBOR.
-    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
-        crate::util::serialization::to_vec(self)
+    /// Serialize this key package for direct secure-storage persistence.
+    pub fn export_for_secure_storage(
+        &self,
+        context: SecretExportContext,
+    ) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
+        self.export_with_context(context, SecretExportKind::SecureStorage)
     }
 
-    /// Deserialize from bytes.
-    pub fn from_bytes(
+    /// Deserialize a key package that was loaded directly from secure storage.
+    pub fn import_from_secure_storage(
         bytes: &[u8],
+        context: SecretExportContext,
     ) -> Result<Self, crate::util::serialization::SerializationError> {
-        crate::util::serialization::from_slice(bytes)
+        Self::import_with_context(bytes, context, SecretExportKind::SecureStorage)
+    }
+
+    /// Serialize this key package for explicit key wrapping or envelope encryption.
+    pub fn export_for_key_wrapping(
+        &self,
+        context: SecretExportContext,
+    ) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
+        self.export_with_context(context, SecretExportKind::KeyWrapping)
+    }
+
+    /// Deserialize a key package that was loaded through an explicit key-wrapping boundary.
+    pub fn import_from_key_wrapping(
+        bytes: &[u8],
+        context: SecretExportContext,
+    ) -> Result<Self, crate::util::serialization::SerializationError> {
+        Self::import_with_context(bytes, context, SecretExportKind::KeyWrapping)
+    }
+
+    fn export_with_context(
+        &self,
+        context: SecretExportContext,
+        expected_kind: SecretExportKind,
+    ) -> Result<Vec<u8>, crate::util::serialization::SerializationError> {
+        validate_context(context, expected_kind)?;
+        crate::util::serialization::to_vec(&EncodedSingleSignerKeyPackage {
+            signing_key: self.signing_key.expose_private_key().to_vec(),
+            verifying_key: self.verifying_key.clone(),
+        })
+    }
+
+    fn import_with_context(
+        bytes: &[u8],
+        context: SecretExportContext,
+        expected_kind: SecretExportKind,
+    ) -> Result<Self, crate::util::serialization::SerializationError> {
+        validate_context(context, expected_kind)?;
+        let encoded: EncodedSingleSignerKeyPackage = crate::util::serialization::from_slice(bytes)?;
+        Self::try_new(encoded.signing_key, encoded.verifying_key).ok_or_else(|| {
+            crate::util::serialization::SerializationError::InvalidFormat(
+                "single-signer key package contains invalid key lengths".to_string(),
+            )
+        })
+    }
+}
+
+fn validate_context(
+    context: SecretExportContext,
+    expected_kind: SecretExportKind,
+) -> Result<(), crate::util::serialization::SerializationError> {
+    if context.kind() == expected_kind {
+        Ok(())
+    } else {
+        Err(
+            crate::util::serialization::SerializationError::InvalidFormat(format!(
+                "single-signer key package requires {expected_kind:?} context, got {:?} from {}",
+                context.kind(),
+                context.boundary()
+            )),
+        )
     }
 }
 
@@ -173,14 +243,6 @@ impl std::fmt::Debug for SingleSignerKeyPackage {
             .field("signing_key", &"[REDACTED]")
             .field("verifying_key", &hex::encode(&self.verifying_key))
             .finish()
-    }
-}
-
-impl Drop for SingleSignerKeyPackage {
-    fn drop(&mut self) {
-        // Zeroize signing key on drop
-        use zeroize::Zeroize;
-        self.signing_key.zeroize();
     }
 }
 
@@ -280,11 +342,29 @@ mod tests {
         let verifying_key = vec![2u8; 32];
         let pkg = SingleSignerKeyPackage::new(signing_key.clone(), verifying_key.clone());
 
-        let bytes = pkg.to_bytes().unwrap();
-        let restored = SingleSignerKeyPackage::from_bytes(&bytes).unwrap();
+        let bytes = pkg
+            .export_for_secure_storage(SecretExportContext::secure_storage("single-signer-test"))
+            .unwrap();
+        let restored = SingleSignerKeyPackage::import_from_secure_storage(
+            &bytes,
+            SecretExportContext::secure_storage("single-signer-test"),
+        )
+        .unwrap();
 
         assert_eq!(restored.signing_key(), &signing_key[..]);
         assert_eq!(restored.verifying_key(), &verifying_key[..]);
+    }
+
+    #[test]
+    fn test_key_package_rejects_wrong_export_context() {
+        let pkg = SingleSignerKeyPackage::new(vec![1u8; 32], vec![2u8; 32]);
+        let error = pkg
+            .export_for_secure_storage(SecretExportContext::key_wrapping("wrong-boundary"))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::util::serialization::SerializationError::InvalidFormat(_)
+        ));
     }
 
     #[test]

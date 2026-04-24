@@ -8,6 +8,7 @@
 use crate::types::physical_time_ms;
 use crate::StorageCapability;
 use aura_core::time::PhysicalTime;
+use aura_core::types::scope::{StoragePath, StoragePathError};
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,14 +17,16 @@ fn insert_metadata(metadata: &mut BTreeMap<String, String>, key: String, value: 
     metadata.insert(key, value);
 }
 
-fn is_same_or_child_path(candidate: &str, parent: &str) -> bool {
-    let candidate = candidate.trim_matches('/');
-    let parent = parent.trim_matches('/');
-    parent.is_empty()
-        || candidate == parent
-        || candidate
-            .strip_prefix(parent)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+fn namespace_scope_path(namespace: &str) -> Result<StoragePath, StoragePathError> {
+    let trimmed = namespace.trim().trim_end_matches('/');
+    let raw = if trimmed == "*" || trimmed == "/*" {
+        "*".to_string()
+    } else if trimmed.ends_with("/*") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/*")
+    };
+    StoragePath::parse(&raw)
 }
 
 /// Search scope for limiting search domains
@@ -32,7 +35,7 @@ pub enum SearchScope {
     /// Search all accessible content
     Global,
     /// Search within a specific namespace
-    Namespace(String),
+    Namespace(StoragePath),
     /// Search specific content IDs
     Content(Vec<String>),
 }
@@ -40,7 +43,13 @@ pub enum SearchScope {
 impl SearchScope {
     /// Create namespace scope
     pub fn namespace(namespace: &str) -> Self {
-        Self::Namespace(namespace.to_string())
+        Self::try_namespace(namespace)
+            .unwrap_or_else(|error| panic!("invalid search namespace scope `{namespace}`: {error}"))
+    }
+
+    /// Create namespace scope with validation.
+    pub fn try_namespace(namespace: &str) -> Result<Self, StoragePathError> {
+        namespace_scope_path(namespace).map(Self::Namespace)
     }
 
     /// Create content scope
@@ -52,7 +61,9 @@ impl SearchScope {
     pub fn contains_content(&self, content_id: &str) -> bool {
         match self {
             Self::Global => true,
-            Self::Namespace(ns) => is_same_or_child_path(content_id, ns),
+            Self::Namespace(ns) => StoragePath::parse(content_id)
+                .map(|path| ns.covers(&path))
+                .unwrap_or(false),
             Self::Content(ids) => ids.contains(&content_id.to_string()),
         }
     }
@@ -363,6 +374,13 @@ mod tests {
         let scope = SearchScope::namespace("user/alice");
         assert!(scope.contains_content("user/alice/document1"));
         assert!(!scope.contains_content("user/bob/document1"));
+        assert!(!scope.contains_content("user/alice2/document1"));
+    }
+
+    #[test]
+    fn test_search_scope_rejects_ambiguous_prefixes() {
+        assert!(SearchScope::try_namespace("user/alice*").is_err());
+        assert!(SearchScope::try_namespace("user/alice/*/extra").is_err());
     }
 
     #[test]

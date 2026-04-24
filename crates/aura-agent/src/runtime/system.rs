@@ -28,7 +28,6 @@ use aura_core::effects::time::PhysicalTimeEffects;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::transport::{TransportEnvelope, MAX_TRANSPORT_SIGNATURE_BYTES};
 use aura_core::types::identifiers::AuthorityId;
-#[cfg(not(target_arch = "wasm32"))]
 use aura_core::DeviceId;
 use aura_core::{
     execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskSpawner, TimeoutBudget,

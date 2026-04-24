@@ -39,11 +39,11 @@ pub use ids::{
     classify_settings_section_item_id, contacts_friend_action_controls, list_item_dom_id,
     list_item_selector, nav_control_id_for_screen, screen_item_id,
     semantic_settings_section_item_id, semantic_settings_section_surface_id,
-    settings_section_item_id, AcceptedPendingChannelBinding, ChannelBindingWitness, ControlId,
-    FieldId, FrontendSpecificSettingsSectionId, HarnessUiCommand, HarnessUiCommandReceipt,
-    HarnessUiOperationHandle, ListId, ModalId, ParityUiIdentity, ScreenId,
+    settings_section_item_id, AcceptedPendingChannelBinding, AuthenticatedHarnessUiCommand,
+    ChannelBindingWitness, ControlId, FieldId, FrontendSpecificSettingsSectionId, HarnessUiCommand,
+    HarnessUiCommandReceipt, HarnessUiOperationHandle, ListId, ModalId, ParityUiIdentity, ScreenId,
     SettingsSectionSurfaceId, SharedSettingsSectionId, FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
-    PARITY_CRITICAL_SETTINGS_SECTIONS,
+    HARNESS_AUTH_TOKEN_MIN_LEN, HARNESS_COMMAND_MAX_FRAME_BYTES, PARITY_CRITICAL_SETTINGS_SECTIONS,
 };
 pub use operations::{
     bridged_operation_statuses, AuthoritativeSemanticFact, AuthoritativeSemanticFactKind,

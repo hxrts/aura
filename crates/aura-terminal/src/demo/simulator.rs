@@ -779,6 +779,7 @@ async fn process_peer_transport_messages(
                     let message = match aura_protocol::amp::amp_recv(
                         effects.as_ref(),
                         context,
+                        envelope.source,
                         payload,
                     )
                     .await
@@ -1106,6 +1107,7 @@ pub fn spawn_amp_inbox_listener(
                 if let Err(err) = aura_protocol::amp::amp_recv(
                     effects.as_ref(),
                     envelope.context,
+                    envelope.source,
                     envelope.payload.clone(),
                 )
                 .await

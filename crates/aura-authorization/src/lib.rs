@@ -77,7 +77,7 @@ pub use aura_core::types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 // Biscuit authorization types
 pub use biscuit_evaluator::{
-    AuthorizationResult, BiscuitAuthorizationBridge, VerifiedBiscuitToken,
+    AuthorizationResult, BiscuitAuthorizationBridge, VerifiedBiscuitToken, AURA_BISCUIT_LIMITS,
 };
 
 // Storage authorization types

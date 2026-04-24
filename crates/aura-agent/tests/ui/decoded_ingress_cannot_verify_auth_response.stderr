@@ -1,7 +1,7 @@
 error[E0308]: mismatched types
-  --> tests/ui/decoded_ingress_cannot_verify_auth_response.rs:35:48
+  --> tests/ui/decoded_ingress_cannot_verify_auth_response.rs:37:48
    |
-35 |     let _ = handler.verify_response(effects(), &decoded);
+37 |     let _ = handler.verify_response(effects(), &decoded);
    |                     ---------------            ^^^^^^^^ expected `&VerifiedIngress<AuthResponse>`, found `&DecodedIngress<AuthResponse>`
    |                     |
    |                     arguments to this method are incorrect

@@ -42,13 +42,13 @@ pub const MAX_INVITE_CODE_CHARS: usize = "aura:v255:".len() + MAX_INVITE_CODE_BA
 /// Return the maximum base64 characters required to encode `decoded_len` bytes.
 #[must_use]
 pub const fn max_base64_encoded_len(decoded_len: usize) -> usize {
-    ((decoded_len + 2) / 3) * 4
+    decoded_len.div_ceil(3) * 4
 }
 
 /// Return an allocation-safe upper bound for decoded bytes from base64 text.
 #[must_use]
 pub const fn base64_decoded_len_upper_bound(encoded_len: usize) -> usize {
-    ((encoded_len + 3) / 4) * 3
+    encoded_len.div_ceil(4) * 3
 }
 
 /// Unified envelope for shareable Aura payloads.
@@ -198,8 +198,7 @@ impl AuraEnvelope {
             || base64_decoded_len_upper_bound(payload_part.len()) > MAX_INVITE_CODE_DECODED_BYTES
         {
             return Err(format!(
-                "invite code payload exceeds {} decoded bytes",
-                MAX_INVITE_CODE_DECODED_BYTES
+                "invite code payload exceeds {MAX_INVITE_CODE_DECODED_BYTES} decoded bytes"
             ));
         }
 
@@ -245,6 +244,24 @@ impl AuraEnvelope {
 #[allow(clippy::expect_used)] // Tests use expect for simplicity
 mod tests {
     use super::*;
+    use ciborium::{
+        ser::into_writer as cbor_into_writer,
+        value::{CanonicalValue, Value as CborValue},
+    };
+
+    fn encode_noncanonical_map<T: serde::Serialize>(value: &T) -> Vec<u8> {
+        let CborValue::Map(mut entries) =
+            CborValue::serialized(value).expect("serialize test value")
+        else {
+            panic!("expected map-encoded test value");
+        };
+        entries.sort_by(|(left, _), (right, _)| {
+            CanonicalValue::from(right.clone()).cmp(&CanonicalValue::from(left.clone()))
+        });
+        let mut bytes = Vec::new();
+        cbor_into_writer(&CborValue::Map(entries), &mut bytes).expect("encode noncanonical bytes");
+        bytes
+    }
 
     #[test]
     fn test_envelope_round_trip() {
@@ -344,5 +361,16 @@ mod tests {
 
         let payload = envelope.into_payload();
         assert_eq!(payload, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_decode_rejects_noncanonical_wire_encoding() {
+        let envelope = AuraEnvelope::invite(vec![1, 2, 3, 4]);
+        let canonical = envelope.encode().expect("encode");
+        let noncanonical = encode_noncanonical_map(&envelope);
+        assert_ne!(canonical, noncanonical);
+
+        let err = AuraEnvelope::decode(&noncanonical).expect_err("reject noncanonical wire bytes");
+        assert!(err.contains("Non-canonical DAG-CBOR wire encoding"));
     }
 }

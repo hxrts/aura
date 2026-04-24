@@ -57,17 +57,27 @@ impl AuthManager {
     }
 
     /// Cache a pending challenge.
-    pub async fn cache_challenge(&self, challenge: AuthChallenge) {
+    pub async fn cache_challenge(&self, challenge: AuthChallenge) -> Result<(), String> {
         with_state_mut_validated(
             &self.state,
-            |state| {
+            move |state| {
+                if state
+                    .pending_challenges
+                    .contains_key(&challenge.challenge_id)
+                {
+                    return Err(format!(
+                        "pending auth challenge collision for id {}",
+                        challenge.challenge_id
+                    ));
+                }
                 state
                     .pending_challenges
                     .insert(challenge.challenge_id.clone(), challenge);
+                Ok(())
             },
             |state| state.validate(),
         )
-        .await;
+        .await
     }
 
     /// Get a cached challenge.

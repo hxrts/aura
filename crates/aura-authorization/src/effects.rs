@@ -61,6 +61,16 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         self
     }
 
+    /// Get the trusted Biscuit root public key configured for this handler.
+    pub fn root_public_key(&self) -> PublicKey {
+        self.biscuit_bridge.root_public_key()
+    }
+
+    /// Get the authority identity bound to this handler's Biscuit evaluation context.
+    pub fn authority_id(&self) -> AuthorityId {
+        self.biscuit_bridge.authority_id()
+    }
+
     /// Validate capability structure and temporal bounds
     ///
     /// This encapsulates the domain-specific business logic for capability validation

@@ -24,19 +24,27 @@
 //! let comparison = verifier.compare_roots(remote_root).await?;
 //!
 //! // Verify incoming facts
-//! let result = verifier.verify_incoming_facts(facts, claimed_root).await?;
+//! let result = verifier
+//!     .verify_incoming_facts(facts, claimed_root, context_id)
+//!     .await?;
 //! ```
 
+use crate::capabilities::SyncCapability;
+use aura_core::crypto::{ed25519_verify, Ed25519Signature, Ed25519VerifyingKey, SimpleMerkleProof};
 use aura_core::effects::indexed::{IndexStats, IndexedFact, IndexedJournalEffects};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::BloomFilter;
+use aura_core::hash::hash;
 use aura_core::time::TimeStamp;
-use aura_core::AuraError;
+use aura_core::util::serialization;
+use aura_core::{verify_merkle_proof, AuraError, AuthorityId, ContextId};
+use aura_signature::{encode_transcript, SecurityTranscript};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Maximum allowed clock skew in milliseconds for timestamp validation
 const MAX_CLOCK_SKEW_MS: u64 = 300_000; // 5 minutes
+const SYNC_FACT_SCHEMA_VERSION: u16 = 1;
 
 // =============================================================================
 // Types
@@ -54,6 +62,88 @@ pub enum MerkleComparison {
         /// Remote Merkle root
         remote_root: [u8; 32],
     },
+}
+
+/// Namespace carried by peer fact envelopes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum FactEnvelopeNamespace {
+    Context(ContextId),
+}
+
+/// Signer metadata required to authenticate a peer fact envelope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FactEnvelopeSigner {
+    /// Authority claimed for the signer.
+    pub authority: AuthorityId,
+    /// Ed25519 public key bytes for the signer.
+    pub public_key: Vec<u8>,
+    /// Key identifier within the signer namespace.
+    pub key_id: String,
+    /// Optional certificate bytes carried with the signer metadata.
+    pub certificate: Option<Vec<u8>>,
+}
+
+/// Peer-supplied fact envelope containing proof and signer evidence.
+#[derive(Debug, Clone)]
+pub struct FactEnvelope {
+    /// The fact being synchronized.
+    pub fact: IndexedFact,
+    /// Merkle proof showing inclusion under the claimed peer root.
+    pub merkle_proof: SimpleMerkleProof,
+    /// Namespace scoped by the sync session.
+    pub namespace: FactEnvelopeNamespace,
+    /// Schema version for the envelope.
+    pub schema_version: u16,
+    /// Signer metadata carried with the envelope.
+    pub signer: FactEnvelopeSigner,
+    /// Signature over the canonical envelope transcript.
+    pub signature: Vec<u8>,
+    /// Capability asserted for pushing this fact batch.
+    pub capability: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FactEnvelopeTranscriptPayload {
+    namespace: FactEnvelopeNamespace,
+    schema_version: u16,
+    claimed_root: [u8; 32],
+    fact_hash: [u8; 32],
+    proof_hash: [u8; 32],
+    signer_authority: AuthorityId,
+    signer_public_key: Vec<u8>,
+    signer_key_id: String,
+    capability: String,
+}
+
+struct FactEnvelopeTranscript<'a> {
+    envelope: &'a FactEnvelope,
+    claimed_root: [u8; 32],
+}
+
+impl SecurityTranscript for FactEnvelopeTranscript<'_> {
+    type Payload = FactEnvelopeTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.sync.fact-envelope";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        let fact_hash = hash(&fact_to_bytes(&self.envelope.fact));
+        let proof_bytes = match serialization::to_vec(&self.envelope.merkle_proof) {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("fact envelope proof should serialize: {error}"),
+        };
+        let proof_hash = hash(&proof_bytes);
+        FactEnvelopeTranscriptPayload {
+            namespace: self.envelope.namespace.clone(),
+            schema_version: self.envelope.schema_version,
+            claimed_root: self.claimed_root,
+            fact_hash,
+            proof_hash,
+            signer_authority: self.envelope.signer.authority,
+            signer_public_key: self.envelope.signer.public_key.clone(),
+            signer_key_id: self.envelope.signer.key_id.clone(),
+            capability: self.envelope.capability.clone(),
+        }
+    }
 }
 
 /// Verification result for a batch of facts
@@ -168,6 +258,7 @@ impl MerkleVerifier {
     ///
     /// * `facts` - Facts received from peer to verify
     /// * `claimed_root` - Merkle root claimed by the peer
+    /// * `context_id` - Namespace context authorized for this sync session
     ///
     /// # Returns
     ///
@@ -175,8 +266,9 @@ impl MerkleVerifier {
     /// the current local Merkle root.
     pub async fn verify_incoming_facts(
         &self,
-        facts: Vec<IndexedFact>,
-        _claimed_root: [u8; 32],
+        facts: Vec<FactEnvelope>,
+        claimed_root: [u8; 32],
+        context_id: ContextId,
     ) -> Result<VerificationResult, AuraError> {
         let mut verified = Vec::new();
         let mut rejected = Vec::new();
@@ -189,7 +281,18 @@ impl MerkleVerifier {
             .map(|t| t.ts_ms)
             .unwrap_or(0);
 
-        for fact in facts {
+        for envelope in facts {
+            let fact = envelope.fact.clone();
+            if let Err(reason) = Self::validate_envelope(&envelope, claimed_root, context_id) {
+                tracing::warn!(
+                    fact_id = ?fact.id,
+                    reason = %reason,
+                    "Fact rejected: envelope validation failed"
+                );
+                rejected.push((fact, reason));
+                continue;
+            }
+
             // Check if fact is already in our index
             match self.indexed_journal.verify_fact_inclusion(&fact).await {
                 Ok(is_included) => {
@@ -220,7 +323,7 @@ impl MerkleVerifier {
                         }
 
                         // Validate authority presence
-                        if let Err(reason) = Self::validate_authority(&fact) {
+                        if let Err(reason) = Self::validate_authority(&fact, &envelope) {
                             tracing::warn!(
                                 fact_id = ?fact.id,
                                 reason = %reason,
@@ -229,12 +332,6 @@ impl MerkleVerifier {
                             rejected.push((fact, reason));
                             continue;
                         }
-
-                        // NOTE: Merkle proof and signature verification require additional
-                        // infrastructure:
-                        // - IndexedFact would need to carry SimpleMerkleProof from the sender
-                        // - IndexedFact would need to carry authority signature
-                        // When these are available, add verification here.
 
                         tracing::trace!(
                             fact_id = ?fact.id,
@@ -319,7 +416,7 @@ impl MerkleVerifier {
     /// # Returns
     /// - `Ok(())` if authority is present
     /// - `Err(reason)` if authority is missing
-    fn validate_authority(fact: &IndexedFact) -> Result<(), String> {
+    fn validate_authority(fact: &IndexedFact, envelope: &FactEnvelope) -> Result<(), String> {
         if fact.authority.is_none() {
             tracing::warn!(
                 fact_id = ?fact.id,
@@ -330,6 +427,77 @@ impl MerkleVerifier {
                 fact.id
             ));
         }
+        if fact.authority != Some(envelope.signer.authority) {
+            return Err(format!(
+                "Fact {:?} signer authority does not match fact authority",
+                fact.id
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_envelope(
+        envelope: &FactEnvelope,
+        claimed_root: [u8; 32],
+        context_id: ContextId,
+    ) -> Result<(), String> {
+        if envelope.schema_version != SYNC_FACT_SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported fact envelope schema version {}",
+                envelope.schema_version
+            ));
+        }
+
+        if envelope.capability != SyncCapability::PushOps.as_name().as_str() {
+            return Err(format!(
+                "fact envelope capability '{}' is not authorized for fact sync",
+                envelope.capability
+            ));
+        }
+
+        if envelope.signer.key_id.trim().is_empty() {
+            return Err("fact envelope signer metadata is missing key_id".to_string());
+        }
+
+        if envelope.signature.is_empty() {
+            return Err("fact envelope is missing signature bytes".to_string());
+        }
+
+        let expected_namespace = FactEnvelopeNamespace::Context(context_id);
+        if envelope.namespace != expected_namespace {
+            return Err(format!(
+                "fact envelope namespace {:?} does not match authorized sync namespace {:?}",
+                envelope.namespace, expected_namespace
+            ));
+        }
+
+        let public_key: [u8; 32] = envelope
+            .signer
+            .public_key
+            .as_slice()
+            .try_into()
+            .map_err(|_| "fact envelope signer public key must be 32 bytes".to_string())?;
+        let authority_from_key = AuthorityId::new_from_entropy(hash(&public_key));
+        if authority_from_key != envelope.signer.authority {
+            return Err("fact envelope signer public key does not bind to authority".to_string());
+        }
+
+        let leaf_value = fact_to_bytes(&envelope.fact);
+        if !verify_merkle_proof(&envelope.merkle_proof, &claimed_root, &leaf_value) {
+            return Err("fact envelope Merkle proof does not match claimed root".to_string());
+        }
+
+        let transcript_bytes = fact_envelope_transcript_bytes(envelope, claimed_root)
+            .map_err(|error| format!("encode fact envelope transcript: {error}"))?;
+        let signature = Ed25519Signature::try_from_slice(&envelope.signature)
+            .map_err(|error| format!("invalid fact envelope signature: {error}"))?;
+        let verifying_key = Ed25519VerifyingKey(public_key);
+        let signature_ok = ed25519_verify(&transcript_bytes, &signature, &verifying_key)
+            .map_err(|error| format!("verify fact envelope signature: {error}"))?;
+        if !signature_ok {
+            return Err("fact envelope signature verification failed".to_string());
+        }
+
         Ok(())
     }
 
@@ -342,6 +510,58 @@ impl MerkleVerifier {
     }
 }
 
+fn fact_to_bytes(fact: &IndexedFact) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&fact.id.0.to_le_bytes());
+    bytes.extend_from_slice(fact.predicate.as_bytes());
+    bytes.push(0);
+    match &fact.value {
+        aura_core::domain::journal::FactValue::String(s) => {
+            bytes.push(0);
+            bytes.extend_from_slice(s.as_bytes());
+        }
+        aura_core::domain::journal::FactValue::Number(n) => {
+            bytes.push(1);
+            bytes.extend_from_slice(&n.to_le_bytes());
+        }
+        aura_core::domain::journal::FactValue::Bytes(b) => {
+            bytes.push(2);
+            bytes.extend_from_slice(b);
+        }
+        aura_core::domain::journal::FactValue::Set(set) => {
+            bytes.push(3);
+            for item in set {
+                bytes.extend_from_slice(item.as_bytes());
+                bytes.push(0);
+            }
+        }
+        aura_core::domain::journal::FactValue::Nested(nested) => {
+            bytes.push(4);
+            if let Ok(serialized) = serialization::to_vec(nested.as_ref()) {
+                let nested_hash = hash(&serialized);
+                bytes.extend_from_slice(&nested_hash);
+            }
+        }
+    }
+    bytes
+}
+
+pub(crate) fn fact_envelope_transcript_bytes(
+    envelope: &FactEnvelope,
+    claimed_root: [u8; 32],
+) -> Result<Vec<u8>, AuraError> {
+    let transcript = FactEnvelopeTranscript {
+        envelope,
+        claimed_root,
+    };
+    encode_transcript(
+        FactEnvelopeTranscript::DOMAIN_SEPARATOR,
+        FactEnvelopeTranscript::SCHEMA_VERSION,
+        &transcript.transcript_payload(),
+    )
+    .map_err(|error| AuraError::invalid(format!("encode fact envelope transcript: {error}")))
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -350,12 +570,15 @@ impl MerkleVerifier {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use aura_core::crypto::{build_merkle_root, generate_merkle_proof};
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver};
     use aura_core::effects::BloomConfig;
+    use aura_core::effects::CryptoCoreEffects;
     use aura_core::effects::TimeError;
     use aura_core::time::PhysicalTime;
-    use aura_core::AuthorityId;
+    use aura_core::{hash::hash, AuthorityId, ContextId};
+    use aura_effects::RealCryptoHandler;
     use std::sync::Mutex;
 
     /// Fixed time for deterministic tests
@@ -495,6 +718,49 @@ mod tests {
         }
     }
 
+    async fn signed_fact_envelopes(
+        context_id: ContextId,
+        facts: Vec<IndexedFact>,
+    ) -> ([u8; 32], Vec<FactEnvelope>) {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x5Au8; 32]);
+        let (private_key, public_key) = crypto.ed25519_generate_keypair().await.unwrap();
+        let signer_authority = AuthorityId::new_from_entropy(hash(&public_key));
+        let facts: Vec<IndexedFact> = facts
+            .into_iter()
+            .map(|mut fact| {
+                fact.authority = Some(signer_authority);
+                fact
+            })
+            .collect();
+        let leaves: Vec<Vec<u8>> = facts.iter().map(fact_to_bytes).collect();
+        let claimed_root = build_merkle_root(&leaves);
+        let mut envelopes = Vec::with_capacity(facts.len());
+        for (index, fact) in facts.into_iter().enumerate() {
+            let merkle_proof = generate_merkle_proof(&leaves, index).unwrap();
+            let mut envelope = FactEnvelope {
+                fact,
+                merkle_proof,
+                namespace: FactEnvelopeNamespace::Context(context_id),
+                schema_version: SYNC_FACT_SCHEMA_VERSION,
+                signer: FactEnvelopeSigner {
+                    authority: signer_authority,
+                    public_key: public_key.clone(),
+                    key_id: format!("device-{index}"),
+                    certificate: None,
+                },
+                signature: Vec::new(),
+                capability: SyncCapability::PushOps.as_name().to_string(),
+            };
+            let transcript_bytes = fact_envelope_transcript_bytes(&envelope, claimed_root).unwrap();
+            envelope.signature = crypto
+                .ed25519_sign(&transcript_bytes, &private_key)
+                .await
+                .unwrap();
+            envelopes.push(envelope);
+        }
+        (claimed_root, envelopes)
+    }
+
     #[tokio::test]
     async fn test_compare_roots_in_sync() {
         let root = [1u8; 32];
@@ -526,17 +792,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_existing_facts() {
-        let root = [1u8; 32];
         let existing_fact = create_test_fact(1);
+        let context_id = ContextId::new_from_entropy([0x11; 32]);
+        let (claimed_root, envelopes) =
+            signed_fact_envelopes(context_id, vec![existing_fact.clone()]).await;
         let journal = Arc::new(MockIndexedJournal::with_facts(
-            root,
+            claimed_root,
             vec![existing_fact.clone()],
         ));
         let time = MockTimeEffects::new(TEST_TIME_MS);
         let verifier = MerkleVerifier::new(journal, time);
 
         let result = verifier
-            .verify_incoming_facts(vec![existing_fact], root)
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
             .await
             .unwrap();
 
@@ -546,20 +814,134 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_new_facts() {
-        let root = [1u8; 32];
-        let journal = Arc::new(MockIndexedJournal::new(root));
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
         let time = MockTimeEffects::new(TEST_TIME_MS);
         let verifier = MerkleVerifier::new(journal, time);
-
+        let context_id = ContextId::new_from_entropy([0x22; 32]);
         let new_fact = create_test_fact(99);
+        let (claimed_root, envelopes) = signed_fact_envelopes(context_id, vec![new_fact]).await;
         let result = verifier
-            .verify_incoming_facts(vec![new_fact], root)
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
             .await
             .unwrap();
 
-        // New facts are accepted for merge
         assert_eq!(result.verified.len(), 1);
         assert!(result.rejected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_wrong_root_proof() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x23; 32]);
+        let (_claimed_root, envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(100)]).await;
+        let wrong_root = [0xFF; 32];
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, wrong_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_missing_signature() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x24; 32]);
+        let (claimed_root, mut envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(101)]).await;
+        envelopes[0].signature.clear();
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_wrong_namespace() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x26; 32]);
+        let (claimed_root, mut envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(103)]).await;
+        envelopes[0].namespace =
+            FactEnvelopeNamespace::Context(ContextId::new_from_entropy([0x27; 32]));
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_invalid_schema_version() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x28; 32]);
+        let (claimed_root, mut envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(104)]).await;
+        envelopes[0].schema_version = 99;
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_forged_authority_binding() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x25; 32]);
+        let (claimed_root, mut envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(102)]).await;
+        envelopes[0].fact.authority = Some(AuthorityId::new_from_entropy([0xAA; 32]));
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_verify_new_facts_rejects_missing_authority() {
+        let journal = Arc::new(MockIndexedJournal::new([1u8; 32]));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let verifier = MerkleVerifier::new(journal, time);
+        let context_id = ContextId::new_from_entropy([0x29; 32]);
+        let (claimed_root, mut envelopes) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(105)]).await;
+        envelopes[0].fact.authority = None;
+
+        let result = verifier
+            .verify_incoming_facts(envelopes, claimed_root, context_id)
+            .await
+            .unwrap();
+
+        assert!(result.verified.is_empty());
+        assert_eq!(result.rejected.len(), 1);
     }
 
     #[tokio::test]

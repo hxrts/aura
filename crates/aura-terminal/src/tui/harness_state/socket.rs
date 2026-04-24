@@ -1,29 +1,35 @@
 //! Socket infrastructure for harness command ingress.
 
+use super::config::{
+    configured_command_socket, configured_harness_command_token, ensure_private_parent_dir,
+    reject_symlink_target, set_private_permissions,
+};
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{HarnessCommandSender, HarnessCommandSubmission};
-use aura_app::harness_mode_enabled;
 use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::{HarnessUiCommand, HarnessUiCommandReceipt};
-use aura_app::ui_contract::{HarnessUiOperationHandle, OperationInstanceId};
+use aura_app::ui_contract::{
+    AuthenticatedHarnessUiCommand, HarnessUiOperationHandle, OperationInstanceId,
+    HARNESS_COMMAND_MAX_FRAME_BYTES,
+};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
     execute_with_timeout_budget, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
     TimeoutRunError,
 };
 use aura_effects::time::PhysicalTimeHandler;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, Semaphore};
 
-const COMMAND_SOCKET_ENV: &str = "AURA_TUI_COMMAND_SOCKET";
-
-static COMMAND_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static HARNESS_COMMAND_PLANE_CONTROL: OnceLock<
     Mutex<Option<mpsc::Sender<HarnessCommandPlaneControl>>>,
 > = OnceLock::new();
@@ -105,25 +111,16 @@ impl Drop for HarnessSocketGuard {
     }
 }
 
-fn configured_command_socket() -> Option<&'static PathBuf> {
-    if !harness_mode_enabled() {
-        return None;
-    }
-    COMMAND_SOCKET
-        .get_or_init(|| std::env::var_os(COMMAND_SOCKET_ENV).map(PathBuf::from))
-        .as_ref()
-}
-
 fn bind_harness_command_listener() -> io::Result<Option<(UnixListener, HarnessSocketGuard)>> {
-    let Some(path) = configured_command_socket().cloned() else {
+    let Some(path) = configured_command_socket()? else {
         return Ok(None);
     };
+    reject_symlink_target(&path)?;
     let _ = fs::remove_file(&path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    ensure_private_parent_dir(&path)?;
     let listener = std::os::unix::net::UnixListener::bind(&path)?;
     listener.set_nonblocking(true)?;
+    set_private_permissions(&path, 0o600)?;
     UnixListener::from_std(listener).map(|listener| Some((listener, HarnessSocketGuard::new(path))))
 }
 
@@ -574,13 +571,21 @@ async fn forward_harness_commands_from_listener(
     listener: UnixListener,
     control_tx: mpsc::Sender<HarnessCommandPlaneControl>,
 ) {
+    const MAX_CONCURRENT_HARNESS_COMMANDS: usize = 8;
+    let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_HARNESS_COMMANDS));
     loop {
+        let permit = match permits.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => break,
+        };
         let Ok((stream, _addr)) = listener.accept().await else {
             break;
         };
-        if !process_harness_command_stream(stream, &control_tx).await {
-            break;
-        }
+        let control_tx = control_tx.clone();
+        harness_command_listener_tasks().spawn(async move {
+            let _permit = permit;
+            let _ = process_harness_command_stream(stream, &control_tx).await;
+        });
     }
 }
 
@@ -595,6 +600,51 @@ pub(super) async fn forward_test_harness_commands_from_listener(listener: UnixLi
 /// Per-connection timeout for reading a harness command payload.
 const HARNESS_COMMAND_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const HARNESS_COMMAND_SUBMISSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn frame_too_large_error(payload_len: usize, context: &str) -> io::Error {
+    io::Error::other(format!(
+        "{context} exceeded harness frame limit ({} > {})",
+        payload_len, HARNESS_COMMAND_MAX_FRAME_BYTES
+    ))
+}
+
+fn encode_framed_json<T: Serialize>(value: &T, context: &str) -> io::Result<Vec<u8>> {
+    let payload = serde_json::to_vec(value)
+        .map_err(|error| io::Error::other(format!("failed to encode {context}: {error}")))?;
+    if payload.len() > HARNESS_COMMAND_MAX_FRAME_BYTES {
+        return Err(frame_too_large_error(payload.len(), context));
+    }
+    let payload_len = u32::try_from(payload.len())
+        .map_err(|_| io::Error::other(format!("{context} length overflowed u32")))?;
+    let mut framed = Vec::with_capacity(payload.len() + 4);
+    framed.extend_from_slice(&payload_len.to_be_bytes());
+    framed.extend_from_slice(&payload);
+    Ok(framed)
+}
+
+async fn read_framed_json<T: DeserializeOwned>(
+    stream: &mut UnixStream,
+    context: &str,
+) -> io::Result<T> {
+    let mut length_bytes = [0u8; 4];
+    stream
+        .read_exact(&mut length_bytes)
+        .await
+        .map_err(|error| {
+            io::Error::other(format!("failed to read {context} frame length: {error}"))
+        })?;
+    let payload_len = u32::from_be_bytes(length_bytes) as usize;
+    if payload_len > HARNESS_COMMAND_MAX_FRAME_BYTES {
+        return Err(frame_too_large_error(payload_len, context));
+    }
+    let mut payload = vec![0u8; payload_len];
+    stream
+        .read_exact(&mut payload)
+        .await
+        .map_err(|error| io::Error::other(format!("failed to read {context} payload: {error}")))?;
+    serde_json::from_slice(&payload)
+        .map_err(|error| io::Error::other(format!("failed to decode {context}: {error}")))
+}
 
 fn harness_timeout_profile() -> TimeoutExecutionProfile {
     TimeoutExecutionProfile::harness()
@@ -625,8 +675,7 @@ fn timeout_error_reason(error: TimeoutBudgetError, context: &str) -> String {
 async fn process_harness_command_stream(
     mut stream: UnixStream,
     control_tx: &mpsc::Sender<HarnessCommandPlaneControl>,
-) -> bool {
-    let mut payload = Vec::new();
+) -> io::Result<()> {
     let time = PhysicalTimeHandler::new();
     let read_budget = match harness_budget(&time, HARNESS_COMMAND_READ_TIMEOUT).await {
         Ok(budget) => budget,
@@ -638,15 +687,15 @@ async fn process_harness_command_stream(
                 },
             )
             .await;
-            return true;
+            return Ok(());
         }
     };
     let read_result = execute_with_timeout_budget(&time, &read_budget, || async {
-        stream.read_to_end(&mut payload).await
+        read_framed_json::<AuthenticatedHarnessUiCommand>(&mut stream, "harness command").await
     })
     .await;
-    let read_result = match read_result {
-        Ok(_bytes_read) => Ok(()),
+    let authenticated_command = match read_result {
+        Ok(command) => command,
         Err(TimeoutRunError::Timeout(error)) => {
             let _ = write_harness_command_receipt(
                 &mut stream,
@@ -655,33 +704,54 @@ async fn process_harness_command_stream(
                 },
             )
             .await;
-            return true;
+            return Ok(());
         }
-        Err(TimeoutRunError::Operation(error)) => Err(error),
+        Err(TimeoutRunError::Operation(error)) => {
+            let _ = write_harness_command_receipt(
+                &mut stream,
+                &HarnessUiCommandReceipt::Rejected {
+                    reason: format!("failed to read harness command payload: {error}"),
+                },
+            )
+            .await;
+            return Ok(());
+        }
     };
-    if let Err(error) = read_result {
-        let _ = write_harness_command_receipt(
-            &mut stream,
-            &HarnessUiCommandReceipt::Rejected {
-                reason: format!("failed to read harness command payload: {error}"),
-            },
-        )
-        .await;
-        return true;
-    }
-    let command = match serde_json::from_slice::<HarnessUiCommand>(&payload) {
-        Ok(command) => command,
+    let expected_token = match configured_harness_command_token() {
+        Ok(Some(token)) => token,
+        Ok(None) => {
+            let _ = write_harness_command_receipt(
+                &mut stream,
+                &HarnessUiCommandReceipt::Rejected {
+                    reason: "harness command ingress is unavailable outside harness mode"
+                        .to_string(),
+                },
+            )
+            .await;
+            return Ok(());
+        }
         Err(error) => {
             let _ = write_harness_command_receipt(
                 &mut stream,
                 &HarnessUiCommandReceipt::Rejected {
-                    reason: format!("failed to decode harness command payload: {error}"),
+                    reason: format!("invalid harness command configuration: {error}"),
                 },
             )
             .await;
-            return true;
+            return Ok(());
         }
     };
+    if authenticated_command.token != expected_token {
+        let _ = write_harness_command_receipt(
+            &mut stream,
+            &HarnessUiCommandReceipt::Rejected {
+                reason: "harness command authentication failed".to_string(),
+            },
+        )
+        .await;
+        return Ok(());
+    };
+    let command = authenticated_command.command;
     let submit_budget = match harness_budget(&time, HARNESS_COMMAND_SUBMISSION_TIMEOUT).await {
         Ok(budget) => budget,
         Err(error) => {
@@ -692,7 +762,7 @@ async fn process_harness_command_stream(
                 },
             )
             .await;
-            return true;
+            return Ok(());
         }
     };
     let receipt = match execute_with_timeout_budget(&time, &submit_budget, || {
@@ -728,17 +798,14 @@ async fn process_harness_command_stream(
             reason: error.to_string(),
         },
     };
-    let _ = write_harness_command_receipt(&mut stream, &receipt).await;
-    true
+    write_harness_command_receipt(&mut stream, &receipt).await
 }
 
 async fn write_harness_command_receipt(
     stream: &mut UnixStream,
     receipt: &HarnessUiCommandReceipt,
 ) -> io::Result<()> {
-    let payload = serde_json::to_vec(receipt).map_err(|error| {
-        io::Error::other(format!("failed to encode harness command receipt: {error}"))
-    })?;
+    let payload = encode_framed_json(receipt, "harness command receipt")?;
     stream.write_all(&payload).await?;
     stream.flush().await
 }

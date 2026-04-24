@@ -33,6 +33,12 @@ End-to-end authentication protocol including challenge-response flows, session m
 - Facts must be reduced under their matching `ContextId`.
 - Session and request identifiers are treated as stable binding keys.
 - Recovery and guardian approval flows are consensus-gated (Category C).
+- Authentication challenge verification must resolve trusted device or
+  threshold keys from enrolled authority state; response-supplied key material
+  is untrusted and may only appear in negative-test surfaces.
+- DKD commitments and reveals must be signed by enrolled device signing keys,
+  and verification must bind sender identity, key id, phase, epoch, and
+  protocol version before threshold counting.
 
 ### InvariantAuthenticationContextBinding
 
@@ -102,6 +108,7 @@ cargo test -p aura-authentication
 | Guardian approval flow incorrect | `src/view.rs` `test_recovery_approval_flow`, `src/service.rs` `test_guardian_approval_request` | Covered |
 | DKD agreement mode wrong | `src/dkd.rs` `test_dkd_agreement_mode_requires_consensus` | Covered |
 | DKD contribution validation fails on mismatch | `src/dkd.rs` `test_contribution_validation` | Covered |
+| Self-supplied auth/DKD keys bypass enrollment | `src/dkd.rs`, `src/service.rs` inline negative tests | Covered |
 
 ## Operation Categories
 

@@ -253,7 +253,7 @@ test-crate crate:
         package="${crate}"
         ;;
     esac
-    cargo test -p "${package}" -q
+    RUST_MIN_STACK="${RUST_MIN_STACK:-33554432}" cargo test -p "${package}" -q
 
 # Run tests for a specific crate in isolation (lib + unit tests only)
 test-crate-isolated crate:

@@ -37,7 +37,7 @@ type MasterKeyMaterial = Arc<Zeroizing<[u8; 32]>>;
 #[derive(Debug, Clone)]
 pub struct EncryptedStorageConfig {
     /// Encryption policy for all operations.
-    pub encryption: StorageEncryptionMode,
+    encryption: StorageEncryptionMode,
     /// Use opaque (hashed) file names instead of semantic names
     pub opaque_names: bool,
     /// Custom namespace for master key in secure storage
@@ -47,28 +47,35 @@ pub struct EncryptedStorageConfig {
 }
 
 /// Explicit encrypted storage mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StorageEncryptionMode {
     /// Encrypt all records and reject plaintext blobs.
+    #[default]
     Required,
     /// Test-only plaintext passthrough for storage bring-up.
+    #[cfg(any(test, feature = "simulation"))]
     PlaintextForTests,
 }
 
 impl StorageEncryptionMode {
     fn encrypts(self) -> bool {
-        matches!(self, Self::Required)
-    }
-}
-
-impl Default for StorageEncryptionMode {
-    fn default() -> Self {
-        Self::Required
+        match self {
+            Self::Required => true,
+            #[cfg(any(test, feature = "simulation"))]
+            Self::PlaintextForTests => false,
+        }
     }
 }
 
 impl Default for EncryptedStorageConfig {
     fn default() -> Self {
+        Self::production_required()
+    }
+}
+
+impl EncryptedStorageConfig {
+    /// Create a production-safe encrypted storage config.
+    pub fn production_required() -> Self {
         Self {
             encryption: StorageEncryptionMode::Required,
             opaque_names: false,
@@ -76,23 +83,24 @@ impl Default for EncryptedStorageConfig {
             key_id: None,
         }
     }
-}
 
-impl EncryptedStorageConfig {
-    /// Create config with default settings
+    /// Create config with default production-safe settings.
     pub fn new() -> Self {
-        Self::default()
+        Self::production_required()
+    }
+
+    /// Create an explicit test/simulation plaintext-storage config.
+    #[cfg(any(test, feature = "simulation"))]
+    pub fn testing_plaintext() -> Self {
+        Self {
+            encryption: StorageEncryptionMode::PlaintextForTests,
+            ..Self::production_required()
+        }
     }
 
     /// Enable opaque file names derived from the master key and semantic name.
     pub fn with_opaque_names(mut self) -> Self {
         self.opaque_names = true;
-        self
-    }
-
-    /// Set the encryption policy.
-    pub fn with_encryption_mode(mut self, mode: StorageEncryptionMode) -> Self {
-        self.encryption = mode;
         self
     }
 
@@ -106,6 +114,10 @@ impl EncryptedStorageConfig {
     pub fn with_key_id(mut self, id: impl Into<String>) -> Self {
         self.key_id = Some(id.into());
         self
+    }
+
+    fn encrypts(&self) -> bool {
+        self.encryption.encrypts()
     }
 }
 
@@ -284,7 +296,7 @@ where
 
     /// Get the storage key to use (opaque or semantic)
     async fn storage_key(&self, key: &str) -> Result<String, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return Ok(key.to_string());
         }
         if self.config.opaque_names {
@@ -418,7 +430,7 @@ where
     Sec: SecureStorageEffects + Send + Sync,
 {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.store(key, value).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -427,7 +439,7 @@ where
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.retrieve(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -448,7 +460,7 @@ where
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.remove(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -456,7 +468,7 @@ where
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.list_keys(prefix).await;
         }
         // If using opaque names, we can't filter by prefix effectively
@@ -478,7 +490,7 @@ where
     Sec: SecureStorageEffects + Send + Sync,
 {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.exists(key).await;
         }
         let storage_key = self.storage_key(key).await?;
@@ -486,7 +498,7 @@ where
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.store_batch(pairs).await;
         }
         // Encrypt each value
@@ -503,7 +515,7 @@ where
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.retrieve_batch(keys).await;
         }
         // Map semantic keys to storage keys
@@ -531,14 +543,14 @@ where
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.clear_all().await;
         }
         self.inner.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        if !self.config.encryption.encrypts() {
+        if !self.config.encrypts() {
             return self.inner.stats().await;
         }
         let mut stats = self.inner.stats().await?;
@@ -963,14 +975,26 @@ mod tests {
         async fn secure_generate_key(
             &self,
             location: &SecureStorageLocation,
-            _key_type: &str,
+            key_type: &str,
             caps: &[SecureStorageCapability],
         ) -> Result<aura_core::effects::SecureGeneratedKey, aura_core::AuraError> {
-            let key = vec![0u8; 32];
+            let (key, generated) = match key_type {
+                "ed25519" => (
+                    vec![0u8; 32],
+                    aura_core::effects::SecureGeneratedKey::PublicMaterial(vec![9u8; 32]),
+                ),
+                "frost-share" | "symmetric" | "aes256" | "xchacha20poly1305" => (
+                    vec![0u8; 32],
+                    aura_core::effects::SecureGeneratedKey::OpaqueHandle(location.full_path()),
+                ),
+                other => {
+                    return Err(aura_core::AuraError::invalid(format!(
+                        "unsupported secure key type: {other}"
+                    )));
+                }
+            };
             self.secure_store(location, &key, caps).await?;
-            Ok(aura_core::effects::SecureGeneratedKey::OpaqueHandle(
-                location.full_path(),
-            ))
+            Ok(generated)
         }
 
         async fn secure_create_time_bound_token(
@@ -1179,18 +1203,15 @@ mod tests {
         );
     }
 
-    /// With encryption disabled, data must pass through to the inner storage
-    /// unchanged. If broken, either: (a) data is silently unencrypted in
-    /// production, or (b) test/bring-up environments fail because data is
-    /// unexpectedly encrypted.
+    /// The explicit test-only plaintext constructor must still provide a
+    /// focused passthrough mode for storage bring-up and isolated tests.
     #[tokio::test]
     async fn test_disabled_encryption_passes_through_plaintext() {
         let storage = MockStorage::new();
         let crypto = Arc::new(MockCrypto);
         let secure = Arc::new(MockSecureStorage::new());
 
-        let config = EncryptedStorageConfig::default()
-            .with_encryption_mode(StorageEncryptionMode::PlaintextForTests);
+        let config = EncryptedStorageConfig::testing_plaintext();
         let encrypted = EncryptedStorage::new(storage, crypto, secure, config);
 
         let value = b"raw-data".to_vec();

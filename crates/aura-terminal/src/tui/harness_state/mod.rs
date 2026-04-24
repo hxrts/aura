@@ -1,11 +1,13 @@
 //! Structured TUI state export for harness observation.
 
 mod commands;
+mod config;
 mod snapshot;
 mod socket;
 
 pub(crate) use commands::apply_harness_command;
 pub use commands::TuiSemanticInputs;
+pub(crate) use config::harness_bridge_enabled;
 pub use snapshot::{maybe_export_ui_snapshot, publish_loading_ui_snapshot};
 pub(crate) use socket::{
     accept_harness_command_submission, clear_harness_command_sender,
@@ -17,7 +19,8 @@ pub(crate) use socket::{
 #[cfg(test)]
 mod tests {
     use super::commands::{apply_harness_command, TuiSemanticInputs};
-    use super::snapshot::authoritative_ui_snapshot;
+    use super::config::harness_bridge_enabled;
+    use super::snapshot::{authoritative_ui_snapshot, publish_loading_ui_snapshot};
     use super::socket::{
         accept_harness_command_submission, clear_harness_command_sender,
         complete_pending_semantic_submission, forward_test_harness_commands_from_listener,
@@ -38,23 +41,32 @@ mod tests {
         ScreenId, UiReadiness,
     };
     use aura_app::ui::types::StateSnapshot;
-    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
+    use aura_app::ui_contract::{
+        AuthenticatedHarnessUiCommand, InvitationFactKind, RuntimeFact,
+        HARNESS_COMMAND_MAX_FRAME_BYTES,
+    };
     use aura_core::effects::PhysicalTimeEffects;
     use aura_core::{
         execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
     };
     use aura_effects::time::PhysicalTimeHandler;
+    use serde::de::DeserializeOwned;
+    use serde::Serialize;
+    use std::ffi::OsString;
+    use std::os::unix::fs::symlink;
     use std::os::unix::net::UnixListener as StdUnixListener;
     use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::OnceLock;
     use std::time::Duration;
+    use tempfile::TempDir;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{UnixListener, UnixStream};
     use tokio::sync::Mutex;
 
     static TEST_SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
     static HARNESS_BRIDGE_TEST_GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    const TEST_HARNESS_TOKEN: &str = "test-harness-token-0123456789abcdef";
 
     fn test_socket_path(label: &str) -> std::path::PathBuf {
         let suffix = TEST_SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -80,6 +92,118 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .await
+    }
+
+    struct HarnessEnvGuard {
+        saved: Vec<(&'static str, Option<OsString>)>,
+        root: TempDir,
+    }
+
+    impl HarnessEnvGuard {
+        fn root(&self) -> &Path {
+            self.root.path()
+        }
+    }
+
+    impl Drop for HarnessEnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.saved.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn harness_mode_env_key() -> String {
+        ["AURA", "HARNESS", "MODE"].join("_")
+    }
+
+    fn set_env(saved: &mut Vec<(&'static str, Option<OsString>)>, key: &'static str, value: &str) {
+        saved.push((key, std::env::var_os(key)));
+        std::env::set_var(key, value);
+    }
+
+    fn clear_env(saved: &mut Vec<(&'static str, Option<OsString>)>, key: &'static str) {
+        saved.push((key, std::env::var_os(key)));
+        std::env::remove_var(key);
+    }
+
+    fn native_harness_env() -> HarnessEnvGuard {
+        let root = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("failed to create harness tempdir: {error}"));
+        let mut saved = Vec::new();
+        let harness_mode_env = harness_mode_env_key();
+        let harness_mode_env: &'static str = Box::leak(harness_mode_env.into_boxed_str());
+        saved.push((harness_mode_env, std::env::var_os(harness_mode_env)));
+        std::env::set_var(harness_mode_env, "1");
+        set_env(&mut saved, "AURA_HARNESS_SCENARIO_SEED", "7");
+        set_env(&mut saved, "AURA_HARNESS_INSTANCE_ID", "test-instance");
+        set_env(&mut saved, "AURA_HARNESS_RUN_TOKEN", TEST_HARNESS_TOKEN);
+        set_env(
+            &mut saved,
+            "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT",
+            root.path()
+                .to_str()
+                .unwrap_or_else(|| panic!("harness tempdir must be valid UTF-8")),
+        );
+        clear_env(&mut saved, "AURA_TUI_COMMAND_SOCKET");
+        clear_env(&mut saved, "AURA_TUI_UI_STATE_SOCKET");
+        clear_env(&mut saved, "AURA_TUI_UI_STATE_FILE");
+        HarnessEnvGuard { saved, root }
+    }
+
+    fn encode_framed_json<T: Serialize>(value: &T) -> Vec<u8> {
+        let payload = serde_json::to_vec(value)
+            .unwrap_or_else(|error| panic!("failed to encode framed JSON payload: {error}"));
+        assert!(
+            payload.len() <= HARNESS_COMMAND_MAX_FRAME_BYTES,
+            "test payload exceeded frame limit"
+        );
+        let mut framed = Vec::with_capacity(payload.len() + 4);
+        framed.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        framed.extend_from_slice(&payload);
+        framed
+    }
+
+    async fn read_framed_json<T: DeserializeOwned>(stream: &mut UnixStream) -> T {
+        let mut length_bytes = [0u8; 4];
+        stream
+            .read_exact(&mut length_bytes)
+            .await
+            .unwrap_or_else(|error| panic!("failed to read frame length: {error}"));
+        let payload_len = u32::from_be_bytes(length_bytes) as usize;
+        let mut payload = vec![0u8; payload_len];
+        stream
+            .read_exact(&mut payload)
+            .await
+            .unwrap_or_else(|error| panic!("failed to read frame payload: {error}"));
+        serde_json::from_slice(&payload)
+            .unwrap_or_else(|error| panic!("failed to decode framed JSON payload: {error}"))
+    }
+
+    async fn send_harness_command(
+        socket_path: &Path,
+        command: HarnessUiCommand,
+        token: &str,
+    ) -> HarnessUiCommandReceipt {
+        let mut stream = UnixStream::connect(socket_path)
+            .await
+            .unwrap_or_else(|error| panic!("failed to connect {}: {error}", socket_path.display()));
+        let payload = encode_framed_json(&AuthenticatedHarnessUiCommand {
+            token: token.to_string(),
+            command,
+        });
+        stream
+            .write_all(&payload)
+            .await
+            .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
+        stream
+            .shutdown()
+            .await
+            .unwrap_or_else(|error| panic!("failed to half-close harness command stream: {error}"));
+        read_framed_json::<HarnessUiCommandReceipt>(&mut stream).await
     }
 
     #[test]
@@ -719,6 +843,7 @@ mod tests {
     #[tokio::test]
     async fn harness_command_bridge_acknowledges_submission_and_emits_update() {
         let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
         let socket_path = test_socket_path("command-bridge");
         let _ = std::fs::remove_file(&socket_path);
         let listener = StdUnixListener::bind(&socket_path)
@@ -784,32 +909,14 @@ mod tests {
         };
 
         let client_task = async {
-            let mut stream = UnixStream::connect(&socket_path)
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("failed to connect {}: {error}", socket_path.display())
-                });
-            let command = HarnessUiCommand::NavigateScreen {
-                screen: ScreenId::Settings,
-            };
-            let payload = serde_json::to_vec(&command)
-                .unwrap_or_else(|error| panic!("failed to encode harness command: {error}"));
-            stream
-                .write_all(&payload)
-                .await
-                .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
-            stream.shutdown().await.unwrap_or_else(|error| {
-                panic!("failed to half-close harness command stream: {error}")
-            });
-            let mut receipt_payload = Vec::new();
-            stream
-                .read_to_end(&mut receipt_payload)
-                .await
-                .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
-            let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
-                .unwrap_or_else(|error| {
-                    panic!("failed to decode harness command receipt: {error}")
-                });
+            let receipt = send_harness_command(
+                &socket_path,
+                HarnessUiCommand::NavigateScreen {
+                    screen: ScreenId::Settings,
+                },
+                TEST_HARNESS_TOKEN,
+            )
+            .await;
             assert_eq!(receipt, HarnessUiCommandReceipt::Accepted { value: None });
         };
 
@@ -825,6 +932,7 @@ mod tests {
     #[tokio::test]
     async fn harness_command_bridge_tracks_pending_contact_invitation_value() {
         let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
         let socket_path = test_socket_path("pending-contact-invitation");
         let _ = std::fs::remove_file(&socket_path);
         let listener = StdUnixListener::bind(&socket_path)
@@ -889,32 +997,14 @@ mod tests {
         };
 
         let client_task = async {
-            let mut stream = UnixStream::connect(&socket_path)
-                .await
-                .unwrap_or_else(|error| {
-                    panic!("failed to connect {}: {error}", socket_path.display())
-                });
-            let command = HarnessUiCommand::CreateContactInvitation {
-                receiver_authority_id: "authority:test-peer".to_string(),
-            };
-            let payload = serde_json::to_vec(&command)
-                .unwrap_or_else(|error| panic!("failed to encode harness command: {error}"));
-            stream
-                .write_all(&payload)
-                .await
-                .unwrap_or_else(|error| panic!("failed to write harness command: {error}"));
-            stream.shutdown().await.unwrap_or_else(|error| {
-                panic!("failed to half-close harness command stream: {error}")
-            });
-            let mut receipt_payload = Vec::new();
-            stream
-                .read_to_end(&mut receipt_payload)
-                .await
-                .unwrap_or_else(|error| panic!("failed to read harness command receipt: {error}"));
-            let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt_payload)
-                .unwrap_or_else(|error| {
-                    panic!("failed to decode harness command receipt: {error}")
-                });
+            let receipt = send_harness_command(
+                &socket_path,
+                HarnessUiCommand::CreateContactInvitation {
+                    receiver_authority_id: "authority:test-peer".to_string(),
+                },
+                TEST_HARNESS_TOKEN,
+            )
+            .await;
             assert_eq!(
                 receipt,
                 HarnessUiCommandReceipt::AcceptedWithOperation {
@@ -940,6 +1030,290 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
         let _ = std::fs::remove_file(&socket_path);
+    }
+
+    #[tokio::test]
+    async fn harness_command_bridge_rejects_invalid_tokens() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        let socket_path = test_socket_path("invalid-token");
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = StdUnixListener::bind(&socket_path)
+            .unwrap_or_else(|error| panic!("failed to bind {}: {error}", socket_path.display()));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("failed to configure nonblocking listener: {error}"));
+        let listener = UnixListener::from_std(listener)
+            .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
+
+        let (command_tx, mut command_rx) = harness_command_channel();
+        register_harness_command_sender(command_tx)
+            .await
+            .unwrap_or_else(|error| panic!("failed to register harness command sender: {error}"));
+        let bridge_tasks = UiTaskOwner::new();
+        bridge_tasks.spawn(async move {
+            forward_test_harness_commands_from_listener(listener).await;
+        });
+
+        let receipt = send_harness_command(
+            &socket_path,
+            HarnessUiCommand::NavigateScreen {
+                screen: ScreenId::Settings,
+            },
+            "wrong-token",
+        )
+        .await;
+        assert_eq!(
+            receipt,
+            HarnessUiCommandReceipt::Rejected {
+                reason: "harness command authentication failed".to_string(),
+            }
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), command_rx.recv())
+                .await
+                .is_err(),
+            "invalid tokens must not reach the shell ingress"
+        );
+
+        bridge_tasks.shutdown();
+        clear_harness_command_sender()
+            .await
+            .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
+    }
+
+    #[tokio::test]
+    async fn harness_command_bridge_rejects_oversized_payloads() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        let socket_path = test_socket_path("oversized");
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = StdUnixListener::bind(&socket_path)
+            .unwrap_or_else(|error| panic!("failed to bind {}: {error}", socket_path.display()));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("failed to configure nonblocking listener: {error}"));
+        let listener = UnixListener::from_std(listener)
+            .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
+
+        let (command_tx, mut command_rx) = harness_command_channel();
+        register_harness_command_sender(command_tx)
+            .await
+            .unwrap_or_else(|error| panic!("failed to register harness command sender: {error}"));
+        let bridge_tasks = UiTaskOwner::new();
+        bridge_tasks.spawn(async move {
+            forward_test_harness_commands_from_listener(listener).await;
+        });
+
+        let mut stream = UnixStream::connect(&socket_path)
+            .await
+            .unwrap_or_else(|error| panic!("failed to connect {}: {error}", socket_path.display()));
+        let framed = ((HARNESS_COMMAND_MAX_FRAME_BYTES + 1) as u32).to_be_bytes();
+        stream
+            .write_all(&framed)
+            .await
+            .unwrap_or_else(|error| panic!("failed to write oversized harness command: {error}"));
+        stream.shutdown().await.unwrap_or_else(|error| {
+            panic!("failed to half-close oversized harness command stream: {error}")
+        });
+        let receipt = read_framed_json::<HarnessUiCommandReceipt>(&mut stream).await;
+        match receipt {
+            HarnessUiCommandReceipt::Rejected { reason } => {
+                assert!(
+                    reason.contains("frame limit"),
+                    "unexpected reason: {reason}"
+                );
+            }
+            other => panic!("oversized payload should be rejected, got: {other:?}"),
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), command_rx.recv())
+                .await
+                .is_err(),
+            "oversized payloads must not reach the shell ingress"
+        );
+
+        bridge_tasks.shutdown();
+        clear_harness_command_sender()
+            .await
+            .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
+    }
+
+    #[tokio::test]
+    async fn slow_client_does_not_block_later_harness_commands() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        let socket_path = test_socket_path("slow-client");
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = StdUnixListener::bind(&socket_path)
+            .unwrap_or_else(|error| panic!("failed to bind {}: {error}", socket_path.display()));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|error| panic!("failed to configure nonblocking listener: {error}"));
+        let listener = UnixListener::from_std(listener)
+            .unwrap_or_else(|error| panic!("failed to convert listener: {error}"));
+
+        let (command_tx, mut command_rx) = harness_command_channel();
+        register_harness_command_sender(command_tx)
+            .await
+            .unwrap_or_else(|error| panic!("failed to register harness command sender: {error}"));
+        let bridge_tasks = UiTaskOwner::new();
+        bridge_tasks.spawn(async move {
+            forward_test_harness_commands_from_listener(listener).await;
+        });
+
+        let mut slow_stream = UnixStream::connect(&socket_path)
+            .await
+            .unwrap_or_else(|error| panic!("failed to connect {}: {error}", socket_path.display()));
+        let slow_payload = encode_framed_json(&AuthenticatedHarnessUiCommand {
+            token: TEST_HARNESS_TOKEN.to_string(),
+            command: HarnessUiCommand::Ping,
+        });
+        slow_stream
+            .write_all(&slow_payload[..2])
+            .await
+            .unwrap_or_else(|error| panic!("failed to start slow harness command: {error}"));
+
+        let apply_task = async move {
+            let observed_submission = command_rx
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("harness command channel closed unexpectedly"));
+            match observed_submission {
+                HarnessCommandSubmission {
+                    submission_id,
+                    command:
+                        HarnessUiCommand::NavigateScreen {
+                            screen: ScreenId::Settings,
+                        },
+                } => {
+                    accept_harness_command_submission(
+                        submission_id,
+                        None::<aura_app::ui_contract::HarnessUiOperationHandle>,
+                        None::<aura_app::scenario_contract::SemanticCommandValue>,
+                    )
+                    .await
+                    .unwrap_or_else(|error| {
+                        panic!("failed to accept harness command submission: {error}")
+                    });
+                }
+                other => panic!("unexpected harness command submission: {other:?}"),
+            }
+        };
+        let client_task = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let receipt = send_harness_command(
+                &socket_path,
+                HarnessUiCommand::NavigateScreen {
+                    screen: ScreenId::Settings,
+                },
+                TEST_HARNESS_TOKEN,
+            )
+            .await;
+            assert_eq!(receipt, HarnessUiCommandReceipt::Accepted { value: None });
+        };
+        let (_, ()) = tokio::join!(apply_task, client_task);
+        drop(slow_stream);
+
+        bridge_tasks.shutdown();
+        clear_harness_command_sender()
+            .await
+            .unwrap_or_else(|error| panic!("failed to clear harness command sender: {error}"));
+    }
+
+    #[tokio::test]
+    async fn harness_bridge_is_disabled_without_native_harness_context() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        std::env::remove_var(harness_mode_env_key());
+        std::env::set_var("AURA_TUI_COMMAND_SOCKET", "/tmp/should-not-bind.sock");
+        assert!(
+            !harness_bridge_enabled()
+                .unwrap_or_else(|error| panic!("failed to inspect harness bridge state: {error}")),
+            "command ingress must stay disabled without explicit harness mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn harness_bridge_requires_a_run_token() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        std::env::remove_var("AURA_HARNESS_RUN_TOKEN");
+        let error = harness_bridge_enabled()
+            .err()
+            .unwrap_or_else(|| panic!("missing harness token should fail closed"));
+        assert!(error.to_string().contains("AURA_HARNESS_RUN_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn snapshot_export_ignores_env_without_native_harness_context() {
+        let _guard = lock_harness_bridge_test().await;
+        let _env = native_harness_env();
+        let output_path = std::env::temp_dir().join(format!(
+            "aura-terminal-harness-ignore-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&output_path);
+        std::env::remove_var(harness_mode_env_key());
+        std::env::set_var("AURA_TUI_UI_STATE_FILE", &output_path);
+        publish_loading_ui_snapshot(&TuiState::new())
+            .unwrap_or_else(|error| panic!("snapshot export should stay inert: {error}"));
+        assert!(
+            !output_path.exists(),
+            "snapshot export must stay disabled without explicit harness mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_export_rejects_path_escape_targets() {
+        let _guard = lock_harness_bridge_test().await;
+        let env = native_harness_env();
+        let escaped = std::env::temp_dir().join(format!(
+            "aura-terminal-harness-escape-{}.json",
+            std::process::id()
+        ));
+        std::env::set_var("AURA_TUI_UI_STATE_FILE", &escaped);
+        let error = publish_loading_ui_snapshot(&TuiState::new())
+            .err()
+            .unwrap_or_else(|| panic!("path escape should fail"));
+        assert!(
+            error.contains("must stay under"),
+            "unexpected error: {error}"
+        );
+        assert!(!escaped.starts_with(env.root()));
+    }
+
+    #[tokio::test]
+    async fn snapshot_export_rejects_symlink_targets() {
+        let _guard = lock_harness_bridge_test().await;
+        let env = native_harness_env();
+        let outside = tempfile::tempdir()
+            .unwrap_or_else(|error| panic!("failed to create outside tempdir: {error}"));
+        let symlink_path = env.root().join("snapshot-link.json");
+        let target = outside.path().join("redirected.json");
+        let _ = std::fs::remove_file(&symlink_path);
+        symlink(&target, &symlink_path)
+            .unwrap_or_else(|error| panic!("failed to create snapshot symlink: {error}"));
+        std::env::set_var("AURA_TUI_UI_STATE_FILE", &symlink_path);
+        let error = publish_loading_ui_snapshot(&TuiState::new())
+            .err()
+            .unwrap_or_else(|| panic!("symlink target should fail"));
+        assert!(error.contains("symlink"), "unexpected error: {error}");
+    }
+
+    #[tokio::test]
+    async fn snapshot_export_writes_under_harness_root() {
+        let _guard = lock_harness_bridge_test().await;
+        let env = native_harness_env();
+        let output_path = env.root().join("snapshots").join("ui-state.json");
+        std::env::set_var("AURA_TUI_UI_STATE_FILE", &output_path);
+        publish_loading_ui_snapshot(&TuiState::new())
+            .unwrap_or_else(|error| panic!("snapshot export should succeed: {error}"));
+        let payload = std::fs::read(&output_path)
+            .unwrap_or_else(|error| panic!("failed to read written snapshot: {error}"));
+        let snapshot: aura_app::ui_contract::UiSnapshot = serde_json::from_slice(&payload)
+            .unwrap_or_else(|error| panic!("failed to decode written snapshot: {error}"));
+        assert_eq!(snapshot.readiness, UiReadiness::Loading);
     }
 
     /// Helper: read all `.rs` source files from the harness_state module directory

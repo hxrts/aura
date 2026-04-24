@@ -146,21 +146,55 @@ impl HandlerContext {
         OperationSessionId::new(SessionId::new_from_entropy(hash::hash(&seed)))
     }
 
-    // Registry helper
-    /// Create a new handler context
+    fn operation_id_from_session(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+        session_id: OperationSessionId,
+    ) -> Uuid {
+        let mut seed = Self::deterministic_seed(
+            Some(b"aura-operation"),
+            authority_id,
+            context_id,
+            execution_mode,
+        );
+        seed.extend_from_slice(session_id.raw().uuid().as_bytes());
+        let digest = hash::hash(&seed);
+        let mut op_bytes = [0u8; 16];
+        op_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(op_bytes)
+    }
+
+    /// Create a new handler context with a fresh operation/session identity.
     pub fn new(
         authority_id: AuthorityId,
         context_id: ContextId,
         execution_mode: ExecutionMode,
     ) -> Self {
-        let operation_id =
-            Self::deterministic_operation_id(authority_id, context_id, execution_mode);
+        let snapshot = ContextSnapshot::fresh(authority_id, context_id, execution_mode);
+        Self::from_snapshot(snapshot)
+    }
+
+    /// Create a deterministic handler context for testing or simulation.
+    pub fn deterministic(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        assert!(
+            execution_mode.is_deterministic(),
+            "deterministic HandlerContext constructors are reserved for testing/simulation"
+        );
         Self {
             authority_id,
             context_id,
             execution_mode,
             session_id: Self::deterministic_session_id(authority_id, context_id, execution_mode),
-            operation_id,
+            operation_id: Self::deterministic_operation_id(
+                authority_id,
+                context_id,
+                execution_mode,
+            ),
             metadata: HashMap::new(),
         }
     }
@@ -170,13 +204,14 @@ impl HandlerContext {
         let authority_id = snapshot.authority_id();
         let context_id = snapshot.context_id();
         let execution_mode = snapshot.execution_mode();
+        let session_id = snapshot.session_id();
         let operation_id =
-            Self::deterministic_operation_id(authority_id, context_id, execution_mode);
+            Self::operation_id_from_session(authority_id, context_id, execution_mode, session_id);
         Self {
             authority_id,
             context_id,
             execution_mode,
-            session_id: snapshot.session_id(),
+            session_id,
             operation_id,
             metadata: HashMap::new(),
         }
@@ -996,25 +1031,41 @@ mod tests {
         assert!(!capabilities.supports_execution_mode(ExecutionMode::Simulation { seed: 42 }));
     }
 
-    /// Same (authority, context, mode) triple produces the same operation_id;
-    /// changing any input produces a different one.
+    /// Fresh contexts in the same scope receive distinct operation/session ids.
     #[test]
-    fn test_handler_context_operation_id_deterministic() {
+    fn test_handler_context_operation_id_is_fresh() {
         let authority_id = test_authority(1);
         let context_id = test_context(2);
         let ctx1 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
         let ctx2 = HandlerContext::new(authority_id, context_id, ExecutionMode::Testing);
 
-        // Same inputs produce the same operation_id (deterministic)
+        assert_ne!(ctx1.operation_id, ctx2.operation_id);
+        assert_ne!(ctx1.session_id, ctx2.session_id);
+    }
+
+    /// Deterministic constructors are explicit and remain replayable for testing.
+    #[test]
+    fn test_handler_context_deterministic_constructor_is_replayable() {
+        let authority_id = test_authority(1);
+        let context_id = test_context(2);
+        let ctx1 = HandlerContext::deterministic(authority_id, context_id, ExecutionMode::Testing);
+        let ctx2 = HandlerContext::deterministic(authority_id, context_id, ExecutionMode::Testing);
+
         assert_eq!(ctx1.operation_id, ctx2.operation_id);
+        assert_eq!(ctx1.session_id, ctx2.session_id);
 
         // Different inputs produce different operation_ids
         let different_authority = test_authority(3);
-        let ctx3 = HandlerContext::new(different_authority, context_id, ExecutionMode::Testing);
+        let ctx3 =
+            HandlerContext::deterministic(different_authority, context_id, ExecutionMode::Testing);
         assert_ne!(ctx1.operation_id, ctx3.operation_id);
 
         // Different execution mode produces different operation_id
-        let ctx4 = HandlerContext::new(authority_id, context_id, ExecutionMode::Production);
+        let ctx4 = HandlerContext::deterministic(
+            authority_id,
+            context_id,
+            ExecutionMode::Simulation { seed: 7 },
+        );
         assert_ne!(ctx1.operation_id, ctx4.operation_id);
     }
 

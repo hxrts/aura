@@ -34,8 +34,7 @@ use crate::domain::ConsistencyMap;
 use crate::effects::reactive::SignalStream;
 use crate::effects::reactive::{ReactiveEffects, ReactiveError, Signal, SignalId};
 use crate::query::{
-    ConsensusId, DatalogBindings, Query, QueryCapability, QueryIsolation, QueryParseError,
-    QueryStats,
+    ConsensusId, Query, QueryCapability, QueryIsolation, QueryParseError, QueryStats,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,15 +184,6 @@ pub trait QueryEffects: Send + Sync {
     /// - `QueryError::ExecutionError` if Datalog execution fails
     /// - `QueryError::ParseError` if result parsing fails
     async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError>;
-
-    /// Execute a raw Datalog program and return bindings.
-    ///
-    /// Lower-level API for executing arbitrary Datalog without typed parsing.
-    /// Useful for debugging or dynamic queries.
-    async fn query_raw(
-        &self,
-        program: &crate::query::DatalogProgram,
-    ) -> Result<DatalogBindings, QueryError>;
 
     /// Subscribe to a query for live updates.
     ///
@@ -375,13 +365,6 @@ use std::sync::Arc;
 impl<T: QueryEffects + ?Sized> QueryEffects for Arc<T> {
     async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
         (**self).query(query).await
-    }
-
-    async fn query_raw(
-        &self,
-        program: &crate::query::DatalogProgram,
-    ) -> Result<DatalogBindings, QueryError> {
-        (**self).query_raw(program).await
     }
 
     fn subscribe<Q: Query>(&self, query: &Q) -> QuerySubscription<Q::Result> {

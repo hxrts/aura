@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::scenario_contract::SemanticCommandValue;
 use crate::views::contacts::ContactRelationshipState;
 
+pub const HARNESS_AUTH_TOKEN_MIN_LEN: usize = 16;
+pub const HARNESS_COMMAND_MAX_FRAME_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenId {
@@ -125,6 +128,12 @@ pub enum HarnessUiCommand {
     ObserveRuntimeFact {
         fact: Box<RuntimeFact>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthenticatedHarnessUiCommand {
+    pub token: String,
+    pub command: HarnessUiCommand,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

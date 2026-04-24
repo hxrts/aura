@@ -32,6 +32,11 @@ impl GuardContextProvider for AuraEffectSystem {
                 .read()
                 .as_ref()
                 .map(|c| c.root_pk_b64.clone()),
+            "biscuit_issuer_authority" => self
+                .biscuit_cache
+                .read()
+                .as_ref()
+                .map(|c| c.issuer_authority.to_string()),
             _ => None,
         }
     }

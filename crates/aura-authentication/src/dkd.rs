@@ -30,17 +30,21 @@
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{
     effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects},
-    hash, AuraError, AuraResult, ContextId, DeviceId, Hash32,
+    hash,
+    secrets::PrivateKeyBytes,
+    AuraError, AuraResult, ContextId, DeviceId, Hash32,
 };
 use aura_guards::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata,
 };
 use aura_macros::tell;
-use aura_signature::{sign_ed25519_transcript, SecurityTranscript};
+use aura_signature::{sign_ed25519_transcript, verify_ed25519_transcript, SecurityTranscript};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use thiserror::Error;
+
+const DKD_CONTRIBUTION_PROTOCOL_VERSION: u16 = 1;
 
 // =============================================================================
 // Types and Configuration
@@ -132,14 +136,27 @@ pub struct KeyDerivationContext {
 pub struct ParticipantContribution {
     /// Device identifier
     pub device_id: DeviceId,
+    /// Enrolled signer key identifier for this participant.
+    pub key_id: String,
     /// Random contribution (32 bytes)
     pub randomness: [u8; 32],
     /// Commitment to the randomness
     pub commitment: Hash32,
-    /// FROST signature over the commitment
+    /// Signed DKD phase for this message.
+    pub phase: DkdContributionPhase,
+    /// Contribution transcript schema version.
+    pub protocol_version: u16,
+    /// Signature over the canonical contribution transcript.
     pub signature: Vec<u8>,
     /// Timestamp for replay protection
     pub timestamp: u64,
+}
+
+/// Contribution phases that must be signed distinctly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DkdContributionPhase {
+    Commitment,
+    Reveal,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -150,15 +167,21 @@ struct DkdContributionTranscriptPayload {
     epoch: u64,
     participants: Vec<DeviceId>,
     device_id: DeviceId,
+    key_id: String,
     commitment: Hash32,
     timestamp: u64,
+    phase: DkdContributionPhase,
+    protocol_version: u16,
 }
 
 struct DkdContributionTranscript {
     context: KeyDerivationContext,
     device_id: DeviceId,
+    key_id: String,
     commitment: Hash32,
     timestamp: u64,
+    phase: DkdContributionPhase,
+    protocol_version: u16,
 }
 
 impl SecurityTranscript for DkdContributionTranscript {
@@ -174,10 +197,19 @@ impl SecurityTranscript for DkdContributionTranscript {
             epoch: self.context.epoch,
             participants: self.context.participants.clone(),
             device_id: self.device_id,
+            key_id: self.key_id.clone(),
             commitment: self.commitment,
             timestamp: self.timestamp,
+            phase: self.phase,
+            protocol_version: self.protocol_version,
         }
     }
+}
+
+struct EnrolledDkdSigner {
+    key_id: String,
+    public_key: Vec<u8>,
+    private_key: Option<PrivateKeyBytes>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -284,6 +316,7 @@ impl From<DkdError> for AuraError {
 pub struct DkdProtocol {
     config: DkdConfig,
     active_sessions: HashMap<DkdSessionId, KeyDerivationContext>,
+    enrolled_signers: HashMap<DeviceId, EnrolledDkdSigner>,
     agreement_mode: AgreementMode,
 }
 
@@ -293,6 +326,7 @@ impl DkdProtocol {
         Self {
             config,
             active_sessions: HashMap::new(),
+            enrolled_signers: HashMap::new(),
             agreement_mode: policy_for(CeremonyFlow::DkdCeremony).initial_mode(),
         }
     }
@@ -312,12 +346,81 @@ impl DkdProtocol {
         ContextId::new_from_entropy(hash::hash(session_id.0.as_bytes()))
     }
 
-    fn verified_contribution(
+    /// Register a participant verification key that DKD will trust for
+    /// contribution verification.
+    pub fn register_enrolled_device_verification_key(
+        &mut self,
+        device_id: DeviceId,
+        key_id: impl Into<String>,
+        public_key: Vec<u8>,
+    ) {
+        self.enrolled_signers.insert(
+            device_id,
+            EnrolledDkdSigner {
+                key_id: key_id.into(),
+                public_key,
+                private_key: None,
+            },
+        );
+    }
+
+    /// Register a participant signing keypair for local DKD contribution
+    /// generation and verification.
+    pub fn register_enrolled_device_signing_key(
+        &mut self,
+        device_id: DeviceId,
+        key_id: impl Into<String>,
+        public_key: Vec<u8>,
+        private_key: Vec<u8>,
+    ) {
+        self.enrolled_signers.insert(
+            device_id,
+            EnrolledDkdSigner {
+                key_id: key_id.into(),
+                public_key,
+                private_key: Some(PrivateKeyBytes::import(private_key)),
+            },
+        );
+    }
+
+    fn enrolled_signer(&self, device_id: DeviceId) -> Result<&EnrolledDkdSigner, DkdError> {
+        self.enrolled_signers
+            .get(&device_id)
+            .ok_or_else(|| DkdError::InvalidContribution {
+                device_id,
+                reason: "unknown or rotated-out signer".to_string(),
+            })
+    }
+
+    fn contribution_transcript(
+        context: KeyDerivationContext,
+        contribution: &ParticipantContribution,
+    ) -> DkdContributionTranscript {
+        DkdContributionTranscript {
+            context,
+            device_id: contribution.device_id,
+            key_id: contribution.key_id.clone(),
+            commitment: contribution.commitment,
+            timestamp: contribution.timestamp,
+            phase: contribution.phase,
+            protocol_version: contribution.protocol_version,
+        }
+    }
+
+    async fn verified_contribution<E>(
+        &self,
+        effects: &E,
         session_id: &DkdSessionId,
-        participants: &[DeviceId],
         sender_id: uuid::Uuid,
+        expected_phase: DkdContributionPhase,
         contribution: ParticipantContribution,
-    ) -> Result<VerifiedIngress<ParticipantContribution>, DkdError> {
+    ) -> Result<VerifiedIngress<ParticipantContribution>, DkdError>
+    where
+        E: CryptoEffects + Send + Sync,
+    {
+        let context = self.session_context(session_id)?.clone();
+        let trusted_signer_from_enrollment = self.enrolled_signer(contribution.device_id)?;
+        let trusted_key_from_enrollment = &trusted_signer_from_enrollment.public_key;
         let payload_hash =
             Hash32::from_value(&contribution).map_err(|error| DkdError::InvalidContribution {
                 device_id: contribution.device_id,
@@ -331,6 +434,17 @@ impl DkdProtocol {
             1,
         );
         let expected_commitment = Hash32::new(hash::hash(&contribution.randomness));
+        let transcript = Self::contribution_transcript(context.clone(), &contribution);
+        let signature_valid = verify_ed25519_transcript(
+            effects,
+            &transcript,
+            &contribution.signature,
+            trusted_key_from_enrollment,
+        )
+        .await
+        .map_err(|error| DkdError::SignatureVerificationFailed {
+            reason: error.to_string(),
+        })?;
         let evidence = IngressVerificationEvidence::builder(metadata)
             .peer_identity(
                 sender_id == contribution.device_id.0,
@@ -338,13 +452,13 @@ impl DkdProtocol {
             )
             .and_then(|builder| {
                 builder.envelope_authenticity(
-                    !contribution.signature.is_empty(),
-                    "DKD contribution signature must be present",
+                    signature_valid,
+                    "DKD contribution signature must verify against the enrolled device key",
                 )
             })
             .and_then(|builder| {
                 builder.capability_authorization(
-                    participants.contains(&contribution.device_id),
+                    context.participants.contains(&contribution.device_id),
                     "DKD contributor must be in the session participant set",
                 )
             })
@@ -354,20 +468,23 @@ impl DkdProtocol {
             .and_then(|builder| builder.schema_version(true, "DKD contribution schema v1"))
             .and_then(|builder| {
                 builder.replay_freshness(
-                    contribution.timestamp != 0,
-                    "DKD contribution timestamp must be non-zero",
+                    contribution.timestamp >= context.epoch,
+                    "DKD contribution timestamp must not predate the session epoch",
                 )
             })
             .and_then(|builder| {
                 builder.signer_membership(
-                    participants.contains(&contribution.device_id),
+                    context.participants.contains(&contribution.device_id)
+                        && contribution.key_id == trusted_signer_from_enrollment.key_id,
                     "DKD signer must be a session participant",
                 )
             })
             .and_then(|builder| {
                 builder.proof_evidence(
-                    expected_commitment == contribution.commitment,
-                    "DKD commitment must match revealed randomness",
+                    expected_commitment == contribution.commitment
+                        && contribution.phase == expected_phase
+                        && contribution.protocol_version == DKD_CONTRIBUTION_PROTOCOL_VERSION,
+                    "DKD contribution transcript fields must match the enrolled phase and protocol",
                 )
             })
             .and_then(|builder| builder.build())
@@ -575,32 +692,48 @@ impl DkdProtocol {
         // Get current timestamp for replay protection
         let timestamp = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
 
-        let session_context = self.session_context(session_id)?.clone();
         let commitment = Hash32::new(commitment);
-        let signature_transcript = DkdContributionTranscript {
-            context: session_context,
-            device_id,
-            commitment,
-            timestamp,
-        };
-
-        // Generate Ed25519 keypair for signing (in production, use device's persistent key)
-        let (_public_key, private_key) = effects
-            .ed25519_generate_keypair()
-            .await
-            .map_err(crypto_failure)?;
-
-        // Sign the commitment
-        let signature = sign_ed25519_transcript(effects, &signature_transcript, &private_key)
-            .await
-            .map_err(crypto_failure)?;
-
+        let signer = self.enrolled_signer(device_id)?;
+        let private_key =
+            signer
+                .private_key
+                .as_ref()
+                .ok_or_else(|| DkdError::InvalidContribution {
+                    device_id,
+                    reason: "missing enrolled signing key for local participant".to_string(),
+                })?;
         let contribution = ParticipantContribution {
             device_id,
+            key_id: signer.key_id.clone(),
             randomness,
             commitment,
-            signature,
+            phase: DkdContributionPhase::Commitment,
+            protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
+            signature: Vec::with_capacity(64),
             timestamp,
+        };
+        let signature_transcript = DkdContributionTranscript {
+            context: self.session_context(session_id)?.clone(),
+            device_id: contribution.device_id,
+            key_id: contribution.key_id.clone(),
+            commitment: contribution.commitment,
+            timestamp: contribution.timestamp,
+            phase: contribution.phase,
+            protocol_version: contribution.protocol_version,
+        };
+
+        // Sign the commitment
+        let signature = sign_ed25519_transcript(
+            effects,
+            &signature_transcript,
+            private_key.expose_private_key(),
+        )
+        .await
+        .map_err(crypto_failure)?;
+
+        let contribution = ParticipantContribution {
+            signature,
+            ..contribution
         };
 
         tracing::debug!(
@@ -621,13 +754,14 @@ impl DkdProtocol {
         local_contribution: ParticipantContribution,
     ) -> Result<Vec<ParticipantContribution>, DkdError>
     where
-        E: NetworkEffects + Send + Sync,
+        E: CryptoEffects + NetworkEffects + Send + Sync,
     {
         tracing::debug!(session_id = ?session_id, "Exchanging commitments");
 
         let context = self.session_context(session_id)?;
 
         let mut peer_commitments = Vec::new();
+        let mut seen_devices = HashMap::new();
 
         // Send commitment to all other participants
         let commitment_message = serialize_network(&local_contribution)?;
@@ -647,15 +781,28 @@ impl DkdProtocol {
             let (sender_id, commitment_data) = effects.receive().await.map_err(network_failure)?;
 
             let contribution: ParticipantContribution = deserialize_network(&commitment_data)?;
-            let contribution = Self::verified_contribution(
-                session_id,
-                &context.participants,
-                sender_id,
-                contribution,
-            )?;
+            if seen_devices.insert(contribution.device_id, ()).is_some() {
+                return Err(DkdError::InvalidContribution {
+                    device_id: contribution.device_id,
+                    reason: "duplicate commitment contributor".to_string(),
+                });
+            }
+            let contribution = self
+                .verified_contribution(
+                    effects,
+                    session_id,
+                    sender_id,
+                    DkdContributionPhase::Commitment,
+                    contribution,
+                )
+                .await?;
 
             // Validate contribution
-            self.validate_verified_contribution(&contribution)?;
+            self.validate_verified_contribution(
+                session_id,
+                DkdContributionPhase::Commitment,
+                &contribution,
+            )?;
             peer_commitments.push(contribution);
         }
 
@@ -682,20 +829,54 @@ impl DkdProtocol {
         commitments: &[ParticipantContribution],
     ) -> Result<Vec<ParticipantContribution>, DkdError>
     where
-        E: NetworkEffects + Send + Sync,
+        E: CryptoEffects + NetworkEffects + PhysicalTimeEffects + Send + Sync,
     {
         tracing::debug!(session_id = ?session_id, "Exchanging reveals");
 
         // Broadcast our commitment+randomness and receive the same from peers
         let context = self.session_context(session_id)?;
 
-        let local = commitments
+        let local_commitment = commitments
             .first()
             .ok_or_else(|| DkdError::SessionNotFound {
                 session_id: session_id.clone(),
             })?
             .clone();
-
+        let signer = self.enrolled_signer(local_commitment.device_id)?;
+        let private_key =
+            signer
+                .private_key
+                .as_ref()
+                .ok_or_else(|| DkdError::InvalidContribution {
+                    device_id: local_commitment.device_id,
+                    reason: "missing enrolled signing key for local reveal".to_string(),
+                })?;
+        let local = ParticipantContribution {
+            phase: DkdContributionPhase::Reveal,
+            protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
+            timestamp: effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+            signature: Vec::with_capacity(64),
+            ..local_commitment
+        };
+        let transcript = DkdContributionTranscript {
+            context: context.clone(),
+            device_id: local.device_id,
+            key_id: local.key_id.clone(),
+            commitment: local.commitment,
+            timestamp: local.timestamp,
+            phase: local.phase,
+            protocol_version: local.protocol_version,
+        };
+        let local = ParticipantContribution {
+            signature: sign_ed25519_transcript(
+                effects,
+                &transcript,
+                private_key.expose_private_key(),
+            )
+            .await
+            .map_err(crypto_failure)?,
+            ..local
+        };
         let reveal_bytes = serialize_network(&local)?;
 
         for participant in &context.participants {
@@ -708,25 +889,49 @@ impl DkdProtocol {
         }
 
         let mut verified_peer_contributions = Vec::new();
+        let mut prior_commitments = HashMap::new();
+        for commitment in commitments {
+            prior_commitments.insert(commitment.device_id, commitment.commitment);
+        }
+        let mut seen_devices = HashMap::new();
 
         // Receive reveals from peers and validate commitments
         for _ in 0..(context.participants.len().saturating_sub(1)) {
             let (sender_id, bytes) = effects.receive().await.map_err(network_failure)?;
             let contribution: ParticipantContribution = deserialize_network(&bytes)?;
-            let contribution = Self::verified_contribution(
-                session_id,
-                &context.participants,
-                sender_id,
-                contribution,
-            )?;
+            if seen_devices.insert(contribution.device_id, ()).is_some() {
+                return Err(DkdError::InvalidContribution {
+                    device_id: contribution.device_id,
+                    reason: "duplicate reveal contributor".to_string(),
+                });
+            }
+            let contribution = self
+                .verified_contribution(
+                    effects,
+                    session_id,
+                    sender_id,
+                    DkdContributionPhase::Reveal,
+                    contribution,
+                )
+                .await?;
             let contribution_ref = contribution.payload();
-
-            let expected_commitment = hash::hash(&contribution_ref.randomness);
-            if Hash32::new(expected_commitment) != contribution_ref.commitment {
+            let Some(expected_commitment) = prior_commitments.get(&contribution_ref.device_id)
+            else {
+                return Err(DkdError::InvalidContribution {
+                    device_id: contribution_ref.device_id,
+                    reason: "reveal came from an unknown contributor".to_string(),
+                });
+            };
+            if expected_commitment != &contribution_ref.commitment {
                 return Err(DkdError::CommitmentVerificationFailed {
                     device_id: contribution_ref.device_id,
                 });
             }
+            self.validate_verified_contribution(
+                session_id,
+                DkdContributionPhase::Reveal,
+                &contribution,
+            )?;
             verified_peer_contributions.push(contribution);
         }
 
@@ -758,6 +963,7 @@ impl DkdProtocol {
         tracing::debug!(session_id = ?session_id, "Deriving key from contributions");
 
         let context = self.session_context(session_id)?;
+        self.ensure_unique_contributors(context, DkdContributionPhase::Reveal, contributions)?;
 
         // Check threshold
         if contributions.len() < self.config.threshold as usize {
@@ -940,21 +1146,50 @@ impl DkdProtocol {
     /// Validate a participant's contribution
     fn validate_contribution(
         &self,
+        context: &KeyDerivationContext,
+        expected_phase: DkdContributionPhase,
         contribution: &ParticipantContribution,
     ) -> Result<(), DkdError> {
-        // Check randomness length
-        if contribution.randomness.len() != 32 {
+        if !context.participants.contains(&contribution.device_id) {
             return Err(DkdError::InvalidContribution {
                 device_id: contribution.device_id,
-                reason: "Invalid randomness length".to_string(),
+                reason: "unknown contributor device".to_string(),
             });
         }
 
-        // Check signature length
+        let signer = self.enrolled_signer(contribution.device_id)?;
+        if contribution.key_id != signer.key_id {
+            return Err(DkdError::InvalidContribution {
+                device_id: contribution.device_id,
+                reason: "contribution key id does not match enrolled signer".to_string(),
+            });
+        }
+
+        if contribution.phase != expected_phase {
+            return Err(DkdError::InvalidContribution {
+                device_id: contribution.device_id,
+                reason: "contribution phase does not match expected protocol phase".to_string(),
+            });
+        }
+
+        if contribution.protocol_version != DKD_CONTRIBUTION_PROTOCOL_VERSION {
+            return Err(DkdError::InvalidContribution {
+                device_id: contribution.device_id,
+                reason: "unsupported DKD contribution protocol version".to_string(),
+            });
+        }
+
+        if contribution.timestamp < context.epoch {
+            return Err(DkdError::ReplayAttackDetected {
+                session_id: context.session_id.clone(),
+                epoch: contribution.timestamp,
+            });
+        }
+
         if contribution.signature.is_empty() {
             return Err(DkdError::InvalidContribution {
                 device_id: contribution.device_id,
-                reason: "Missing signature".to_string(),
+                reason: "missing signature".to_string(),
             });
         }
 
@@ -971,9 +1206,31 @@ impl DkdProtocol {
 
     fn validate_verified_contribution(
         &self,
+        session_id: &DkdSessionId,
+        expected_phase: DkdContributionPhase,
         contribution: &VerifiedIngress<ParticipantContribution>,
     ) -> Result<(), DkdError> {
-        self.validate_contribution(contribution.payload())
+        let context = self.session_context(session_id)?;
+        self.validate_contribution(context, expected_phase, contribution.payload())
+    }
+
+    fn ensure_unique_contributors(
+        &self,
+        context: &KeyDerivationContext,
+        expected_phase: DkdContributionPhase,
+        contributions: &[ParticipantContribution],
+    ) -> Result<(), DkdError> {
+        let mut seen_devices = HashMap::new();
+        for contribution in contributions {
+            if seen_devices.insert(contribution.device_id, ()).is_some() {
+                return Err(DkdError::InvalidContribution {
+                    device_id: contribution.device_id,
+                    reason: "duplicate contributor device id".to_string(),
+                });
+            }
+            self.validate_contribution(context, expected_phase, contribution)?;
+        }
+        Ok(())
     }
 
     /// Compute combined commitment from all contributions
@@ -1117,6 +1374,18 @@ where
     };
 
     let mut protocol = DkdProtocol::new(config);
+    for participant in &participants {
+        let (private_key, public_key) = effects
+            .ed25519_generate_keypair()
+            .await
+            .map_err(crypto_failure)?;
+        protocol.register_enrolled_device_signing_key(
+            *participant,
+            format!("device:{participant}"),
+            public_key,
+            private_key,
+        );
+    }
     let session_id = protocol
         .initiate_session(effects, participants.clone(), None)
         .await?;
@@ -1135,6 +1404,54 @@ mod tests {
     use crate::test_support::device;
     use aura_testkit::TestEffectsBuilder;
 
+    async fn enroll_test_signer<E>(protocol: &mut DkdProtocol, effects: &E, device_id: DeviceId)
+    where
+        E: CryptoEffects + Send + Sync,
+    {
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+        protocol.register_enrolled_device_signing_key(
+            device_id,
+            format!("device:{device_id}"),
+            public_key,
+            private_key,
+        );
+    }
+
+    async fn signed_contribution_for_tests<E>(
+        protocol: &DkdProtocol,
+        effects: &E,
+        session_id: &DkdSessionId,
+        device_id: DeviceId,
+        phase: DkdContributionPhase,
+    ) -> ParticipantContribution
+    where
+        E: CryptoEffects + PhysicalTimeEffects + Send + Sync,
+    {
+        let mut contribution = protocol
+            .generate_contribution(effects, session_id, device_id)
+            .await
+            .unwrap();
+        if phase == DkdContributionPhase::Commitment {
+            return contribution;
+        }
+
+        let signer = protocol.enrolled_signer(device_id).unwrap();
+        let private_key = signer.private_key.as_ref().unwrap();
+        contribution.phase = phase;
+        contribution.timestamp = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
+        contribution.signature = sign_ed25519_transcript(
+            effects,
+            &DkdProtocol::contribution_transcript(
+                protocol.session_context(session_id).unwrap().clone(),
+                &contribution,
+            ),
+            private_key.expose_private_key(),
+        )
+        .await
+        .unwrap();
+        contribution
+    }
+
     #[tokio::test]
     async fn test_dkd_session_creation() {
         let config = create_test_config(2, 3);
@@ -1145,6 +1462,9 @@ mod tests {
         let effects = TestEffectsBuilder::for_unit_tests(device(9))
             .build()
             .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        for participant in &participants {
+            enroll_test_signer(&mut protocol, &effects, *participant).await;
+        }
         let session_id = protocol
             .initiate_session(&effects, participants, None)
             .await
@@ -1163,6 +1483,8 @@ mod tests {
             .unwrap_or_else(|_| panic!("Failed to build test effects"));
 
         let device_id = device(4);
+        enroll_test_signer(&mut protocol, &effects, device_id).await;
+        enroll_test_signer(&mut protocol, &effects, device(5)).await;
         let session_id = protocol
             .initiate_session(
                 &effects,
@@ -1190,6 +1512,8 @@ mod tests {
             .build()
             .unwrap_or_else(|_| panic!("Failed to build test effects"));
         let device_id = device(4);
+        enroll_test_signer(&mut protocol, &effects, device_id).await;
+        enroll_test_signer(&mut protocol, &effects, device(5)).await;
         let session_id = protocol
             .initiate_session(
                 &effects,
@@ -1206,16 +1530,22 @@ mod tests {
         let current = DkdContributionTranscript {
             context,
             device_id,
+            key_id: format!("device:{device_id}"),
             commitment,
             timestamp: 100,
+            phase: DkdContributionPhase::Commitment,
+            protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
         }
         .transcript_bytes()
         .unwrap();
         let next_epoch = DkdContributionTranscript {
             context: next_context,
             device_id,
+            key_id: format!("device:{device_id}"),
             commitment,
             timestamp: 100,
+            phase: DkdContributionPhase::Commitment,
+            protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
         }
         .transcript_bytes()
         .unwrap();
@@ -1223,24 +1553,284 @@ mod tests {
         assert_ne!(current, next_epoch);
     }
 
-    #[test]
-    fn test_contribution_validation() {
-        let protocol = DkdProtocol::new(create_test_config(2, 3));
+    #[tokio::test]
+    async fn test_contribution_validation() {
+        let mut protocol = DkdProtocol::new(create_test_config(2, 3));
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let contributor = device(5);
+        enroll_test_signer(&mut protocol, &effects, contributor).await;
+        let context = KeyDerivationContext {
+            session_id: DkdSessionId::deterministic("validation"),
+            app_id: "test_app".to_string(),
+            context: "test_context".to_string(),
+            participants: vec![contributor, device(6)],
+            epoch: 1000,
+            metadata: HashMap::new(),
+        };
 
         let mut contribution = ParticipantContribution {
-            device_id: device(5),
+            device_id: contributor,
+            key_id: format!("device:{contributor}"),
             randomness: [1u8; 32],
             commitment: Hash32::new(hash::hash(&[1u8; 32])),
+            phase: DkdContributionPhase::Commitment,
+            protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
             signature: vec![1, 2, 3, 4],
-            timestamp: 12345,
+            timestamp: 12345.max(context.epoch),
         };
 
         // Valid contribution should pass
-        assert!(protocol.validate_contribution(&contribution).is_ok());
+        assert!(protocol
+            .validate_contribution(&context, DkdContributionPhase::Commitment, &contribution)
+            .is_ok());
 
         // Invalid commitment should fail
         contribution.commitment = Hash32::new(hash::hash(&[2u8; 32]));
-        assert!(protocol.validate_contribution(&contribution).is_err());
+        assert!(protocol
+            .validate_contribution(&context, DkdContributionPhase::Commitment, &contribution)
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn forged_signature_is_rejected() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(8);
+        let peer = device(9);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("forged")),
+            )
+            .await
+            .unwrap();
+
+        let mut contribution = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Commitment,
+        )
+        .await;
+        contribution.signature[0] ^= 0xFF;
+
+        let result = protocol
+            .verified_contribution(
+                &effects,
+                &session_id,
+                participant.0,
+                DkdContributionPhase::Commitment,
+                contribution,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn sender_contribution_mismatch_is_rejected() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(10);
+        let peer = device(11);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("sender-mismatch")),
+            )
+            .await
+            .unwrap();
+        let contribution = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Commitment,
+        )
+        .await;
+
+        let result = protocol
+            .verified_contribution(
+                &effects,
+                &session_id,
+                peer.0,
+                DkdContributionPhase::Commitment,
+                contribution,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn stale_contribution_is_rejected() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(12);
+        let peer = device(13);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("stale")),
+            )
+            .await
+            .unwrap();
+        let context = protocol.session_context(&session_id).unwrap().clone();
+        let mut contribution = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Commitment,
+        )
+        .await;
+        contribution.timestamp = context.epoch.saturating_sub(1);
+
+        assert!(protocol
+            .validate_contribution(&context, DkdContributionPhase::Commitment, &contribution)
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn duplicate_device_ids_are_rejected_before_threshold_counting() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(14);
+        let peer = device(15);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("duplicate")),
+            )
+            .await
+            .unwrap();
+        let first = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Reveal,
+        )
+        .await;
+        let second = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Reveal,
+        )
+        .await;
+
+        let result = protocol
+            .derive_key(&effects, &session_id, &[first, second])
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn reveal_substitution_is_rejected() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(18);
+        let peer = device(19);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("reveal-substitution")),
+            )
+            .await
+            .unwrap();
+        let contribution = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Commitment,
+        )
+        .await;
+
+        let result = protocol
+            .verified_contribution(
+                &effects,
+                &session_id,
+                participant.0,
+                DkdContributionPhase::Reveal,
+                contribution,
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn valid_enrolled_contribution_verifies() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let participant = device(16);
+        let peer = device(17);
+        enroll_test_signer(&mut protocol, &effects, participant).await;
+        enroll_test_signer(&mut protocol, &effects, peer).await;
+        let session_id = protocol
+            .initiate_session(
+                &effects,
+                vec![participant, peer],
+                Some(DkdSessionId::deterministic("valid")),
+            )
+            .await
+            .unwrap();
+        let contribution = signed_contribution_for_tests(
+            &protocol,
+            &effects,
+            &session_id,
+            participant,
+            DkdContributionPhase::Commitment,
+        )
+        .await;
+
+        let verified = protocol
+            .verified_contribution(
+                &effects,
+                &session_id,
+                participant.0,
+                DkdContributionPhase::Commitment,
+                contribution,
+            )
+            .await
+            .unwrap();
+        assert_eq!(verified.payload().device_id, participant);
     }
 
     #[test]
@@ -1250,15 +1840,21 @@ mod tests {
         let contributions = vec![
             ParticipantContribution {
                 device_id: device(6),
+                key_id: "device:6".to_string(),
                 randomness: [1u8; 32],
                 commitment: Hash32::new(hash::hash(&[1u8; 32])),
+                phase: DkdContributionPhase::Commitment,
+                protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
                 signature: vec![1, 2, 3],
                 timestamp: 12345,
             },
             ParticipantContribution {
                 device_id: device(7),
+                key_id: "device:7".to_string(),
                 randomness: [2u8; 32],
                 commitment: Hash32::new(hash::hash(&[2u8; 32])),
+                phase: DkdContributionPhase::Commitment,
+                protocol_version: DKD_CONTRIBUTION_PROTOCOL_VERSION,
                 signature: vec![4, 5, 6],
                 timestamp: 12346,
             },

@@ -2,7 +2,7 @@
 
 use aura_core::query::{
     DatalogBindings, DatalogProgram, DatalogRow, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use aura_core::types::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ pub(super) fn get_string(row: &DatalogRow, key: &str) -> String {
     row.get(key)
         .and_then(|value| match value {
             DatalogValue::String(string) => Some(string.clone()),
-            DatalogValue::Symbol(symbol) => Some(symbol.clone()),
+            DatalogValue::Symbol(symbol) => Some(symbol.as_str().to_string()),
             _ => None,
         })
         .unwrap_or_default()
@@ -170,8 +170,8 @@ impl Query for UnreadCountQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("messages")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("messages"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

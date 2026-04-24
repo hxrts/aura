@@ -44,6 +44,10 @@ enum AuthGuardError {
     GuardianSetRequiresApproveCapability,
     #[error("Emergency freeze requires recovery:initiate capability or emergency flag")]
     EmergencyFreezeRequiresInitiateCapability,
+    #[error("Session or challenge identifier {id} already exists")]
+    DuplicateSessionId { id: String },
+    #[error("Guardian approval request identifier {id} already exists")]
+    DuplicateGuardianRequestId { id: String },
 }
 
 // =============================================================================
@@ -182,6 +186,17 @@ impl AuthService {
     /// Returns a `GuardOutcome` containing effect commands to generate
     /// the challenge if allowed.
     pub fn request_challenge(&self, snapshot: &GuardSnapshot, scope: SessionScope) -> GuardOutcome {
+        let session_id = fresh_snapshot_id("session", snapshot);
+        self.request_challenge_with_id(snapshot, session_id, scope)
+    }
+
+    /// Request an authentication challenge with an explicit caller-generated identifier.
+    pub fn request_challenge_with_id(
+        &self,
+        snapshot: &GuardSnapshot,
+        session_id: String,
+        scope: SessionScope,
+    ) -> GuardOutcome {
         if let Some(outcome) = check_capability_and_budget(
             snapshot,
             &AuthenticationCapability::Request.as_name(),
@@ -190,7 +205,9 @@ impl AuthService {
             return outcome;
         }
 
-        let session_id = generate_session_id(snapshot);
+        if !snapshot.session_id_available(&session_id) {
+            return deny_auth_guard(AuthGuardError::DuplicateSessionId { id: session_id });
+        }
         let expires_at_ms = snapshot.now_ms + self.config.challenge_expiration_ms;
 
         let fact = AuthFact::ChallengeGenerated {
@@ -267,6 +284,18 @@ impl AuthService {
         scope: SessionScope,
         duration_seconds: u64,
     ) -> GuardOutcome {
+        let session_id = fresh_snapshot_id("session", snapshot);
+        self.create_session_with_id(snapshot, session_id, scope, duration_seconds)
+    }
+
+    /// Create a session ticket with an explicit caller-generated identifier.
+    pub fn create_session_with_id(
+        &self,
+        snapshot: &GuardSnapshot,
+        session_id: String,
+        scope: SessionScope,
+        duration_seconds: u64,
+    ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         if let Some(outcome) = check_capability_and_budget(
             snapshot,
@@ -283,7 +312,9 @@ impl AuthService {
             });
         }
 
-        let session_id = generate_session_id(snapshot);
+        if !snapshot.session_id_available(&session_id) {
+            return deny_auth_guard(AuthGuardError::DuplicateSessionId { id: session_id });
+        }
         let expires_at_ms = snapshot.now_ms + (duration_seconds * 1000);
 
         let fact = AuthFact::SessionIssued {
@@ -321,6 +352,25 @@ impl AuthService {
         context: RecoveryContext,
         required_guardians: u32,
     ) -> GuardOutcome {
+        let request_id = fresh_snapshot_id("guardian_req", snapshot);
+        self.request_guardian_approval_with_id(
+            snapshot,
+            request_id,
+            account_id,
+            context,
+            required_guardians,
+        )
+    }
+
+    /// Request guardian approval with an explicit caller-generated identifier.
+    pub fn request_guardian_approval_with_id(
+        &self,
+        snapshot: &GuardSnapshot,
+        request_id: String,
+        account_id: AuthorityId,
+        context: RecoveryContext,
+        required_guardians: u32,
+    ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         if let Some(outcome) = check_capability_and_budget(
             snapshot,
@@ -334,7 +384,9 @@ impl AuthService {
             return outcome;
         }
 
-        let request_id = generate_request_id(snapshot);
+        if !snapshot.guardian_request_id_available(&request_id) {
+            return deny_auth_guard(AuthGuardError::DuplicateGuardianRequestId { id: request_id });
+        }
         let expires_at_ms = snapshot.now_ms + self.config.guardian_approval_expiration_ms;
 
         let fact = AuthFact::GuardianApprovalRequested {
@@ -464,17 +516,7 @@ impl Default for AuthService {
 // Helper Functions
 // =============================================================================
 
-/// Generate a unique session ID based on the snapshot
-fn generate_session_id(snapshot: &GuardSnapshot) -> String {
-    generate_freshness_id("session", snapshot)
-}
-
-/// Generate a unique request ID for guardian approval
-fn generate_request_id(snapshot: &GuardSnapshot) -> String {
-    generate_freshness_id("guardian_req", snapshot)
-}
-
-fn generate_freshness_id(prefix: &str, snapshot: &GuardSnapshot) -> String {
+fn fresh_snapshot_id(prefix: &str, snapshot: &GuardSnapshot) -> String {
     let mut material = Vec::with_capacity(prefix.len() + 16 + 32 + 32 + 8);
     material.extend_from_slice(prefix.as_bytes());
     material.extend_from_slice(&snapshot.freshness_nonce);
@@ -615,6 +657,101 @@ mod tests {
 
         let outcome = service.request_guardian_approval(&snapshot, authority(1), context, 2);
         assert!(outcome.is_allowed());
+    }
+
+    #[test]
+    fn test_same_millisecond_challenge_ids_differ_when_nonce_differs() {
+        let service = AuthService::new();
+        let snapshot_a = standard_service_snapshot();
+        let mut snapshot_b = standard_service_snapshot();
+        snapshot_b.freshness_nonce = [9; 16];
+
+        let scope = protocol_scope("test");
+        let outcome_a = service.request_challenge(&snapshot_a, scope.clone());
+        let outcome_b = service.request_challenge(&snapshot_b, scope);
+
+        let id_a = outcome_a
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                EffectCommand::GenerateChallenge { session_id, .. } => Some(session_id.clone()),
+                _ => None,
+            })
+            .expect("challenge id");
+        let id_b = outcome_b
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                EffectCommand::GenerateChallenge { session_id, .. } => Some(session_id.clone()),
+                _ => None,
+            })
+            .expect("challenge id");
+
+        assert_ne!(id_a, id_b);
+    }
+
+    #[test]
+    fn test_repeated_epoch_collisions_are_rejected_for_explicit_challenge_ids() {
+        let service = AuthService::new();
+        let mut snapshot = standard_service_snapshot();
+        snapshot
+            .pending_session_ids
+            .insert("session_fixed".to_string());
+
+        let outcome = service.request_challenge_with_id(
+            &snapshot,
+            "session_fixed".to_string(),
+            protocol_scope("test"),
+        );
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_guardian_request_collisions_are_rejected() {
+        let service = AuthService::new();
+        let mut snapshot = standard_service_snapshot();
+        snapshot
+            .pending_guardian_request_ids
+            .insert("guardian_req_fixed".to_string());
+        let context = RecoveryContext::new(
+            RecoveryOperationType::DeviceKeyRecovery,
+            "Lost device",
+            1000,
+        );
+
+        let outcome = service.request_guardian_approval_with_id(
+            &snapshot,
+            "guardian_req_fixed".to_string(),
+            authority(1),
+            context,
+            2,
+        );
+        assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn test_valid_fresh_explicit_ids_are_accepted() {
+        let service = AuthService::new();
+        let snapshot = standard_service_snapshot();
+        let challenge = service.request_challenge_with_id(
+            &snapshot,
+            "session_explicit".to_string(),
+            protocol_scope("test"),
+        );
+        let guardian = service.request_guardian_approval_with_id(
+            &snapshot,
+            "guardian_req_explicit".to_string(),
+            authority(1),
+            RecoveryContext::new(
+                RecoveryOperationType::DeviceKeyRecovery,
+                "Lost device",
+                1000,
+            ),
+            2,
+        );
+
+        assert!(challenge.is_allowed());
+        assert!(guardian.is_allowed());
     }
 
     #[test]

@@ -165,7 +165,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
             }
             #[cfg(test)]
             JournalAuthorizationMode::TestSimulationBypass { reason } => {
-                tracing::debug!(reason, "journal authorization bypassed for test/simulation")
+                tracing::debug!(reason, "journal authorization bypassed for test/simulation");
             }
         }
         Ok(())
@@ -433,7 +433,8 @@ mod tests {
     use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
     use aura_core::{AuthorizationOp, Cap, Fact, FactValue, Hash32};
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[derive(Clone, Default)]
     struct TestCrypto {
@@ -541,33 +542,20 @@ mod tests {
     #[async_trait]
     impl StorageCoreEffects for TestStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-            self.data
-                .lock()
-                .expect("test storage lock")
-                .insert(key.to_string(), value);
+            self.data.lock().await.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-            Ok(self
-                .data
-                .lock()
-                .expect("test storage lock")
-                .get(key)
-                .cloned())
+            Ok(self.data.lock().await.get(key).cloned())
         }
 
         async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-            Ok(self
-                .data
-                .lock()
-                .expect("test storage lock")
-                .remove(key)
-                .is_some())
+            Ok(self.data.lock().await.remove(key).is_some())
         }
 
         async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-            let data = self.data.lock().expect("test storage lock");
+            let data = self.data.lock().await;
             Ok(data
                 .keys()
                 .filter(|key| prefix.is_none_or(|prefix| key.starts_with(prefix)))
@@ -579,15 +567,11 @@ mod tests {
     #[async_trait]
     impl StorageExtendedEffects for TestStorage {
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-            Ok(self
-                .data
-                .lock()
-                .expect("test storage lock")
-                .contains_key(key))
+            Ok(self.data.lock().await.contains_key(key))
         }
 
         async fn stats(&self) -> Result<StorageStats, StorageError> {
-            let data = self.data.lock().expect("test storage lock");
+            let data = self.data.lock().await;
             Ok(StorageStats {
                 key_count: data.len() as u64,
                 total_size: data.values().map(|value| value.len() as u64).sum(),

@@ -414,8 +414,8 @@ mod tests {
         )
         .expect("dealer key generation should succeed");
         let mut share_values = secret_shares
-            .into_iter()
-            .map(|(_, secret_share)| {
+            .into_values()
+            .map(|secret_share| {
                 let key_package = frost_ed25519::keys::KeyPackage::try_from(secret_share)
                     .expect("secret share should convert to key package");
                 Share::from(key_package)

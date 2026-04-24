@@ -111,12 +111,12 @@ impl SecureStorageEffects for AuraEffectSystem {
     async fn secure_generate_key(
         &self,
         location: &SecureStorageLocation,
-        context: &str,
+        key_type: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<SecureGeneratedKey, SecureStorageError> {
         self.crypto
             .secure_storage()
-            .secure_generate_key(location, context, caps)
+            .secure_generate_key(location, key_type, caps)
             .await
     }
 

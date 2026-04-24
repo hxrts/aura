@@ -10,6 +10,7 @@ use aura_guards::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata,
 };
+use aura_sync::protocols::anti_entropy::VerifiedRemoteOpsBatch;
 use aura_sync::protocols::{AntiEntropyConfig, AntiEntropyProtocol};
 
 fn make_attested_op(seed: u8) -> AttestedOp {
@@ -27,14 +28,15 @@ fn make_attested_op(seed: u8) -> AttestedOp {
     }
 }
 
-fn verified_ops(ops: Vec<AttestedOp>) -> VerifiedIngress<Vec<AttestedOp>> {
+fn verified_ops(ops: Vec<AttestedOp>) -> VerifiedIngress<VerifiedRemoteOpsBatch> {
     let peer = DeviceId::new_from_entropy([7u8; 32]);
     let context = ContextId::new_from_entropy([8u8; 32]);
+    let payload = VerifiedRemoteOpsBatch::new(ops);
     let metadata = VerifiedIngressMetadata::new(
         IngressSource::Device(peer),
         context,
         None,
-        Hash32::zero(),
+        Hash32::from_value(&payload).unwrap(),
         1,
     );
     let evidence = IngressVerificationEvidence::new(
@@ -42,7 +44,9 @@ fn verified_ops(ops: Vec<AttestedOp>) -> VerifiedIngress<Vec<AttestedOp>> {
         aura_guards::REQUIRED_INGRESS_VERIFICATION_CHECKS,
     )
     .unwrap();
-    DecodedIngress::new(ops, metadata).verify(evidence).unwrap()
+    DecodedIngress::new(payload, metadata)
+        .verify(evidence)
+        .unwrap()
 }
 
 #[test]

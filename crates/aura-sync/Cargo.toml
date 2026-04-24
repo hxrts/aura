@@ -51,6 +51,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+curve25519-dalek = { workspace = true }
 
 [dev-dependencies]
 aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }

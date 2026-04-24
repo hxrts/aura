@@ -22,8 +22,8 @@ use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDispositio
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{
-    CryptoCoreEffects, CryptoExtendedEffects, PhysicalTimeEffects, RandomCoreEffects,
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
+    CryptoCoreEffects, CryptoExtendedEffects, PhysicalTimeEffects, SecureStorageCapability,
+    SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
 };
 use aura_core::hash::hash;
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -41,7 +41,10 @@ use aura_recovery::ceremony_runners::{AbortCeremony, ProposeRotation};
 // Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
 // to construct it - we only match on the type name suffix when processing received messages.
 use aura_recovery::guardian_ceremony::{
-    CeremonyAbort, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg, GuardianRotationOp,
+    build_guardian_ceremony_commit_certificate, encrypt_ceremony_key_package,
+    verify_guardian_ceremony_response_signature, CeremonyAbort, CeremonyCommit,
+    CeremonyCommitCertificate, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
+    GuardianRotationOp,
 };
 use aura_recovery::guardian_membership::{
     sign_guardian_vote, verify_guardian_vote_signature, ChangeCompletion, GuardianVote,
@@ -1078,7 +1081,6 @@ impl RecoveryServiceApi {
         use crate::core::AgentError;
 
         use aura_core::ContextId;
-        use aura_recovery::guardian_ceremony::CeremonyProposal;
 
         tracing::info!(
             guardian_id = %guardian_authority,
@@ -1103,22 +1105,15 @@ impl RecoveryServiceApi {
         };
         let ceremony_context = ContextId::new_from_entropy(context_entropy);
 
-        // Best-effort encryption envelope fields (actual key agreement is wired separately).
-        let nonce_bytes = self.effects.random_bytes(12).await;
-        let mut encryption_nonce = [0u8; 12];
-        encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
-        let ephemeral_public_key = self.effects.random_bytes(32).await;
-
-        // Create the ceremony proposal
-        let proposal = CeremonyProposal {
-            ceremony_id,
-            initiator_id,
-            prestate_hash,
-            operation,
-            encrypted_key_package: key_package.to_vec(),
-            encryption_nonce,
-            ephemeral_public_key,
-        };
+        let proposal = self
+            .build_guardian_ceremony_proposal(
+                guardian_authority,
+                ceremony_id,
+                prestate_hash,
+                &operation,
+                key_package,
+            )
+            .await?;
 
         // Serialize the proposal
         let payload = serde_json::to_vec(&proposal)
@@ -1188,6 +1183,20 @@ impl RecoveryServiceApi {
         guardian_packages.sort_by_key(|(g, _)| *g);
         let (sorted_guardians, sorted_key_packages): (Vec<_>, Vec<_>) =
             guardian_packages.into_iter().unzip();
+        let guardian_key_resolver = self.trusted_guardian_setup_keys(&sorted_guardians).await?;
+        let mut guardian_proposals = BTreeMap::new();
+        for (guardian, key_package) in sorted_guardians.iter().zip(sorted_key_packages.iter()) {
+            let proposal = self
+                .build_guardian_ceremony_proposal(
+                    *guardian,
+                    ceremony_id,
+                    prestate_hash,
+                    &operation,
+                    key_package,
+                )
+                .await?;
+            guardian_proposals.insert(*guardian, proposal);
+        }
         let session_id = Self::ceremony_session_id(ceremony_id);
         let roles = vec![
             Self::role(authority_id, 0),
@@ -1240,25 +1249,17 @@ impl RecoveryServiceApi {
                 }
             };
 
-            for key_package in &sorted_key_packages {
-                let nonce_bytes = self.effects.random_bytes(12).await;
-                let mut encryption_nonce = [0u8; 12];
-                encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
-                let ephemeral_public_key = self.effects.random_bytes(32).await;
-                session.queue_send_bytes(
-                    to_vec(&ProposeRotation(CeremonyProposal {
-                        ceremony_id,
-                        initiator_id: authority_id,
-                        prestate_hash,
-                        operation: operation.clone(),
-                        encrypted_key_package: key_package.clone(),
-                        encryption_nonce,
-                        ephemeral_public_key,
-                    }))
-                    .map_err(|error| {
+            for guardian in &sorted_guardians {
+                let proposal = guardian_proposals.get(guardian).ok_or_else(|| {
+                    AgentError::internal(format!(
+                        "missing guardian ceremony proposal for {guardian}"
+                    ))
+                })?;
+                session.queue_send_bytes(to_vec(&ProposeRotation(proposal.clone())).map_err(
+                    |error| {
                         AgentError::internal(format!("guardian proposal encode failed: {error}"))
-                    })?,
-                );
+                    },
+                )?);
             }
 
             let peer_roles = BTreeMap::from([
@@ -1266,6 +1267,7 @@ impl RecoveryServiceApi {
                 ("Guardian2".to_string(), Self::role(sorted_guardians[1], 0)),
             ]);
             let mut responses = Vec::new();
+            let mut seen_guardians = BTreeSet::new();
             let mut branch_queued = false;
 
             let loop_result = loop {
@@ -1284,7 +1286,33 @@ impl RecoveryServiceApi {
                     let response_guardian = response.guardian_id;
                     let response_context = response.ceremony_id.to_string();
                     let response_member = sorted_guardians.contains(&response_guardian);
-                    let response_has_proof = !response.signature.is_empty();
+                    if !response_member {
+                        return Err(AgentError::invalid(format!(
+                            "guardian ceremony response from unexpected guardian {response_guardian}"
+                        )));
+                    }
+                    if !seen_guardians.insert(response_guardian) {
+                        return Err(AgentError::invalid(format!(
+                            "duplicate guardian ceremony response from {response_guardian}"
+                        )));
+                    }
+                    let proposal = guardian_proposals.get(&response_guardian).ok_or_else(|| {
+                        AgentError::internal(format!(
+                            "missing guardian ceremony proposal for response from {response_guardian}"
+                        ))
+                    })?;
+                    let response_has_proof = verify_guardian_ceremony_response_signature(
+                        self.effects.as_ref(),
+                        proposal,
+                        &response,
+                        &guardian_key_resolver,
+                    )
+                    .await
+                    .map_err(|error| {
+                        AgentError::effects(format!(
+                            "guardian ceremony response verification failed: {error}"
+                        ))
+                    })?;
                     let response = Self::verified_recovery_session_payload(
                         response_guardian,
                         response_context.as_bytes(),
@@ -1308,9 +1336,46 @@ impl RecoveryServiceApi {
                         let finalize =
                             !declined && accepted.len() >= operation.threshold_k as usize;
                         if finalize {
-                            return Err(AgentError::internal(
-                                "guardian ceremony commit requires an aggregated threshold signature; placeholder commits are disabled",
-                            ));
+                            let accepted_messages: Vec<_> = responses
+                                .iter()
+                                .filter(|response| {
+                                    response.payload().response == CeremonyResponse::Accept
+                                })
+                                .map(|response| response.payload().clone())
+                                .collect();
+                            let commit_certificate = build_guardian_ceremony_commit_certificate(
+                                self.effects.as_ref(),
+                                ceremony_id,
+                                authority_id,
+                                prestate_hash,
+                                &operation,
+                                &sorted_guardians,
+                                operation.threshold_k,
+                                &accepted_messages,
+                                &guardian_key_resolver,
+                            )
+                            .await
+                            .map_err(|error| {
+                                AgentError::effects(format!(
+                                    "guardian ceremony commit certificate build failed: {error}"
+                                ))
+                            })?;
+                            self.store_guardian_ceremony_commit_certificate(&commit_certificate)
+                                .await?;
+                            session.queue_choice_label("commit");
+                            let commit = CeremonyCommit {
+                                ceremony_id,
+                                new_epoch: operation.new_epoch,
+                                commit_certificate,
+                                participants: accepted,
+                            };
+                            let payload = to_vec(&commit).map_err(|error| {
+                                AgentError::internal(format!(
+                                    "guardian ceremony commit encode failed: {error}"
+                                ))
+                            })?;
+                            session.queue_send_bytes(payload.clone());
+                            session.queue_send_bytes(payload);
                         } else {
                             session.queue_choice_label("cancel");
                             let reason = if declined {
@@ -1404,6 +1469,68 @@ impl RecoveryServiceApi {
         Err(AgentError::internal(
             "guardian ceremony response requires a guardian signature; unsigned responses are disabled",
         ))
+    }
+
+    async fn build_guardian_ceremony_proposal(
+        &self,
+        guardian_authority: AuthorityId,
+        ceremony_id: aura_recovery::CeremonyId,
+        prestate_hash: aura_core::Hash32,
+        operation: &GuardianRotationOp,
+        key_package: &[u8],
+    ) -> AgentResult<CeremonyProposal> {
+        let initiator_id = self.handler.authority_context().authority_id();
+        let guardian_public_key = self
+            .effects
+            .retrieve(&recovery_guardian_public_key_storage_key(guardian_authority))
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian ceremony trusted key retrieval failed for {guardian_authority}: {error}"
+                ))
+            })?
+            .ok_or_else(|| {
+                AgentError::invalid(format!(
+                    "missing trusted guardian ceremony key for {guardian_authority}"
+                ))
+            })?;
+        encrypt_ceremony_key_package(
+            self.effects.as_ref(),
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            operation,
+            &guardian_public_key,
+            key_package,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::effects(format!(
+                "guardian ceremony proposal encryption failed for {guardian_authority}: {error}"
+            ))
+        })
+    }
+
+    async fn store_guardian_ceremony_commit_certificate(
+        &self,
+        certificate: &CeremonyCommitCertificate,
+    ) -> AgentResult<()> {
+        let encoded = to_vec(certificate).map_err(|error| {
+            AgentError::internal(format!(
+                "guardian ceremony commit certificate encode failed: {error}"
+            ))
+        })?;
+        self.effects
+            .store(
+                &guardian_ceremony_commit_certificate_storage_key(certificate.ceremony_id),
+                encoded,
+            )
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian ceremony commit certificate storage failed: {error}"
+                ))
+            })
     }
 
     /// Execute guardian setup ceremony as initiator using choreographic protocol.
@@ -2674,6 +2801,15 @@ fn physical_timestamp_ms(timestamp: &TimeStamp) -> AgentResult<u64> {
     }
 }
 
+fn guardian_ceremony_commit_certificate_storage_key(
+    ceremony_id: aura_recovery::CeremonyId,
+) -> String {
+    format!(
+        "recovery_guardian_ceremony_commit_certificates/{}",
+        hex::encode(ceremony_id.0 .0)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::recovery::{
@@ -2683,6 +2819,11 @@ mod tests {
     use crate::core::config::StorageConfig;
     use crate::core::AgentConfig;
     use aura_core::effects::StorageCoreEffects;
+    use aura_recovery::guardian_ceremony::{
+        build_guardian_ceremony_commit_certificate, decrypt_ceremony_key_package,
+        sign_guardian_ceremony_response_with_context, verify_guardian_ceremony_commit_certificate,
+        CeremonyCommitCertificate,
+    };
     use aura_recovery::recovery_approval::{
         recovery_operation_hash, RecoveryApprovalTranscript, RecoveryApprovalTranscriptPayload,
     };
@@ -3516,5 +3657,150 @@ mod tests {
             share_guardians,
             BTreeSet::from([guardians[0], guardians[1]])
         );
+    }
+
+    #[tokio::test]
+    async fn guardian_ceremony_proposal_encryption_replaces_raw_key_packages() {
+        let authority_context = create_test_authority(222);
+        let initiator_id = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let guardian_id = AuthorityId::new_from_entropy([223u8; 32]);
+        let (guardian_private_key, guardian_public_key) =
+            store_guardian_setup_signing_keypair(&effects, guardian_id).await;
+        let ceremony_id = aura_recovery::CeremonyId(Hash32([0x81; 32]));
+        let prestate_hash = Hash32([0x82; 32]);
+        let operation = GuardianRotationOp {
+            threshold_k: 1,
+            total_n: 1,
+            guardian_ids: vec![guardian_id],
+            new_epoch: 9,
+        };
+        let key_package = vec![0xA5; 48];
+
+        let proposal = service
+            .build_guardian_ceremony_proposal(
+                guardian_id,
+                ceremony_id,
+                prestate_hash,
+                &operation,
+                &key_package,
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(proposal.encrypted_key_package, key_package);
+        assert_eq!(proposal.recipient_public_key, guardian_public_key);
+        assert_eq!(proposal.initiator_id, initiator_id);
+        let decrypted =
+            decrypt_ceremony_key_package(effects.as_ref(), &proposal, &guardian_private_key)
+                .await
+                .unwrap();
+        assert_eq!(decrypted, key_package);
+    }
+
+    #[tokio::test]
+    async fn guardian_ceremony_commit_certificate_is_persisted_and_verifiable() {
+        let authority_context = create_test_authority(224);
+        let initiator_id = authority_context.authority_id();
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = RecoveryServiceApi::new_for_test(effects.clone(), authority_context).unwrap();
+        let guardians = vec![
+            AuthorityId::new_from_entropy([225u8; 32]),
+            AuthorityId::new_from_entropy([226u8; 32]),
+        ];
+        let ceremony_id = aura_recovery::CeremonyId(Hash32([0x83; 32]));
+        let prestate_hash = Hash32([0x84; 32]);
+        let operation = GuardianRotationOp {
+            threshold_k: 2,
+            total_n: 2,
+            guardian_ids: guardians.clone(),
+            new_epoch: 10,
+        };
+        let (g1_private_key, _) =
+            store_guardian_setup_signing_keypair(&effects, guardians[0]).await;
+        let (g2_private_key, _) =
+            store_guardian_setup_signing_keypair(&effects, guardians[1]).await;
+        let resolver = service
+            .trusted_guardian_setup_keys(&guardians)
+            .await
+            .unwrap();
+
+        let response_1 = CeremonyResponseMsg {
+            ceremony_id,
+            guardian_id: guardians[0],
+            response: CeremonyResponse::Accept,
+            encrypted_key_package_hash: Hash32([0x91; 32]),
+            signature: sign_guardian_ceremony_response_with_context(
+                effects.as_ref(),
+                ceremony_id,
+                initiator_id,
+                prestate_hash,
+                &operation,
+                guardians[0],
+                CeremonyResponse::Accept,
+                Hash32([0x91; 32]),
+                &g1_private_key,
+            )
+            .await
+            .unwrap(),
+        };
+        let response_2 = CeremonyResponseMsg {
+            ceremony_id,
+            guardian_id: guardians[1],
+            response: CeremonyResponse::Accept,
+            encrypted_key_package_hash: Hash32([0x92; 32]),
+            signature: sign_guardian_ceremony_response_with_context(
+                effects.as_ref(),
+                ceremony_id,
+                initiator_id,
+                prestate_hash,
+                &operation,
+                guardians[1],
+                CeremonyResponse::Accept,
+                Hash32([0x92; 32]),
+                &g2_private_key,
+            )
+            .await
+            .unwrap(),
+        };
+
+        let certificate = build_guardian_ceremony_commit_certificate(
+            effects.as_ref(),
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[response_1, response_2],
+            &resolver,
+        )
+        .await
+        .unwrap();
+        service
+            .store_guardian_ceremony_commit_certificate(&certificate)
+            .await
+            .unwrap();
+
+        let stored = effects
+            .retrieve(&guardian_ceremony_commit_certificate_storage_key(
+                ceremony_id,
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        let stored: CeremonyCommitCertificate = from_slice(&stored).unwrap();
+        assert!(verify_guardian_ceremony_commit_certificate(
+            effects.as_ref(),
+            &stored,
+            &guardians,
+            operation.threshold_k,
+            &resolver,
+        )
+        .await
+        .unwrap());
     }
 }

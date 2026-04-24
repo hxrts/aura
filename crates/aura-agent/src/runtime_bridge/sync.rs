@@ -3,13 +3,14 @@ use super::{
     harness_mode_enabled, harness_sync_backoff_ms, harness_sync_rounds, require_rendezvous_service,
     require_sync_service, service_unavailable, AgentRuntimeBridge,
 };
+use crate::core::default_context_id_for_authority;
 use aura_app::runtime_bridge::{
     CeremonyProcessingCounts, CeremonyProcessingOutcome, ReachabilityRefreshOutcome, SyncStatus,
 };
 use aura_app::IntentError;
 use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_core::{DeviceId, EffectContext};
+use aura_core::DeviceId;
 
 const RUNTIME_BRIDGE_SYNC_STATUS_QUERY_CAPABILITY: &str = "runtime_bridge_sync_status_query";
 const RUNTIME_BRIDGE_SYNC_PEER_ONLINE_QUERY_CAPABILITY: &str =
@@ -57,7 +58,7 @@ pub(super) async fn get_sync_status(
 pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityId) -> bool {
     let _ = RUNTIME_BRIDGE_SYNC_PEER_ONLINE_QUERY_CAPABILITY;
     let effects = bridge.agent.runtime().effects();
-    let context = EffectContext::with_authority(bridge.agent.authority_id()).context_id();
+    let context = default_context_id_for_authority(bridge.agent.authority_id());
 
     if effects.is_channel_established(context, peer).await {
         return true;

@@ -1,7 +1,7 @@
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,10 +19,13 @@ use aura_app::ui::contract::{
     semantic_settings_section_item_id, ControlId, FieldId, HarnessUiCommand,
     HarnessUiCommandReceipt, ListId, ModalId, ScreenId, UiReadiness, UiSnapshot,
 };
+use aura_app::ui_contract::{AuthenticatedHarnessUiCommand, HARNESS_COMMAND_MAX_FRAME_BYTES};
 use nix::errno::Errno;
 use nix::sys::signal;
 use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
@@ -39,6 +42,53 @@ use crate::timeouts::blocking_sleep;
 enum BackendState {
     Stopped,
     Running,
+}
+
+fn write_length_prefixed_json<T: Serialize>(
+    stream: &mut UnixStream,
+    value: &T,
+    context: &str,
+) -> Result<()> {
+    let payload =
+        serde_json::to_vec(value).with_context(|| format!("failed to encode {context}"))?;
+    if payload.len() > HARNESS_COMMAND_MAX_FRAME_BYTES {
+        anyhow::bail!(
+            "{context} exceeded harness frame limit ({} > {})",
+            payload.len(),
+            HARNESS_COMMAND_MAX_FRAME_BYTES
+        );
+    }
+    let payload_len = u32::try_from(payload.len()).context("frame length does not fit in u32")?;
+    stream
+        .write_all(&payload_len.to_be_bytes())
+        .with_context(|| format!("failed to write {context} frame length"))?;
+    stream
+        .write_all(&payload)
+        .with_context(|| format!("failed to write {context} payload"))?;
+    Ok(())
+}
+
+fn read_length_prefixed_json<T: DeserializeOwned>(
+    stream: &mut UnixStream,
+    context: &str,
+) -> Result<T> {
+    let mut length_bytes = [0u8; 4];
+    stream
+        .read_exact(&mut length_bytes)
+        .with_context(|| format!("failed to read {context} frame length"))?;
+    let payload_len = u32::from_be_bytes(length_bytes) as usize;
+    if payload_len > HARNESS_COMMAND_MAX_FRAME_BYTES {
+        anyhow::bail!(
+            "{context} exceeded harness frame limit ({} > {})",
+            payload_len,
+            HARNESS_COMMAND_MAX_FRAME_BYTES
+        );
+    }
+    let mut payload = vec![0u8; payload_len];
+    stream
+        .read_exact(&mut payload)
+        .with_context(|| format!("failed to read {context} payload"))?;
+    serde_json::from_slice(&payload).with_context(|| format!("failed to decode {context}"))
 }
 
 fn into_ui_operation_handle(
@@ -352,10 +402,7 @@ impl LocalPtyBackend {
     }
 
     fn socket_root(&self) -> PathBuf {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.config.id.hash(&mut hasher);
-        self.transient_root().hash(&mut hasher);
-        std::env::temp_dir().join(format!("aura-h-{:016x}", hasher.finish()))
+        self.transient_root().join("tui")
     }
 
     fn ui_state_socket_path(&self, session_generation: u64) -> PathBuf {
@@ -380,6 +427,15 @@ impl LocalPtyBackend {
     fn child_pid_path(&self, session_generation: u64) -> PathBuf {
         self.transient_root()
             .join(format!("child-gen{session_generation}.pid"))
+    }
+
+    fn harness_command_token(&self) -> Result<String> {
+        Self::env_value("AURA_HARNESS_RUN_TOKEN", &self.config.env).with_context(|| {
+            format!(
+                "instance {} is missing AURA_HARNESS_RUN_TOKEN for TUI harness command auth",
+                self.config.id
+            )
+        })
     }
 
     pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
@@ -412,6 +468,12 @@ impl LocalPtyBackend {
         let listener = UnixListener::bind(socket_path).with_context(|| {
             format!(
                 "failed to bind TUI UI snapshot socket {}",
+                socket_path.display()
+            )
+        })?;
+        fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600)).with_context(|| {
+            format!(
+                "failed to restrict TUI UI snapshot socket permissions {}",
                 socket_path.display()
             )
         })?;
@@ -586,6 +648,7 @@ impl LocalPtyBackend {
         &self,
         command: &HarnessUiCommand,
     ) -> Result<HarnessUiCommandReceipt> {
+        let token = self.harness_command_token()?;
         let socket_path = self
             .session
             .as_ref()
@@ -593,47 +656,28 @@ impl LocalPtyBackend {
             .unwrap_or_else(|| {
                 Self::absolutize_path(self.command_socket_path(self.session_generation))
             });
-        let payload = serde_json::to_vec(command).context("failed to encode harness UI command")?;
+        let request = AuthenticatedHarnessUiCommand {
+            token,
+            command: command.clone(),
+        };
         let deadline = Instant::now() + Duration::from_secs(10);
 
         loop {
             match UnixStream::connect(&socket_path) {
                 Ok(mut stream) => {
                     let command_result: Result<HarnessUiCommandReceipt> = (|| {
-                        stream
-                            .write_all(&payload)
-                            .context("failed to write harness UI command")?;
+                        write_length_prefixed_json(
+                            &mut stream,
+                            &request,
+                            "authenticated harness UI command",
+                        )?;
                         stream
                             .flush()
                             .context("failed to flush harness UI command")?;
                         stream
                             .shutdown(Shutdown::Write)
                             .context("failed to half-close harness UI command socket")?;
-                        let mut receipt = Vec::new();
-                        stream
-                            .read_to_end(&mut receipt)
-                            .context("failed to read harness UI command receipt")?;
-                        if receipt.is_empty() {
-                            return Err(std::io::Error::new(
-                                ErrorKind::UnexpectedEof,
-                                "empty harness UI command receipt",
-                            )
-                            .into());
-                        }
-                        let receipt = serde_json::from_slice::<HarnessUiCommandReceipt>(&receipt)
-                            .map_err(|error| {
-                            if error.classify() == serde_json::error::Category::Eof {
-                                std::io::Error::new(
-                                    ErrorKind::UnexpectedEof,
-                                    format!("truncated harness UI command receipt: {error}"),
-                                )
-                                .into()
-                            } else {
-                                anyhow::Error::new(error)
-                                    .context("failed to decode harness UI command receipt")
-                            }
-                        })?;
-                        Ok(receipt)
+                        read_length_prefixed_json(&mut stream, "harness UI command receipt")
                     })();
 
                     match command_result {
@@ -768,6 +812,14 @@ impl InstanceBackend for LocalPtyBackend {
                 transient_root.display()
             )
         })?;
+        fs::set_permissions(&transient_root, fs::Permissions::from_mode(0o700)).with_context(
+            || {
+                format!(
+                    "failed to restrict instance transient root permissions {}",
+                    transient_root.display()
+                )
+            },
+        )?;
         let socket_root = self.socket_root();
         fs::create_dir_all(&socket_root).with_context(|| {
             format!(
@@ -775,6 +827,14 @@ impl InstanceBackend for LocalPtyBackend {
                 socket_root.display()
             )
         })?;
+        fs::set_permissions(&socket_root, fs::Permissions::from_mode(0o700)).with_context(
+            || {
+                format!(
+                    "failed to restrict instance socket root permissions {}",
+                    socket_root.display()
+                )
+            },
+        )?;
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
             let clipboard_file = Self::absolutize_path(self.clipboard_file_path());
             command.env(

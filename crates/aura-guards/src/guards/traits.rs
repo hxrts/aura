@@ -42,17 +42,23 @@ where
 
 pub const META_BISCUIT_TOKEN: &str = "biscuit_token";
 pub const META_BISCUIT_ROOT_PK: &str = "biscuit_root_pk";
+pub const META_BISCUIT_ISSUER_AUTHORITY: &str = "biscuit_issuer_authority";
 
 pub fn require_biscuit_metadata(
     provider: &impl GuardContextProvider,
-) -> aura_core::AuraResult<(String, String)> {
+) -> aura_core::AuraResult<(String, String, String)> {
     let token = provider.get_metadata(META_BISCUIT_TOKEN).ok_or_else(|| {
         aura_core::AuraError::invalid("missing biscuit_token metadata".to_string())
     })?;
     let root_pk = provider.get_metadata(META_BISCUIT_ROOT_PK).ok_or_else(|| {
         aura_core::AuraError::invalid("missing biscuit_root_pk metadata".to_string())
     })?;
-    Ok((token, root_pk))
+    let issuer = provider
+        .get_metadata(META_BISCUIT_ISSUER_AUTHORITY)
+        .ok_or_else(|| {
+            aura_core::AuraError::invalid("missing biscuit_issuer_authority metadata".to_string())
+        })?;
+    Ok((token, root_pk, issuer))
 }
 
 /// Security context for guard operations

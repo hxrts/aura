@@ -19,8 +19,8 @@ pub use context::{
 };
 pub use graph::{CycleError, DagNode};
 pub use serialization::{
-    from_slice, hash_canonical, to_vec, SemanticVersion as SerVersion, SerializationError,
-    VersionedMessage,
+    from_slice, from_slice_trusted, hash_canonical, to_vec, SemanticVersion as SerVersion,
+    SerializationError, VersionedMessage,
 };
 // conversions module is internal helpers, no re-exports
 // test_utils is hidden and used internally

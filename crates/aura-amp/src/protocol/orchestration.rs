@@ -7,8 +7,8 @@ use super::telemetry::{create_window_validation_result, WindowValidationResult, 
 use crate::config::AmpRuntimeConfig;
 use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::core::{nonce_from_header, ratchet_from_epoch_state, send_ratchet_from_epoch_state};
-use crate::get_channel_state;
-use crate::wire::{deserialize_message, serialize_message, AmpMessage};
+use crate::wire::{deserialize_message, serialize_message, AmpMessage, AMP_WIRE_SCHEMA_VERSION};
+use crate::{get_channel_state, list_channel_participants};
 use crate::{AmpEvidenceEffects, AmpJournalEffects};
 use aura_core::effects::amp::{AmpCiphertext, AmpHeader};
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -18,7 +18,7 @@ use aura_core::effects::{
 };
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
-use aura_core::types::identifiers::{ChannelId, ContextId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::{AuraError, Result};
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::{GuardEffects, GuardOperation, GuardOperationId};
@@ -71,6 +71,72 @@ impl AmpMessage {
 
 fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {err}"))
+}
+
+fn amp_recipients(participants: &[AuthorityId], sender: AuthorityId) -> Vec<AuthorityId> {
+    let mut recipients: Vec<AuthorityId> = participants
+        .iter()
+        .copied()
+        .filter(|participant| *participant != sender)
+        .collect();
+    recipients.sort_unstable_by_key(|participant| participant.to_bytes());
+    recipients
+}
+
+fn amp_additional_data(
+    header: &AmpHeader,
+    sender: AuthorityId,
+    recipients: &[AuthorityId],
+) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(2 + 32 + 32 + 8 + 8 + 32 + (recipients.len() * 32));
+    aad.extend_from_slice(&AMP_WIRE_SCHEMA_VERSION.to_le_bytes());
+    aad.extend_from_slice(header.context.as_bytes());
+    aad.extend_from_slice(header.channel.as_bytes());
+    aad.extend_from_slice(&header.chan_epoch.to_le_bytes());
+    aad.extend_from_slice(&header.ratchet_gen.to_le_bytes());
+    aad.extend_from_slice(&sender.to_bytes());
+    for recipient in recipients {
+        aad.extend_from_slice(&recipient.to_bytes());
+    }
+    aad
+}
+
+fn amp_replay_marker_location(
+    namespace: &str,
+    header: &AmpHeader,
+    sender: AuthorityId,
+) -> SecureStorageLocation {
+    let mut scope = Vec::with_capacity(32 + 32 + 32 + 8);
+    scope.extend_from_slice(header.context.as_bytes());
+    scope.extend_from_slice(header.channel.as_bytes());
+    scope.extend_from_slice(&sender.to_bytes());
+    scope.extend_from_slice(&header.chan_epoch.to_le_bytes());
+    let scope_hash = aura_core::Hash32::from_bytes(&scope).to_hex();
+    SecureStorageLocation::with_sub_key(namespace, scope_hash, header.ratchet_gen.to_string())
+}
+
+async fn record_amp_replay_marker<E: SecureStorageEffects>(
+    effects: &E,
+    namespace: &str,
+    header: &AmpHeader,
+    sender: AuthorityId,
+) -> Result<()> {
+    let location = amp_replay_marker_location(namespace, header, sender);
+    if effects
+        .secure_exists(&location)
+        .await
+        .map_err(|e| AuraError::internal(format!("AMP replay marker lookup failed: {e}")))?
+    {
+        return Err(AuraError::invalid(format!(
+            "AMP replay detected for channel {} epoch {} generation {}",
+            header.channel, header.chan_epoch, header.ratchet_gen
+        )));
+    }
+    effects
+        .secure_store(&location, &[1], &[SecureStorageCapability::Write])
+        .await
+        .map_err(|e| AuraError::internal(format!("AMP replay marker store failed: {e}")))?;
+    Ok(())
 }
 
 fn return_send_failure(context: ContextId, channel: ChannelId, error: AuraError) -> AuraError {
@@ -159,6 +225,22 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
         header.ratchet_gen,
     )
     .map_err(|e| AuraError::crypto(format!("AMP bootstrap KDF failed: {e}")))
+}
+
+async fn derive_channel_message_key<E: SecureStorageEffects>(
+    effects: &E,
+    context: ContextId,
+    channel: ChannelId,
+    state: &ChannelEpochState,
+    header: &AmpHeader,
+) -> Result<aura_core::Hash32> {
+    let bootstrap = state.bootstrap.as_ref().ok_or_else(|| {
+        AuraError::invalid(format!(
+            "AMP channel {} missing bootstrap key material for epoch {}",
+            channel, header.chan_epoch
+        ))
+    })?;
+    derive_bootstrap_message_key(effects, context, channel, bootstrap.bootstrap_id, header).await
 }
 
 // ============================================================================
@@ -281,6 +363,7 @@ pub async fn amp_send<E>(
     effects: &E,
     context: ContextId,
     channel: ChannelId,
+    sender: AuthorityId,
     payload: Vec<u8>,
     config: &AmpRuntimeConfig,
 ) -> Result<AmpCiphertext>
@@ -303,26 +386,21 @@ where
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
-    let message_key = if header.chan_epoch == 0 {
-        match state.bootstrap.as_ref() {
-            Some(bootstrap) => derive_bootstrap_message_key(
-                effects,
-                context,
-                channel,
-                bootstrap.bootstrap_id,
-                &header,
-            )
-            .await
-            .map_err(|e| return_send_failure(context, channel, e))?,
-            None => deriv.message_key,
-        }
-    } else {
-        deriv.message_key
-    };
+    let participants = list_channel_participants(effects, context, channel)
+        .await
+        .map_err(|e| return_send_failure(context, channel, e))?;
+    let recipients = amp_recipients(&participants, sender);
+    let aad = amp_additional_data(&header, sender, &recipients);
+    let message_key = derive_channel_message_key(effects, context, channel, &state, &header)
+        .await
+        .map_err(|e| return_send_failure(context, channel, e))?;
+    record_amp_replay_marker(effects, "amp_send_replay_markers", &header, sender)
+        .await
+        .map_err(|e| return_send_failure(context, channel, e))?;
     let key = message_key.0;
     let nonce = nonce_from_header(&header);
     let sealed = effects
-        .aes_gcm_encrypt(&payload, &key, &nonce)
+        .aes_gcm_encrypt_with_aad(&payload, &key, &nonce, &aad)
         .await
         .map_err(|e| {
             return_send_failure(
@@ -394,7 +472,12 @@ where
 
 /// High-level recv path: decode, validate header/window, and decrypt.
 #[instrument(skip(effects, bytes), fields(context = %context))]
-pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Result<AmpMessage>
+pub async fn amp_recv<E>(
+    effects: &E,
+    context: ContextId,
+    sender: AuthorityId,
+    bytes: Vec<u8>,
+) -> Result<AmpMessage>
 where
     E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
 {
@@ -425,33 +508,30 @@ where
         })?;
 
     // Phase 4: AEAD decryption
-    let message_key = if transport_header.chan_epoch == 0 {
-        match state.bootstrap.as_ref() {
-            Some(bootstrap) => derive_bootstrap_message_key(
-                effects,
-                context,
-                transport_header.channel,
-                bootstrap.bootstrap_id,
-                &transport_header,
-            )
-            .await
-            .map_err(|e| {
-                return_receive_failure(
-                    context,
-                    Some(&transport_header),
-                    Some(&window_validation),
-                    e,
-                )
-            })?,
-            None => deriv.message_key,
-        }
-    } else {
-        deriv.message_key
-    };
+    let participants =
+        list_channel_participants(effects, context, transport_header.channel).await?;
+    let recipients = amp_recipients(&participants, sender);
+    let aad = amp_additional_data(&transport_header, sender, &recipients);
+    let message_key = derive_channel_message_key(
+        effects,
+        context,
+        transport_header.channel,
+        &state,
+        &transport_header,
+    )
+    .await
+    .map_err(|e| {
+        return_receive_failure(
+            context,
+            Some(&transport_header),
+            Some(&window_validation),
+            e,
+        )
+    })?;
     let key = message_key.0;
     let nonce = nonce_from_header(&transport_header);
     let opened = effects
-        .aes_gcm_decrypt(&wire.payload, &key, &nonce)
+        .aes_gcm_decrypt_with_aad(&wire.payload, &key, &nonce, &aad)
         .await
         .map_err(|e| {
             return_receive_failure(
@@ -461,6 +541,21 @@ where
                 AuraError::crypto(format!("AMP open failed: {e}")),
             )
         })?;
+    record_amp_replay_marker(
+        effects,
+        "amp_recv_replay_markers",
+        &transport_header,
+        sender,
+    )
+    .await
+    .map_err(|e| {
+        return_receive_failure(
+            context,
+            Some(&transport_header),
+            Some(&window_validation),
+            e,
+        )
+    })?;
 
     // Success telemetry
     AMP_TELEMETRY.log_receive_success(
@@ -514,14 +609,146 @@ fn validate_and_build_result(
 pub async fn amp_recv_with_receipt<E>(
     effects: &E,
     context: ContextId,
+    sender: AuthorityId,
     bytes: Vec<u8>,
 ) -> Result<AmpDelivery>
 where
     E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
 {
-    let msg = amp_recv(effects, context, bytes).await?;
+    let msg = amp_recv(effects, context, sender, bytes).await?;
     Ok(AmpDelivery {
         receipt: msg.receipt(),
         payload: msg.payload,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::effects::{
+        CryptoExtendedEffects, SecureStorageCapability, SecureStorageEffects,
+    };
+    use aura_core::time::PhysicalTime;
+    use aura_effects::{ProductionSecureStorageHandler, RealCryptoHandler};
+    use aura_journal::fact::ChannelBootstrap;
+    use uuid::Uuid;
+
+    fn test_paths(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "aura-amp-orchestration-{label}-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ))
+    }
+
+    fn bootstrap_state(
+        context: ContextId,
+        channel: ChannelId,
+        dealer: AuthorityId,
+        recipients: Vec<AuthorityId>,
+        bootstrap_id: aura_core::Hash32,
+    ) -> ChannelEpochState {
+        ChannelEpochState {
+            chan_epoch: 1,
+            pending_bump: None,
+            bootstrap: Some(ChannelBootstrap {
+                context,
+                channel,
+                bootstrap_id,
+                dealer,
+                recipients,
+                created_at: PhysicalTime::exact(1),
+                expires_at: None,
+            }),
+            last_checkpoint_gen: 0,
+            current_gen: 1,
+            skip_window: 64,
+            transition: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn amp_ciphertext_requires_channel_key_and_aad_integrity() {
+        let storage_dir = test_paths("aead");
+        let storage =
+            ProductionSecureStorageHandler::filesystem_fallback_for_non_production(storage_dir);
+        let crypto = RealCryptoHandler::for_simulation_seed([0xA4; 32]);
+        let context = ContextId::new_from_entropy([1; 32]);
+        let channel = ChannelId::from_bytes([2; 32]);
+        let sender = AuthorityId::new_from_entropy([3; 32]);
+        let recipient = AuthorityId::new_from_entropy([4; 32]);
+        let bootstrap_key = [9u8; 32];
+        let bootstrap_id = aura_core::Hash32::from_bytes(&bootstrap_key);
+        let state = bootstrap_state(context, channel, sender, vec![recipient], bootstrap_id);
+        let header = AmpHeader {
+            context,
+            channel,
+            chan_epoch: 1,
+            ratchet_gen: 7,
+        };
+        let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+        storage
+            .secure_store(&location, &bootstrap_key, &[SecureStorageCapability::Write])
+            .await
+            .unwrap();
+
+        let recipients = amp_recipients(&[sender, recipient], sender);
+        let aad = amp_additional_data(&header, sender, &recipients);
+        let key = derive_channel_message_key(&storage, context, channel, &state, &header)
+            .await
+            .unwrap();
+        let nonce = nonce_from_header(&header);
+        let plaintext = b"amp-secret-payload";
+        let ciphertext = crypto
+            .aes_gcm_encrypt_with_aad(plaintext, &key.0, &nonce, &aad)
+            .await
+            .unwrap();
+
+        let opened = crypto
+            .aes_gcm_decrypt_with_aad(&ciphertext, &key.0, &nonce, &aad)
+            .await
+            .unwrap();
+        assert_eq!(opened, plaintext);
+
+        let wrong_key = [0x55; 32];
+        assert!(crypto
+            .aes_gcm_decrypt_with_aad(&ciphertext, &wrong_key, &nonce, &aad)
+            .await
+            .is_err());
+
+        let mut tampered = ciphertext.clone();
+        tampered[0] ^= 0x80;
+        assert!(crypto
+            .aes_gcm_decrypt_with_aad(&tampered, &key.0, &nonce, &aad)
+            .await
+            .is_err());
+
+        let wrong_aad = amp_additional_data(&header, recipient, &recipients);
+        assert!(crypto
+            .aes_gcm_decrypt_with_aad(&ciphertext, &key.0, &nonce, &wrong_aad)
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn amp_replay_marker_rejects_duplicate_epoch_generation() {
+        let storage_dir = test_paths("replay");
+        let storage =
+            ProductionSecureStorageHandler::filesystem_fallback_for_non_production(storage_dir);
+        let header = AmpHeader {
+            context: ContextId::new_from_entropy([7; 32]),
+            channel: ChannelId::from_bytes([8; 32]),
+            chan_epoch: 2,
+            ratchet_gen: 11,
+        };
+        let sender = AuthorityId::new_from_entropy([9; 32]);
+
+        record_amp_replay_marker(&storage, "amp_recv_replay_markers", &header, sender)
+            .await
+            .unwrap();
+        let err = record_amp_replay_marker(&storage, "amp_recv_replay_markers", &header, sender)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("AMP replay detected"));
+    }
 }

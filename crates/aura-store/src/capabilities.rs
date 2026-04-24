@@ -27,16 +27,19 @@
 //! These types may be migrated to use `aura_core::ResourceScope` in a future
 //! version for consistency with the broader authorization system.
 
+use aura_core::types::scope::{StoragePath, StoragePathError};
 use serde::{Deserialize, Serialize};
 
-fn is_same_or_child_path(candidate: &str, parent: &str) -> bool {
-    let candidate = candidate.trim_matches('/');
-    let parent = parent.trim_matches('/');
-    parent.is_empty()
-        || candidate == parent
-        || candidate
-            .strip_prefix(parent)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+fn namespace_scope_path(namespace: &str) -> Result<StoragePath, StoragePathError> {
+    let trimmed = namespace.trim().trim_end_matches('/');
+    let raw = if trimmed == "*" || trimmed == "/*" {
+        "*".to_string()
+    } else if trimmed.ends_with("/*") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/*")
+    };
+    StoragePath::parse(&raw)
 }
 
 /// Storage capability metadata specifying required access level
@@ -96,7 +99,7 @@ pub enum StorageResource {
     /// Specific content by content ID
     Content(String),
     /// All content in a namespace (path-based scoping)
-    Namespace(String),
+    Namespace(StoragePath),
     /// Global storage access (admin operations)
     Global,
     /// Search index access
@@ -113,7 +116,13 @@ impl StorageResource {
 
     /// Create namespace resource
     pub fn namespace(namespace: &str) -> Self {
-        Self::Namespace(namespace.to_string())
+        Self::try_namespace(namespace)
+            .unwrap_or_else(|error| panic!("invalid namespace scope `{namespace}`: {error}"))
+    }
+
+    /// Create namespace resource with validation.
+    pub fn try_namespace(namespace: &str) -> Result<Self, StoragePathError> {
+        namespace_scope_path(namespace).map(Self::Namespace)
     }
 
     /// Check if this resource covers another resource
@@ -121,11 +130,11 @@ impl StorageResource {
         match (self, other) {
             (StorageResource::Global, _) => true,
             (StorageResource::Namespace(ns1), StorageResource::Content(content_id)) => {
-                is_same_or_child_path(content_id, ns1)
+                StoragePath::parse(content_id)
+                    .map(|path| ns1.covers(&path))
+                    .unwrap_or(false)
             }
-            (StorageResource::Namespace(ns1), StorageResource::Namespace(ns2)) => {
-                is_same_or_child_path(ns2, ns1)
-            }
+            (StorageResource::Namespace(ns1), StorageResource::Namespace(ns2)) => ns1.covers(ns2),
             _ => self == other,
         }
     }
@@ -202,10 +211,18 @@ mod tests {
         let global = StorageResource::Global;
         let namespace = StorageResource::namespace("user/alice");
         let content = StorageResource::content("user/alice/document1");
+        let sibling = StorageResource::content("user/alice2/document1");
 
         assert!(global.covers(&namespace));
         assert!(global.covers(&content));
         assert!(namespace.covers(&content));
+        assert!(!namespace.covers(&sibling));
         assert!(!content.covers(&namespace));
+    }
+
+    #[test]
+    fn namespace_scope_requires_terminal_wildcard_shape() {
+        assert!(StorageResource::try_namespace("user/alice*").is_err());
+        assert!(StorageResource::try_namespace("user/alice/*/extra").is_err());
     }
 }

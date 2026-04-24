@@ -25,6 +25,7 @@ use aura_core::effects::crypto::{
 use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
 };
+use aura_core::secrets::SecretExportContext;
 use std::sync::{Arc, Mutex};
 
 /// Mock crypto handler for deterministic testing
@@ -326,11 +327,15 @@ impl CryptoExtendedEffects for MockCryptoHandler {
             let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key.clone());
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes().map_err(|e| {
-                    aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "key package serialization: {e}"
+                key_packages: vec![key_package
+                    .export_for_secure_storage(SecretExportContext::secure_storage(
+                        "aura-testkit::stateful_effects::generate_signing_keys",
                     ))
-                })?],
+                    .map_err(|e| {
+                        aura_core::effects::crypto::CryptoError::invalid(format!(
+                            "key package serialization: {e}"
+                        ))
+                    })?],
                 public_key_package: public_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
                         "public package serialization: {e}"
@@ -362,7 +367,13 @@ impl CryptoExtendedEffects for MockCryptoHandler {
     ) -> Result<Vec<u8>, CryptoError> {
         match mode {
             SigningMode::SingleSigner => {
-                let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
+                let package = SingleSignerKeyPackage::import_from_secure_storage(
+                    key_package,
+                    SecretExportContext::secure_storage(
+                        "aura-testkit::stateful_effects::sign_with_key",
+                    ),
+                )
+                .map_err(|e| {
                     CryptoError::invalid(format!("Invalid single-signer key package: {e}"))
                 })?;
                 self.ed25519_sign(message, package.signing_key()).await

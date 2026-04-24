@@ -376,6 +376,7 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
         };
         use aura_core::effects::crypto::SigningKeyGenResult;
+        use aura_core::secrets::SecretExportContext;
 
         // Validate basic constraints
         if threshold == 0 {
@@ -397,9 +398,13 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             let public_package = SingleSignerPublicKeyPackage::new(verifying_key);
 
             Ok(SigningKeyGenResult {
-                key_packages: vec![key_package.to_bytes().map_err(|e| {
-                    CryptoError::invalid(format!("key package serialization: {e}"))
-                })?],
+                key_packages: vec![key_package
+                    .export_for_secure_storage(SecretExportContext::secure_storage(
+                        "aura-effects::crypto::generate_signing_keys",
+                    ))
+                    .map_err(|e| {
+                        CryptoError::invalid(format!("key package serialization: {e}"))
+                    })?],
                 public_key_package: public_package.to_bytes().map_err(|e| {
                     CryptoError::invalid(format!("public package serialization: {e}"))
                 })?,
@@ -450,11 +455,16 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         mode: aura_core::effects::crypto::SigningMode,
     ) -> Result<Vec<u8>, CryptoError> {
         use aura_core::crypto::single_signer::{SigningMode, SingleSignerKeyPackage};
+        use aura_core::secrets::SecretExportContext;
 
         match mode {
             SigningMode::SingleSigner => {
                 // Deserialize and sign with Ed25519
-                let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
+                let package = SingleSignerKeyPackage::import_from_secure_storage(
+                    key_package,
+                    SecretExportContext::secure_storage("aura-effects::crypto::sign_with_key"),
+                )
+                .map_err(|e| {
                     CryptoError::invalid(format!("Invalid single-signer key package: {e}"))
                 })?;
 
@@ -896,6 +906,30 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             .map_err(|e| CryptoError::invalid(format!("AES-GCM encryption failed: {e}")))
     }
 
+    async fn aes_gcm_encrypt_with_aad(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        use aes_gcm::aead::{Aead, Payload};
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+
+        let cipher = Aes256Gcm::new(key.into());
+        let nonce = Nonce::from_slice(nonce);
+
+        cipher
+            .encrypt(
+                nonce,
+                Payload {
+                    msg: plaintext,
+                    aad,
+                },
+            )
+            .map_err(|e| CryptoError::invalid(format!("AES-GCM encryption failed: {e}")))
+    }
+
     async fn aes_gcm_decrypt(
         &self,
         ciphertext: &[u8],
@@ -910,6 +944,30 @@ impl CryptoExtendedEffects for RealCryptoHandler {
 
         cipher
             .decrypt(nonce, ciphertext)
+            .map_err(|e| CryptoError::invalid(format!("AES-GCM decryption failed: {e}")))
+    }
+
+    async fn aes_gcm_decrypt_with_aad(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        use aes_gcm::aead::{Aead, Payload};
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+
+        let cipher = Aes256Gcm::new(key.into());
+        let nonce = Nonce::from_slice(nonce);
+
+        cipher
+            .decrypt(
+                nonce,
+                Payload {
+                    msg: ciphertext,
+                    aad,
+                },
+            )
             .map_err(|e| CryptoError::invalid(format!("AES-GCM decryption failed: {e}")))
     }
 
@@ -1244,9 +1302,13 @@ mod single_signer_tests {
         assert!(!keys.public_key_package.is_empty());
 
         // Verify the key package can be deserialized
-        let key_pkg = aura_core::crypto::single_signer::SingleSignerKeyPackage::from_bytes(
-            &keys.key_packages[0],
-        );
+        let key_pkg =
+            aura_core::crypto::single_signer::SingleSignerKeyPackage::import_from_secure_storage(
+                &keys.key_packages[0],
+                aura_core::secrets::SecretExportContext::secure_storage(
+                    "aura-effects::crypto::tests::generate_signing_keys",
+                ),
+            );
         assert!(key_pkg.is_ok(), "Key package should deserialize");
         let key_pkg = key_pkg.unwrap();
         assert_eq!(key_pkg.signing_key().len(), 32);

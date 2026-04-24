@@ -92,7 +92,7 @@ just check-arch
 | Supported operations don't match registry | `src/adapters/mod.rs` (inline) | Covered |
 | View delta compaction loses deltas | `src/view_delta.rs` (inline) | Covered |
 | Reducer dispatch to wrong handler | `src/view_delta.rs` (inline) | Covered |
-| HandlerContext operation_id non-deterministic | `src/registry.rs` (inline) | Covered |
+| HandlerContext fresh operation/session ids and deterministic test constructor split | `src/registry.rs` (inline) | Covered |
 
 ## References
 

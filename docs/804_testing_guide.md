@@ -40,6 +40,14 @@ Use this lane matrix when selecting harness mode.
 
 All shared flows should use typed scenario primitives, typed semantic command submission, and structured snapshot and readiness waits.
 
+Native TUI harness IPC is part of that shared compatibility surface now. In
+explicit harness mode the command socket and semantic snapshot mirrors are
+scoped under `AURA_HARNESS_INSTANCE_TRANSIENT_ROOT`, and command submission
+must authenticate with the per-run `AURA_HARNESS_RUN_TOKEN`. Setting
+`AURA_TUI_COMMAND_SOCKET`, `AURA_TUI_UI_STATE_SOCKET`, or
+`AURA_TUI_UI_STATE_FILE` outside explicit harness mode must stay inert or fail
+closed; those env vars are not a production backdoor.
+
 Shared-semantic preflight is intentionally stricter than generic backend startup. A run config that includes SSH instances does not automatically qualify for the shared semantic lane. Until a backend implements the shared semantic contract, SSH remains diagnostic-only for harness purposes. Shared-semantic scenarios must fail closed before execution.
 
 For SSH-backed diagnostic runs, remote artifact capture now has two explicit modes. When `ssh_dry_run = true`, the harness records a simulated sync summary only. When `ssh_dry_run = false`, the harness copies `logs/` from the instance's `remote_workdir` back into the local artifact bundle under `remote/<instance-id>/logs/` using `scp`, then records the copied file manifest and checksums in the per-instance sync summary plus `remote_artifact_sync.json`. Use `require_remote_artifact_sync = true` when the run should fail closed if that SSH artifact copy does not complete.

@@ -10,6 +10,7 @@ use aura_app::ui::workflows::settings as settings_workflows;
 use aura_app::ui::workflows::system as system_workflows;
 use aura_app::{dual_frontend_web_demo_shortcuts, DUAL_FRONTEND_DEMO_WEB_TABLET_NAME};
 use aura_app::{AppConfig, AppCore};
+use aura_core::effects::ExecutionMode;
 use aura_core::types::identifiers::AuthorityId;
 use aura_ui::UiController;
 use dioxus::prelude::{Signal, WritableExt};
@@ -351,7 +352,8 @@ async fn shutdown_previous_bootstrap_generation(previous: Option<BootstrapState>
     };
 
     let authority_id = agent.authority_id();
-    let effect_context = aura_agent::EffectContext::with_authority(authority_id);
+    let effect_context =
+        aura_agent::EffectContext::with_default_context(authority_id, ExecutionMode::Production);
     let mut agent = agent;
     for attempt in 1..=8 {
         match Arc::try_unwrap(agent) {

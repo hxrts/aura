@@ -59,8 +59,9 @@ pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 pub use session::verify_session_ticket;
 pub use transcript::{
     encode_transcript, sign_ed25519_transcript, threshold_signing_context_transcript_bytes,
-    verify_ed25519_transcript, verify_frost_transcript,
-    verify_threshold_signing_context_transcript, SecurityTranscript, TranscriptEnvelope,
+    verify_ed25519_threshold_signing_context_transcript, verify_ed25519_transcript,
+    verify_frost_transcript, verify_threshold_signing_context_transcript, SecurityTranscript,
+    TranscriptEnvelope,
 };
 
 // Re-export identity validation functions
@@ -162,19 +163,87 @@ fn verified_identity(proof: &IdentityProof, message: &[u8]) -> VerifiedIdentity 
     }
 }
 
-fn threshold_signer_requirement(threshold_sig: &ThresholdSig) -> Result<u16> {
-    let signer_count = u16::try_from(threshold_sig.signers.len()).map_err(|_| {
-        AuthenticationError::InvalidThresholdSignature {
-            details: "threshold signer set exceeds supported size".to_string(),
-        }
-    })?;
+/// Trusted threshold verification material for one account.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThresholdGroupKey {
+    /// Group public key package resolved from trusted local state.
+    pub public_key_package: aura_core::frost::PublicKeyPackage,
+    /// Required threshold for this signer set.
+    pub required_threshold: u16,
+    /// Trusted authority-to-FROST participant mapping.
+    pub signer_membership: std::collections::HashMap<aura_core::AuthorityId, u16>,
+}
 
-    if signer_count == 0 {
-        Err(AuthenticationError::InvalidThresholdSignature {
-            details: "threshold signature requires at least one signer".to_string(),
+impl ThresholdGroupKey {
+    /// Create threshold verification material with membership validation.
+    pub fn new(
+        public_key_package: aura_core::frost::PublicKeyPackage,
+        required_threshold: u16,
+        participants: impl IntoIterator<Item = ThresholdParticipant>,
+    ) -> Result<Self> {
+        if required_threshold == 0 {
+            return Err(AuthenticationError::InvalidThresholdSignature {
+                details: "threshold signer policy must require at least one signer".to_string(),
+            });
+        }
+
+        let mut signer_membership = std::collections::HashMap::new();
+        for participant in participants {
+            if !public_key_package
+                .signer_public_keys
+                .contains_key(&participant.signer_index)
+            {
+                return Err(AuthenticationError::InvalidThresholdSignature {
+                    details: format!(
+                        "unknown signer index {} for authority {}",
+                        participant.signer_index, participant.authority_id
+                    ),
+                });
+            }
+
+            if signer_membership
+                .insert(participant.authority_id, participant.signer_index)
+                .is_some()
+            {
+                return Err(AuthenticationError::InvalidThresholdSignature {
+                    details: format!(
+                        "duplicate authority in threshold membership: {}",
+                        participant.authority_id
+                    ),
+                });
+            }
+        }
+
+        let participant_count = u16::try_from(signer_membership.len()).map_err(|_| {
+            AuthenticationError::InvalidThresholdSignature {
+                details: "threshold membership exceeds supported size".to_string(),
+            }
+        })?;
+
+        if participant_count < required_threshold {
+            return Err(AuthenticationError::InvalidThresholdSignature {
+                details: format!(
+                    "threshold policy requires {required_threshold} signers but only {participant_count} are enrolled"
+                ),
+            });
+        }
+
+        let mut signer_indices = signer_membership.values().copied().collect::<Vec<_>>();
+        signer_indices.sort_unstable();
+        if signer_indices
+            .windows(2)
+            .any(|window| window[0] == window[1])
+        {
+            return Err(AuthenticationError::InvalidThresholdSignature {
+                details: "duplicate signer index in trusted threshold membership".to_string(),
+            });
+        }
+
+        Ok(Self {
+            public_key_package,
+            required_threshold,
+            signer_membership,
         })
-    } else {
-        Ok(signer_count)
     }
 }
 
@@ -198,8 +267,8 @@ pub struct KeyMaterial {
     /// Guardian public keys indexed by GuardianId
     guardian_keys: std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
 
-    /// Group public keys for threshold verification indexed by AccountId
-    group_keys: std::collections::HashMap<aura_core::AccountId, aura_core::Ed25519VerifyingKey>,
+    /// Trusted threshold verification material indexed by AccountId
+    group_keys: std::collections::HashMap<aura_core::AccountId, ThresholdGroupKey>,
 }
 
 impl KeyMaterial {
@@ -258,7 +327,7 @@ impl KeyMaterial {
     pub fn get_group_public_key(
         &self,
         account_id: &aura_core::AccountId,
-    ) -> Result<&Ed25519VerifyingKey> {
+    ) -> Result<&ThresholdGroupKey> {
         get_key(&self.group_keys, account_id, || {
             AuthenticationError::InvalidThresholdSignature {
                 details: format!("No group key for account: {account_id}"),
@@ -270,7 +339,7 @@ impl KeyMaterial {
     pub fn add_group_key(
         &mut self,
         account_id: aura_core::AccountId,
-        group_key: Ed25519VerifyingKey,
+        group_key: ThresholdGroupKey,
     ) {
         insert_key(&mut self.group_keys, account_id, group_key);
     }
@@ -305,12 +374,23 @@ pub enum IdentityProof {
 /// Threshold signature structure
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ThresholdSig {
-    /// The aggregated Ed25519 signature
-    pub signature: Ed25519Signature,
-    /// Indices of participants that participated in signing
-    pub signers: Vec<u8>,
-    /// Individual signature shares (for auditing)
-    pub signature_shares: Vec<Vec<u8>>,
+    /// The aggregated FROST threshold signature.
+    pub aggregate_signature: aura_core::frost::ThresholdSignature,
+    /// Claimed participating authorities and their FROST participant indices.
+    pub participants: Vec<ThresholdParticipant>,
+    /// The signer nonce commitments that bind FROST factors for this transcript.
+    pub commitments: Vec<aura_core::frost::NonceCommitment>,
+    /// Individual FROST signature shares used to build the aggregate signature.
+    pub signature_shares: Vec<aura_core::frost::PartialSignature>,
+}
+
+/// Claimed signer identity for a threshold proof.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ThresholdParticipant {
+    /// Authority identity expected by higher-layer policy.
+    pub authority_id: aura_core::AuthorityId,
+    /// FROST participant identifier used in the cryptographic evidence.
+    pub signer_index: u16,
 }
 
 /// Verified identity after successful authentication
@@ -366,7 +446,7 @@ impl SimpleIdentityVerifier {
     pub fn add_group_key(
         &mut self,
         account_id: aura_core::AccountId,
-        group_key: Ed25519VerifyingKey,
+        group_key: ThresholdGroupKey,
     ) {
         self.key_material.add_group_key(account_id, group_key);
     }
@@ -399,13 +479,12 @@ impl SimpleIdentityVerifier {
             IdentityProof::Threshold(threshold_sig) => {
                 let message = account_id.0.as_bytes();
                 let group_key = self.key_material.get_group_public_key(&account_id)?;
-                let required_threshold = threshold_signer_requirement(threshold_sig)?;
 
                 validate_threshold_signature_event(
                     threshold_sig,
                     message,
                     group_key,
-                    required_threshold,
+                    group_key.required_threshold,
                 )?;
                 Ok(verified_identity(proof, message))
             }
@@ -453,6 +532,9 @@ impl Default for SimpleIdentityVerifier {
 mod tests {
     use super::*;
     use aura_core::crypto::ed25519::Ed25519SigningKey;
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::SeedableRng;
+    use std::collections::BTreeMap;
 
     fn authority_id(seed: u8) -> aura_core::AuthorityId {
         aura_core::AuthorityId::new_from_entropy([seed; 32])
@@ -471,6 +553,107 @@ mod tests {
         let verifying_key = signing_key.verifying_key().unwrap();
         let signature = signing_key.sign(message).unwrap();
         (signature, verifying_key)
+    }
+
+    fn threshold_fixture(
+        account_id: aura_core::AccountId,
+        authorities: [aura_core::AuthorityId; 2],
+    ) -> (ThresholdGroupKey, ThresholdSig) {
+        let message = account_id.0.as_bytes();
+        let mut rng = ChaCha20Rng::from_seed([31u8; 32]);
+        let (secret_shares, frost_group_public_key) = frost_ed25519::keys::generate_with_dealer(
+            2,
+            2,
+            frost_ed25519::keys::IdentifierList::Default,
+            &mut rng,
+        )
+        .expect("dealer key generation should succeed");
+
+        let key_packages = secret_shares
+            .into_values()
+            .map(|secret_share| {
+                frost_ed25519::keys::KeyPackage::try_from(secret_share)
+                    .expect("secret share should convert to key package")
+            })
+            .collect::<Vec<_>>();
+
+        let mut commitments = BTreeMap::new();
+        let mut signing_inputs = Vec::new();
+        let mut participants = Vec::new();
+        for (index, key_package) in key_packages.into_iter().enumerate() {
+            let signer = u16::from_be_bytes([0, key_package.identifier().serialize()[0]]);
+            let authority_id = authorities[index];
+            let (nonces, signing_commitments) =
+                frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
+            commitments.insert(
+                signer,
+                aura_core::frost::NonceCommitment {
+                    signer,
+                    commitment: signing_commitments
+                        .serialize()
+                        .expect("signing commitments should serialize"),
+                },
+            );
+            participants.push(ThresholdParticipant {
+                authority_id,
+                signer_index: signer,
+            });
+            signing_inputs.push((key_package, nonces));
+        }
+
+        let frost_commitments = commitments
+            .iter()
+            .map(|(signer, commitment)| {
+                let frost_signer = frost_ed25519::Identifier::try_from(*signer)
+                    .expect("signer should convert to FROST identifier");
+                let frost_commitment = commitment
+                    .to_frost()
+                    .expect("commitment should deserialize");
+                (frost_signer, frost_commitment)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let signing_package = frost_ed25519::SigningPackage::new(frost_commitments, message);
+
+        let signature_shares = signing_inputs
+            .into_iter()
+            .map(|(key_package, nonces)| {
+                let signature_share =
+                    frost_ed25519::round2::sign(&signing_package, &nonces, &key_package)
+                        .expect("partial signature should be created");
+                aura_core::frost::PartialSignature::from_frost(
+                    *key_package.identifier(),
+                    signature_share,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let aggregate_signature = aura_core::crypto::tree_signing::frost_aggregate(
+            &signature_shares,
+            message,
+            &commitments,
+            &frost_group_public_key,
+        )
+        .expect("partial signatures should aggregate");
+
+        let group_key = ThresholdGroupKey::new(
+            aura_core::frost::PublicKeyPackage::from(frost_group_public_key),
+            2,
+            participants.clone(),
+        )
+        .expect("trusted threshold group key should build");
+
+        (
+            group_key,
+            ThresholdSig {
+                aggregate_signature: aura_core::frost::ThresholdSignature::new(
+                    aggregate_signature,
+                    signature_shares.iter().map(|share| share.signer).collect(),
+                ),
+                participants,
+                commitments: commitments.into_values().collect(),
+                signature_shares,
+            },
+        )
     }
 
     #[test]
@@ -533,13 +716,19 @@ mod tests {
     fn threshold_signature_requires_nonempty_signers() {
         let mut verifier = SimpleIdentityVerifier::new();
         let account_id = account_id(4);
-        let message = account_id.0.as_bytes();
-        let (signature, verifying_key) = signing_material(21, message);
-        verifier.add_group_key(account_id, verifying_key);
+        let authority_a = authority_id(21);
+        let authority_b = authority_id(22);
+        let (group_key, mut threshold_sig) =
+            threshold_fixture(account_id, [authority_a, authority_b]);
+        threshold_sig.participants.clear();
+        threshold_sig.commitments.clear();
+        threshold_sig.signature_shares.clear();
+        verifier.add_group_key(account_id, group_key);
         let proof = IdentityProof::Threshold(ThresholdSig {
-            signature,
-            signers: Vec::new(),
-            signature_shares: Vec::new(),
+            aggregate_signature: threshold_sig.aggregate_signature,
+            participants: threshold_sig.participants,
+            commitments: threshold_sig.commitments,
+            signature_shares: threshold_sig.signature_shares,
         });
 
         let result = verifier.verify_threshold_signature(&proof, account_id);
@@ -556,13 +745,11 @@ mod tests {
         let mut verifier = SimpleIdentityVerifier::new();
         let account_id = account_id(5);
         let message = account_id.0.as_bytes();
-        let (signature, verifying_key) = signing_material(22, message);
-        verifier.add_group_key(account_id, verifying_key);
-        let proof = IdentityProof::Threshold(ThresholdSig {
-            signature,
-            signers: vec![1],
-            signature_shares: Vec::new(),
-        });
+        let authority_a = authority_id(23);
+        let authority_b = authority_id(24);
+        let (group_key, threshold_sig) = threshold_fixture(account_id, [authority_a, authority_b]);
+        verifier.add_group_key(account_id, group_key);
+        let proof = IdentityProof::Threshold(threshold_sig);
 
         let verified = verifier
             .verify_threshold_signature(&proof, account_id)

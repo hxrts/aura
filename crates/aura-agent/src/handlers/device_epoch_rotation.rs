@@ -21,16 +21,22 @@ use aura_core::tree::LeafRole;
 use aura_core::types::identifiers::CeremonyId;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
-    hash, AttestedOp, AuthorityId, ContextId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp,
+    hash, AttestedOp, AuthorityId, DeviceId, Hash32, LeafId, LeafNode, NodeIndex, TreeOp,
+    TrustedKeyDomain, TrustedPublicKey,
 };
 use aura_protocol::effects::{ChoreographicRole, RoleIndex, TreeEffects};
 use aura_protocol::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata,
 };
-use aura_sync::protocols::{
-    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochProposal, DeviceEpochRotationKind,
+use aura_sync::protocols::device_epoch_rotation::{
+    decrypt_device_epoch_key_package, device_epoch_commit_attested_op_hash,
+    device_epoch_proposal_hash, encrypt_device_epoch_key_package,
+    verify_device_epoch_authority_signature, verify_device_epoch_proposal_hashes,
+    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochCommitTranscript, DeviceEpochProposal,
+    DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage,
 };
+use aura_sync::protocols::DeviceEpochRotationKind;
 use std::{collections::BTreeMap, fmt};
 use uuid::Uuid;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -39,6 +45,8 @@ const PROTOCOL_ID: &str = "aura.sync.device_epoch_rotation";
 const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
+const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
+const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
 
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DeviceEpochRotationInitRequest {
@@ -125,17 +133,9 @@ impl DeviceEpochRotationService {
             aura_sync::protocols::device_epoch_rotation::telltale_session_types_device_epoch_rotation::vm_artifacts::global_type();
         let local_types =
             aura_sync::protocols::device_epoch_rotation::telltale_session_types_device_epoch_rotation::vm_artifacts::local_types();
-        let proposal = DeviceEpochProposal {
-            ceremony_id: request.ceremony_id.clone(),
-            kind: request.kind,
-            subject_authority: self.authority_id,
-            pending_epoch: request.pending_epoch,
-            initiator_device_id,
-            participant_device_id: request.participant_device_id,
-            key_package: request.key_package.clone(),
-            threshold_config: request.threshold_config.clone(),
-            public_key_package: request.public_key_package.clone(),
-        };
+        let proposal = self
+            .build_signed_proposal(&request, initiator_device_id)
+            .await?;
 
         let mut session = open_owned_manifest_vm_session_admitted(
             self.effects.clone(),
@@ -161,7 +161,8 @@ impl DeviceEpochRotationService {
             if let Some(blocked) = round.blocked_receive {
                 let decoded: DeviceEpochAcceptance =
                     from_slice(&blocked.payload).map_err(map_decode_error)?;
-                let verified_acceptance = verified_device_epoch_acceptance(&request, decoded)?;
+                let verified_acceptance =
+                    verified_device_epoch_acceptance(&request, &proposal, decoded)?;
                 acceptance = Some(verified_acceptance.clone());
                 let threshold_reached = self
                     .ceremony_runner
@@ -179,7 +180,7 @@ impl DeviceEpochRotationService {
                     .map_err(map_internal_error)?;
 
                 let commit = if threshold_reached {
-                    self.coordinate_commit(&request).await?
+                    self.coordinate_commit(&request, &proposal).await?
                 } else {
                     self.wait_for_commit(&request.ceremony_id).await?
                 };
@@ -201,6 +202,271 @@ impl DeviceEpochRotationService {
             self.record_native_session(session_uuid).await;
         }
 
+        Ok(())
+    }
+
+    async fn build_signed_proposal(
+        &self,
+        request: &DeviceEpochRotationInitRequest,
+        initiator_device_id: DeviceId,
+    ) -> AgentResult<DeviceEpochProposal> {
+        let proposed_at_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(map_internal_error)?
+            .ts_ms;
+        let recipient_public_key = self
+            .resolve_device_leaf_public_key(request.participant_device_id)
+            .await?;
+        let mut proposal = DeviceEpochProposal {
+            ceremony_id: request.ceremony_id.clone(),
+            kind: request.kind,
+            subject_authority: self.authority_id,
+            pending_epoch: request.pending_epoch,
+            initiator_device_id,
+            participant_device_id: request.participant_device_id,
+            key_package_hash: Hash32::from_bytes(&request.key_package),
+            threshold_config_hash: Hash32::from_bytes(&request.threshold_config),
+            public_key_package_hash: Hash32::from_bytes(&request.public_key_package),
+            proposed_at_ms,
+            authority_signature: aura_core::threshold::ThresholdSignature::single_signer(
+                Vec::new(),
+                Vec::new(),
+                0,
+            ),
+            encrypted_key_package: EncryptedDeviceEpochKeyPackage {
+                protocol_version: 1,
+                recipient_device_id: request.participant_device_id,
+                recipient_public_key: recipient_public_key.clone(),
+                ephemeral_public_key: Vec::new(),
+                nonce: [0u8; 12],
+                ciphertext: Vec::new(),
+                binding_hash: Hash32::from_bytes(&[]),
+            },
+            threshold_config: request.threshold_config.clone(),
+            public_key_package: request.public_key_package.clone(),
+        };
+        proposal.encrypted_key_package = encrypt_device_epoch_key_package(
+            self.effects.as_ref(),
+            &proposal,
+            &recipient_public_key,
+            &request.key_package,
+        )
+        .await
+        .map_err(map_internal_error)?;
+        let transcript = DeviceEpochProposalTranscript::new(&proposal);
+        proposal.authority_signature = self
+            .sign_authority_transcript(PROPOSAL_SIGNING_DOMAIN, &transcript)
+            .await?;
+        Ok(proposal)
+    }
+
+    async fn build_signed_commit(
+        &self,
+        proposal: &DeviceEpochProposal,
+        attested_leaf_op: Option<AttestedOp>,
+    ) -> AgentResult<DeviceEpochCommit> {
+        let committed_at_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(map_internal_error)?
+            .ts_ms;
+        let mut commit = DeviceEpochCommit {
+            ceremony_id: proposal.ceremony_id.clone(),
+            new_epoch: proposal.pending_epoch,
+            proposal_hash: device_epoch_proposal_hash(proposal).map_err(map_internal_error)?,
+            committed_at_ms,
+            attested_leaf_op_hash: None,
+            authority_signature: aura_core::threshold::ThresholdSignature::single_signer(
+                Vec::new(),
+                Vec::new(),
+                0,
+            ),
+            attested_leaf_op,
+        };
+        commit.attested_leaf_op_hash =
+            device_epoch_commit_attested_op_hash(&commit).map_err(map_internal_error)?;
+        let transcript = DeviceEpochCommitTranscript::new(&commit);
+        commit.authority_signature = self
+            .sign_authority_transcript(COMMIT_SIGNING_DOMAIN, &transcript)
+            .await?;
+        Ok(commit)
+    }
+
+    async fn sign_authority_transcript<T: aura_signature::SecurityTranscript + ?Sized>(
+        &self,
+        domain: &str,
+        transcript: &T,
+    ) -> AgentResult<aura_core::threshold::ThresholdSignature> {
+        let payload = transcript.transcript_bytes().map_err(map_internal_error)?;
+        self.signing_service
+            .sign(SigningContext::message(
+                self.authority_id,
+                domain.to_string(),
+                payload,
+            ))
+            .await
+            .map_err(map_internal_error)
+    }
+
+    async fn current_authority_signature_material(&self) -> AgentResult<(u64, TrustedPublicKey)> {
+        let state = self
+            .signing_service
+            .threshold_state(&self.authority_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::internal(
+                    "missing current authority threshold state for device epoch rotation",
+                )
+            })?;
+        let public_key_package = self
+            .signing_service
+            .public_key_package(&self.authority_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::internal(
+                    "missing current authority public key package for device epoch rotation",
+                )
+            })?;
+        let trusted_key = TrustedPublicKey::active(
+            TrustedKeyDomain::AuthorityThreshold,
+            Some(state.epoch),
+            public_key_package.clone(),
+            Hash32::from_bytes(&public_key_package),
+        );
+        Ok((state.epoch, trusted_key))
+    }
+
+    async fn verify_device_epoch_proposal(
+        &self,
+        proposal: &DeviceEpochProposal,
+        initiator_device_id: DeviceId,
+        expected_session_uuid: Uuid,
+    ) -> AgentResult<()> {
+        if proposal.subject_authority != self.authority_id {
+            return Err(AgentError::invalid(format!(
+                "device epoch proposal authority mismatch: expected {}, got {}",
+                self.authority_id, proposal.subject_authority
+            )));
+        }
+        if proposal.initiator_device_id != initiator_device_id {
+            return Err(AgentError::invalid(format!(
+                "device epoch proposal initiator mismatch: expected {}, got {}",
+                initiator_device_id, proposal.initiator_device_id
+            )));
+        }
+        if proposal.participant_device_id != self.effects.device_id() {
+            return Err(AgentError::invalid(format!(
+                "device epoch proposal participant mismatch: expected {}, got {}",
+                self.effects.device_id(),
+                proposal.participant_device_id
+            )));
+        }
+        let local_device_public_key = self
+            .resolve_device_leaf_public_key(self.effects.device_id())
+            .await?;
+        if proposal.encrypted_key_package.recipient_public_key != local_device_public_key {
+            return Err(AgentError::invalid(
+                "device epoch proposal recipient key does not match the enrolled device key"
+                    .to_string(),
+            ));
+        }
+        if device_epoch_rotation_session_id(&proposal.ceremony_id, proposal.participant_device_id)
+            != expected_session_uuid
+        {
+            return Err(AgentError::invalid(
+                "device epoch proposal ceremony/session binding mismatch".to_string(),
+            ));
+        }
+        if !verify_device_epoch_proposal_hashes(proposal) {
+            return Err(AgentError::invalid(
+                "device epoch proposal hashes do not match key material".to_string(),
+            ));
+        }
+        let current_tree_state = self
+            .effects
+            .get_current_state()
+            .await
+            .map_err(map_internal_error)?;
+        if proposal.pending_epoch <= current_tree_state.epoch.value() {
+            return Err(AgentError::invalid(format!(
+                "device epoch proposal pending epoch {} must advance past current epoch {}",
+                proposal.pending_epoch,
+                current_tree_state.epoch.value()
+            )));
+        }
+
+        let (expected_epoch, trusted_public_key_package) =
+            self.current_authority_signature_material().await?;
+        let verified: bool = verify_device_epoch_authority_signature::<AuraEffectSystem, _>(
+            self.effects.as_ref(),
+            self.authority_id,
+            PROPOSAL_SIGNING_DOMAIN,
+            &DeviceEpochProposalTranscript::new(proposal),
+            &proposal.authority_signature,
+            &trusted_public_key_package,
+            expected_epoch,
+        )
+        .await
+        .map_err(map_internal_error)?;
+        if !verified {
+            return Err(AgentError::invalid(
+                "device epoch proposal authority signature verification failed".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn verify_device_epoch_commit(
+        &self,
+        proposal: &DeviceEpochProposal,
+        commit: &DeviceEpochCommit,
+    ) -> AgentResult<()> {
+        if commit.ceremony_id != proposal.ceremony_id {
+            return Err(AgentError::invalid(
+                "device epoch commit ceremony id mismatch".to_string(),
+            ));
+        }
+        if commit.new_epoch != proposal.pending_epoch {
+            return Err(AgentError::invalid(
+                "device epoch commit pending epoch mismatch".to_string(),
+            ));
+        }
+        if commit.proposal_hash
+            != device_epoch_proposal_hash(proposal).map_err(map_internal_error)?
+        {
+            return Err(AgentError::invalid(
+                "device epoch commit proposal hash mismatch".to_string(),
+            ));
+        }
+        if commit.attested_leaf_op_hash
+            != device_epoch_commit_attested_op_hash(commit).map_err(map_internal_error)?
+        {
+            return Err(AgentError::invalid(
+                "device epoch commit attested-op hash mismatch".to_string(),
+            ));
+        }
+
+        let (expected_epoch, trusted_public_key_package) =
+            self.current_authority_signature_material().await?;
+        let verified: bool = verify_device_epoch_authority_signature::<AuraEffectSystem, _>(
+            self.effects.as_ref(),
+            self.authority_id,
+            COMMIT_SIGNING_DOMAIN,
+            &DeviceEpochCommitTranscript::new(commit),
+            &commit.authority_signature,
+            &trusted_public_key_package,
+            expected_epoch,
+        )
+        .await
+        .map_err(map_internal_error)?;
+        if !verified {
+            return Err(AgentError::invalid(
+                "device epoch commit authority signature verification failed".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -274,7 +540,7 @@ impl DeviceEpochRotationService {
         })?;
         self.effects.requeue_envelope(envelope);
 
-        let mut staged_proposal: Option<DeviceEpochProposal> = None;
+        let staged_proposal: Option<DeviceEpochProposal> = None;
 
         loop {
             let round = session
@@ -286,17 +552,20 @@ impl DeviceEpochRotationService {
                 if staged_proposal.is_none() {
                     let proposal: DeviceEpochProposal =
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
+                    self.verify_device_epoch_proposal(&proposal, initiator_device_id, session_uuid)
+                        .await?;
                     self.stage_proposal(&proposal).await?;
-                    let acceptance = DeviceEpochAcceptance {
-                        ceremony_id: proposal.ceremony_id.clone(),
-                        acceptor_device_id: participant_device_id,
-                    };
-                    session.queue_send_bytes(to_vec(&acceptance).map_err(map_encode_error)?);
-                    staged_proposal = Some(proposal);
+                    let _ = session.close().await;
+                    return Err(AgentError::internal(
+                        "device epoch acceptance requires signed participant device proof; unsigned acceptances are disabled".to_string(),
+                    ));
                 } else {
                     let commit: DeviceEpochCommit =
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
-                    self.apply_commit(&commit).await?;
+                    let proposal = staged_proposal
+                        .as_ref()
+                        .ok_or_else(|| AgentError::internal("missing staged proposal"))?;
+                    self.apply_commit(proposal, &commit).await?;
                     self.record_native_session(session_uuid).await;
                 }
                 session
@@ -320,27 +589,19 @@ impl DeviceEpochRotationService {
     async fn coordinate_commit(
         &self,
         request: &DeviceEpochRotationInitRequest,
+        proposal: &DeviceEpochProposal,
     ) -> AgentResult<DeviceEpochCommit> {
         let commit = match request.kind {
             DeviceEpochRotationKind::Enrollment => {
                 let attested_leaf_op = self.finalize_enrollment(&request.ceremony_id).await?;
-                self.commit_local_rotation(&request.ceremony_id).await?;
-                DeviceEpochCommit {
-                    ceremony_id: request.ceremony_id.clone(),
-                    new_epoch: request.pending_epoch,
-                    attested_leaf_op,
-                }
+                self.build_signed_commit(proposal, attested_leaf_op).await?
             }
             DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
-                self.commit_local_rotation(&request.ceremony_id).await?;
-                DeviceEpochCommit {
-                    ceremony_id: request.ceremony_id.clone(),
-                    new_epoch: request.pending_epoch,
-                    attested_leaf_op: None,
-                }
+                self.build_signed_commit(proposal, None).await?
             }
         };
 
+        self.commit_local_rotation(&request.ceremony_id).await?;
         self.store_commit(&commit).await?;
         self.ceremony_runner
             .commit(&request.ceremony_id, CeremonyCommitMetadata::default())
@@ -396,6 +657,22 @@ impl DeviceEpochRotationService {
 
     async fn stage_proposal(&self, proposal: &DeviceEpochProposal) -> AgentResult<()> {
         let participant = ParticipantIdentity::device(self.effects.device_id());
+        let recipient_public_key = self
+            .resolve_device_leaf_public_key(self.effects.device_id())
+            .await?;
+        let recipient_private_key = self
+            .signing_service
+            .current_local_key_agreement_secret(&self.authority_id)
+            .await
+            .map_err(map_internal_error)?;
+        let key_package = decrypt_device_epoch_key_package(
+            self.effects.as_ref(),
+            proposal,
+            &recipient_public_key,
+            &recipient_private_key,
+        )
+        .await
+        .map_err(map_internal_error)?;
         let location = SecureStorageLocation::with_sub_key(
             "participant_shares",
             format!("{}:{}", proposal.subject_authority, proposal.pending_epoch),
@@ -405,7 +682,7 @@ impl DeviceEpochRotationService {
         self.effects
             .secure_store(
                 &location,
-                &proposal.key_package,
+                &key_package,
                 &[
                     SecureStorageCapability::Read,
                     SecureStorageCapability::Write,
@@ -451,7 +728,12 @@ impl DeviceEpochRotationService {
         Ok(())
     }
 
-    async fn apply_commit(&self, commit: &DeviceEpochCommit) -> AgentResult<()> {
+    async fn apply_commit(
+        &self,
+        proposal: &DeviceEpochProposal,
+        commit: &DeviceEpochCommit,
+    ) -> AgentResult<()> {
+        self.verify_device_epoch_commit(proposal, commit).await?;
         if let Some(attested_op) = commit.attested_leaf_op.clone() {
             self.effects
                 .apply_attested_op(attested_op)
@@ -632,6 +914,25 @@ impl DeviceEpochRotationService {
             .record_native_session(self.authority_id, session_id)
             .await;
     }
+
+    async fn resolve_device_leaf_public_key(&self, device_id: DeviceId) -> AgentResult<Vec<u8>> {
+        let tree_state = self
+            .effects
+            .get_current_state()
+            .await
+            .map_err(map_internal_error)?;
+        tree_state
+            .leaves
+            .values()
+            .find(|leaf| leaf.role == LeafRole::Device && leaf.device_id == device_id)
+            .map(|leaf| Vec::from(&leaf.public_key))
+            .ok_or_else(|| {
+                AgentError::invalid(format!(
+                    "missing enrolled device leaf public key for {}",
+                    device_id
+                ))
+            })
+    }
 }
 
 fn role(authority_id: AuthorityId, device_id: DeviceId, role_index: u16) -> ChoreographicRole {
@@ -695,68 +996,15 @@ fn envelope_source_device_id(envelope: &TransportEnvelope) -> AgentResult<Device
     source.parse().map_err(map_internal_error)
 }
 
-fn device_epoch_acceptance_context(ceremony_id: &CeremonyId) -> ContextId {
-    ContextId::new_from_entropy(hash::hash(ceremony_id.to_string().as_bytes()))
-}
-
 fn verified_device_epoch_acceptance(
     request: &DeviceEpochRotationInitRequest,
+    proposal: &DeviceEpochProposal,
     acceptance: DeviceEpochAcceptance,
 ) -> AgentResult<VerifiedIngress<DeviceEpochAcceptance>> {
-    let payload_hash = aura_core::Hash32::from_value(&acceptance)
-        .map_err(|error| AgentError::internal(format!("hash device epoch acceptance: {error}")))?;
-    let metadata = VerifiedIngressMetadata::new(
-        IngressSource::Device(acceptance.acceptor_device_id),
-        device_epoch_acceptance_context(&request.ceremony_id),
-        None,
-        payload_hash,
-        1,
-    );
-    let decoded = DecodedIngress::new(acceptance, metadata.clone());
-    let evidence = IngressVerificationEvidence::builder(metadata)
-        .peer_identity(
-            decoded.payload().acceptor_device_id == request.participant_device_id,
-            "device epoch acceptance must come from the requested participant",
-        )
-        .and_then(|builder| {
-            builder.envelope_authenticity(
-                decoded.payload().ceremony_id == request.ceremony_id,
-                "device epoch acceptance must bind the ceremony id",
-            )
-        })
-        .and_then(|builder| {
-            builder.capability_authorization(
-                decoded.payload().acceptor_device_id == request.participant_device_id,
-                "device epoch acceptor must be the ceremony participant",
-            )
-        })
-        .and_then(|builder| builder.namespace_scope(true, "device epoch acceptance context"))
-        .and_then(|builder| builder.schema_version(true, "device epoch acceptance schema v1"))
-        .and_then(|builder| {
-            builder.replay_freshness(
-                decoded.payload().ceremony_id == request.ceremony_id,
-                "device epoch acceptance ceremony id is the session freshness scope",
-            )
-        })
-        .and_then(|builder| {
-            builder.signer_membership(
-                decoded.payload().acceptor_device_id == request.participant_device_id,
-                "device epoch acceptor must be a participant",
-            )
-        })
-        .and_then(|builder| {
-            builder.proof_evidence(
-                decoded.payload().ceremony_id == request.ceremony_id,
-                "device epoch acceptance proof binds the expected ceremony",
-            )
-        })
-        .and_then(|builder| builder.build())
-        .map_err(|error| {
-            AgentError::internal(format!("verify device epoch acceptance: {error}"))
-        })?;
-    decoded
-        .verify(evidence)
-        .map_err(|error| AgentError::internal(format!("promote device epoch acceptance: {error}")))
+    let _ = (request, proposal, acceptance);
+    Err(AgentError::internal(
+        "device epoch acceptance verification requires signed participant-device proofs; unsigned acceptances are disabled".to_string(),
+    ))
 }
 
 fn verified_device_epoch_envelope(
@@ -847,4 +1095,256 @@ fn map_decode_error(error: impl std::fmt::Display) -> AgentError {
 
 fn map_session_error(error: SessionIngressError) -> AgentError {
     AgentError::internal(format!("device epoch rotation session failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use aura_core::effects::{SecureStorageEffects, ThresholdSigningEffects};
+    use aura_core::threshold::ThresholdConfig;
+    use std::sync::Arc;
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
+    async fn test_service(seed: u8) -> DeviceEpochRotationService {
+        let authority_id = test_authority(seed);
+        let config = AgentConfig {
+            device_id: test_device(seed.wrapping_add(1)),
+            ..Default::default()
+        };
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &config,
+                authority_id,
+                u64::from(seed),
+            )
+            .expect("effect system"),
+        );
+        let signing_service = ThresholdSigningService::new(effects.clone());
+        signing_service
+            .bootstrap_authority(&authority_id)
+            .await
+            .expect("bootstrap authority");
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects);
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
+        DeviceEpochRotationService::new(
+            authority_id,
+            effects,
+            ceremony_tracker,
+            ceremony_runner,
+            signing_service,
+            ReconfigurationManager::new(),
+        )
+    }
+
+    fn test_request(
+        ceremony_id: &'static str,
+        pending_epoch: u64,
+        participant_device_id: DeviceId,
+        key_package: Vec<u8>,
+        public_key_package: Vec<u8>,
+    ) -> DeviceEpochRotationInitRequest {
+        DeviceEpochRotationInitRequest {
+            ceremony_id: CeremonyId::new(ceremony_id),
+            kind: DeviceEpochRotationKind::Rotation,
+            pending_epoch,
+            participant_device_id,
+            key_package,
+            threshold_config: to_vec(&ThresholdConfig {
+                threshold: 1,
+                total_participants: 1,
+            })
+            .expect("encode threshold config"),
+            public_key_package,
+        }
+    }
+
+    #[tokio::test]
+    async fn device_epoch_proposal_verification_rejects_tampered_key_material() {
+        let service = test_service(81).await;
+        let initiator_device_id = test_device(82);
+        let request = test_request(
+            "device-epoch-proposal-tamper",
+            1,
+            service.effects.device_id(),
+            vec![1, 2, 3, 4],
+            vec![9; 32],
+        );
+
+        let mut proposal = service
+            .build_signed_proposal(&request, initiator_device_id)
+            .await
+            .expect("signed proposal");
+        proposal.encrypted_key_package.ciphertext[0] ^= 0xAA;
+        let expected_session_uuid =
+            device_epoch_rotation_session_id(&proposal.ceremony_id, proposal.participant_device_id);
+
+        let error = service
+            .verify_device_epoch_proposal(&proposal, initiator_device_id, expected_session_uuid)
+            .await
+            .expect_err("tampered key material must be rejected");
+        assert!(error.to_string().contains("hashes do not match"));
+
+        let share_location = SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", service.authority_id, request.pending_epoch),
+            ParticipantIdentity::device(service.effects.device_id()).storage_key(),
+        );
+        assert!(
+            service
+                .effects
+                .secure_retrieve(&share_location, &[SecureStorageCapability::Read])
+                .await
+                .is_err(),
+            "proposal verification failure must not stage participant key material"
+        );
+    }
+
+    #[tokio::test]
+    async fn device_epoch_proposal_verification_rejects_wrong_participant_device() {
+        let service = test_service(83).await;
+        let initiator_device_id = test_device(84);
+        let request = test_request(
+            "device-epoch-wrong-participant",
+            1,
+            service.effects.device_id(),
+            vec![5, 6, 7, 8],
+            vec![7; 32],
+        );
+
+        let mut proposal = service
+            .build_signed_proposal(&request, initiator_device_id)
+            .await
+            .expect("signed proposal");
+        proposal.participant_device_id = test_device(85);
+        let expected_session_uuid =
+            device_epoch_rotation_session_id(&request.ceremony_id, request.participant_device_id);
+
+        let error = service
+            .verify_device_epoch_proposal(&proposal, initiator_device_id, expected_session_uuid)
+            .await
+            .expect_err("wrong participant must be rejected");
+        assert!(error.to_string().contains("participant mismatch"));
+    }
+
+    #[tokio::test]
+    async fn device_epoch_acceptance_verification_is_fail_closed_without_device_signer() {
+        let service = test_service(86).await;
+        let initiator_device_id = test_device(87);
+        let request = test_request(
+            "device-epoch-acceptance-disabled",
+            1,
+            service.effects.device_id(),
+            vec![9, 10, 11],
+            vec![8; 32],
+        );
+        let proposal = service
+            .build_signed_proposal(&request, initiator_device_id)
+            .await
+            .expect("signed proposal");
+        let acceptance = DeviceEpochAcceptance {
+            ceremony_id: request.ceremony_id.clone(),
+            acceptor_device_id: service.effects.device_id(),
+            proposal_hash: device_epoch_proposal_hash(&proposal).expect("proposal hash"),
+            accepted_at_ms: 1,
+            signature: vec![1; 64],
+        };
+
+        let error = verified_device_epoch_acceptance(&request, &proposal, acceptance)
+            .expect_err("unsigned participant-device acceptance must fail closed");
+        assert!(error
+            .to_string()
+            .contains("unsigned acceptances are disabled"));
+    }
+
+    #[tokio::test]
+    async fn device_epoch_commit_verification_rejects_forged_signature() {
+        let service = test_service(88).await;
+        let initiator_device_id = test_device(89);
+        let request = test_request(
+            "device-epoch-commit-forged",
+            1,
+            service.effects.device_id(),
+            vec![12, 13, 14],
+            vec![6; 32],
+        );
+        let proposal = service
+            .build_signed_proposal(&request, initiator_device_id)
+            .await
+            .expect("signed proposal");
+        let mut commit = service
+            .build_signed_commit(&proposal, None)
+            .await
+            .expect("signed commit");
+        commit.authority_signature.signature[0] ^= 0x55;
+
+        let error = service
+            .verify_device_epoch_commit(&proposal, &commit)
+            .await
+            .expect_err("forged commit signature must fail");
+        assert!(error
+            .to_string()
+            .contains("authority signature verification failed"));
+    }
+
+    #[tokio::test]
+    async fn valid_signed_device_epoch_commit_activates_new_epoch_and_rejects_replay() {
+        let service = test_service(90).await;
+        let initiator_device_id = test_device(91);
+        let participants = vec![ParticipantIdentity::device(service.effects.device_id())];
+        let (pending_epoch, key_packages, public_key_package) = service
+            .effects
+            .rotate_keys(&service.authority_id, 1, 1, &participants)
+            .await
+            .expect("rotate keys");
+        let request = test_request(
+            "device-epoch-valid-commit",
+            pending_epoch,
+            service.effects.device_id(),
+            key_packages[0].clone(),
+            public_key_package,
+        );
+        let proposal = service
+            .build_signed_proposal(&request, initiator_device_id)
+            .await
+            .expect("signed proposal");
+        let expected_session_uuid =
+            device_epoch_rotation_session_id(&proposal.ceremony_id, proposal.participant_device_id);
+        service
+            .verify_device_epoch_proposal(&proposal, initiator_device_id, expected_session_uuid)
+            .await
+            .expect("proposal should verify");
+
+        let commit = service
+            .build_signed_commit(&proposal, None)
+            .await
+            .expect("signed commit");
+        service
+            .apply_commit(&proposal, &commit)
+            .await
+            .expect("valid signed commit should activate the epoch");
+
+        let threshold_state = service
+            .signing_service
+            .threshold_state(&service.authority_id)
+            .await
+            .expect("committed threshold state");
+        assert_eq!(threshold_state.epoch, pending_epoch);
+
+        let replay_error = service
+            .apply_commit(&proposal, &commit)
+            .await
+            .expect_err("replayed commit must fail");
+        assert!(replay_error
+            .to_string()
+            .contains("authority signature verification failed"));
+    }
 }

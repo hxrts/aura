@@ -46,6 +46,7 @@ use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_guards::{BiscuitGuardEvaluator, GuardContextProvider};
+use aura_protocol::effects::TreeEffects;
 use futures;
 
 #[cfg(target_arch = "wasm32")]
@@ -275,7 +276,8 @@ impl JournalSyncProtocol {
             + Send
             + Sync
             + PhysicalTimeEffects
-            + GuardContextProvider,
+            + GuardContextProvider
+            + TreeEffects,
     {
         let mut operations_synced = 0u64;
         let mut peers_synced = Vec::new();
@@ -383,7 +385,8 @@ impl JournalSyncProtocol {
             + Send
             + Sync
             + PhysicalTimeEffects
-            + GuardContextProvider,
+            + GuardContextProvider
+            + TreeEffects,
     {
         self.peer_states.insert(peer, SyncState::Syncing);
         self.sync_with_peer_impl(effects, peer).await
@@ -397,7 +400,8 @@ impl JournalSyncProtocol {
             + Send
             + Sync
             + PhysicalTimeEffects
-            + GuardContextProvider,
+            + GuardContextProvider
+            + TreeEffects,
     {
         tracing::debug!("Starting synchronization with peer {}", peer);
 

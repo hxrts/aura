@@ -465,11 +465,7 @@ fn dkd_session_uuid(session_id: &DkdSessionId) -> Uuid {
 }
 
 fn guardian_auth_session_uuid(context_id: &ContextId, request: &GuardianAuthRequest) -> Uuid {
-    // Create deterministic session ID from context + guardian + account
-    let key = format!(
-        "guardian_auth:{}:{}:{}",
-        context_id.0, request.guardian_id, request.account_id
-    );
+    let key = format!("guardian_auth:{}:{}", context_id.0, request.request_id);
     let digest = hash::hash(key.as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
@@ -559,23 +555,28 @@ mod tests {
         let account_id = AuthorityId::new_from_entropy([51u8; 32]);
 
         let request = GuardianAuthRequest {
+            request_id: "request-1".to_string(),
             context_id,
             guardian_id,
             account_id,
             operation: GuardianOperation::DenyRecovery {
                 reason: "test".to_string(),
             },
+            epoch: 1,
+            expires_at_ms: 10_000,
+            protocol_version: 1,
         };
 
         let uuid1 = guardian_auth_session_uuid(&context_id, &request);
         let uuid2 = guardian_auth_session_uuid(&context_id, &request);
 
-        // Same inputs should produce same session ID
+        // Same request id should produce same session ID
         assert_eq!(uuid1, uuid2);
 
-        // Different context should produce different session ID
-        let context_id2 = ContextId(Uuid::from_bytes([2u8; 16]));
-        let uuid3 = guardian_auth_session_uuid(&context_id2, &request);
+        // Different request ids should produce different session IDs
+        let mut request2 = request.clone();
+        request2.request_id = "request-2".to_string();
+        let uuid3 = guardian_auth_session_uuid(&context_id, &request2);
         assert_ne!(uuid1, uuid3);
     }
 
@@ -589,21 +590,29 @@ mod tests {
         let account_id = AuthorityId::new_from_entropy([54u8; 32]);
 
         let request1 = GuardianAuthRequest {
+            request_id: "request-a".to_string(),
             context_id,
             guardian_id: guardian_id1,
             account_id,
             operation: GuardianOperation::DenyRecovery {
                 reason: "test".to_string(),
             },
+            epoch: 1,
+            expires_at_ms: 10_000,
+            protocol_version: 1,
         };
 
         let request2 = GuardianAuthRequest {
+            request_id: "request-b".to_string(),
             context_id,
             guardian_id: guardian_id2,
             account_id,
             operation: GuardianOperation::DenyRecovery {
                 reason: "test".to_string(),
             },
+            epoch: 1,
+            expires_at_ms: 10_000,
+            protocol_version: 1,
         };
 
         let uuid1 = guardian_auth_session_uuid(&context_id, &request1);

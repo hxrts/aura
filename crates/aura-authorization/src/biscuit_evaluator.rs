@@ -17,7 +17,7 @@ use aura_core::{types::identifiers::AuthorityId, CapabilityName, CapabilityNameE
 use biscuit_auth::{macros::*, AuthorizerLimits, Biscuit, PublicKey};
 use std::time::Duration;
 
-const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
+pub const AURA_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
     max_facts: 10_000,
     max_iterations: 1_000,
     max_time: Duration::from_millis(50),
@@ -99,30 +99,70 @@ impl BiscuitAuthorizationBridge {
         resource: &ResourceScope,
         current_time_seconds: Option<u64>,
     ) -> Result<AuthorizationResult, BiscuitError> {
+        self.authorize_with_time_and_limits(
+            token,
+            operation,
+            resource,
+            current_time_seconds,
+            AURA_BISCUIT_LIMITS,
+        )
+    }
+
+    /// Check if a verified token has a specific capability through Datalog evaluation.
+    pub fn has_capability_with_time(
+        &self,
+        token: &VerifiedBiscuitToken,
+        capability: &str,
+        current_time_seconds: Option<u64>,
+    ) -> Result<bool, BiscuitError> {
+        self.has_capability_with_time_and_limits(
+            token,
+            capability,
+            current_time_seconds,
+            AURA_BISCUIT_LIMITS,
+        )
+    }
+
+    fn authorize_with_time_and_limits(
+        &self,
+        token: &VerifiedBiscuitToken,
+        operation: AuthorizationOp,
+        resource: &ResourceScope,
+        current_time_seconds: Option<u64>,
+        limits: AuthorizerLimits,
+    ) -> Result<AuthorizationResult, BiscuitError> {
         let current_time_seconds = require_time(current_time_seconds)?;
-        let mut authorizer = token.authorizer()?;
-        // Phase 2: Add ambient facts for authorization context
         let operation_name =
             CapabilityName::parse(operation.as_str()).map_err(invalid_capability_error)?;
         let operation_str = operation_name.as_str();
+        let mut authorizer = token.authorizer()?;
         self.add_operation_authority_time_facts(
             &mut authorizer,
             operation_str,
             current_time_seconds,
         )?;
-
-        // Add resource-specific facts based on ResourceScope
         self.add_resource_facts(&mut authorizer, resource)?;
-
-        // Phase 3: Add authorization policies for specific operations
         self.add_operation_policies(&mut authorizer, operation, operation_str)?;
 
-        // Phase 4: Run Datalog evaluation
-        let authorization_result = authorizer.authorize_with_limits(AURA_BISCUIT_LIMITS);
-
-        let authorized = match authorization_result {
+        let authorized = match authorizer.authorize_with_limits(limits) {
             Ok(_) => true,
-            Err(biscuit_auth::error::Token::FailedLogic(_)) => false,
+            Err(biscuit_auth::error::Token::FailedLogic(_)) => {
+                tracing::debug!(
+                    operation = operation_str,
+                    resource = %resource.resource_pattern(),
+                    "Biscuit authorization denied by policy"
+                );
+                false
+            }
+            Err(e @ biscuit_auth::error::Token::RunLimit(_)) => {
+                tracing::warn!(
+                    operation = operation_str,
+                    resource = %resource.resource_pattern(),
+                    error = %e,
+                    "Biscuit authorization denied by resource limit"
+                );
+                return Err(BiscuitError::BiscuitLib(e));
+            }
             Err(e) => return Err(BiscuitError::BiscuitLib(e)),
         };
 
@@ -133,12 +173,12 @@ impl BiscuitAuthorizationBridge {
         })
     }
 
-    /// Check if a verified token has a specific capability through Datalog evaluation.
-    pub fn has_capability_with_time(
+    fn has_capability_with_time_and_limits(
         &self,
         token: &VerifiedBiscuitToken,
         capability: &str,
         current_time_seconds: Option<u64>,
+        limits: AuthorizerLimits,
     ) -> Result<bool, BiscuitError> {
         let current_time_seconds = require_time(current_time_seconds)?;
         let capability_name =
@@ -146,21 +186,22 @@ impl BiscuitAuthorizationBridge {
         let capability = capability_name.as_str();
         let mut authorizer = token.authorizer()?;
 
-        // Add ambient facts for capability check
         self.add_authority_and_time_facts(&mut authorizer, current_time_seconds)?;
-
-        // Add a policy to allow if the token contains the requested capability
         Self::add_policy(
             &mut authorizer,
             policy!("allow if capability({capability})"),
         )?;
 
-        // Run bounded Datalog evaluation
-        let result = authorizer.authorize_with_limits(AURA_BISCUIT_LIMITS);
-
-        match result {
+        match authorizer.authorize_with_limits(limits) {
             Ok(_) => Ok(true),
-            Err(biscuit_auth::error::Token::FailedLogic(_)) => Ok(false),
+            Err(biscuit_auth::error::Token::FailedLogic(_)) => {
+                tracing::debug!(capability, "Biscuit capability denied by policy");
+                Ok(false)
+            }
+            Err(e @ biscuit_auth::error::Token::RunLimit(_)) => {
+                tracing::warn!(capability, error = %e, "Biscuit capability denied by resource limit");
+                Err(BiscuitError::BiscuitLib(e))
+            }
             Err(e) => Err(BiscuitError::BiscuitLib(e)),
         }
     }
@@ -333,6 +374,132 @@ fn invalid_capability_error(error: CapabilityNameError) -> BiscuitError {
 
 fn require_time(current_time_seconds: Option<u64>) -> Result<u64, BiscuitError> {
     current_time_seconds.ok_or(BiscuitError::TimeRequired)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::types::scope::{AuthorityOp, AuthorizationOp};
+    use biscuit_auth::{builder::BiscuitBuilder, error::RunLimit, KeyPair};
+
+    fn test_bridge(keypair: &KeyPair) -> BiscuitAuthorizationBridge {
+        BiscuitAuthorizationBridge::new(keypair.public(), AuthorityId::new_from_entropy([7; 32]))
+    }
+
+    fn test_scope() -> ResourceScope {
+        ResourceScope::Authority {
+            authority_id: AuthorityId::new_from_entropy([8; 32]),
+            operation: AuthorityOp::UpdateTree,
+        }
+    }
+
+    fn token_with_many_facts(count: usize) -> (KeyPair, VerifiedBiscuitToken) {
+        let keypair = KeyPair::new();
+        let mut builder = BiscuitBuilder::new();
+        builder
+            .add_fact(fact!("capability(\"read\")"))
+            .expect("add capability");
+        for index in 0..count {
+            let index = index as i64;
+            builder
+                .add_fact(fact!("spam({index})"))
+                .unwrap_or_else(|err| panic!("add spam fact {index}: {err:?}"));
+        }
+        let token = builder.build(&keypair).expect("build token");
+        let verified = VerifiedBiscuitToken::from_token(&token, keypair.public()).expect("verify");
+        (keypair, verified)
+    }
+
+    fn token_with_iteration_chain(steps: usize) -> (KeyPair, VerifiedBiscuitToken) {
+        let keypair = KeyPair::new();
+        let mut builder = BiscuitBuilder::new();
+        builder
+            .add_fact(fact!("capability(\"read\")"))
+            .expect("add capability");
+        builder.add_fact(fact!("chain(0)")).expect("add chain seed");
+        for step in 0..steps {
+            let rule = format!("chain({}) <- chain({step})", step + 1);
+            builder
+                .add_rule(rule.as_str())
+                .unwrap_or_else(|err| panic!("add chain rule {step}: {err:?}"));
+        }
+        let token = builder.build(&keypair).expect("build token");
+        let verified = VerifiedBiscuitToken::from_token(&token, keypair.public()).expect("verify");
+        (keypair, verified)
+    }
+
+    #[test]
+    fn authorize_with_limits_rejects_tokens_that_exceed_fact_budget() {
+        let (keypair, verified) = token_with_iteration_chain(32);
+        let bridge = test_bridge(&keypair);
+        let error = bridge
+            .authorize_with_time_and_limits(
+                &verified,
+                AuthorizationOp::Read,
+                &test_scope(),
+                Some(1_000),
+                AuthorizerLimits {
+                    max_facts: 8,
+                    max_iterations: 64,
+                    max_time: Duration::from_secs(1),
+                },
+            )
+            .expect_err("fact-budget token must fail closed");
+
+        assert!(matches!(
+            error,
+            BiscuitError::BiscuitLib(biscuit_auth::error::Token::RunLimit(RunLimit::TooManyFacts))
+        ));
+    }
+
+    #[test]
+    fn capability_checks_reject_tokens_that_exceed_iteration_budget() {
+        let (keypair, verified) = token_with_iteration_chain(32);
+        let bridge = test_bridge(&keypair);
+        let error = bridge
+            .has_capability_with_time_and_limits(
+                &verified,
+                "read",
+                Some(1_000),
+                AuthorizerLimits {
+                    max_facts: AURA_BISCUIT_LIMITS.max_facts,
+                    max_iterations: 8,
+                    max_time: Duration::from_secs(1),
+                },
+            )
+            .expect_err("iteration-budget token must fail closed");
+
+        assert!(matches!(
+            error,
+            BiscuitError::BiscuitLib(biscuit_auth::error::Token::RunLimit(
+                RunLimit::TooManyIterations
+            ))
+        ));
+    }
+
+    #[test]
+    fn authorize_with_limits_rejects_timeout_budget_exhaustion() {
+        let (keypair, verified) = token_with_many_facts(1);
+        let bridge = test_bridge(&keypair);
+        let error = bridge
+            .authorize_with_time_and_limits(
+                &verified,
+                AuthorizationOp::Read,
+                &test_scope(),
+                Some(1_000),
+                AuthorizerLimits {
+                    max_facts: AURA_BISCUIT_LIMITS.max_facts,
+                    max_iterations: AURA_BISCUIT_LIMITS.max_iterations,
+                    max_time: Duration::ZERO,
+                },
+            )
+            .expect_err("zero-time budget must fail closed");
+
+        assert!(matches!(
+            error,
+            BiscuitError::BiscuitLib(biscuit_auth::error::Token::RunLimit(RunLimit::Timeout))
+        ));
+    }
 }
 
 // ============================================================================

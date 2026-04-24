@@ -25,7 +25,9 @@ use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_consensus::dkg::recovery::recover_share_from_transcript;
 use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
-use aura_core::crypto::single_signer::{SigningMode, SingleSignerPublicKeyPackage};
+use aura_core::crypto::single_signer::{
+    SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
+};
 use aura_core::crypto::tree_signing;
 use aura_core::effects::RandomCoreEffects;
 use aura_core::effects::{
@@ -42,6 +44,7 @@ use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp}
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::{
     effects::{PhysicalTimeEffects, ThresholdSigningEffects},
+    secrets::SecretExportContext,
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Epoch, Hash32,
 };
@@ -528,6 +531,89 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Failed to load key package: {e}")))?;
         self.decrypt_participant_key_package(authority, epoch, participant, &envelope)
             .await
+    }
+
+    /// Return the current local key-agreement secret for the active signing
+    /// participant on this device.
+    pub async fn current_local_key_agreement_secret(
+        &self,
+        authority: &AuthorityId,
+    ) -> Result<[u8; 32], AuraError> {
+        let state = self.shared.state.read().await;
+        let context = state
+            .contexts
+            .get(authority)
+            .cloned()
+            .ok_or_else(|| AuraError::not_found("authority context not found"))?;
+        drop(state);
+
+        match context.mode {
+            SigningMode::SingleSigner => {
+                let participant = ParticipantIdentity::guardian(*authority);
+                let location = SecureStorageLocation::with_sub_key(
+                    "signing_keys",
+                    format!("{}:{}", authority, context.epoch),
+                    "1",
+                );
+                let key_package = self
+                    .retrieve_participant_key_package(
+                        authority,
+                        context.epoch,
+                        &participant,
+                        &location,
+                    )
+                    .await?;
+                let package = SingleSignerKeyPackage::import_from_secure_storage(
+                    &key_package,
+                    SecretExportContext::secure_storage(
+                        "aura-agent::runtime::services::threshold_signing::current_local_key_agreement_secret",
+                    ),
+                )
+                .map_err(|error| {
+                    AuraError::internal(format!(
+                        "failed to decode single-signer key package for key agreement: {error}"
+                    ))
+                })?;
+                let mut scalar = [0u8; 32];
+                scalar.copy_from_slice(package.signing_key());
+                Ok(scalar)
+            }
+            SigningMode::Threshold => {
+                let signer_index = context.my_signer_index.ok_or_else(|| {
+                    AuraError::invalid(
+                        "current device is not an active signer for this authority context",
+                    )
+                })?;
+                let participant = context
+                    .participants
+                    .get(usize::from(signer_index.saturating_sub(1)))
+                    .cloned()
+                    .ok_or_else(|| {
+                        AuraError::internal(
+                            "local signer index is out of bounds for threshold participants",
+                        )
+                    })?;
+                let location =
+                    Self::participant_share_location(authority, context.epoch, &participant);
+                let key_package = self
+                    .retrieve_participant_key_package(
+                        authority,
+                        context.epoch,
+                        &participant,
+                        &location,
+                    )
+                    .await?;
+                let share = tree_signing::share_from_key_package_bytes(&key_package)?;
+                if share.value.len() != 32 {
+                    return Err(AuraError::internal(
+                        "threshold signing share must be 32 bytes for key agreement",
+                    ));
+                }
+                let mut scalar = [0u8; 32];
+                scalar.copy_from_slice(&share.value);
+                Ok(scalar)
+            }
+        }
     }
 
     /// Load a finalized DKG transcript by blob reference.
@@ -1618,6 +1704,7 @@ impl RuntimeService for ThresholdSigningService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::config::StorageConfig;
     use crate::core::AgentConfig;
     use aura_core::threshold::SigningContext;
     use aura_core::tree::{TreeOp, TreeOpKind};
@@ -1634,6 +1721,18 @@ mod tests {
             op: TreeOpKind::RotateEpoch { affected: vec![] },
             version: 1,
         }
+    }
+
+    fn isolated_test_config() -> (tempfile::TempDir, AgentConfig) {
+        let temp = tempfile::tempdir().unwrap();
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        (temp, config)
     }
 
     #[test]
@@ -1659,7 +1758,7 @@ mod tests {
 
     #[tokio::test]
     async fn bootstrap_authority_seeds_initial_device_leaf_in_tree_ops() {
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ThresholdSigningService::new(effects.clone());
         let authority = test_authority();
@@ -1685,7 +1784,7 @@ mod tests {
 
     #[tokio::test]
     async fn commit_key_rotation_uses_threshold_config_metadata_written_by_effects() {
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ThresholdSigningService::new(effects.clone());
         let authority = test_authority();
@@ -1712,7 +1811,7 @@ mod tests {
 
     #[tokio::test]
     async fn participant_key_packages_are_wrapped_before_secure_storage() {
-        let config = AgentConfig::default();
+        let (_temp, config) = isolated_test_config();
         let effects = crate::testing::simulation_effect_system_arc(&config);
         let service = ThresholdSigningService::new(effects.clone());
         let authority = test_authority();

@@ -1593,6 +1593,19 @@ pub fn run_security_bug_class_regressions() -> Result<()> {
                     idx + 1
                 ));
             }
+
+            if is_deterministic_context_constructor_use(line)
+                && !known_security_bug_class_violation(
+                    &rel,
+                    line,
+                    "deterministic-context-constructor",
+                )
+            {
+                violations.push(format!(
+                    "{rel}:{} deterministic context/session constructors are test/simulation-only; production workflow entry points must use fresh constructors",
+                    idx + 1
+                ));
+            }
         }
     }
 
@@ -1765,6 +1778,13 @@ fn is_string_prefix_authorization(line: &str, context: &str, rel: &str) -> bool 
     ]
     .iter()
     .any(|needle| lowered.contains(needle))
+}
+
+fn is_deterministic_context_constructor_use(line: &str) -> bool {
+    line.contains("EffectContext::deterministic(")
+        || line.contains("EffectContext::deterministic_with_default_context(")
+        || line.contains("ContextSnapshot::deterministic(")
+        || line.contains("HandlerContext::deterministic(")
 }
 
 fn known_security_bug_class_violation(rel: &str, line: &str, class: &str) -> bool {

@@ -4,19 +4,21 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 
+#[path = "../support/mod.rs"]
+mod support;
+
 #[cfg(feature = "development")]
 mod development {
     use aura_terminal::demo::hints::DemoHints;
 
     #[test]
     fn test_invite_code_parseable_by_shareable_invitation() {
-        use aura_agent::handlers::ShareableInvitation;
+        use support::parse_demo_invite_code;
 
         let hints = DemoHints::new(2024);
 
         // Verify Alice's code can be parsed
-        let alice_parsed = ShareableInvitation::from_code(&hints.alice_invite_code)
-            .expect("Alice's invite code should be parseable");
+        let alice_parsed = parse_demo_invite_code(&hints.alice_invite_code);
         assert_eq!(alice_parsed.version, 1);
         assert!(!alice_parsed.invitation_id.0.is_empty());
         // Verify the invitation type is Contact (not Guardian)
@@ -31,8 +33,7 @@ mod development {
         }
 
         // Verify Carol's code can be parsed
-        let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
-            .expect("Carol's invite code should be parseable");
+        let carol_parsed = parse_demo_invite_code(&hints.carol_invite_code);
         assert_eq!(carol_parsed.version, 1);
         assert!(!carol_parsed.invitation_id.0.is_empty());
         match carol_parsed.invitation_type {

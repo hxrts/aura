@@ -35,6 +35,16 @@ Single source of truth for domain types and effect trait definitions. Provides f
 - Effect trait definitions only (no implementations).
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
 - Context isolation prevents cross-context information flow.
+- Secret-bearing wrappers such as `PrivateKeyBytes` are the canonical Layer 1
+  carrier for raw private-key material; explicit export context is required
+  before those bytes may leave the wrapper.
+- `StoragePath` is the canonical segment-aware storage scope primitive;
+  wildcard coverage is limited to a single terminal `*` segment and matching
+  must use `StoragePath::covers` rather than raw string prefix checks.
+- Peer-originated, signed, content-addressed, and journal-fact DAG-CBOR bytes
+  must decode through strict `util::serialization::from_slice`; the
+  non-canonical-tolerant `from_slice_trusted` path is reserved for trusted
+  internal bytes only.
 
 ### InvariantContextIsolation
 
@@ -129,13 +139,16 @@ cargo test -p aura-core --lib              # inline unit tests only
 | OwnerToken: stale after handoff | `tests/boundaries/` | compile-fail | covered |
 | Sealed owner traits: external impl blocked | `tests/boundaries/` | compile-fail | covered |
 | Capability-gated publication (3 variants) | `tests/boundaries/` | compile-fail | covered |
+| Raw query bypass unavailable on `QueryEffects` | `tests/boundaries/query_effects_raw_query_private.rs` | compile-fail | covered |
 | WireEnvelope, FactEnvelope roundtrip | `tests/contracts/serialization_roundtrip.rs` | roundtrip | covered |
 | DAG-CBOR canonical encoding (byte-exact) | `tests/contracts/serialization_roundtrip.rs` | hash stability | covered |
+| Wire and fact decode reject non-canonical DAG-CBOR | `src/envelope.rs`, `src/types/facts.rs`, `src/util/serialization.rs` | inline strict-decode regression | covered |
 | AuthorityId, DeviceId, SessionId uniqueness | `tests/contracts/identifier_uniqueness.rs` | pinned vectors | covered |
 | DKD derivation determinism | `tests/contracts/dkd_determinism.rs` | determinism | covered |
 | Content addressing (Hash32, ContentId) | `tests/contracts/content_addressing.rs` | roundtrip | covered |
 | Context isolation (opaque, unlinkable IDs) | `tests/contracts/identifier_uniqueness.rs` | uniqueness | covered |
 | FlowBudget charge-before-send | `src/types/flow.rs` | inline | covered |
+| StoragePath wildcard coverage stays segment-aware | `src/types/scope.rs` | inline | covered |
 | Consistency metadata at 10k scale | `tests/contracts/consistency_scaling.rs` | `#[ignore]` | covered |
 
 ## References

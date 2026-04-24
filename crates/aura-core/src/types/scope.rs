@@ -33,7 +33,7 @@ pub enum ResourceScope {
 ///
 /// Paths are normalized to use forward slashes, with empty segments removed.
 /// Wildcards (`*`) are allowed only as the terminal segment.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct StoragePath(String);
 
@@ -106,6 +106,21 @@ impl StoragePath {
     /// Access the normalized storage path string.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether this path covers the requested path using exact or terminal
+    /// wildcard segment semantics.
+    pub fn covers(&self, requested: &StoragePath) -> bool {
+        let grant_segments: Vec<_> = self.0.split('/').collect();
+        let requested_segments: Vec<_> = requested.0.split('/').collect();
+        match grant_segments.last().copied() {
+            Some("*") => {
+                let parent = &grant_segments[..grant_segments.len().saturating_sub(1)];
+                requested_segments.len() >= parent.len()
+                    && requested_segments[..parent.len()] == *parent
+            }
+            _ => grant_segments == requested_segments,
+        }
     }
 }
 
@@ -481,6 +496,20 @@ mod tests {
         assert!(StoragePath::parse("../secrets").is_err());
         assert!(StoragePath::parse("content/*/extra").is_err());
         assert!(StoragePath::parse("content/pa*th").is_err());
+    }
+
+    #[test]
+    fn storage_path_covers_uses_segment_aware_matching() {
+        let grant = StoragePath::parse("namespace/home/alice/*").unwrap();
+        let same_namespace = StoragePath::parse("namespace/home/alice/*").unwrap();
+        let child = StoragePath::parse("namespace/home/alice/messages").unwrap();
+        let sibling_prefix = StoragePath::parse("namespace/home/alice2/messages").unwrap();
+        let ambiguous_prefix = StoragePath::parse("namespace/home/alice-messages").unwrap();
+
+        assert!(grant.covers(&same_namespace));
+        assert!(grant.covers(&child));
+        assert!(!grant.covers(&sibling_prefix));
+        assert!(!grant.covers(&ambiguous_prefix));
     }
 
     #[test]

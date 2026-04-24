@@ -8,7 +8,7 @@
 use crate::core::config::SyncConfig;
 use crate::core::{exchange_json_with_peer, sync_session_error};
 use crate::protocols::journal_apply::{JournalApplyService, RemoteJournalDelta};
-use aura_authorization::VerifiedBiscuitToken;
+use aura_authorization::{VerifiedBiscuitToken, AURA_BISCUIT_LIMITS};
 use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
 use aura_core::types::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
@@ -16,19 +16,12 @@ use aura_guards::{DecodedIngress, VerifiedIngress};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 use biscuit_auth::macros::*;
-use biscuit_auth::AuthorizerLimits;
+use biscuit_auth::{error::Token as BiscuitTokenError, AuthorizerLimits};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::Duration;
 use uuid::Uuid;
-
-const NAMESPACED_SYNC_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
-    max_facts: 10_000,
-    max_iterations: 1_000,
-    max_time: Duration::from_millis(50),
-};
 
 fn parse_context_participants(bytes: &[u8]) -> Result<Vec<AuthorityId>> {
     serde_json::from_slice(bytes)
@@ -322,6 +315,18 @@ impl NamespacedSync {
         operation: &str,
         scope: &aura_core::types::scope::ResourceScope,
     ) -> Result<bool> {
+        self.validate_token_with_limits(effects, token_bytes, operation, scope, AURA_BISCUIT_LIMITS)
+            .await
+    }
+
+    async fn validate_token_with_limits<E: StorageCoreEffects>(
+        &self,
+        effects: &E,
+        token_bytes: &[u8],
+        operation: &str,
+        scope: &aura_core::types::scope::ResourceScope,
+        limits: AuthorizerLimits,
+    ) -> Result<bool> {
         let root = self.load_root_public_key(effects).await?;
         let token = VerifiedBiscuitToken::from_bytes(token_bytes, root).map_err(|e| {
             AuraError::invalid(format!("Biscuit parse failed for {operation}: {e}"))
@@ -361,9 +366,35 @@ impl NamespacedSync {
             aura_core::types::scope::ResourceScope::Storage { .. } => return Ok(false),
         }
 
-        authorizer
-            .authorize_with_limits(NAMESPACED_SYNC_BISCUIT_LIMITS)
-            .map_err(|e| AuraError::permission_denied(format!("Biscuit evaluation failed: {e}")))?;
+        match authorizer.authorize_with_limits(limits) {
+            Ok(_) => {}
+            Err(BiscuitTokenError::FailedLogic(_)) => {
+                tracing::debug!(
+                    operation,
+                    resource = %scope.resource_pattern(),
+                    "Namespaced sync Biscuit denied by policy"
+                );
+                return Err(AuraError::permission_denied(
+                    "Biscuit authorization denied by policy",
+                ));
+            }
+            Err(err @ BiscuitTokenError::RunLimit(_)) => {
+                tracing::warn!(
+                    operation,
+                    resource = %scope.resource_pattern(),
+                    error = %err,
+                    "Namespaced sync Biscuit denied by resource limit"
+                );
+                return Err(AuraError::permission_denied(
+                    "Biscuit evaluation exceeded resource limits",
+                ));
+            }
+            Err(err) => {
+                return Err(AuraError::permission_denied(format!(
+                    "Biscuit evaluation failed: {err}"
+                )));
+            }
+        }
         tracing::debug!(
             "Validated Biscuit token for {} on scope {} (root verified)",
             operation,
@@ -617,6 +648,7 @@ mod tests {
     use aura_core::time::{OrderTime, TimeStamp};
     use aura_core::Hash32;
     use aura_journal::{FactContent, SnapshotFact};
+    use std::time::Duration;
 
     enum SyncTokenScope {
         Authority(AuthorityId),
@@ -811,6 +843,38 @@ mod tests {
             .check_context_authorization_via_token(&effects, &peer, &context)
             .await
             .is_err());
+    }
+
+    #[aura_macros::aura_test]
+    async fn namespaced_sync_fails_closed_when_resource_budget_is_exhausted() {
+        let peer = AuthorityId::new_from_entropy([28u8; 32]);
+        let authority = AuthorityId::new_from_entropy([29u8; 32]);
+        let sync = sync_for_namespace(JournalNamespace::Authority(authority));
+        let effects = aura_testkit::mock_effects::MockEffects::deterministic();
+        let (keypair, token_bytes) =
+            token_with_sync_facts("sync:authority", SyncTokenScope::Authority(authority));
+        store_sync_root_and_peer_token(&effects, peer, &keypair, token_bytes.clone()).await;
+        let scope = aura_core::types::scope::ResourceScope::Authority {
+            authority_id: authority,
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+
+        let err = sync
+            .validate_token_with_limits(
+                &effects,
+                &token_bytes,
+                "sync:authority",
+                &scope,
+                AuthorizerLimits {
+                    max_facts: AURA_BISCUIT_LIMITS.max_facts,
+                    max_iterations: AURA_BISCUIT_LIMITS.max_iterations,
+                    max_time: Duration::ZERO,
+                },
+            )
+            .await
+            .expect_err("zero-time budget must fail closed");
+
+        assert!(err.to_string().contains("resource limits"));
     }
 
     #[aura_macros::aura_test]

@@ -1035,21 +1035,21 @@ mod tests {
             proposal.invitation_id.clone(),
             proposal.acceptor,
             proposal.prestate_hash,
-            proposal.message.clone(),
+            proposal.message,
         )
         .unwrap();
         let acceptor = invitation_acceptance_transcript_bytes(
             different_acceptor.invitation_id.clone(),
             different_acceptor.acceptor,
             different_acceptor.prestate_hash,
-            different_acceptor.message.clone(),
+            different_acceptor.message,
         )
         .unwrap();
         let prestate = invitation_acceptance_transcript_bytes(
             different_prestate.invitation_id.clone(),
             different_prestate.acceptor,
             different_prestate.prestate_hash,
-            different_prestate.message.clone(),
+            different_prestate.message,
         )
         .unwrap();
 

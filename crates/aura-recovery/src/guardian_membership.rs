@@ -545,9 +545,9 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
         #[cfg(not(test))]
         {
             let _ = (proposal, physical_time);
-            return Err(AuraError::internal(
+            Err(AuraError::internal(
                 "guardian membership votes must be supplied by signed guardian runtimes",
-            ));
+            ))
         }
 
         #[cfg(test)]

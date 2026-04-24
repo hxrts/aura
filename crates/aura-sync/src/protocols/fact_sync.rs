@@ -52,7 +52,7 @@
 
 use crate::core::binary_serialize;
 use crate::protocols::journal_apply::JournalApplyService;
-use crate::verification::{MerkleComparison, MerkleVerifier};
+use crate::verification::{FactEnvelope, MerkleComparison, MerkleVerifier};
 use aura_core::domain::journal::FactValue;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -80,22 +80,18 @@ pub struct FactSyncConfig {
 }
 
 /// Explicit Merkle verification policy for fact sync.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MerkleVerificationPolicy {
     /// Incoming facts must verify against peer Merkle evidence.
+    #[default]
     Required,
 }
 
-impl Default for MerkleVerificationPolicy {
-    fn default() -> Self {
-        Self::Required
-    }
-}
-
 /// Explicit policy for handling peers whose Merkle roots already match ours.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RootMatchPolicy {
     /// Return early when roots match.
+    #[default]
     SkipWhenInSync,
     /// Continue reconciliation even when roots match.
     ReconcileWhenInSync,
@@ -104,12 +100,6 @@ pub enum RootMatchPolicy {
 impl RootMatchPolicy {
     fn skips_when_in_sync(self) -> bool {
         matches!(self, Self::SkipWhenInSync)
-    }
-}
-
-impl Default for RootMatchPolicy {
-    fn default() -> Self {
-        Self::SkipWhenInSync
     }
 }
 
@@ -205,8 +195,8 @@ pub struct FactSyncPeerData {
     pub peer_root: [u8; 32],
     /// Serialized Bloom filter from the peer.
     pub peer_bloom: Vec<u8>,
-    /// Facts received from the peer.
-    pub incoming_facts: Vec<IndexedFact>,
+    /// Fact envelopes received from the peer.
+    pub incoming_facts: Vec<FactEnvelope>,
 }
 
 // =============================================================================
@@ -287,7 +277,7 @@ impl FactSyncProtocol {
     ) -> Result<(FactSyncResult, Vec<IndexedFact>), AuraError> {
         let (peer_data, evidence) = peer_data.into_parts();
         let FactSyncPeerData {
-            context_id: _,
+            context_id,
             peer_root,
             peer_bloom,
             incoming_facts,
@@ -312,7 +302,7 @@ impl FactSyncProtocol {
         let verification = match self.config.merkle_verification {
             MerkleVerificationPolicy::Required => {
                 self.verifier
-                    .verify_incoming_facts(incoming_facts.clone(), peer_root)
+                    .verify_incoming_facts(incoming_facts.clone(), peer_root, context_id)
                     .await?
             }
         };
@@ -499,13 +489,20 @@ fn bloom_insert(filter: &mut BloomFilter, fact: &IndexedFact) {
 mod tests {
     use super::*;
     use crate::protocols::journal_apply::apply_path_hits_for_tests;
+    use crate::verification::{
+        fact_envelope_transcript_bytes, FactEnvelopeNamespace, FactEnvelopeSigner,
+    };
     use async_trait::async_trait;
+    use aura_core::crypto::{build_merkle_root, generate_merkle_proof};
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};
+    use aura_core::effects::CryptoCoreEffects;
     use aura_core::effects::TimeError;
     use aura_core::effects::{BloomConfig, BloomFilter};
     use aura_core::time::PhysicalTime;
-    use aura_core::{AuthorityId, ContextId};
+    use aura_core::{hash::hash, AuthorityId, ContextId};
+    use aura_effects::RealCryptoHandler;
+    use serde::Serialize;
     use std::sync::Mutex;
 
     /// Fixed time for deterministic tests
@@ -645,17 +642,68 @@ mod tests {
         }
     }
 
+    #[derive(Serialize)]
+    struct WireBloomFilter {
+        bits: Vec<u8>,
+        config: BloomConfig,
+        element_count: u64,
+    }
+
+    async fn signed_fact_envelopes(
+        context_id: ContextId,
+        facts: Vec<IndexedFact>,
+    ) -> ([u8; 32], Vec<FactEnvelope>) {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x6Bu8; 32]);
+        let (private_key, public_key) = crypto.ed25519_generate_keypair().await.unwrap();
+        let signer_authority = AuthorityId::new_from_entropy(hash(&public_key));
+        let facts: Vec<IndexedFact> = facts
+            .into_iter()
+            .map(|mut fact| {
+                fact.authority = Some(signer_authority);
+                fact
+            })
+            .collect();
+        let leaves: Vec<Vec<u8>> = facts.iter().map(fact_to_bytes).collect();
+        let claimed_root = build_merkle_root(&leaves);
+        let mut envelopes = Vec::with_capacity(facts.len());
+        for (index, fact) in facts.into_iter().enumerate() {
+            let mut envelope = FactEnvelope {
+                fact,
+                merkle_proof: generate_merkle_proof(&leaves, index).unwrap(),
+                namespace: FactEnvelopeNamespace::Context(context_id),
+                schema_version: 1,
+                signer: FactEnvelopeSigner {
+                    authority: signer_authority,
+                    public_key: public_key.clone(),
+                    key_id: format!("device-{index}"),
+                    certificate: None,
+                },
+                signature: Vec::new(),
+                capability: crate::capabilities::SyncCapability::PushOps
+                    .as_name()
+                    .to_string(),
+            };
+            let transcript_bytes = fact_envelope_transcript_bytes(&envelope, claimed_root).unwrap();
+            envelope.signature = crypto
+                .ed25519_sign(&transcript_bytes, &private_key)
+                .await
+                .unwrap();
+            envelopes.push(envelope);
+        }
+        (claimed_root, envelopes)
+    }
+
     fn verified_peer_data(
         peer_root: [u8; 32],
         peer_bloom: Vec<u8>,
-        incoming_facts: Vec<IndexedFact>,
+        incoming_facts: Vec<FactEnvelope>,
     ) -> aura_guards::VerifiedIngress<FactSyncPeerData> {
         let mut hash_material = Vec::new();
         hash_material.extend_from_slice(&peer_root);
         hash_material.extend_from_slice(&peer_bloom);
-        for fact in &incoming_facts {
-            hash_material.extend_from_slice(&fact.id.0.to_le_bytes());
-            hash_material.extend_from_slice(fact.predicate.as_bytes());
+        for envelope in &incoming_facts {
+            hash_material.extend_from_slice(&envelope.fact.id.0.to_le_bytes());
+            hash_material.extend_from_slice(envelope.fact.predicate.as_bytes());
         }
         crate::protocols::ingress::verified_authority_payload_with_hash(
             AuthorityId::new_from_entropy([9u8; 32]),
@@ -694,7 +742,6 @@ mod tests {
     async fn test_sync_with_different_roots() {
         let before = apply_path_hits_for_tests();
         let local_root = [1u8; 32];
-        let remote_root = [2u8; 32];
         let local_facts = vec![create_test_fact(1), create_test_fact(2)];
         let journal = Arc::new(MockIndexedJournal::with_facts(
             local_root,
@@ -703,7 +750,9 @@ mod tests {
         let time = MockTimeEffects::new(TEST_TIME_MS);
         let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
 
-        let incoming = vec![create_test_fact(3)];
+        let context_id = ContextId::new_from_entropy([8u8; 32]);
+        let (remote_root, incoming) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(3)]).await;
         let (result, facts_to_send) = protocol
             .sync_with_peer(verified_peer_data(remote_root, Vec::new(), incoming))
             .await
@@ -715,6 +764,30 @@ mod tests {
         assert_eq!(result.facts_rejected, 0);
         assert_eq!(facts_to_send.len(), 2); // All local facts
         assert!(apply_path_hits_for_tests() > before);
+    }
+
+    #[aura_macros::aura_test]
+    async fn test_sync_rejects_proofless_fact_envelopes() {
+        let local_root = [1u8; 32];
+        let journal = Arc::new(MockIndexedJournal::with_facts(
+            local_root,
+            vec![create_test_fact(1)],
+        ));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
+        let context_id = ContextId::new_from_entropy([8u8; 32]);
+        let (remote_root, mut incoming) =
+            signed_fact_envelopes(context_id, vec![create_test_fact(99)]).await;
+        incoming[0].signature.clear();
+
+        let (result, _) = protocol
+            .sync_with_peer(verified_peer_data(remote_root, Vec::new(), incoming))
+            .await
+            .unwrap();
+
+        assert_eq!(result.facts_received, 1);
+        assert_eq!(result.facts_verified, 0);
+        assert_eq!(result.facts_rejected, 1);
     }
 
     #[aura_macros::aura_test]
@@ -766,6 +839,58 @@ mod tests {
 
         assert_eq!(facts_to_send.len(), 1);
         assert_eq!(facts_to_send[0].id, local_facts[1].id);
+    }
+
+    #[aura_macros::aura_test]
+    async fn test_invalid_peer_bloom_filter_falls_back_to_bounded_full_batch() {
+        let local_root = [1u8; 32];
+        let remote_root = [2u8; 32];
+        let local_facts = vec![create_test_fact(1), create_test_fact(2)];
+        let journal = Arc::new(MockIndexedJournal::with_facts(
+            local_root,
+            local_facts.clone(),
+        ));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
+
+        let invalid_filter = WireBloomFilter {
+            bits: vec![0; 8],
+            config: BloomConfig {
+                expected_elements: 10,
+                false_positive_rate: 0.01,
+                num_hash_functions: 3,
+                bit_vector_size: 0,
+            },
+            element_count: 0,
+        };
+        let serialized = aura_core::util::serialization::to_vec(&invalid_filter).unwrap();
+
+        let (_, facts_to_send) = protocol
+            .sync_with_peer(verified_peer_data(remote_root, serialized, vec![]))
+            .await
+            .unwrap();
+
+        assert_eq!(facts_to_send.len(), local_facts.len());
+    }
+
+    #[aura_macros::aura_test]
+    async fn test_malformed_peer_bloom_filter_falls_back_to_bounded_full_batch() {
+        let local_root = [1u8; 32];
+        let remote_root = [2u8; 32];
+        let local_facts = vec![create_test_fact(1), create_test_fact(2)];
+        let journal = Arc::new(MockIndexedJournal::with_facts(
+            local_root,
+            local_facts.clone(),
+        ));
+        let time = MockTimeEffects::new(TEST_TIME_MS);
+        let protocol = FactSyncProtocol::new(FactSyncConfig::default(), journal, time);
+
+        let (_, facts_to_send) = protocol
+            .sync_with_peer(verified_peer_data(remote_root, vec![0xff, 0x00], vec![]))
+            .await
+            .unwrap();
+
+        assert_eq!(facts_to_send.len(), local_facts.len());
     }
 
     #[aura_macros::aura_test]

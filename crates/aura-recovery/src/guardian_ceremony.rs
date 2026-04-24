@@ -34,17 +34,23 @@ use crate::{
     RecoveryResult,
 };
 use aura_core::{
-    effects::{JournalEffects, PhysicalTimeEffects},
+    effects::{CryptoEffects, JournalEffects, PhysicalTimeEffects},
     hash,
+    key_resolution::TrustedKeyResolver,
     threshold::{policy_for, AgreementMode, CeremonyFlow},
     time::PhysicalTime,
     types::AuthorityId,
-    Hash32,
+    AuraError, Hash32,
 };
 use aura_macros::tell;
+use aura_signature::{sign_ed25519_transcript, verify_ed25519_transcript, SecurityTranscript};
+use curve25519_dalek::{montgomery::MontgomeryPoint, scalar::Scalar};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+
+const GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION: u8 = 1;
+const GUARDIAN_CEREMONY_ENCRYPTION_KDF_DOMAIN: &[u8] = b"aura.recovery.guardian-ceremony.v1";
 
 // ============================================================================
 // Core Types
@@ -398,8 +404,16 @@ pub struct CeremonyProposal {
     pub encrypted_key_package: Vec<u8>,
     /// Nonce for decryption
     pub encryption_nonce: [u8; 12],
-    /// Untrusted key material: ephemeral agreement key carried by the remote ceremony payload.
+    /// X25519 ephemeral sender key derived via the reviewed Ed25519->X25519 conversion path.
     pub ephemeral_public_key: Vec<u8>,
+    /// Recipient Ed25519 public key authenticated from trusted guardian key state.
+    pub recipient_public_key: Vec<u8>,
+    /// Protocol version for the encrypted key-package format.
+    pub key_package_version: u8,
+    /// Hash of the encrypted key package bytes.
+    pub encrypted_key_package_hash: Hash32,
+    /// Hash binding ceremony scope, recipient, sender ephemeral key, nonce, and ciphertext hash.
+    pub binding_hash: Hash32,
 }
 
 /// Response from a guardian
@@ -411,8 +425,25 @@ pub struct CeremonyResponseMsg {
     pub guardian_id: AuthorityId,
     /// The response
     pub response: CeremonyResponse,
+    /// Hash of the encrypted key package bound into this guardian's proposal.
+    pub encrypted_key_package_hash: Hash32,
     /// Guardian's signature over the ceremony (for commit proof)
     pub signature: Vec<u8>,
+}
+
+/// Independently verifiable evidence for a committed guardian ceremony.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CeremonyCommitCertificate {
+    /// Ceremony being committed.
+    pub ceremony_id: CeremonyId,
+    /// Authority that initiated the ceremony.
+    pub initiator_id: AuthorityId,
+    /// Prestate hash the ceremony was bound to.
+    pub prestate_hash: Hash32,
+    /// Operation approved by the guardians.
+    pub operation: GuardianRotationOp,
+    /// Signed acceptance responses that satisfied the threshold.
+    pub accepted_responses: Vec<CeremonyResponseMsg>,
 }
 
 /// Commit message finalizing the ceremony
@@ -422,8 +453,8 @@ pub struct CeremonyCommit {
     pub ceremony_id: CeremonyId,
     /// New epoch that is now active
     pub new_epoch: u64,
-    /// Aggregated signatures from accepting guardians
-    pub threshold_signature: Vec<u8>,
+    /// Independently verifiable evidence for the commit decision.
+    pub commit_certificate: CeremonyCommitCertificate,
     /// List of guardians who accepted
     pub participants: Vec<AuthorityId>,
 }
@@ -453,6 +484,539 @@ pub struct CeremonyResult {
     pub participants: Vec<AuthorityId>,
     /// Reason for abort if not committed
     pub abort_reason: Option<String>,
+}
+
+fn to_x25519_scalar(private_key: &[u8; 32]) -> Scalar {
+    Scalar::from_bytes_mod_order(*private_key)
+}
+
+fn x25519_shared_secret(private_key: &[u8; 32], public_key: &[u8; 32]) -> [u8; 32] {
+    let scalar = to_x25519_scalar(private_key);
+    let point = MontgomeryPoint(*public_key);
+    (scalar * point).to_bytes()
+}
+
+fn ceremony_proposal_kdf_transcript(proposal: &CeremonyProposal) -> RecoveryResult<Vec<u8>> {
+    aura_core::util::serialization::to_vec(&CeremonyProposalKeyAgreementTranscript {
+        protocol_version: GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION,
+        ceremony_id: proposal.ceremony_id,
+        initiator_id: proposal.initiator_id,
+        prestate_hash: proposal.prestate_hash,
+        operation: proposal.operation.clone(),
+        recipient_public_key: &proposal.recipient_public_key,
+        ephemeral_public_key: &proposal.ephemeral_public_key,
+    })
+    .map_err(|error| {
+        AuraError::crypto(format!(
+            "guardian ceremony proposal transcript encode failed: {error}"
+        ))
+    })
+}
+
+fn ceremony_proposal_binding_hash(proposal: &CeremonyProposal) -> RecoveryResult<Hash32> {
+    Hash32::from_value(&CeremonyProposalBindingTranscript {
+        protocol_version: proposal.key_package_version,
+        ceremony_id: proposal.ceremony_id,
+        initiator_id: proposal.initiator_id,
+        prestate_hash: proposal.prestate_hash,
+        operation: proposal.operation.clone(),
+        recipient_public_key: &proposal.recipient_public_key,
+        ephemeral_public_key: &proposal.ephemeral_public_key,
+        encrypted_key_package_hash: proposal.encrypted_key_package_hash,
+        encryption_nonce: proposal.encryption_nonce,
+    })
+    .map_err(|error| {
+        AuraError::crypto(format!(
+            "guardian ceremony proposal binding hash failed: {error}"
+        ))
+    })
+}
+
+/// Encrypt a guardian ceremony key package for one guardian.
+pub async fn encrypt_ceremony_key_package<E>(
+    effects: &E,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: &GuardianRotationOp,
+    recipient_public_key: &[u8],
+    key_package: &[u8],
+) -> RecoveryResult<CeremonyProposal>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    let recipient_x25519_public = effects
+        .convert_ed25519_to_x25519_public(recipient_public_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony recipient key conversion failed: {error}"
+            ))
+        })?;
+    let (ephemeral_private_key, ephemeral_ed25519_public_key) =
+        effects.ed25519_generate_keypair().await.map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony ephemeral key generation failed: {error}"
+            ))
+        })?;
+    let ephemeral_x25519_private = effects
+        .convert_ed25519_to_x25519_private(&ephemeral_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony ephemeral private-key conversion failed: {error}"
+            ))
+        })?;
+    let ephemeral_x25519_public = effects
+        .convert_ed25519_to_x25519_public(&ephemeral_ed25519_public_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony ephemeral public-key conversion failed: {error}"
+            ))
+        })?;
+    let shared_secret = x25519_shared_secret(&ephemeral_x25519_private, &recipient_x25519_public);
+    let nonce_bytes = effects.random_bytes(12).await;
+    let mut encryption_nonce = [0u8; 12];
+    encryption_nonce.copy_from_slice(&nonce_bytes);
+
+    let mut proposal = CeremonyProposal {
+        ceremony_id,
+        initiator_id,
+        prestate_hash,
+        operation: operation.clone(),
+        encrypted_key_package: Vec::new(),
+        encryption_nonce,
+        ephemeral_public_key: ephemeral_x25519_public.to_vec(),
+        recipient_public_key: recipient_public_key.to_vec(),
+        key_package_version: GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION,
+        encrypted_key_package_hash: Hash32::zero(),
+        binding_hash: Hash32::zero(),
+    };
+    let kdf_info = ceremony_proposal_kdf_transcript(&proposal)?;
+    let encryption_key = effects
+        .kdf_derive(
+            &shared_secret,
+            GUARDIAN_CEREMONY_ENCRYPTION_KDF_DOMAIN,
+            &kdf_info,
+            32,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony encryption key derivation failed: {error}"
+            ))
+        })?;
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&encryption_key);
+    let encrypted_key_package = effects
+        .chacha20_encrypt(key_package, &key_array, &encryption_nonce)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony key-package encryption failed: {error}"
+            ))
+        })?;
+    proposal.encrypted_key_package_hash = Hash32::from_bytes(&encrypted_key_package);
+    proposal.encrypted_key_package = encrypted_key_package;
+    proposal.binding_hash = ceremony_proposal_binding_hash(&proposal)?;
+    Ok(proposal)
+}
+
+/// Decrypt and verify a guardian ceremony proposal key package.
+pub async fn decrypt_ceremony_key_package<E>(
+    effects: &E,
+    proposal: &CeremonyProposal,
+    recipient_private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if proposal.key_package_version != GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION {
+        return Err(AuraError::invalid(format!(
+            "unsupported guardian ceremony proposal version {}",
+            proposal.key_package_version
+        )));
+    }
+    let derived_recipient_public_key = effects
+        .ed25519_public_key(recipient_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony recipient public-key derivation failed: {error}"
+            ))
+        })?;
+    if derived_recipient_public_key != proposal.recipient_public_key {
+        return Err(AuraError::invalid(
+            "guardian ceremony recipient key does not match proposal binding".to_string(),
+        ));
+    }
+    let expected_package_hash = Hash32::from_bytes(&proposal.encrypted_key_package);
+    if proposal.encrypted_key_package_hash != expected_package_hash {
+        return Err(AuraError::invalid(
+            "guardian ceremony encrypted key-package hash does not match ciphertext".to_string(),
+        ));
+    }
+    if proposal.binding_hash != ceremony_proposal_binding_hash(proposal)? {
+        return Err(AuraError::invalid(
+            "guardian ceremony proposal binding hash does not match ciphertext or metadata"
+                .to_string(),
+        ));
+    }
+    let recipient_x25519_private = effects
+        .convert_ed25519_to_x25519_private(recipient_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony recipient private-key conversion failed: {error}"
+            ))
+        })?;
+    let ephemeral_public_key: [u8; 32] = proposal
+        .ephemeral_public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuraError::invalid("guardian ceremony ephemeral key must be 32 bytes"))?;
+    let shared_secret = x25519_shared_secret(&recipient_x25519_private, &ephemeral_public_key);
+    let kdf_info = ceremony_proposal_kdf_transcript(proposal)?;
+    let decryption_key = effects
+        .kdf_derive(
+            &shared_secret,
+            GUARDIAN_CEREMONY_ENCRYPTION_KDF_DOMAIN,
+            &kdf_info,
+            32,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony decryption key derivation failed: {error}"
+            ))
+        })?;
+    let mut key_array = [0u8; 32];
+    key_array.copy_from_slice(&decryption_key);
+    effects
+        .chacha20_decrypt(
+            &proposal.encrypted_key_package,
+            &key_array,
+            &proposal.encryption_nonce,
+        )
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony key-package decryption failed: {error}"
+            ))
+        })
+}
+
+/// Sign a guardian ceremony response.
+pub async fn sign_guardian_ceremony_response<E>(
+    effects: &E,
+    proposal: &CeremonyProposal,
+    guardian_id: AuthorityId,
+    response: CeremonyResponse,
+    guardian_private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    sign_guardian_ceremony_response_with_context(
+        effects,
+        proposal.ceremony_id,
+        proposal.initiator_id,
+        proposal.prestate_hash,
+        &proposal.operation,
+        guardian_id,
+        response,
+        proposal.encrypted_key_package_hash,
+        guardian_private_key,
+    )
+    .await
+}
+
+/// Sign a guardian ceremony response against explicit ceremony context.
+pub async fn sign_guardian_ceremony_response_with_context<E>(
+    effects: &E,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: &GuardianRotationOp,
+    guardian_id: AuthorityId,
+    response: CeremonyResponse,
+    encrypted_key_package_hash: Hash32,
+    guardian_private_key: &[u8],
+) -> RecoveryResult<Vec<u8>>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    let transcript = CeremonyResponseTranscript {
+        ceremony_id,
+        initiator_id,
+        prestate_hash,
+        operation,
+        guardian_id,
+        response,
+        encrypted_key_package_hash,
+    };
+    sign_ed25519_transcript(effects, &transcript, guardian_private_key)
+        .await
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "guardian ceremony response signing failed: {error}"
+            ))
+        })
+}
+
+/// Verify a guardian ceremony response against trusted guardian keys.
+pub async fn verify_guardian_ceremony_response_signature<E>(
+    effects: &E,
+    proposal: &CeremonyProposal,
+    response: &CeremonyResponseMsg,
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<bool>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    verify_guardian_ceremony_response_signature_with_context(
+        effects,
+        proposal.ceremony_id,
+        proposal.initiator_id,
+        proposal.prestate_hash,
+        &proposal.operation,
+        proposal.encrypted_key_package_hash,
+        response,
+        key_resolver,
+    )
+    .await
+}
+
+/// Verify a guardian ceremony response against explicit ceremony context.
+pub async fn verify_guardian_ceremony_response_signature_with_context<E>(
+    effects: &E,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: &GuardianRotationOp,
+    encrypted_key_package_hash: Hash32,
+    response: &CeremonyResponseMsg,
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<bool>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if response.ceremony_id != ceremony_id
+        || response.encrypted_key_package_hash != encrypted_key_package_hash
+    {
+        return Ok(false);
+    }
+    let trusted_key = key_resolver
+        .resolve_guardian_key(response.guardian_id)
+        .map_err(|error| {
+            AuraError::crypto(format!(
+                "trusted guardian ceremony key resolution failed for {}: {error}",
+                response.guardian_id
+            ))
+        })?;
+    let transcript = CeremonyResponseTranscript {
+        ceremony_id,
+        initiator_id,
+        prestate_hash,
+        operation,
+        guardian_id: response.guardian_id,
+        response: response.response,
+        encrypted_key_package_hash: response.encrypted_key_package_hash,
+    };
+    verify_ed25519_transcript(
+        effects,
+        &transcript,
+        &response.signature,
+        trusted_key.bytes(),
+    )
+    .await
+    .map_err(|error| {
+        AuraError::crypto(format!(
+            "guardian ceremony response verification failed: {error}"
+        ))
+    })
+}
+
+/// Build an independently verifiable guardian ceremony commit certificate.
+pub async fn build_guardian_ceremony_commit_certificate<E>(
+    effects: &E,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: &GuardianRotationOp,
+    guardians: &[AuthorityId],
+    threshold_k: u16,
+    accepted_responses: &[CeremonyResponseMsg],
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<CeremonyCommitCertificate>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if accepted_responses.len() < threshold_k as usize {
+        return Err(AuraError::invalid(format!(
+            "guardian ceremony commit certificate requires at least {threshold_k} acceptances"
+        )));
+    }
+
+    let guardian_set: BTreeSet<_> = guardians.iter().copied().collect();
+    let mut seen_guardians = BTreeSet::new();
+    let mut certificate_responses = Vec::with_capacity(accepted_responses.len());
+
+    for response in accepted_responses {
+        if response.response != CeremonyResponse::Accept {
+            return Err(AuraError::invalid(
+                "guardian ceremony commit certificate may only contain acceptance responses",
+            ));
+        }
+        if !guardian_set.contains(&response.guardian_id) {
+            return Err(AuraError::invalid(format!(
+                "guardian ceremony response from unknown guardian {}",
+                response.guardian_id
+            )));
+        }
+        if !seen_guardians.insert(response.guardian_id) {
+            return Err(AuraError::invalid(format!(
+                "duplicate guardian ceremony acceptance from {}",
+                response.guardian_id
+            )));
+        }
+        let verified = verify_guardian_ceremony_response_signature_with_context(
+            effects,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            operation,
+            response.encrypted_key_package_hash,
+            response,
+            key_resolver,
+        )
+        .await?;
+        if !verified {
+            return Err(AuraError::invalid(format!(
+                "guardian ceremony signature verification failed for {}",
+                response.guardian_id
+            )));
+        }
+        certificate_responses.push(response.clone());
+    }
+
+    Ok(CeremonyCommitCertificate {
+        ceremony_id,
+        initiator_id,
+        prestate_hash,
+        operation: operation.clone(),
+        accepted_responses: certificate_responses,
+    })
+}
+
+/// Verify guardian ceremony commit evidence against trusted guardian keys.
+pub async fn verify_guardian_ceremony_commit_certificate<E>(
+    effects: &E,
+    certificate: &CeremonyCommitCertificate,
+    guardians: &[AuthorityId],
+    threshold_k: u16,
+    key_resolver: &impl TrustedKeyResolver,
+) -> RecoveryResult<bool>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    if certificate.accepted_responses.len() < threshold_k as usize {
+        return Ok(false);
+    }
+
+    let guardian_set: BTreeSet<_> = guardians.iter().copied().collect();
+    let mut seen_guardians = BTreeSet::new();
+
+    for response in &certificate.accepted_responses {
+        if response.response != CeremonyResponse::Accept {
+            return Ok(false);
+        }
+        if !guardian_set.contains(&response.guardian_id)
+            || !seen_guardians.insert(response.guardian_id)
+        {
+            return Ok(false);
+        }
+        let verified = verify_guardian_ceremony_response_signature_with_context(
+            effects,
+            certificate.ceremony_id,
+            certificate.initiator_id,
+            certificate.prestate_hash,
+            &certificate.operation,
+            response.encrypted_key_package_hash,
+            response,
+            key_resolver,
+        )
+        .await?;
+        if !verified {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CeremonyProposalKeyAgreementTranscript<'a> {
+    protocol_version: u8,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: GuardianRotationOp,
+    recipient_public_key: &'a [u8],
+    ephemeral_public_key: &'a [u8],
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CeremonyProposalBindingTranscript<'a> {
+    protocol_version: u8,
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: GuardianRotationOp,
+    recipient_public_key: &'a [u8],
+    ephemeral_public_key: &'a [u8],
+    encrypted_key_package_hash: Hash32,
+    encryption_nonce: [u8; 12],
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CeremonyResponseTranscriptPayload {
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: GuardianRotationOp,
+    guardian_id: AuthorityId,
+    response: CeremonyResponse,
+    encrypted_key_package_hash: Hash32,
+}
+
+struct CeremonyResponseTranscript<'a> {
+    ceremony_id: CeremonyId,
+    initiator_id: AuthorityId,
+    prestate_hash: Hash32,
+    operation: &'a GuardianRotationOp,
+    guardian_id: AuthorityId,
+    response: CeremonyResponse,
+    encrypted_key_package_hash: Hash32,
+}
+
+impl SecurityTranscript for CeremonyResponseTranscript<'_> {
+    type Payload = CeremonyResponseTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.recovery.guardian-ceremony.response";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        CeremonyResponseTranscriptPayload {
+            ceremony_id: self.ceremony_id,
+            initiator_id: self.initiator_id,
+            prestate_hash: self.prestate_hash,
+            operation: self.operation.clone(),
+            guardian_id: self.guardian_id,
+            response: self.response,
+            encrypted_key_package_hash: self.encrypted_key_package_hash,
+        }
+    }
 }
 
 impl CeremonyResult {
@@ -910,78 +1474,126 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
     }
 }
 
-// ============================================================================
-// Simplified API for TUI Integration
-// ============================================================================
-
-/// High-level ceremony API for TUI integration
-///
-/// Provides a simplified interface that handles the ceremony lifecycle
-/// with demo-mode auto-acceptance for testing.
-pub struct GuardianCeremonyManager<E: RecoveryEffects> {
-    executor: GuardianCeremonyExecutor<E>,
-    /// If true, guardians auto-accept (for demo mode)
-    pub demo_mode: bool,
-}
-
-impl<E: RecoveryEffects + 'static> GuardianCeremonyManager<E> {
-    /// Create a new ceremony manager
-    pub fn new(effects: Arc<E>, demo_mode: bool) -> Self {
-        Self {
-            executor: GuardianCeremonyExecutor::new(effects),
-            demo_mode,
-        }
-    }
-
-    /// Execute a complete guardian ceremony
-    ///
-    /// Demo mode: Automatically accepts for all guardians.
-    /// Production mode: Waits for real guardian responses via protocol.
-    pub async fn execute_ceremony(
-        &self,
-        authority_id: AuthorityId,
-        threshold_k: u16,
-        guardian_ids: Vec<AuthorityId>,
-    ) -> RecoveryResult<CeremonyState> {
-        // Initiate the ceremony
-        let mut state = self
-            .executor
-            .initiate_ceremony(authority_id, threshold_k, guardian_ids.clone())
-            .await?;
-
-        if self.demo_mode {
-            // Auto-accept for all guardians in demo mode
-            for guardian_id in &guardian_ids {
-                self.executor
-                    .record_response(&mut state, *guardian_id, CeremonyResponse::Accept)
-                    .await?;
-            }
-
-            // Commit the ceremony
-            self.executor.try_commit(&mut state, &authority_id).await?;
-        }
-
-        Ok(state)
-    }
-
-    /// Check if there's a pending ceremony
-    pub async fn has_pending(&self, authority_id: &AuthorityId) -> RecoveryResult<bool> {
-        self.executor.has_pending_ceremony(authority_id).await
-    }
-
-    /// Get current guardian state
-    pub async fn get_state(&self, authority_id: &AuthorityId) -> RecoveryResult<GuardianState> {
-        self.executor.get_current_guardian_state(authority_id).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::key_resolution::{
+        KeyResolutionError, TrustedKeyDomain, TrustedKeyResolver, TrustedPublicKey,
+    };
+    use aura_effects::crypto::RealCryptoHandler;
     use aura_testkit::MockEffects;
+    use std::collections::BTreeMap;
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    #[derive(Default)]
+    struct TestGuardianKeyResolver {
+        guardian_keys: BTreeMap<AuthorityId, TrustedPublicKey>,
+    }
+
+    impl TestGuardianKeyResolver {
+        fn register_guardian_key(&mut self, guardian_id: AuthorityId, public_key: Vec<u8>) {
+            self.guardian_keys.insert(
+                guardian_id,
+                TrustedPublicKey::active(
+                    TrustedKeyDomain::Guardian,
+                    None,
+                    public_key.clone(),
+                    Hash32::from_bytes(&public_key),
+                ),
+            );
+        }
+    }
+
+    impl TrustedKeyResolver for TestGuardianKeyResolver {
+        fn resolve_authority_threshold_key(
+            &self,
+            _authority: AuthorityId,
+            _epoch: u64,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::AuthorityThreshold,
+            })
+        }
+
+        fn resolve_device_key(
+            &self,
+            _device: aura_core::DeviceId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Device,
+            })
+        }
+
+        fn resolve_guardian_key(
+            &self,
+            guardian: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            self.guardian_keys
+                .get(&guardian)
+                .cloned()
+                .ok_or(KeyResolutionError::Unknown {
+                    domain: TrustedKeyDomain::Guardian,
+                })
+        }
+
+        fn resolve_release_key(
+            &self,
+            _authority: AuthorityId,
+        ) -> Result<TrustedPublicKey, KeyResolutionError> {
+            Err(KeyResolutionError::Unknown {
+                domain: TrustedKeyDomain::Release,
+            })
+        }
+    }
+
+    fn test_rotation_operation() -> GuardianRotationOp {
+        GuardianRotationOp {
+            threshold_k: 2,
+            total_n: 3,
+            guardian_ids: vec![test_authority(2), test_authority(3), test_authority(4)],
+            new_epoch: 10,
+        }
+    }
+
+    async fn real_crypto_ceremony_response(
+        crypto: &RealCryptoHandler,
+        ceremony_id: CeremonyId,
+        initiator_id: AuthorityId,
+        prestate_hash: Hash32,
+        operation: &GuardianRotationOp,
+        guardian_id: AuthorityId,
+        key_package_hash: Hash32,
+    ) -> (CeremonyResponseMsg, Vec<u8>, Vec<u8>) {
+        let (guardian_private_key, guardian_public_key) =
+            crypto.ed25519_generate_keypair().await.unwrap();
+        let signature = sign_guardian_ceremony_response_with_context(
+            crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            operation,
+            guardian_id,
+            CeremonyResponse::Accept,
+            key_package_hash,
+            &guardian_private_key,
+        )
+        .await
+        .unwrap();
+        (
+            CeremonyResponseMsg {
+                ceremony_id,
+                guardian_id,
+                response: CeremonyResponse::Accept,
+                encrypted_key_package_hash: key_package_hash,
+                signature,
+            },
+            guardian_private_key,
+            guardian_public_key,
+        )
     }
 
     #[test]
@@ -1066,15 +1678,14 @@ mod tests {
             ceremony_id: CeremonyId(Hash32([1u8; 32])),
             initiator_id: test_authority(1),
             prestate_hash: Hash32([2u8; 32]),
-            operation: GuardianRotationOp {
-                threshold_k: 2,
-                total_n: 3,
-                guardian_ids: vec![test_authority(2), test_authority(3), test_authority(4)],
-                new_epoch: 10,
-            },
+            operation: test_rotation_operation(),
             encrypted_key_package: vec![5],
             encryption_nonce: [6u8; 12],
-            ephemeral_public_key: vec![7],
+            ephemeral_public_key: vec![7; 32],
+            recipient_public_key: vec![8; 32],
+            key_package_version: GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION,
+            encrypted_key_package_hash: Hash32::from_bytes(&[5u8]),
+            binding_hash: Hash32::from_bytes(&[9u8]),
         };
         let mut different_epoch = proposal.clone();
         different_epoch.operation.new_epoch = 11;
@@ -1083,6 +1694,7 @@ mod tests {
             ceremony_id: proposal.ceremony_id,
             guardian_id: test_authority(2),
             response: CeremonyResponse::Accept,
+            encrypted_key_package_hash: proposal.encrypted_key_package_hash,
             signature: vec![8],
         };
         let mut decline = accept.clone();
@@ -1116,6 +1728,182 @@ mod tests {
         let authority = test_authority(0);
         let state = executor.get_current_guardian_state(&authority).await;
         assert!(state.is_ok());
+    }
+
+    #[tokio::test]
+    async fn guardian_ceremony_key_package_round_trip_uses_bound_x25519_key_agreement() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x41; 32]);
+        let initiator_id = test_authority(1);
+        let ceremony_id = CeremonyId(Hash32([0x51; 32]));
+        let prestate_hash = Hash32([0x61; 32]);
+        let operation = test_rotation_operation();
+        let (_guardian_private_key, guardian_public_key) =
+            crypto.ed25519_generate_keypair().await.unwrap();
+        let key_package = vec![0xAB; 64];
+
+        let proposal = encrypt_ceremony_key_package(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardian_public_key,
+            &key_package,
+        )
+        .await
+        .unwrap();
+        let (guardian_private_key, derived_public_key) =
+            crypto.ed25519_generate_keypair().await.unwrap();
+        assert_ne!(guardian_public_key, derived_public_key);
+
+        let decrypted =
+            decrypt_ceremony_key_package(&crypto, &proposal, &guardian_private_key).await;
+        assert!(decrypted.is_err());
+
+        let (recipient_private_key, recipient_public_key) =
+            crypto.ed25519_generate_keypair().await.unwrap();
+        let proposal = encrypt_ceremony_key_package(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &recipient_public_key,
+            &key_package,
+        )
+        .await
+        .unwrap();
+        let decrypted = decrypt_ceremony_key_package(&crypto, &proposal, &recipient_private_key)
+            .await
+            .unwrap();
+        assert_eq!(decrypted, key_package);
+        assert_eq!(
+            proposal.key_package_version,
+            GUARDIAN_CEREMONY_ENCRYPTION_PROTOCOL_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn guardian_ceremony_commit_certificate_rejects_invalid_accepts() {
+        let crypto = RealCryptoHandler::for_simulation_seed([0x42; 32]);
+        let ceremony_id = CeremonyId(Hash32([0x52; 32]));
+        let initiator_id = test_authority(1);
+        let prestate_hash = Hash32([0x62; 32]);
+        let operation = test_rotation_operation();
+        let guardians = operation.guardian_ids.clone();
+        let package_hash_a = Hash32([0x71; 32]);
+        let package_hash_b = Hash32([0x72; 32]);
+
+        let (response_a, _private_a, public_a) = real_crypto_ceremony_response(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            guardians[0],
+            package_hash_a,
+        )
+        .await;
+        let (mut response_b, _private_b, public_b) = real_crypto_ceremony_response(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            guardians[1],
+            package_hash_b,
+        )
+        .await;
+
+        let mut resolver = TestGuardianKeyResolver::default();
+        resolver.register_guardian_key(guardians[0], public_a);
+        resolver.register_guardian_key(guardians[1], public_b.clone());
+
+        let certificate = build_guardian_ceremony_commit_certificate(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[response_a.clone(), response_b.clone()],
+            &resolver,
+        )
+        .await
+        .unwrap();
+        assert!(verify_guardian_ceremony_commit_certificate(
+            &crypto,
+            &certificate,
+            &guardians,
+            operation.threshold_k,
+            &resolver,
+        )
+        .await
+        .unwrap());
+
+        response_b.guardian_id = guardians[0];
+        let duplicate = build_guardian_ceremony_commit_certificate(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[response_a.clone(), response_b.clone()],
+            &resolver,
+        )
+        .await;
+        assert!(duplicate.is_err());
+
+        let mut forged = response_a.clone();
+        forged.signature[0] ^= 0x01;
+        let forged_certificate = build_guardian_ceremony_commit_certificate(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[forged, response_b.clone()],
+            &resolver,
+        )
+        .await;
+        assert!(forged_certificate.is_err());
+
+        let mut empty_signature = response_a.clone();
+        empty_signature.signature.clear();
+        let empty_signature_certificate = build_guardian_ceremony_commit_certificate(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[empty_signature, response_b.clone()],
+            &resolver,
+        )
+        .await;
+        assert!(empty_signature_certificate.is_err());
+
+        let mut unknown_guardian = response_b;
+        unknown_guardian.guardian_id = test_authority(9);
+        let unknown_guardian_certificate = build_guardian_ceremony_commit_certificate(
+            &crypto,
+            ceremony_id,
+            initiator_id,
+            prestate_hash,
+            &operation,
+            &guardians,
+            operation.threshold_k,
+            &[response_a, unknown_guardian],
+            &resolver,
+        )
+        .await;
+        assert!(unknown_guardian_certificate.is_err());
     }
 }
 

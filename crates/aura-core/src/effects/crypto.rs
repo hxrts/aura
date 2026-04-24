@@ -386,6 +386,28 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         Err(AuraError::crypto("aes_gcm_decrypt not supported"))
     }
 
+    async fn aes_gcm_encrypt_with_aad(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = aad;
+        self.aes_gcm_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn aes_gcm_decrypt_with_aad(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = aad;
+        self.aes_gcm_decrypt(ciphertext, key, nonce).await
+    }
+
     // ====== Key Rotation & Resharing ======
 
     async fn frost_rotate_keys(

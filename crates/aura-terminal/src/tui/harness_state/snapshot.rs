@@ -3,11 +3,14 @@
 use super::commands::{
     map_modal, map_screen, map_toast_kind, push_list, visible_home_ids, TuiSemanticInputs,
 };
+use super::config::{
+    configured_ui_state_file, configured_ui_state_socket, ensure_private_parent_dir,
+    reject_symlink_target, set_private_permissions,
+};
 use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
-use aura_app::harness_mode_enabled;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
@@ -21,36 +24,14 @@ use parking_lot::Mutex;
 use std::fs;
 use std::io;
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::tui::types::SettingsSection;
 
-const UI_STATE_FILE_ENV: &str = "AURA_TUI_UI_STATE_FILE";
-const UI_STATE_SOCKET_ENV: &str = "AURA_TUI_UI_STATE_SOCKET";
-
-static UI_STATE_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
-static UI_STATE_SOCKET: OnceLock<Option<PathBuf>> = OnceLock::new();
 static LAST_WRITTEN_SNAPSHOT: OnceLock<Mutex<Option<Vec<u8>>>> = OnceLock::new();
-
-fn configured_ui_state_file() -> Option<&'static PathBuf> {
-    if !harness_mode_enabled() {
-        return None;
-    }
-    UI_STATE_FILE
-        .get_or_init(|| std::env::var_os(UI_STATE_FILE_ENV).map(PathBuf::from))
-        .as_ref()
-}
-
-fn configured_ui_state_socket() -> Option<&'static PathBuf> {
-    if !harness_mode_enabled() {
-        return None;
-    }
-    UI_STATE_SOCKET
-        .get_or_init(|| std::env::var_os(UI_STATE_SOCKET_ENV).map(PathBuf::from))
-        .as_ref()
-}
 
 fn last_written_snapshot() -> &'static Mutex<Option<Vec<u8>>> {
     LAST_WRITTEN_SNAPSHOT.get_or_init(|| Mutex::new(None))
@@ -112,12 +93,21 @@ fn exported_notification_ids(state: &TuiState, app_snapshot: &StateSnapshot) -> 
 }
 
 fn write_snapshot_file(path: &Path, snapshot_json: &str) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    ensure_private_parent_dir(path)?;
+    reject_symlink_target(path)?;
     let temp_path = path.with_extension("json.tmp");
-    fs::write(&temp_path, snapshot_json)?;
+    reject_symlink_target(&temp_path)?;
+    let _ = fs::remove_file(&temp_path);
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temp_path)?;
+    file.write_all(snapshot_json.as_bytes())?;
+    file.flush()?;
+    set_private_permissions(&temp_path, 0o600)?;
     fs::rename(temp_path, path)?;
+    set_private_permissions(path, 0o600)?;
     Ok(())
 }
 
@@ -453,8 +443,10 @@ fn authoritative_screen_id(state: &TuiState) -> ScreenId {
 }
 
 fn publish_snapshot(snapshot: &UiSnapshot) -> Result<(), String> {
-    let socket_path = configured_ui_state_socket();
-    let file_path = configured_ui_state_file();
+    let socket_path = configured_ui_state_socket()
+        .map_err(|error| format!("invalid TUI semantic snapshot socket configuration: {error}"))?;
+    let file_path = configured_ui_state_file()
+        .map_err(|error| format!("invalid TUI semantic snapshot file configuration: {error}"))?;
     if socket_path.is_none() && file_path.is_none() {
         return Ok(());
     }
@@ -476,10 +468,10 @@ fn publish_snapshot(snapshot: &UiSnapshot) -> Result<(), String> {
         return Ok(());
     }
 
-    let socket_write_result = socket_path.map(|path| {
+    let socket_write_result = socket_path.as_ref().map(|path| {
         StdUnixStream::connect(path).and_then(|mut stream| stream.write_all(&snapshot_json))
     });
-    let file_write_result = file_path.map(|path| {
+    let file_write_result = file_path.as_ref().map(|path| {
         let text = std::str::from_utf8(&snapshot_json)
             .map_err(|error| io::Error::other(format!("invalid UTF-8 snapshot: {error}")))?;
         write_snapshot_file(path, text)

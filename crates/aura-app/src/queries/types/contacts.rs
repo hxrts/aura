@@ -6,7 +6,7 @@ use super::common::{
 };
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -82,8 +82,8 @@ impl Query for InvitationsQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("invitations")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("invitations"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {
@@ -225,8 +225,8 @@ impl Query for ContactsQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("contacts")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("contacts"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

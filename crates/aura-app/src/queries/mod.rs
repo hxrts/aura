@@ -10,7 +10,7 @@
 //!
 //! Each query type implements the `aura_core::Query` trait, which provides:
 //! - `to_datalog()` - Convert to Datalog program
-//! - `required_capabilities()` - Biscuit capabilities needed
+//! - `access_policy()` - audited capability or public-query policy
 //! - `dependencies()` - Fact predicates for invalidation tracking
 //! - `parse()` - Parse Datalog output to typed results
 //!

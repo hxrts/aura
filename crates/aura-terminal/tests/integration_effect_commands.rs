@@ -61,7 +61,7 @@ use aura_terminal::tui::effects::EffectCommand;
 #[allow(clippy::duplicate_mod)]
 mod support;
 
-use support::{generate_demo_invite_code, MockRuntimeTestEnv};
+use support::{generate_demo_invite_code, parse_demo_invite_code, MockRuntimeTestEnv};
 
 const TEST_PREFIX: &str = "aura-propagation-test";
 
@@ -620,8 +620,7 @@ async fn test_accept_invitation_propagates_to_signals() {
     let alice_code = generate_demo_invite_code("alice", 2024);
 
     // Parse invitation to get ID
-    let alice_invitation =
-        aura_agent::handlers::ShareableInvitation::from_code(&alice_code).expect("Parse Alice");
+    let alice_invitation = parse_demo_invite_code(&alice_code);
 
     // Import Alice's invitation
     ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })
@@ -683,8 +682,7 @@ async fn test_decline_invitation_propagates_to_signal() {
     let bob_code = generate_demo_invite_code("bob", 2024);
 
     // Parse invitation to get Bob's ID (we'll decline Bob)
-    let bob_invitation =
-        aura_agent::handlers::ShareableInvitation::from_code(&bob_code).expect("Parse Bob");
+    let bob_invitation = parse_demo_invite_code(&bob_code);
 
     // Import both invitations
     ctx.dispatch(EffectCommand::ImportInvitation { code: alice_code })

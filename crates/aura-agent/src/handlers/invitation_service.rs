@@ -6,19 +6,26 @@
 use super::invitation::{
     execute_invitation_effect_commands, DeferredInvitationNetworkEffects, Invitation,
     InvitationHandler, InvitationResult, InvitationStatus, InvitationType, ShareableInvitation,
-    ShareableInvitationError,
+    ShareableInvitationError, ShareableInvitationSenderProof, ShareableInvitationTransportMetadata,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
+use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 use aura_core::effects::amp::ChannelBootstrapPackage;
+use aura_core::effects::secure::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+};
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
+use aura_core::secrets::SecretExportContext;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
+use aura_signature::sign_ed25519_transcript;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -820,9 +827,7 @@ impl InvitationServiceApi {
     // Sharing Methods (Out-of-Band Transfer)
     // =========================================================================
 
-    fn append_sender_hint(&self, mut code: String) -> String {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
+    fn sender_transport_metadata(&self) -> ShareableInvitationTransportMetadata {
         #[cfg(target_arch = "wasm32")]
         let sender_addr = self
             .effects
@@ -849,17 +854,90 @@ impl InvitationServiceApi {
             sender_hint = ?sender_hint,
             "export invitation sender transport hint"
         );
-        let sender_hint_segment = sender_hint
+        ShareableInvitationTransportMetadata {
+            sender_hint,
+            sender_device_id: Some(self.effects.device_id()),
+        }
+    }
+
+    fn append_sender_hint(
+        &self,
+        mut code: String,
+        transport: &ShareableInvitationTransportMetadata,
+    ) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let sender_hint_segment = transport
+            .sender_hint
             .as_deref()
             .map(|hint| URL_SAFE_NO_PAD.encode(hint.as_bytes()))
             .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("".as_bytes()));
-        let encoded_device_id =
-            URL_SAFE_NO_PAD.encode(self.effects.device_id().to_string().as_bytes());
-        if sender_hint.is_some() || self.effects.harness_mode_enabled() {
+        let encoded_device_id = transport
+            .sender_device_id
+            .map(|device_id| URL_SAFE_NO_PAD.encode(device_id.to_string().as_bytes()))
+            .unwrap_or_else(|| URL_SAFE_NO_PAD.encode("".as_bytes()));
+        if transport.sender_hint.is_some() || self.effects.harness_mode_enabled() {
             code = format!("{code}:{sender_hint_segment}:{encoded_device_id}");
         }
 
         code
+    }
+
+    async fn retrieve_identity_keys(&self, authority: &AuthorityId) -> Option<(Vec<u8>, Vec<u8>)> {
+        let caps = vec![SecureStorageCapability::Read];
+        for epoch in [1_u64, 0_u64] {
+            let location = SecureStorageLocation::with_sub_key(
+                "signing_keys",
+                format!("{authority}:{epoch}"),
+                "1",
+            );
+            let Ok(bytes) = self.effects.secure_retrieve(&location, &caps).await else {
+                continue;
+            };
+            let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
+                &bytes,
+                SecretExportContext::secure_storage(
+                    "aura-agent::handlers::invitation_service::retrieve_identity_keys",
+                ),
+            ) else {
+                continue;
+            };
+            return Some((pkg.signing_key().to_vec(), pkg.verifying_key().to_vec()));
+        }
+        None
+    }
+
+    async fn export_testing_invitation(
+        &self,
+        invitation: &Invitation,
+        transport: &ShareableInvitationTransportMetadata,
+    ) -> Result<String, ShareableInvitationError> {
+        let shareable = ShareableInvitation::from(invitation);
+        let (private_key, public_key) =
+            match self.retrieve_identity_keys(&shareable.sender_id).await {
+                Some(identity_keys) => identity_keys,
+                None => self
+                    .effects
+                    .ed25519_generate_keypair()
+                    .await
+                    .map_err(|_| ShareableInvitationError::SerializationFailed)?,
+            };
+        let signature = sign_ed25519_transcript(
+            self.effects.as_ref(),
+            &shareable.signing_transcript_with_transport(transport),
+            &private_key,
+        )
+        .await
+        .map_err(|_| ShareableInvitationError::SerializationFailed)?;
+        shareable.to_signed_code_with_transport(
+            ShareableInvitationSenderProof {
+                scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+                public_key,
+                signature,
+                sender_device_id: transport.sender_device_id,
+            },
+            transport.clone(),
+        )
     }
 
     /// Export an invitation as a shareable code string (compile-time safe)
@@ -872,19 +950,34 @@ impl InvitationServiceApi {
     /// # Returns
     /// A shareable code string (format: `aura:v1:<base64>`)
     pub fn export_invitation(invitation: &Invitation) -> Result<String, ShareableInvitationError> {
-        let _ = invitation;
-        Err(ShareableInvitationError::MissingSenderProof)
+        #[cfg(test)]
+        {
+            ShareableInvitation::from(invitation).to_code()
+        }
+        #[cfg(not(test))]
+        {
+            let _ = invitation;
+            Err(ShareableInvitationError::MissingSenderProof)
+        }
     }
 
     /// Export an invitation as a shareable code string with transport metadata.
     ///
     /// This should be used for codes that will be imported by another runtime
     /// and may need a direct sender websocket hint for the first return path.
-    pub fn export_invitation_with_sender_hint(
+    pub async fn export_invitation_with_sender_hint(
         &self,
         invitation: &Invitation,
     ) -> Result<String, ShareableInvitationError> {
-        Self::export_invitation(invitation).map(|code| self.append_sender_hint(code))
+        let transport = self.sender_transport_metadata();
+        if self.effects.is_testing() {
+            let code = self
+                .export_testing_invitation(invitation, &transport)
+                .await?;
+            return Ok(self.append_sender_hint(code, &transport));
+        }
+
+        Err(ShareableInvitationError::MissingSenderProof)
     }
 
     /// Export an invitation by ID as a shareable code string
@@ -916,6 +1009,7 @@ impl InvitationServiceApi {
             "export invitation sender websocket hint"
         );
         self.export_invitation_with_sender_hint(&invitation)
+            .await
             .map_err(|error| AgentError::invalid(error.to_string()))
     }
 

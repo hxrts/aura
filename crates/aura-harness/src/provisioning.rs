@@ -163,7 +163,19 @@ pub(crate) fn run_token() -> Option<String> {
 
     let pid = getpid().as_raw();
     let counter = RUN_TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed);
-    Some(format!("pid{pid}-run{counter}"))
+    let suffix = tempfile::Builder::new()
+        .prefix("aura-harness-run-")
+        .tempdir()
+        .ok()
+        .and_then(|dir| {
+            dir.path()
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(sanitize_segment)
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{counter:x}"));
+    Some(format!("pid{pid}-run{counter}-{suffix}"))
 }
 
 fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {

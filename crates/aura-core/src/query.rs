@@ -405,18 +405,211 @@ impl QueryStats {
 // Datalog Types
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Error type for query parsing and validated query-syntax construction.
+#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+pub enum QueryParseError {
+    /// Missing required field
+    #[error("Missing required field: {field}")]
+    MissingField { field: String },
+
+    /// Invalid field value
+    #[error("Invalid value for field {field}: {reason}")]
+    InvalidValue { field: String, reason: String },
+
+    /// Type conversion error
+    #[error("Type conversion error: {reason}")]
+    TypeConversion { reason: String },
+}
+
+fn invalid_query_value(field: &str, reason: impl Into<String>) -> QueryParseError {
+    QueryParseError::InvalidValue {
+        field: field.to_string(),
+        reason: reason.into(),
+    }
+}
+
+fn validate_identifier(field: &str, value: &str) -> Result<(), QueryParseError> {
+    if value.is_empty() {
+        return Err(invalid_query_value(field, "value must not be empty"));
+    }
+
+    let mut chars = value.chars();
+    let first = chars
+        .next()
+        .ok_or_else(|| invalid_query_value(field, "value must not be empty"))?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(invalid_query_value(
+            field,
+            "must start with an ASCII letter or underscore",
+        ));
+    }
+
+    if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        return Err(invalid_query_value(
+            field,
+            "must contain only ASCII letters, digits, or underscores",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_capability_component(field: &str, value: &str) -> Result<(), QueryParseError> {
+    if value.is_empty() {
+        return Err(invalid_query_value(field, "value must not be empty"));
+    }
+
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':' | '-' | '.' | '/' | '*'))
+    {
+        return Err(invalid_query_value(
+            field,
+            "must contain only ASCII letters, digits, or one of _ : - . / *",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_nonempty_text(field: &str, value: &str) -> Result<String, QueryParseError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(invalid_query_value(field, "value must not be empty"));
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Escape a string literal for Datalog rendering.
+pub fn escape_datalog_string_literal(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+macro_rules! validated_string_wrapper {
+    ($name:ident, $validator:ident, $field:literal) => {
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Result<Self, QueryParseError> {
+                let value = value.into();
+                $validator($field, &value)?;
+                Ok(Self(value))
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = QueryParseError;
+
+            fn try_from(value: String) -> Result<Self, Self::Error> {
+                Self::new(value)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(value: $name) -> Self {
+                value.0
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
+    };
+}
+
+validated_string_wrapper!(DatalogPredicate, validate_identifier, "predicate");
+validated_string_wrapper!(DatalogVariable, validate_identifier, "variable");
+validated_string_wrapper!(DatalogSymbol, validate_identifier, "symbol");
+validated_string_wrapper!(
+    QueryCapabilityResource,
+    validate_capability_component,
+    "capability_resource"
+);
+validated_string_wrapper!(
+    QueryCapabilityAction,
+    validate_capability_component,
+    "capability_action"
+);
+validated_string_wrapper!(
+    QueryConstraintName,
+    validate_identifier,
+    "capability_constraint"
+);
+validated_string_wrapper!(
+    PublicQueryOwner,
+    validate_capability_component,
+    "public_query_owner"
+);
+validated_string_wrapper!(
+    PublicQueryScope,
+    validate_capability_component,
+    "public_query_scope"
+);
+
+/// A Datalog fact goal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct DatalogGoal(DatalogFact);
+
+impl DatalogGoal {
+    pub fn new(goal: DatalogFact) -> Self {
+        Self(goal)
+    }
+
+    pub fn fact(&self) -> &DatalogFact {
+        &self.0
+    }
+}
+
+impl From<DatalogFact> for DatalogGoal {
+    fn from(value: DatalogFact) -> Self {
+        Self::new(value)
+    }
+}
+
+impl fmt::Display for DatalogGoal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.fact())
+    }
+}
+
 /// A Datalog program consisting of rules and facts.
 ///
 /// This is the intermediate representation that queries compile to.
 /// The actual execution happens in the QueryHandler.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DatalogProgram {
     /// Rules that define derived relations
     pub rules: Vec<DatalogRule>,
     /// Base facts to include (optional, usually come from journal)
     pub facts: Vec<DatalogFact>,
     /// The goal query to evaluate
-    pub goal: Option<String>,
+    pub goal: Option<DatalogGoal>,
 }
 
 impl DatalogProgram {
@@ -434,6 +627,21 @@ impl DatalogProgram {
         }
     }
 
+    /// Get the rules in this program.
+    pub fn rules(&self) -> &[DatalogRule] {
+        &self.rules
+    }
+
+    /// Get the facts in this program.
+    pub fn facts(&self) -> &[DatalogFact] {
+        &self.facts
+    }
+
+    /// Get the goal in this program.
+    pub fn goal(&self) -> Option<&DatalogGoal> {
+        self.goal.as_ref()
+    }
+
     /// Add a rule to the program
     #[must_use]
     pub fn with_rule(mut self, rule: DatalogRule) -> Self {
@@ -448,9 +656,9 @@ impl DatalogProgram {
         self
     }
 
-    /// Set the goal query
+    /// Set the goal query.
     #[must_use]
-    pub fn with_goal(mut self, goal: impl Into<String>) -> Self {
+    pub fn with_goal(mut self, goal: impl Into<DatalogGoal>) -> Self {
         self.goal = Some(goal.into());
         self
     }
@@ -474,7 +682,7 @@ impl DatalogProgram {
         // Emit goal
         if let Some(ref goal) = self.goal {
             source.push_str("?- ");
-            source.push_str(goal);
+            source.push_str(&goal.to_string());
             source.push_str(".\n");
         }
 
@@ -488,7 +696,7 @@ impl DatalogProgram {
 }
 
 /// A Datalog rule (head :- body)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DatalogRule {
     /// The rule head (conclusion fact)
     pub head: DatalogFact,
@@ -503,6 +711,16 @@ impl DatalogRule {
             head,
             body: Vec::new(),
         }
+    }
+
+    /// Get the rule head.
+    pub fn head(&self) -> &DatalogFact {
+        &self.head
+    }
+
+    /// Get the rule body conditions.
+    pub fn body(&self) -> &[DatalogFact] {
+        &self.body
     }
 
     /// Create a rule with head and body
@@ -543,21 +761,42 @@ impl fmt::Display for DatalogRule {
 }
 
 /// A Datalog fact (ground term)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DatalogFact {
     /// Predicate name
-    pub predicate: String,
+    pub predicate: DatalogPredicate,
     /// Arguments (as strings for serialization)
     pub args: Vec<DatalogValue>,
 }
 
 impl DatalogFact {
-    /// Create a new fact
+    /// Create a new fact.
     pub fn new(predicate: impl Into<String>, args: Vec<DatalogValue>) -> Self {
-        Self {
-            predicate: predicate.into(),
-            args,
+        match Self::try_new(predicate, args) {
+            Ok(fact) => fact,
+            Err(error) => panic!("invalid Datalog predicate: {error}"),
         }
+    }
+
+    /// Create a new fact with validation.
+    pub fn try_new(
+        predicate: impl Into<String>,
+        args: Vec<DatalogValue>,
+    ) -> Result<Self, QueryParseError> {
+        Ok(Self {
+            predicate: DatalogPredicate::new(predicate)?,
+            args,
+        })
+    }
+
+    /// Get the predicate name.
+    pub fn predicate(&self) -> &DatalogPredicate {
+        &self.predicate
+    }
+
+    /// Get the fact arguments.
+    pub fn args(&self) -> &[DatalogValue] {
+        &self.args
     }
 }
 
@@ -575,7 +814,7 @@ impl fmt::Display for DatalogFact {
 }
 
 /// A value in Datalog (string, number, or boolean)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DatalogValue {
     /// String value
     String(String),
@@ -584,9 +823,9 @@ pub enum DatalogValue {
     /// Boolean value
     Boolean(bool),
     /// Variable (for patterns)
-    Variable(String),
+    Variable(DatalogVariable),
     /// Symbol (unquoted identifier)
-    Symbol(String),
+    Symbol(DatalogSymbol),
     /// Null/none value
     Null,
 }
@@ -594,19 +833,44 @@ pub enum DatalogValue {
 impl DatalogValue {
     /// Create a variable value (shorthand for `DatalogValue::Variable`)
     pub fn var(name: impl Into<String>) -> Self {
-        Self::Variable(name.into())
+        match Self::try_var(name) {
+            Ok(value) => value,
+            Err(error) => panic!("invalid Datalog variable: {error}"),
+        }
     }
 
-    /// Create a symbol value
+    /// Create a variable value with validation.
+    pub fn try_var(name: impl Into<String>) -> Result<Self, QueryParseError> {
+        Ok(Self::Variable(DatalogVariable::new(name)?))
+    }
+
+    /// Create a symbol value.
     pub fn symbol(name: impl Into<String>) -> Self {
-        Self::Symbol(name.into())
+        match Self::try_symbol(name) {
+            Ok(value) => value,
+            Err(error) => panic!("invalid Datalog symbol: {error}"),
+        }
+    }
+
+    /// Create a symbol value with validation.
+    pub fn try_symbol(name: impl Into<String>) -> Result<Self, QueryParseError> {
+        Ok(Self::Symbol(DatalogSymbol::new(name)?))
+    }
+
+    /// Get this value as text when it is either a string or symbol.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value.as_str()),
+            Self::Symbol(value) => Some(value.as_str()),
+            _ => None,
+        }
     }
 }
 
 impl fmt::Display for DatalogValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::String(s) => write!(f, "\"{}\"", s.replace('"', "\\\"")),
+            Self::String(s) => write!(f, "\"{}\"", escape_datalog_string_literal(s)),
             Self::Integer(n) => write!(f, "{n}"),
             Self::Boolean(b) => write!(f, "{b}"),
             Self::Variable(v) => write!(f, "${v}"),
@@ -935,46 +1199,180 @@ impl FactPredicate {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct QueryCapability {
     /// Resource being accessed
-    pub resource: String,
+    pub resource: QueryCapabilityResource,
     /// Action being performed (e.g., "read", "list")
-    pub action: String,
+    pub action: QueryCapabilityAction,
     /// Optional constraints
-    pub constraints: Vec<(String, String)>,
+    pub constraints: Vec<(QueryConstraintName, String)>,
 }
 
 impl QueryCapability {
+    /// Create a validated capability for a resource and action.
+    pub fn try_new(
+        resource: impl Into<String>,
+        action: impl Into<String>,
+    ) -> Result<Self, QueryParseError> {
+        Ok(Self {
+            resource: QueryCapabilityResource::new(resource)?,
+            action: QueryCapabilityAction::new(action)?,
+            constraints: Vec::new(),
+        })
+    }
+
     /// Create a read capability for a resource
     pub fn read(resource: impl Into<String>) -> Self {
-        Self {
-            resource: resource.into(),
-            action: "read".to_string(),
-            constraints: Vec::new(),
+        match Self::try_read(resource) {
+            Ok(capability) => capability,
+            Err(error) => panic!("invalid query capability resource: {error}"),
         }
+    }
+
+    /// Create a read capability for a resource with validation.
+    pub fn try_read(resource: impl Into<String>) -> Result<Self, QueryParseError> {
+        Self::try_new(resource, "read")
     }
 
     /// Create a list capability for a resource
     pub fn list(resource: impl Into<String>) -> Self {
-        Self {
-            resource: resource.into(),
-            action: "list".to_string(),
-            constraints: Vec::new(),
+        match Self::try_list(resource) {
+            Ok(capability) => capability,
+            Err(error) => panic!("invalid query capability resource: {error}"),
         }
+    }
+
+    /// Create a list capability for a resource with validation.
+    pub fn try_list(resource: impl Into<String>) -> Result<Self, QueryParseError> {
+        Self::try_new(resource, "list")
+    }
+
+    /// Get the requested resource.
+    pub fn resource(&self) -> &QueryCapabilityResource {
+        &self.resource
+    }
+
+    /// Get the requested action.
+    pub fn action(&self) -> &QueryCapabilityAction {
+        &self.action
     }
 
     /// Add a constraint
     #[must_use]
     pub fn with_constraint(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.constraints.push((key.into(), value.into()));
+        self = match self.try_with_constraint(key, value) {
+            Ok(capability) => capability,
+            Err(error) => panic!("invalid query capability constraint: {error}"),
+        };
         self
+    }
+
+    /// Add a constraint with validation.
+    pub fn try_with_constraint(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, QueryParseError> {
+        self.constraints
+            .push((QueryConstraintName::new(key)?, value.into()));
+        Ok(self)
+    }
+
+    /// Iterate over query constraints.
+    pub fn constraints(&self) -> impl Iterator<Item = (&QueryConstraintName, &str)> {
+        self.constraints
+            .iter()
+            .map(|(name, value)| (name, value.as_str()))
     }
 
     /// Convert to Biscuit Datalog check
     pub fn to_biscuit_check(&self) -> String {
-        let mut check = format!("check if right(\"{}\", \"{}\")", self.resource, self.action);
+        let mut check = format!(
+            "check if right(\"{}\", \"{}\")",
+            escape_datalog_string_literal(self.resource.as_str()),
+            escape_datalog_string_literal(self.action.as_str())
+        );
         for (key, value) in &self.constraints {
-            check.push_str(&format!(", {key} == \"{value}\""));
+            check.push_str(&format!(
+                ", {} == \"{}\"",
+                key.as_str(),
+                escape_datalog_string_literal(value)
+            ));
         }
         check
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query Access Policy
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Explicit allowlist metadata for a public query.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PublicQuery {
+    /// Owning module, crate, or semantic owner for this public query.
+    pub owner: PublicQueryOwner,
+    /// Audited public read scope.
+    pub scope: PublicQueryScope,
+    /// Human-readable justification for why no capability is required.
+    pub justification: String,
+}
+
+impl PublicQuery {
+    pub fn new(
+        owner: impl Into<String>,
+        scope: impl Into<String>,
+        justification: impl Into<String>,
+    ) -> Result<Self, QueryParseError> {
+        let justification = justification.into();
+        Ok(Self {
+            owner: PublicQueryOwner::new(owner)?,
+            scope: PublicQueryScope::new(scope)?,
+            justification: validate_nonempty_text("public_query_justification", &justification)?,
+        })
+    }
+
+    pub fn owner(&self) -> &PublicQueryOwner {
+        &self.owner
+    }
+
+    pub fn scope(&self) -> &PublicQueryScope {
+        &self.scope
+    }
+
+    pub fn justification(&self) -> &str {
+        &self.justification
+    }
+}
+
+/// Access policy for a typed query.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum QueryAccessPolicy {
+    /// Protected query requiring at least one checked capability.
+    Protected {
+        primary: QueryCapability,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional: Vec<QueryCapability>,
+    },
+    /// Public query explicitly allowlisted with metadata.
+    Public(PublicQuery),
+}
+
+impl QueryAccessPolicy {
+    pub fn protected(primary: QueryCapability) -> Self {
+        Self::Protected {
+            primary,
+            additional: Vec::new(),
+        }
+    }
+
+    pub fn protected_with(primary: QueryCapability, additional: Vec<QueryCapability>) -> Self {
+        Self::Protected {
+            primary,
+            additional,
+        }
+    }
+
+    pub fn public(public: PublicQuery) -> Self {
+        Self::Public(public)
     }
 }
 
@@ -982,34 +1380,21 @@ impl QueryCapability {
 // Query Trait
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Error type for query parsing
-#[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
-pub enum QueryParseError {
-    /// Missing required field
-    #[error("Missing required field: {field}")]
-    MissingField { field: String },
-
-    /// Invalid field value
-    #[error("Invalid value for field {field}: {reason}")]
-    InvalidValue { field: String, reason: String },
-
-    /// Type conversion error
-    #[error("Type conversion error: {reason}")]
-    TypeConversion { reason: String },
-}
-
 /// Trait for typed queries that compile to Datalog.
 ///
 /// Queries are the portable read interface for the journal. They:
 /// - Compile to Datalog programs for execution
-/// - Declare Biscuit capabilities for authorization
+/// - Declare an explicit audited access policy
 /// - Specify fact predicates for change tracking
 /// - Parse results to typed values
 ///
 /// # Example
 ///
 /// ```ignore
-/// use aura_core::query::{Query, DatalogProgram, QueryCapability, FactPredicate};
+/// use aura_core::query::{
+///     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate,
+///     Query, QueryAccessPolicy, QueryCapability, QueryParseError,
+/// };
 ///
 /// struct ChannelsQuery {
 ///     channel_type: Option<String>,
@@ -1019,14 +1404,27 @@ pub enum QueryParseError {
 ///     type Result = Vec<Channel>;
 ///
 ///     fn to_datalog(&self) -> DatalogProgram {
-///         DatalogProgram::new()
-///             .with_rule(DatalogRule::new("channel($id, $name, $type)")
-///                 .when("channel_fact($id, $name, $type)"))
-///             .with_goal("channel($id, $name, $type)")
+///         let head = DatalogFact::new(
+///             "channel",
+///             vec![
+///                 DatalogValue::var("id"),
+///                 DatalogValue::var("name"),
+///                 DatalogValue::var("type"),
+///             ],
+///         );
+///         let body = DatalogFact::new(
+///             "channel_fact",
+///             vec![
+///                 DatalogValue::var("id"),
+///                 DatalogValue::var("name"),
+///                 DatalogValue::var("type"),
+///             ],
+///         );
+///         DatalogProgram::new(vec![DatalogRule::new(head.clone()).when(body)]).with_goal(head)
 ///     }
 ///
-///     fn required_capabilities(&self) -> Vec<QueryCapability> {
-///         vec![QueryCapability::list("channels")]
+///     fn access_policy(&self) -> QueryAccessPolicy {
+///         QueryAccessPolicy::protected(QueryCapability::list("channels"))
 ///     }
 ///
 ///     fn dependencies(&self) -> Vec<FactPredicate> {
@@ -1048,10 +1446,11 @@ pub trait Query: Send + Sync + Clone + 'static {
     /// filtered by Biscuit authorization.
     fn to_datalog(&self) -> DatalogProgram;
 
-    /// Get the Biscuit capabilities required to execute this query.
+    /// Get the audited access policy for this query.
     ///
-    /// The QueryHandler will verify these capabilities before execution.
-    fn required_capabilities(&self) -> Vec<QueryCapability>;
+    /// Production queries must either declare at least one required capability
+    /// or carry explicit public-query metadata.
+    fn access_policy(&self) -> QueryAccessPolicy;
 
     /// Get the fact predicates this query depends on.
     ///
@@ -1126,18 +1525,23 @@ mod tests {
     }
 
     #[test]
+    fn test_datalog_string_display_escapes_quotes_backslashes_and_newlines() {
+        let value = DatalogValue::String("say \"hello\"\npath\\segment".to_string());
+
+        assert_eq!(value.to_string(), "\"say \\\"hello\\\"\\npath\\\\segment\"");
+    }
+
+    #[test]
     fn test_datalog_program_source() {
-        let program = DatalogProgram::new(vec![DatalogRule::new(DatalogFact::new(
-            "active_user",
-            vec![DatalogValue::var("name")],
-        ))
-        .when(DatalogFact::new("user", vec![DatalogValue::var("name")]))
-        .when(DatalogFact::new("online", vec![DatalogValue::var("name")]))])
+        let goal = DatalogFact::new("active_user", vec![DatalogValue::var("name")]);
+        let program = DatalogProgram::new(vec![DatalogRule::new(goal.clone())
+            .when(DatalogFact::new("user", vec![DatalogValue::var("name")]))
+            .when(DatalogFact::new("online", vec![DatalogValue::var("name")]))])
         .with_fact(DatalogFact::new(
             "user",
             vec![DatalogValue::String("alice".to_string())],
         ))
-        .with_goal("active_user($name)");
+        .with_goal(goal);
 
         let source = program.to_datalog_source();
         assert!(source.contains("user(\"alice\")"));
@@ -1261,6 +1665,39 @@ mod tests {
         let check = cap.to_biscuit_check();
         assert!(check.contains("right(\"channels\", \"read\")"));
         assert!(check.contains("owner == \"alice\""));
+    }
+
+    #[test]
+    fn test_query_capability_escapes_constraint_values() {
+        let cap = QueryCapability::read("channels")
+            .with_constraint("owner", "alice\\bob")
+            .with_constraint("note", "line1\n\"line2\"");
+
+        let check = cap.to_biscuit_check();
+        assert!(check.contains("alice\\\\bob"));
+        assert!(check.contains("line1\\n\\\"line2\\\""));
+    }
+
+    #[test]
+    fn test_invalid_variable_name_is_rejected() {
+        let error = DatalogValue::try_var("not-valid")
+            .expect_err("hyphenated variable names should be rejected");
+
+        assert!(matches!(
+            error,
+            QueryParseError::InvalidValue { field, .. } if field == "variable"
+        ));
+    }
+
+    #[test]
+    fn test_public_query_requires_justification_metadata() {
+        let error = PublicQuery::new("aura_core.query.tests", "public_scope", "   ")
+            .expect_err("blank public query justification should be rejected");
+
+        assert!(matches!(
+            error,
+            QueryParseError::InvalidValue { field, .. } if field == "public_query_justification"
+        ));
     }
 
     #[test]

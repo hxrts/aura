@@ -209,6 +209,7 @@ impl AmpChannelEffects for AuraEffectSystem {
             self,
             params.context,
             params.channel,
+            params.sender,
             params.plaintext,
             &config,
         )

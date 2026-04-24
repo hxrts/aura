@@ -17,6 +17,7 @@ use ciborium::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Cursor;
 
 /// Unified error type for serialization operations
 #[derive(Debug, thiserror::Error)]
@@ -37,10 +38,12 @@ fn canonicalize_value(value: CborValue) -> Result<CborValue> {
     match value {
         CborValue::Integer(_)
         | CborValue::Bytes(_)
-        | CborValue::Float(_)
         | CborValue::Text(_)
         | CborValue::Bool(_)
         | CborValue::Null => Ok(value),
+        CborValue::Float(_) => Err(SerializationError::InvalidFormat(
+            "DAG-CBOR floats are not supported in Aura serialization".to_string(),
+        )),
         CborValue::Tag(tag, _) => Err(SerializationError::InvalidFormat(format!(
             "Unsupported DAG-CBOR tag in Aura serialization: {tag}"
         ))),
@@ -79,6 +82,19 @@ fn canonicalize_map(entries: Vec<(CborValue, CborValue)>) -> Result<CborValue> {
     Ok(CborValue::Map(canonical_entries))
 }
 
+fn parse_cbor_value(bytes: &[u8]) -> Result<CborValue> {
+    let mut cursor = Cursor::new(bytes);
+    let value: CborValue =
+        cbor_from_reader(&mut cursor).map_err(|e| SerializationError::DagCbor(e.to_string()))?;
+    let consumed = cursor.position() as usize;
+    if consumed != bytes.len() {
+        return Err(SerializationError::InvalidFormat(
+            "Trailing bytes are not allowed in DAG-CBOR payloads".to_string(),
+        ));
+    }
+    Ok(value)
+}
+
 /// Serialize any serde-compatible type to DAG-CBOR bytes
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let value = CborValue::serialized(value).map_err(|e| {
@@ -92,11 +108,39 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// Deserialize DAG-CBOR bytes to any serde-compatible type
-pub fn from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
-    let value: CborValue =
-        cbor_from_reader(bytes).map_err(|e| SerializationError::DagCbor(e.to_string()))?;
+/// Deserialize trusted/internal DAG-CBOR bytes to any serde-compatible type.
+///
+/// This accepts non-canonical encodings but still rejects values outside Aura's
+/// DAG-CBOR subset. It is reserved for trusted, already-owned bytes such as
+/// local fixture material or compatibility tests. Peer-originated,
+/// transcript-bound, content-addressed, and journal-fact wire bytes must use
+/// [`from_slice`] instead.
+pub fn from_slice_trusted<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
+    let value = parse_cbor_value(bytes)?;
     let value = canonicalize_value(value)?;
+    value
+        .deserialized()
+        .map_err(|e| SerializationError::DagCbor(e.to_string()))
+}
+
+/// Deserialize strict wire/transcript DAG-CBOR bytes to any serde-compatible
+/// type.
+///
+/// This rejects any input whose bytes do not already match the canonical
+/// DAG-CBOR encoding and is the required entrypoint for peer-originated,
+/// signed, or content-addressed bytes.
+pub fn from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
+    let value = parse_cbor_value(bytes)?;
+    let value = canonicalize_value(value)?;
+    let mut canonical_bytes = Vec::new();
+    cbor_into_writer(&value, &mut canonical_bytes).map_err(|e| {
+        SerializationError::DagCbor(format!("Failed to encode canonical DAG-CBOR bytes: {e}"))
+    })?;
+    if canonical_bytes != bytes {
+        return Err(SerializationError::InvalidFormat(
+            "Non-canonical DAG-CBOR wire encoding".to_string(),
+        ));
+    }
     value
         .deserialized()
         .map_err(|e| SerializationError::DagCbor(e.to_string()))
@@ -278,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nested_map_decode_recanonicalizes_noncanonical_input() {
+    fn test_trusted_decode_recanonicalizes_noncanonical_input() {
         #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
         struct NestedEnvelope {
             fields: HashMap<String, HashMap<String, u64>>,
@@ -318,7 +362,7 @@ mod tests {
         let mut bytes = Vec::new();
         cbor_into_writer(&noncanonical, &mut bytes).unwrap();
 
-        let decoded: NestedEnvelope = from_slice(&bytes).unwrap();
+        let decoded: NestedEnvelope = from_slice_trusted(&bytes).unwrap();
 
         let mut expected = HashMap::new();
         expected.insert(
@@ -333,6 +377,53 @@ mod tests {
 
         assert_eq!(decoded, expected);
         assert_eq!(to_vec(&decoded).unwrap(), to_vec(&expected).unwrap());
+    }
+
+    #[test]
+    fn test_strict_decode_rejects_noncanonical_map_order() {
+        #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+        struct NestedEnvelope {
+            fields: HashMap<String, HashMap<String, u64>>,
+        }
+
+        let noncanonical = CborValue::Map(vec![(
+            CborValue::Text("fields".to_string()),
+            CborValue::Map(vec![
+                (
+                    CborValue::Text("beta".to_string()),
+                    CborValue::Map(vec![
+                        (
+                            CborValue::Text("zeta".to_string()),
+                            CborValue::Integer(6.into()),
+                        ),
+                        (
+                            CborValue::Text("alpha".to_string()),
+                            CborValue::Integer(1.into()),
+                        ),
+                    ]),
+                ),
+                (
+                    CborValue::Text("alpha".to_string()),
+                    CborValue::Map(vec![
+                        (
+                            CborValue::Text("delta".to_string()),
+                            CborValue::Integer(4.into()),
+                        ),
+                        (
+                            CborValue::Text("beta".to_string()),
+                            CborValue::Integer(2.into()),
+                        ),
+                    ]),
+                ),
+            ]),
+        )]);
+        let mut bytes = Vec::new();
+        cbor_into_writer(&noncanonical, &mut bytes).unwrap();
+
+        let err = from_slice::<NestedEnvelope>(&bytes).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
     }
 
     #[test]
@@ -401,5 +492,41 @@ mod tests {
 
         let err = from_slice::<HashMap<String, Vec<u64>>>(&bytes).unwrap_err();
         assert!(err.to_string().contains("Unsupported DAG-CBOR tag"));
+    }
+
+    #[test]
+    fn test_floats_are_rejected_on_encode_and_decode() {
+        let err = to_vec(&CborValue::Float(1.0)).unwrap_err();
+        assert!(err.to_string().contains("floats are not supported"));
+
+        let err = from_slice::<CborValue>(&[0xfb, 0x3f, 0xf0, 0, 0, 0, 0, 0, 0]).unwrap_err();
+        assert!(err.to_string().contains("floats are not supported"));
+    }
+
+    #[test]
+    fn test_strict_decode_rejects_indefinite_string_and_array_encodings() {
+        let err = from_slice::<String>(&[0x7f, 0x61, b'a', 0x61, b'b', 0xff]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
+
+        let err = from_slice::<Vec<u64>>(&[0x9f, 0x01, 0x02, 0xff]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
+    }
+
+    #[test]
+    fn test_strict_decode_rejects_alternate_integer_encoding() {
+        let err = from_slice::<u64>(&[0x18, 0x01]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Non-canonical DAG-CBOR wire encoding"));
+    }
+
+    #[test]
+    fn test_strict_decode_rejects_trailing_bytes() {
+        let err = from_slice::<u64>(&[0x01, 0x02]).unwrap_err();
+        assert!(err.to_string().contains("Trailing bytes"));
     }
 }

@@ -22,7 +22,6 @@ use async_lock::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aura_agent::handlers::ShareableInvitation;
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -34,7 +33,7 @@ use aura_terminal::tui::effects::EffectCommand;
 #[path = "../support/mod.rs"]
 mod support;
 
-use support::{generate_demo_invite_code, FullTestEnv};
+use support::{generate_demo_invite_code, parse_demo_invite_code, FullTestEnv};
 
 // ============================================================================
 // Test Infrastructure
@@ -137,7 +136,7 @@ async fn test_demo_invitation_codes_are_parseable() {
 
     // Phase 1: Parse Alice's code
     println!("\nPhase 1: Parse Alice's invite code");
-    let alice_result = ShareableInvitation::from_code(&alice_code);
+    let alice_result = std::panic::catch_unwind(|| parse_demo_invite_code(&alice_code));
     match &alice_result {
         Ok(invitation) => {
             println!("  Success! Alice's invitation:");
@@ -156,15 +155,15 @@ async fn test_demo_invitation_codes_are_parseable() {
             );
             println!("    Message: {message:?}", message = invitation.message);
         }
-        Err(e) => {
-            panic!("Failed to parse Alice's invite code: {e:?}");
+        Err(error) => {
+            panic!("Failed to parse Alice's invite code: {error:?}");
         }
     }
     let alice_invitation = alice_result.expect("Alice's code should parse");
 
     // Phase 2: Parse Carol's code
     println!("\nPhase 2: Parse Carol's invite code");
-    let carol_result = ShareableInvitation::from_code(&carol_code);
+    let carol_result = std::panic::catch_unwind(|| parse_demo_invite_code(&carol_code));
     match &carol_result {
         Ok(invitation) => {
             println!("  Success! Carol's invitation:");
@@ -183,8 +182,8 @@ async fn test_demo_invitation_codes_are_parseable() {
             );
             println!("    Message: {message:?}", message = invitation.message);
         }
-        Err(e) => {
-            panic!("Failed to parse Carol's invite code: {e:?}");
+        Err(error) => {
+            panic!("Failed to parse Carol's invite code: {error:?}");
         }
     }
     let carol_invitation = carol_result.expect("Carol's code should parse");
@@ -232,12 +231,8 @@ async fn test_import_invitation_command_with_demo_codes() {
     // Names and seeds must match AgentFactory::create_demo_agents
     let alice_code = generate_demo_invite_code("Alice", seed);
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
-    let alice_sender = ShareableInvitation::from_code(&alice_code)
-        .expect("Parse Alice code")
-        .sender_id;
-    let carol_sender = ShareableInvitation::from_code(&carol_code)
-        .expect("Parse Carol code")
-        .sender_id;
+    let alice_sender = parse_demo_invite_code(&alice_code).sender_id;
+    let carol_sender = parse_demo_invite_code(&carol_code).sender_id;
 
     // Phase 1: Import Alice's invite code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
@@ -313,8 +308,8 @@ async fn test_complete_demo_invitation_flow() {
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     // Parse the codes to get sender IDs
-    let alice_invitation = ShareableInvitation::from_code(&alice_code).expect("Parse Alice");
-    let carol_invitation = ShareableInvitation::from_code(&carol_code).expect("Parse Carol");
+    let alice_invitation = parse_demo_invite_code(&alice_code);
+    let carol_invitation = parse_demo_invite_code(&carol_code);
 
     // Phase 1: Import both invite codes
     println!("Phase 1: Import Alice and Carol's invite codes");
@@ -570,10 +565,8 @@ async fn test_guardian_authority_id_matching() {
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
     // Step 2: Parse the invitations to get AuthorityIds
-    let alice_invitation =
-        ShareableInvitation::from_code(&alice_code).expect("Alice invitation should parse");
-    let carol_invitation =
-        ShareableInvitation::from_code(&carol_code).expect("Carol invitation should parse");
+    let alice_invitation = parse_demo_invite_code(&alice_code);
+    let carol_invitation = parse_demo_invite_code(&carol_code);
 
     let alice_invitation_authority = alice_invitation.sender_id;
     let carol_invitation_authority = carol_invitation.sender_id;
@@ -642,7 +635,7 @@ async fn test_derivation_chain_consistency() {
 
     // 2. Verify it matches what's in the invitation
     let code = generate_demo_invite_code("Alice", seed);
-    let invitation = ShareableInvitation::from_code(&code).unwrap();
+    let invitation = parse_demo_invite_code(&code);
     println!(
         "  Invitation sender_id: {sender_id}",
         sender_id = invitation.sender_id
@@ -664,7 +657,7 @@ async fn test_derivation_chain_consistency() {
     println!("  AuthorityId: {carol_authority}");
 
     let carol_code = generate_demo_invite_code("Carol", carol_seed);
-    let carol_invitation = ShareableInvitation::from_code(&carol_code).unwrap();
+    let carol_invitation = parse_demo_invite_code(&carol_code);
     println!(
         "  Invitation sender_id: {sender_id}",
         sender_id = carol_invitation.sender_id

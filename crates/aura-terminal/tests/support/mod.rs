@@ -66,7 +66,8 @@ pub use signals::{
 // Demo helpers
 pub use demo::{
     alice_authority_id, alice_invite_code, carol_authority_id, carol_invite_code,
-    generate_demo_guardian_invite_code, generate_demo_invite_code, DEFAULT_DEMO_SEED,
+    generate_demo_guardian_invite_code, generate_demo_invite_code, parse_demo_invite_code,
+    DEFAULT_DEMO_SEED,
 };
 
 // ============================================================================

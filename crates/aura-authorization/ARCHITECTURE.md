@@ -40,6 +40,12 @@ profiles, and evaluated capability frontiers.
 - Evaluated frontiers in guard snapshots are distinct from issuance profiles and
   declared capability families.
 - Policies are Datalog-based for flexible evaluation.
+- Storage Biscuit admission is conjunctive: an allow policy must bind
+  authority/account identity, requested operation, and the exact requested
+  storage resource in one proof path.
+- Storage resource coverage is segment-aware and typed through
+  `aura_core::types::scope::StoragePath`; raw string `starts_with` or
+  substring matching is forbidden for namespace authorization.
 
 ### InvariantCapabilityMeetMonotonicity
 
@@ -113,6 +119,7 @@ cargo test -p aura-authorization --lib             # inline unit tests
 | Permission string mapping wrong | `src/storage_authorization.rs` inline | covered |
 | Scope conversion loses authority binding | `src/storage_authorization.rs` inline | covered |
 | Flow cost calculation wrong | `src/storage_authorization.rs` inline | covered |
+| Namespace prefix confusion widens access | `src/storage_authorization.rs` inline | covered |
 
 ## References
 

@@ -12,8 +12,6 @@ use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, Ceremony
 use crate::runtime::services::{RendezvousManager, SyncServiceManager};
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use async_trait::async_trait;
-#[cfg(test)]
-use aura_app::runtime_bridge::ReachabilityRefreshOutcome;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
@@ -68,8 +66,6 @@ use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use aura_social::{is_user_banned, is_user_muted};
-#[cfg(target_arch = "wasm32")]
-use gloo_net::websocket::{futures::WebSocket, Message};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -525,6 +521,7 @@ impl AgentRuntimeBridge {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(dead_code)] // Retained as the wasm-local bridge helper for future websocket callsites.
 async fn run_local_ws<Mk, Fut, T>(make_fut: Mk) -> Result<T, IntentError>
 where
     Mk: FnOnce() -> Fut + 'static,
@@ -2606,6 +2603,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Use compile-time safe export since we already have the invitation
         let enrollment_code = invitation_service
             .export_invitation_with_sender_hint(&invitation)
+            .await
             .map_err(|error| IntentError::internal_error(error.to_string()))?;
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {

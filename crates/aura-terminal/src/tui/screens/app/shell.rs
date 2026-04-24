@@ -44,9 +44,10 @@ use crate::tui::context::{IoContext, ShellExitIntent};
 use crate::tui::harness_state::{
     accept_harness_command_submission, apply_harness_command, clear_harness_command_sender,
     complete_pending_semantic_submission, ensure_harness_command_listener,
-    fail_pending_semantic_submission, maybe_export_ui_snapshot, publish_loading_ui_snapshot,
-    register_harness_command_sender, reject_harness_command_submission,
-    track_pending_semantic_submission, PendingSemanticValueKind, TuiSemanticInputs,
+    fail_pending_semantic_submission, harness_bridge_enabled, maybe_export_ui_snapshot,
+    publish_loading_ui_snapshot, register_harness_command_sender,
+    reject_harness_command_submission, track_pending_semantic_submission, PendingSemanticValueKind,
+    TuiSemanticInputs,
 };
 use crate::tui::hooks::{AppCoreContext, AppSnapshotAvailability, CallbackContext};
 use crate::tui::keymap::{global_footer_hints, screen_footer_hints};
@@ -121,8 +122,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIn
     let bootstrap_handoff_tx_holder = Arc::new(Mutex::new(Some(bootstrap_handoff_tx)));
     ctx.clear_bootstrap_runtime_handoff_committed()
         .map_err(|error| std::io::Error::other(error.to_string()))?;
-    ensure_harness_command_listener().await?;
-    register_harness_command_sender(harness_command_tx).await?;
+    if harness_bridge_enabled()? {
+        ensure_harness_command_listener().await?;
+        register_harness_command_sender(harness_command_tx).await?;
+    }
 
     let ctx_arc = Arc::new(ctx);
     let callbacks = CallbackRegistry::new(ctx_arc.clone(), update_tx.clone());

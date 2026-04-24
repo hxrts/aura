@@ -12,7 +12,7 @@
 
 #![allow(clippy::disallowed_types)]
 
-use crate::core::config::default_storage_path;
+use crate::core::config::{default_storage_path, SecureStorageBackend};
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
@@ -75,7 +75,12 @@ use super::shared_transport::SharedTransport;
 pub struct BiscuitCache {
     /// Base64-encoded Biscuit token bytes
     pub token_b64: String,
+    /// Trusted issuer metadata carried alongside cached token bytes.
+    pub issuer_authority: AuthorityId,
     /// Base64-encoded root public key bytes
+    ///
+    /// Retained as cache consistency metadata only. Verification must use the
+    /// trusted runtime root public key, not this cached value.
     pub root_pk_b64: String,
 }
 
@@ -383,6 +388,33 @@ impl AuraEffectSystem {
         config
     }
 
+    fn secure_storage_handler_for_config(
+        config: &AgentConfig,
+        execution_mode: ExecutionMode,
+    ) -> ProductionSecureStorageHandler {
+        if !execution_mode.is_production() {
+            return ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                config.storage.base_path.clone(),
+            );
+        }
+
+        match config.storage.secure_storage_backend {
+            SecureStorageBackend::FilesystemFallback => {
+                tracing::warn!(
+                    base_path = %config.storage.base_path.display(),
+                    "Production mode is using the non-interactive filesystem secure-storage fallback; \
+                     opt into platform secure storage via config.storage.secure_storage_backend"
+                );
+                ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                    config.storage.base_path.clone(),
+                )
+            }
+            SecureStorageBackend::PlatformCredentialStore => {
+                ProductionSecureStorageHandler::for_production(config.storage.base_path.clone())
+            }
+        }
+    }
+
     /// Internal helper that builds the effect system with the given composite handler.
     ///
     /// All factory methods delegate to this to avoid code duplication.
@@ -403,7 +435,7 @@ impl AuraEffectSystem {
         shared_transport: Option<SharedTransport>,
         shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
         authority_id: AuthorityId,
-    ) -> Self {
+    ) -> Result<Self, crate::core::AgentError> {
         Self::maybe_start_deadlock_detector();
         assert!(
             !execution_mode.is_production() || crypto_seed.is_none(),
@@ -424,13 +456,10 @@ impl AuraEffectSystem {
             Some(seed) => CryptoRng::deterministic(StdRng::from_seed(seed)),
             None => CryptoRng::thread_local(),
         };
-        let secure_storage_handler = Arc::new(if execution_mode.is_production() {
-            ProductionSecureStorageHandler::for_production(config.storage.base_path.clone())
-        } else {
-            ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
-                config.storage.base_path.clone(),
-            )
-        });
+        let secure_storage_handler = Arc::new(Self::secure_storage_handler_for_config(
+            &config,
+            execution_mode,
+        ));
         let crypto = CryptoSubsystem::from_parts(
             crypto_handler.clone(),
             random_rng,
@@ -449,8 +478,28 @@ impl AuraEffectSystem {
             harness_mode_enabled,
         );
         let encrypted_storage_config = {
-            let mut cfg = EncryptedStorageConfig::default()
-                .with_encryption_mode(config.storage.encryption_policy.into());
+            let mut cfg = match config.storage.encryption_policy {
+                crate::core::config::StorageEncryptionPolicy::Required => {
+                    EncryptedStorageConfig::production_required()
+                }
+                crate::core::config::StorageEncryptionPolicy::PlaintextForTests => {
+                    if execution_mode.is_production() {
+                        return Err(crate::core::AgentError::config(
+                            "production runtime rejects plaintext storage policy; use encrypted storage or an explicit test/simulation constructor",
+                        ));
+                    }
+                    #[cfg(any(test, feature = "simulation"))]
+                    {
+                        EncryptedStorageConfig::testing_plaintext()
+                    }
+                    #[cfg(not(any(test, feature = "simulation")))]
+                    {
+                        return Err(crate::core::AgentError::config(
+                            "plaintext storage policy requires a test build or the simulation feature",
+                        ));
+                    }
+                }
+            };
             if config.storage.opaque_names {
                 cfg = cfg.with_opaque_names();
             }
@@ -516,6 +565,7 @@ impl AuraEffectSystem {
                         let root_pk_bytes = token_authority.root_public_key().to_bytes();
                         Some(BiscuitCache {
                             token_b64: engine.encode(&token_bytes),
+                            issuer_authority: authority,
                             root_pk_b64: engine.encode(root_pk_bytes),
                         })
                     }
@@ -566,7 +616,7 @@ impl AuraEffectSystem {
             "initialized aura runtime effect system"
         );
 
-        effect_system
+        Ok(effect_system)
     }
 
     /// Check if the effect system is in test mode (bypasses authorization guards)
@@ -990,6 +1040,7 @@ impl AuraEffectSystem {
 
                 *self.biscuit_cache.write() = Some(BiscuitCache {
                     token_b64,
+                    issuer_authority: self.authority_id,
                     root_pk_b64,
                 });
                 tracing::info!("Biscuit cache initialized from secure storage");
@@ -1019,6 +1070,58 @@ impl AuraEffectSystem {
     /// Get the current biscuit cache (for guard chain metadata).
     pub fn biscuit_cache(&self) -> Option<BiscuitCache> {
         self.biscuit_cache.read().clone()
+    }
+
+    /// Verify the cached Biscuit frontier against the runtime's trusted root key.
+    pub fn verified_biscuit_frontier(
+        &self,
+    ) -> Result<
+        Option<(
+            aura_authorization::VerifiedBiscuitToken,
+            aura_authorization::BiscuitAuthorizationBridge,
+        )>,
+        AuraError,
+    > {
+        use base64::Engine;
+
+        let Some(cache) = self.biscuit_cache() else {
+            return Ok(None);
+        };
+
+        let trusted_authority = self.authorization_handler.authority_id();
+        if cache.issuer_authority != trusted_authority {
+            return Err(AuraError::invalid(format!(
+                "cached Biscuit issuer {} does not match trusted authority {}",
+                cache.issuer_authority, trusted_authority
+            )));
+        }
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        let token_bytes = engine.decode(cache.token_b64).map_err(|error| {
+            AuraError::invalid(format!("decode cached Biscuit token bytes failed: {error}"))
+        })?;
+
+        let cached_root_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
+            AuraError::invalid(format!(
+                "decode cached Biscuit root public key failed: {error}"
+            ))
+        })?;
+        let root_public_key = aura_authorization::PublicKey::from_bytes(&cached_root_bytes)
+            .map_err(|error| {
+                AuraError::invalid(format!(
+                    "parse cached Biscuit root public key failed: {error}"
+                ))
+            })?;
+
+        let token =
+            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
+                .map_err(|error| {
+                    AuraError::invalid(format!("verify cached Biscuit token failed: {error}"))
+                })?;
+        let bridge =
+            aura_authorization::BiscuitAuthorizationBridge::new(root_public_key, trusted_authority);
+
+        Ok(Some((token, bridge)))
     }
 
     /// Create and persist Biscuit authorization tokens during account bootstrap.
@@ -1057,6 +1160,7 @@ impl AuraEffectSystem {
         let engine = base64::engine::general_purpose::STANDARD;
         self.set_biscuit_cache(BiscuitCache {
             token_b64: engine.encode(&token_bytes),
+            issuer_authority: *authority,
             root_pk_b64: engine.encode(root_pk_bytes),
         });
 
@@ -1297,7 +1401,7 @@ impl AuraEffectSystem {
     ) -> Result<Self, crate::core::AgentError> {
         let config = Self::normalize_test_config(config);
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(
+        Self::build_internal(
             config,
             composite,
             ExecutionMode::Testing,
@@ -1305,7 +1409,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for production.
@@ -1319,7 +1423,7 @@ impl AuraEffectSystem {
             .register_all(RegisterAllOptions::allow_impure())
             .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
         // Production uses OS entropy, no seed
-        Ok(Self::build_internal(
+        Self::build_internal(
             config,
             composite,
             ExecutionMode::Production,
@@ -1327,7 +1431,7 @@ impl AuraEffectSystem {
             None,
             None,
             authority_id,
-        ))
+        )
     }
 
     fn identity_from_location(location: &Location<'_>) -> String {
@@ -1509,7 +1613,7 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(
+        Self::build_internal(
             Self::normalize_test_config(config.clone()),
             composite,
             ExecutionMode::Testing,
@@ -1517,7 +1621,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for testing with shared transport.
@@ -1530,7 +1634,7 @@ impl AuraEffectSystem {
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(
+        Self::build_internal(
             Self::normalize_test_config(config.clone()),
             composite,
             ExecutionMode::Testing,
@@ -1538,7 +1642,7 @@ impl AuraEffectSystem {
             Some(shared_transport),
             None, // No shared inbox
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for simulation with controlled seed.
@@ -1552,7 +1656,7 @@ impl AuraEffectSystem {
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
+        Self::build_internal(
             config,
             composite,
             ExecutionMode::Simulation { seed },
@@ -1560,7 +1664,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for simulation with shared transport.
@@ -1579,7 +1683,7 @@ impl AuraEffectSystem {
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
+        Self::build_internal(
             config,
             composite,
             ExecutionMode::Simulation { seed },
@@ -1587,7 +1691,7 @@ impl AuraEffectSystem {
             Some(shared_transport),
             None, // No shared inbox
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for simulation with a shared inbox.
@@ -1604,7 +1708,7 @@ impl AuraEffectSystem {
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
-        Ok(Self::build_internal(
+        Self::build_internal(
             config,
             composite,
             ExecutionMode::Simulation { seed },
@@ -1612,7 +1716,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             Some(shared_inbox),
             authority_id,
-        ))
+        )
     }
 
     /// Create effect system for production, overriding the authority identity.
@@ -1795,6 +1899,7 @@ impl AuraEffectSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::config::{SecureStorageBackend, StorageConfig};
     use aura_core::effects::ThresholdSigningEffects;
     use aura_core::types::identifiers::ContextId;
     use aura_guards::GuardContextProvider;
@@ -1861,6 +1966,144 @@ mod tests {
         )
         .expect("simulation root key should parse");
         assert_eq!(simulation.mode, AuthorizationRuntimeMode::Simulation);
+    }
+
+    #[test]
+    fn verified_biscuit_frontier_rejects_mismatched_cached_issuer() {
+        use base64::Engine;
+
+        let authority_id = AuthorityId::new_from_entropy([0xB1; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(
+            &AgentConfig::default(),
+            authority_id,
+        )
+        .expect("effect system should build");
+        let issuer = aura_authorization::TokenAuthority::new(authority_id);
+        let token = issuer
+            .create_token(
+                authority_id,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
+            .expect("test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: AuthorityId::new_from_entropy([0xB2; 32]),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
+
+        assert!(effects.verified_biscuit_frontier().is_err());
+    }
+
+    #[test]
+    fn verified_biscuit_frontier_rejects_mismatched_cached_root_key() {
+        use base64::Engine;
+
+        let authority_id = AuthorityId::new_from_entropy([0xB3; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(
+            &AgentConfig::default(),
+            authority_id,
+        )
+        .expect("effect system should build");
+        let issuer = aura_authorization::TokenAuthority::new(authority_id);
+        let wrong_root = aura_authorization::TokenAuthority::new(authority_id);
+        let token = issuer
+            .create_token(
+                authority_id,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
+            .expect("test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: authority_id,
+            root_pk_b64: engine.encode(wrong_root.root_public_key().to_bytes()),
+        });
+
+        assert!(effects.verified_biscuit_frontier().is_err());
+    }
+
+    #[test]
+    fn production_defaults_to_non_interactive_secure_storage_backend() {
+        let authority = AuthorityId::new_from_entropy([0xA7; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let effect_system =
+            AuraEffectSystem::production(config, authority).expect("production runtime builds");
+
+        assert!(matches!(
+            effect_system.crypto.secure_storage().as_ref(),
+            ProductionSecureStorageHandler::FilesystemFallback(_)
+        ));
+    }
+
+    #[test]
+    fn production_can_opt_into_platform_secure_storage_backend() {
+        let authority = AuthorityId::new_from_entropy([0xA8; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                secure_storage_backend: SecureStorageBackend::PlatformCredentialStore,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let effect_system =
+            AuraEffectSystem::production(config, authority).expect("production runtime builds");
+
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd"
+        ))]
+        assert!(matches!(
+            effect_system.crypto.secure_storage().as_ref(),
+            ProductionSecureStorageHandler::Platform(_)
+        ));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd"
+        )))]
+        assert!(matches!(
+            effect_system.crypto.secure_storage().as_ref(),
+            ProductionSecureStorageHandler::UnavailablePlatform { .. }
+        ));
+    }
+
+    #[test]
+    fn production_rejects_plaintext_storage_policy() {
+        let authority = AuthorityId::new_from_entropy([0xA9; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                encryption_policy: crate::core::config::StorageEncryptionPolicy::PlaintextForTests,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = AuraEffectSystem::production(config, authority)
+            .expect_err("production runtime must reject plaintext storage policy");
+
+        assert!(matches!(error, crate::core::AgentError::Config(_)));
     }
 
     #[tokio::test]

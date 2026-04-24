@@ -1,7 +1,7 @@
 use super::super::common::{get_bool, get_channel_id, get_int, get_string};
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use aura_core::types::ChannelId;
 use serde::{Deserialize, Serialize};
@@ -41,8 +41,8 @@ impl Query for NeighborhoodQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("neighborhood")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("neighborhood"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

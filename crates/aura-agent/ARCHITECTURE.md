@@ -513,6 +513,7 @@ cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
 | Threshold signing E2E fails | — | `tests/threshold_signing_e2e.rs` | Covered |
 | Runtime bridge channel resolution wrong | InvariantBridgeOwnershipAgent | `tests/runtime_bridge_channel_resolution.rs` | Covered |
 | Bootstrap preconditions not enforced | InvariantRuntimeCompositionBoundary | `tests/bootstrap_required.rs` | Covered |
+| Production runtime accepts plaintext encrypted-storage policy | InvariantRuntimeCompositionBoundary | `src/runtime/effects.rs` (inline) | Covered |
 | Reactive scheduler signals wrong | — | `tests/reactive_scheduler_signals_e2e.rs` | Covered |
 | Reconfiguration integration broken | InvariantSessionOwnership | `tests/reconfiguration_integration.rs` | Covered |
 

@@ -50,9 +50,13 @@ impl StandardContextHandler {
         EffectContext::new(authority_id, context_id, execution_mode)
     }
 
-    /// Convenience for creating a context with only an authority.
-    pub fn create_effect_context_for_authority(&self, authority_id: AuthorityId) -> EffectContext {
-        EffectContext::with_authority(authority_id)
+    /// Convenience for creating a fresh context in the authority's default context.
+    pub fn create_effect_context_for_default_context(
+        &self,
+        authority_id: AuthorityId,
+        execution_mode: ExecutionMode,
+    ) -> EffectContext {
+        EffectContext::with_default_context(authority_id, execution_mode)
     }
 
     /// Validate context for required metadata fields.

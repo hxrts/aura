@@ -20,6 +20,7 @@
 use aura_terminal::demo_invitation::generate_demo_contact_invite_code;
 use aura_terminal::ids;
 use base64::Engine;
+use serde::Deserialize;
 
 // Re-export portable demo seed from aura-app
 pub use aura_app::ui::workflows::demo_config::DEMO_SEED_2024 as DEFAULT_DEMO_SEED;
@@ -27,6 +28,21 @@ pub use aura_app::ui::workflows::demo_config::DEMO_SEED_2024 as DEFAULT_DEMO_SEE
 /// Demo agent names.
 pub const ALICE: &str = "Alice";
 pub const CAROL: &str = "Carol";
+
+#[derive(Debug, Clone, Deserialize)]
+struct DemoInviteEnvelope {
+    payload: DemoInvite,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct DemoInvite {
+    pub version: u8,
+    pub invitation_id: aura_core::types::identifiers::InvitationId,
+    pub sender_id: aura_core::types::identifiers::AuthorityId,
+    pub invitation_type: aura_invitation::InvitationType,
+    pub expires_at: Option<u64>,
+    pub message: Option<String>,
+}
 
 /// Generate a deterministic invite code for a demo agent.
 ///
@@ -49,6 +65,18 @@ pub const CAROL: &str = "Carol";
 /// ```
 pub fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     generate_demo_contact_invite_code(name, seed)
+}
+
+pub fn parse_demo_invite_code(code: &str) -> DemoInvite {
+    let b64 = code
+        .strip_prefix("aura:v1:")
+        .unwrap_or_else(|| panic!("demo invite must start with aura:v1:"));
+    let json = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(b64)
+        .unwrap_or_else(|error| panic!("demo invite must decode: {error}"));
+    serde_json::from_slice::<DemoInviteEnvelope>(&json)
+        .unwrap_or_else(|error| panic!("demo invite envelope must parse: {error}"))
+        .payload
 }
 
 /// Generate Alice's invite code with the default demo seed.
@@ -82,16 +110,20 @@ pub fn generate_demo_guardian_invite_code(name: &str, seed: u64) -> String {
     let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:guardian-invitation"));
 
     let invitation_data = serde_json::json!({
-        "version": 1,
-        "invitation_id": invitation_id.to_string(),
-        "sender_id": sender_id.uuid().to_string(),
-        "invitation_type": {
-            "Guardian": {
-                "subject_authority": sender_id.uuid().to_string()
-            }
+        "payload": {
+            "version": 1,
+            "invitation_id": invitation_id.to_string(),
+            "sender_id": sender_id.uuid().to_string(),
+            "invitation_type": {
+                "Guardian": {
+                    "subject_authority": sender_id.uuid().to_string()
+                }
+            },
+            "expires_at": null,
+            "message": format!("Guardian invitation from {name} (demo)")
         },
-        "expires_at": null,
-        "message": format!("Guardian invitation from {name} (demo)")
+        "transport": {},
+        "proof": null
     });
 
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();

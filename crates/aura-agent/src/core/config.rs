@@ -7,7 +7,6 @@ use crate::runtime::services::bootstrap_broker::BootstrapBrokerConfig;
 use crate::runtime::services::rendezvous_manager::RendezvousManagerConfig;
 use aura_core::hash;
 use aura_core::DeviceId;
-use aura_effects::StorageEncryptionMode;
 use aura_rendezvous::LanDiscoveryConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -70,6 +69,15 @@ pub struct StorageConfig {
     /// Base storage directory
     pub base_path: PathBuf,
 
+    /// Secure storage backend for key material.
+    ///
+    /// Defaults to a non-interactive filesystem fallback so local development
+    /// and automated runs do not trigger platform credential-store prompts.
+    /// Opt into the platform credential store explicitly when that UX is
+    /// acceptable and required for the deployment target.
+    #[serde(default)]
+    pub secure_storage_backend: SecureStorageBackend,
+
     /// Encrypted-at-rest storage policy.
     #[serde(default)]
     pub encryption_policy: StorageEncryptionPolicy,
@@ -91,6 +99,7 @@ impl Default for StorageConfig {
     fn default() -> Self {
         Self {
             base_path: default_storage_path(),
+            secure_storage_backend: SecureStorageBackend::default(),
             encryption_policy: StorageEncryptionPolicy::Required,
             opaque_names: false,
             cache_size: 50 * 1024 * 1024,
@@ -114,12 +123,24 @@ impl Default for StorageEncryptionPolicy {
     }
 }
 
-impl From<StorageEncryptionPolicy> for StorageEncryptionMode {
-    fn from(policy: StorageEncryptionPolicy) -> Self {
-        match policy {
-            StorageEncryptionPolicy::Required => StorageEncryptionMode::Required,
-            StorageEncryptionPolicy::PlaintextForTests => StorageEncryptionMode::PlaintextForTests,
-        }
+/// Secure storage backend selection for local key material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecureStorageBackend {
+    /// Use the explicit filesystem-backed secure-storage fallback.
+    ///
+    /// This backend is non-interactive and is therefore the default for local
+    /// development, tests, and automation.
+    FilesystemFallback,
+    /// Use the platform credential store (Keychain, Keystore, libsecret, etc.).
+    ///
+    /// This may trigger interactive OS prompts depending on the platform and
+    /// deployment environment.
+    PlatformCredentialStore,
+}
+
+impl Default for SecureStorageBackend {
+    fn default() -> Self {
+        Self::FilesystemFallback
     }
 }
 

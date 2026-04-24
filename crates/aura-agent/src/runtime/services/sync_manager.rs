@@ -16,7 +16,9 @@ use crate::runtime::{
     TaskGroup,
 };
 use async_trait::async_trait;
-use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
+#[cfg(test)]
+use aura_core::effects::indexed::IndexedFact;
+use aura_core::effects::indexed::IndexedJournalEffects;
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::util::serialization::to_vec;
@@ -25,7 +27,9 @@ use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
-use aura_sync::verification::{MerkleVerifier, VerificationResult};
+use aura_sync::verification::MerkleVerifier;
+#[cfg(test)]
+use aura_sync::verification::VerificationResult;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -584,6 +588,7 @@ impl SyncServiceManager {
         E: aura_core::effects::JournalEffects
             + aura_core::effects::NetworkEffects
             + aura_core::effects::PhysicalTimeEffects
+            + aura_protocol::effects::TreeEffects
             + aura_guards::GuardContextProvider
             + Send
             + Sync,
@@ -685,26 +690,16 @@ impl SyncServiceManager {
         }
     }
 
-    /// Verify incoming facts against the local Merkle tree
-    ///
-    /// Returns `None` if Merkle verification is not enabled.
-    /// Otherwise returns the verification result containing:
-    /// - `verified`: Facts that passed verification
-    /// - `rejected`: Facts that failed verification with reasons
-    /// - `merkle_root`: Current local Merkle root after verification
+    /// Test-only legacy raw fact verification hook retained to assert that
+    /// proofless sync admission stays fail-closed.
+    #[cfg(test)]
     pub async fn verify_facts(
         &self,
         facts: Vec<IndexedFact>,
         claimed_root: [u8; 32],
     ) -> Option<VerificationResult> {
-        if let Some(ref verifier) = self.merkle_verifier {
-            verifier
-                .verify_incoming_facts(facts, claimed_root)
-                .await
-                .ok()
-        } else {
-            None
-        }
+        let _ = (&self.merkle_verifier, facts, claimed_root);
+        None
     }
 
     /// Get the internal Merkle verifier reference
@@ -1329,13 +1324,8 @@ mod tests {
             timestamp: None,
         };
 
-        // Verify facts returns a result
+        // Legacy proofless fact verification is fail-closed.
         let result = manager.verify_facts(vec![fact], root).await;
-        assert!(result.is_some());
-
-        let result = result.unwrap();
-        // New fact should be accepted for merge
-        assert_eq!(result.verified.len(), 1);
-        assert!(result.rejected.is_empty());
+        assert!(result.is_none());
     }
 }

@@ -3,7 +3,7 @@
 //! Helper functions for converting between typed Datalog structures and
 //! string representations used by the Biscuit execution engine.
 
-use aura_core::query::{DatalogRow, DatalogRule, DatalogValue};
+use aura_core::query::{escape_datalog_string_literal, DatalogRow, DatalogRule, DatalogValue};
 
 /// Format a Datalog rule for Biscuit execution.
 ///
@@ -11,16 +11,16 @@ use aura_core::query::{DatalogRow, DatalogRule, DatalogValue};
 /// `head(args...) <- body1(args...), body2(args...)`
 pub fn format_rule(rule: &DatalogRule) -> String {
     // Build head
-    let head_args: Vec<String> = rule.head.args.iter().map(format_value).collect();
-    let head = format!("{}({})", rule.head.predicate, head_args.join(", "));
+    let head_args: Vec<String> = rule.head().args().iter().map(format_value).collect();
+    let head = format!("{}({})", rule.head().predicate(), head_args.join(", "));
 
     // Build body
     let body_parts: Vec<String> = rule
-        .body
+        .body()
         .iter()
         .map(|fact| {
-            let args: Vec<String> = fact.args.iter().map(format_value).collect();
-            format!("{}({})", fact.predicate, args.join(", "))
+            let args: Vec<String> = fact.args().iter().map(format_value).collect();
+            format!("{}({})", fact.predicate(), args.join(", "))
         })
         .collect();
 
@@ -39,10 +39,10 @@ pub fn format_rule(rule: &DatalogRule) -> String {
 pub fn format_value(value: &DatalogValue) -> String {
     match value {
         DatalogValue::Variable(name) => format!("${name}"),
-        DatalogValue::String(s) => format!("\"{}\"", s.replace('"', "\\\"")),
+        DatalogValue::String(s) => format!("\"{}\"", escape_datalog_string_literal(s)),
         DatalogValue::Integer(n) => n.to_string(),
         DatalogValue::Boolean(b) => b.to_string(),
-        DatalogValue::Symbol(s) => s.clone(),
+        DatalogValue::Symbol(s) => s.as_str().to_string(),
         DatalogValue::Null => "null".to_string(),
     }
 }
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_format_value_variable() {
-        let value = DatalogValue::Variable("x".to_string());
+        let value = DatalogValue::var("x");
         assert_eq!(format_value(&value), "$x");
     }
 
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn test_format_value_symbol() {
-        let value = DatalogValue::Symbol("admin".to_string());
+        let value = DatalogValue::symbol("admin");
         assert_eq!(format_value(&value), "admin");
     }
 

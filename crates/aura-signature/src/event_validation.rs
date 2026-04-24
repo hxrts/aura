@@ -6,7 +6,7 @@
 use crate::authority;
 use crate::guardian;
 use crate::threshold;
-use crate::{Result, ThresholdSig};
+use crate::{Result, ThresholdGroupKey, ThresholdSig};
 use aura_core::Ed25519Signature;
 use aura_core::{AuthorityId, GuardianId};
 
@@ -43,15 +43,15 @@ impl IdentityValidator {
     pub fn validate_threshold_signature(
         threshold_sig: &ThresholdSig,
         event_hash: &[u8],
-        group_public_key: &aura_core::Ed25519VerifyingKey,
+        group_public_key: &ThresholdGroupKey,
         required_threshold: u16,
     ) -> Result<()> {
-        threshold::ensure_signers_meet_threshold(
-            threshold_sig.signers.len(),
+        threshold::verify_threshold_signature(
+            event_hash,
+            threshold_sig,
+            group_public_key,
             required_threshold as usize,
-        )?;
-        threshold::ensure_unique_signer_indices(&threshold_sig.signers)?;
-        threshold::verify_group_signature(event_hash, &threshold_sig.signature, group_public_key)
+        )
     }
 }
 
@@ -89,7 +89,7 @@ pub fn validate_guardian_signature(
 pub fn validate_threshold_signature(
     threshold_sig: &ThresholdSig,
     event_hash: &[u8],
-    group_public_key: &aura_core::Ed25519VerifyingKey,
+    group_public_key: &ThresholdGroupKey,
     required_threshold: u16,
 ) -> Result<()> {
     IdentityValidator::validate_threshold_signature(

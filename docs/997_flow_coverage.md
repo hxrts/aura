@@ -107,6 +107,13 @@ and continue to map to the same canonical coverage anchors:
   copy and detail text, and the coverage expectation remains that
   notifications navigation exercises shared semantic navigation only rather than
   frontend-specific invitation or recovery actions.
+- The TUI semantic-observation contract keeps the same canonical anchor in
+  `semantic-observation-tui-smoke.toml`, but the native harness ingress now
+  requires explicit harness mode, the per-run `AURA_HARNESS_RUN_TOKEN`, and
+  transient-root-scoped `AURA_TUI_COMMAND_SOCKET`,
+  `AURA_TUI_UI_STATE_SOCKET`, and `AURA_TUI_UI_STATE_FILE` values. That change
+  hardens the existing observation scenario; it does not introduce a new
+  shared-flow anchor or a production-only harness surface.
 - Neighborhood navigation stays anchored by
   `real-runtime-mixed-startup-smoke.toml`
 - Chat/contact navigation, the contact-to-friend lifecycle, invitation, home

@@ -53,6 +53,28 @@ fn verified_biscuit_token_rejects_wrong_root() {
     assert!(VerifiedBiscuitToken::from_bytes(&token_bytes, wrong_root.public()).is_err());
 }
 
+#[test]
+fn attacker_issued_token_with_matching_facts_is_rejected_by_trusted_root() {
+    let trusted_authority = common::token_authority(15);
+    let attacker = biscuit_auth::KeyPair::new();
+    let recipient = trusted_authority.authority_id().to_string();
+    let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+    builder
+        .add_fact(fact!("authority({recipient})"))
+        .unwrap_or_else(|err| panic!("failed to add authority fact: {err:?}"));
+    builder
+        .add_fact(fact!("capability(\"read\")"))
+        .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let token = builder
+        .build(&attacker)
+        .unwrap_or_else(|err| panic!("failed to build attacker token: {err:?}"));
+
+    assert!(
+        VerifiedBiscuitToken::from_token(&token, trusted_authority.root_public_key()).is_err(),
+        "trusted verifier must reject attacker-issued token even if token facts look correct"
+    );
+}
+
 /// Bridge extracts token facts from Biscuit blocks — needed for
 /// Datalog policy evaluation to access issuer/authority metadata.
 #[test]
@@ -69,6 +91,37 @@ fn biscuit_bridge_extracts_token_facts() {
     let facts = bridge.extract_diagnostic_token_facts(&verified);
     assert!(!facts.is_empty());
     assert!(facts.iter().any(|f| f.contains("authority(")));
+}
+
+#[test]
+fn diagnostic_token_facts_cannot_drive_capability_authorization() {
+    let keypair = biscuit_auth::KeyPair::new();
+    let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+    builder
+        .add_fact(fact!("authority(\"diagnostic-only\")"))
+        .unwrap_or_else(|err| panic!("failed to add authority fact: {err:?}"));
+    let token = builder
+        .build(&keypair)
+        .unwrap_or_else(|err| panic!("failed to build diagnostic-only token: {err:?}"));
+    let bridge = BiscuitAuthorizationBridge::new(keypair.public(), common::authority_id(16));
+    let verified = common::verified_token(&token, keypair.public());
+
+    let mut diagnostic_facts = bridge.extract_diagnostic_token_facts(&verified);
+    diagnostic_facts.push("capability(\"read\")".to_string());
+
+    let result = bridge
+        .authorize_with_time(
+            &verified,
+            AuthorizationOp::Read,
+            &common::context_scope(16),
+            Some(1_000),
+        )
+        .unwrap_or_else(|err| panic!("authorization evaluation failed unexpectedly: {err:?}"));
+
+    assert!(
+        !result.authorized,
+        "invented diagnostic facts must not influence Biscuit capability decisions"
+    );
 }
 
 /// Namespaced capabilities with `:` remain valid Biscuit capability tokens.

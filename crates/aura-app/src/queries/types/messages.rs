@@ -6,7 +6,7 @@ use super::common::{
 use crate::views::MessageDeliveryStatus;
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -66,11 +66,18 @@ impl Query for MessagesQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected_with(
             QueryCapability::read("messages"),
-            QueryCapability::read(format!("channel:{}", self.channel_id)),
-        ]
+            vec![
+                match QueryCapability::try_read(format!("channel:{}", self.channel_id)) {
+                    Ok(capability) => capability,
+                    Err(error) => panic!(
+                        "channel capability resource should use validated query syntax: {error}"
+                    ),
+                },
+            ],
+        )
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

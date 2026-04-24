@@ -287,9 +287,14 @@ impl AmpChannelHarness {
                     let content_type = envelope.metadata.get("content-type");
                     if content_type.is_some_and(|ct| ct == AMP_MESSAGE_CONTENT_TYPE) {
                         self.ensure_channel_exists(&effects, channel).await?;
-                        let msg = amp_recv(effects.as_ref(), self.context_id, envelope.payload)
-                            .await
-                            .map_err(|e| AuraError::invalid(format!("amp_recv failed: {e}")))?;
+                        let msg = amp_recv(
+                            effects.as_ref(),
+                            self.context_id,
+                            envelope.source,
+                            envelope.payload,
+                        )
+                        .await
+                        .map_err(|e| AuraError::invalid(format!("amp_recv failed: {e}")))?;
 
                         if msg.header.channel != channel {
                             continue;

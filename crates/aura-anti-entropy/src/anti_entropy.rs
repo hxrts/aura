@@ -9,6 +9,8 @@ use super::pure;
 use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::TransportEffects;
+use aura_core::tree::verification::{check_attested_op, extract_target_node};
+use aura_core::tree::{Epoch, NodeIndex, TreeHash32};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, FlowCost, Hash32};
 use aura_guards::chain::create_send_guard_op;
@@ -18,7 +20,8 @@ use aura_guards::{
     VerifiedIngressMetadata,
 };
 use aura_guards::{GuardOperation, GuardOperationId};
-use std::collections::BTreeSet;
+use aura_journal::commitment_tree::{apply_verified_sync, TreeState};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 /// Composite trait bound for guard chain operations
@@ -97,6 +100,7 @@ pub struct AntiEntropyHandler {
     /// Anti-entropy configuration (sync intervals, batch sizes, etc.)
     config: AntiEntropyConfig,
     state: RwLock<AntiEntropyState>,
+    verification_anchor: RwLock<TreeState>,
     /// Context ID for guard chain operations
     context_id: ContextId,
     /// Runtime cost configuration
@@ -114,6 +118,7 @@ impl AntiEntropyHandler {
         Self {
             config,
             state: RwLock::new(AntiEntropyState::default()),
+            verification_anchor: RwLock::new(TreeState::new()),
             context_id,
             runtime: AntiEntropyRuntimeConfig::default(),
         }
@@ -167,20 +172,6 @@ impl AntiEntropyHandler {
             .collect()
     }
 
-    /// Verify operation before storing
-    ///
-    /// Checks:
-    /// 1. Valid aggregate signature (FROST)
-    /// 2. Parent binding exists in local tree
-    /// 3. Operation is well-formed
-    fn verify_operation(&self, _op: &AttestedOp) -> Result<(), SyncError> {
-        // In real implementation:
-        // 1. frost::verify_aggregate_signature(op.signatures, op.op)?
-        // 2. Check op.op.parent_commitment exists in local tree state
-        // 3. Validate operation constraints (e.g., threshold values)
-        Ok(())
-    }
-
     /// Add peer to known peer set
     pub async fn add_peer(&self, peer_id: DeviceId) {
         let mut state = self.state.write().await;
@@ -197,6 +188,117 @@ impl AntiEntropyHandler {
     pub async fn get_ops(&self) -> Vec<AttestedOp> {
         let state = self.state.read().await;
         state.oplog.clone()
+    }
+
+    /// Replace the verification anchor state used for remote op validation.
+    pub async fn set_verification_anchor(&self, anchor: TreeState) {
+        let mut state = self.verification_anchor.write().await;
+        *state = anchor;
+    }
+
+    fn operation_fingerprint(op: &AttestedOp) -> Result<Hash32, SyncError> {
+        Hash32::from_value(op).map_err(|error| SyncError::VerificationFailed {
+            target: "anti_entropy_op_fingerprint",
+            detail: error.to_string(),
+        })
+    }
+
+    fn state_key(state: &TreeState) -> (Epoch, TreeHash32) {
+        (state.current_epoch(), state.current_commitment())
+    }
+
+    fn parent_key(op: &AttestedOp) -> (Epoch, TreeHash32) {
+        (op.op.parent_epoch, op.op.parent_commitment)
+    }
+
+    fn resolve_target_node(state: &TreeState, op: &AttestedOp) -> Result<NodeIndex, SyncError> {
+        extract_target_node(&op.op.op)
+            .or_else(|| match &op.op.op {
+                aura_core::tree::TreeOpKind::RemoveLeaf { leaf, .. } => {
+                    state.get_remove_leaf_affected_parent(leaf)
+                }
+                _ => None,
+            })
+            .ok_or(SyncError::VerificationFailed {
+                target: "anti_entropy_target_node",
+                detail: "unable to resolve attested-op target node".to_string(),
+            })
+    }
+
+    fn verify_operation(state: &TreeState, op: &AttestedOp) -> Result<(), SyncError> {
+        if op.op.parent_epoch != state.current_epoch() {
+            return Err(SyncError::VerificationFailed {
+                target: "anti_entropy_parent_epoch",
+                detail: format!(
+                    "operation references stale or future epoch {} but current epoch is {}",
+                    op.op.parent_epoch,
+                    state.current_epoch()
+                ),
+            });
+        }
+        if op.op.parent_commitment != state.current_commitment() {
+            return Err(SyncError::VerificationFailed {
+                target: "anti_entropy_parent_commitment",
+                detail: format!(
+                    "operation references unknown parent commitment {:?}; expected {:?}",
+                    Hash32(op.op.parent_commitment),
+                    Hash32(state.current_commitment())
+                ),
+            });
+        }
+
+        let target_node = Self::resolve_target_node(state, op)?;
+        check_attested_op(state, op, target_node).map_err(|error| SyncError::VerificationFailed {
+            target: "anti_entropy_attested_op",
+            detail: error.to_string(),
+        })
+    }
+
+    fn advance_state(parent: &TreeState, op: &AttestedOp) -> Result<TreeState, SyncError> {
+        let mut next = parent.clone();
+        apply_verified_sync(&mut next, op).map_err(|error| SyncError::VerificationFailed {
+            target: "anti_entropy_apply_verified",
+            detail: error.to_string(),
+        })?;
+        Ok(next)
+    }
+
+    fn build_known_states(
+        anchor: &TreeState,
+        ops: &[AttestedOp],
+    ) -> Result<BTreeMap<(Epoch, TreeHash32), TreeState>, SyncError> {
+        let mut known_states = BTreeMap::from([(Self::state_key(anchor), anchor.clone())]);
+        let mut pending = ops.to_vec();
+
+        while !pending.is_empty() {
+            let mut next_pending = Vec::new();
+            let mut progressed = false;
+
+            for op in pending {
+                let Some(parent_state) = known_states.get(&Self::parent_key(&op)).cloned() else {
+                    next_pending.push(op);
+                    continue;
+                };
+
+                Self::verify_operation(&parent_state, &op)?;
+                let next_state = Self::advance_state(&parent_state, &op)?;
+                known_states.insert(Self::state_key(&next_state), next_state);
+                progressed = true;
+            }
+
+            if !progressed {
+                return Err(SyncError::VerificationFailed {
+                    target: "anti_entropy_parent_chain",
+                    detail:
+                        "oplog contains an operation with an unknown or inconsistent parent state"
+                            .to_string(),
+                });
+            }
+
+            pending = next_pending;
+        }
+
+        Ok(known_states)
     }
 }
 
@@ -228,13 +330,62 @@ impl AntiEntropyHandler {
         ops: VerifiedIngress<Vec<AttestedOp>>,
     ) -> Result<(), SyncError> {
         let (ops, _) = ops.into_parts();
+        let anchor = self.verification_anchor.read().await.clone();
         let mut state = self.state.write().await;
-        for op in ops {
-            // Verify before merging
-            self.verify_operation(&op)?;
+        let mut known_states = Self::build_known_states(&anchor, &state.oplog)?;
+        let mut existing_fingerprints = state
+            .oplog
+            .iter()
+            .map(Self::operation_fingerprint)
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let mut batch_fingerprints = BTreeSet::new();
+        let mut pending = Vec::new();
 
-            // Add to local OpLog
-            state.oplog.push(op);
+        for op in ops {
+            let fingerprint = Self::operation_fingerprint(&op)?;
+            if !batch_fingerprints.insert(fingerprint) {
+                return Err(SyncError::VerificationFailed {
+                    target: "anti_entropy_batch_replay",
+                    detail: format!("duplicate operation in remote batch {fingerprint:?}"),
+                });
+            }
+            if existing_fingerprints.contains(&fingerprint) {
+                return Err(SyncError::VerificationFailed {
+                    target: "anti_entropy_replay",
+                    detail: format!("duplicate remote operation {fingerprint:?}"),
+                });
+            }
+            existing_fingerprints.insert(fingerprint);
+            pending.push(op);
+        }
+
+        while !pending.is_empty() {
+            let mut next_pending = Vec::new();
+            let mut progressed = false;
+
+            for op in pending {
+                let Some(parent_state) = known_states.get(&Self::parent_key(&op)).cloned() else {
+                    next_pending.push(op);
+                    continue;
+                };
+
+                Self::verify_operation(&parent_state, &op)?;
+                let next_state = Self::advance_state(&parent_state, &op)?;
+                known_states.insert(Self::state_key(&next_state), next_state);
+                state.oplog.push(op);
+                progressed = true;
+            }
+
+            if !progressed {
+                return Err(SyncError::VerificationFailed {
+                    target: "anti_entropy_remote_parent_chain",
+                    detail:
+                        "remote batch contains an operation with an unknown or inconsistent parent state"
+                            .to_string(),
+                });
+            }
+
+            pending = next_pending;
         }
 
         Ok(())
@@ -658,6 +809,164 @@ impl BestEffortGuardLog {
 mod tests {
     use super::*;
     use crate::test_support::{create_test_op, digest_from_hashes, test_context, test_device};
+    use aura_core::crypto::tree_signing::tree_op_binding_message;
+    use aura_core::tree::{commit_branch, BranchNode, BranchSigningKey, LeafId};
+    use aura_core::{LeafNode, Policy, TreeOp, TreeOpKind};
+    use frost_ed25519 as frost;
+    use rand_chacha::ChaCha20Rng;
+    use rand_core::SeedableRng;
+    use std::collections::BTreeMap;
+
+    struct TestSigningFixture {
+        key_packages: Vec<frost::keys::KeyPackage>,
+        public_key_package: frost::keys::PublicKeyPackage,
+        group_public_key: [u8; 32],
+    }
+
+    fn verification_anchor() -> (TreeState, TestSigningFixture) {
+        let mut rng = ChaCha20Rng::from_seed([7u8; 32]);
+        let (secret_shares, public_key_package) =
+            frost::keys::generate_with_dealer(2, 2, frost::keys::IdentifierList::Default, &mut rng)
+                .expect("generate test FROST keys");
+        let key_packages = secret_shares
+            .values()
+            .map(|share| {
+                share
+                    .clone()
+                    .try_into()
+                    .expect("convert secret share to key package")
+            })
+            .collect::<Vec<frost::keys::KeyPackage>>();
+        let group_public_key = public_key_package.verifying_key().serialize();
+
+        let mut state = TreeState::new();
+        state.epoch = Epoch::new(1);
+
+        let root = NodeIndex(0);
+        let policy = Policy::All;
+        let left_child_commitment = commit_branch(
+            NodeIndex(1),
+            state.current_epoch(),
+            &Policy::Any,
+            &[0u8; 32],
+            &[0u8; 32],
+        );
+        let right_child_commitment = commit_branch(
+            NodeIndex(2),
+            state.current_epoch(),
+            &Policy::Any,
+            &[0u8; 32],
+            &[0u8; 32],
+        );
+        let root_commitment = commit_branch(
+            root,
+            state.current_epoch(),
+            &policy,
+            &left_child_commitment,
+            &right_child_commitment,
+        );
+
+        state.add_branch_with_parent(
+            BranchNode {
+                node: root,
+                policy,
+                commitment: root_commitment,
+            },
+            None,
+        );
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(1),
+                policy: Policy::Any,
+                commitment: left_child_commitment,
+            },
+            Some(root),
+        );
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(2),
+                policy: Policy::Any,
+                commitment: right_child_commitment,
+            },
+            Some(root),
+        );
+        state.set_root_commitment(root_commitment);
+        state.set_signing_key(
+            root,
+            BranchSigningKey::new(group_public_key, state.current_epoch()),
+        );
+
+        (
+            state,
+            TestSigningFixture {
+                key_packages,
+                public_key_package,
+                group_public_key,
+            },
+        )
+    }
+
+    fn signed_add_leaf_op(
+        parent_state: &TreeState,
+        fixture: &TestSigningFixture,
+        leaf_id: u64,
+        parent_epoch: Option<Epoch>,
+        parent_commitment: Option<TreeHash32>,
+    ) -> AttestedOp {
+        let op = TreeOp {
+            parent_epoch: parent_epoch.unwrap_or(parent_state.current_epoch()),
+            parent_commitment: parent_commitment.unwrap_or(parent_state.current_commitment()),
+            op: TreeOpKind::AddLeaf {
+                leaf: LeafNode::new_device(
+                    LeafId(u32::try_from(leaf_id).expect("leaf id fits in u32")),
+                    test_device(100 + u128::from(leaf_id)),
+                    vec![u8::try_from(leaf_id).expect("leaf id fits in u8"); 32],
+                )
+                .expect("valid leaf"),
+                under: NodeIndex(0),
+            },
+            version: 1,
+        };
+        let mut attested = AttestedOp {
+            op,
+            agg_sig: Vec::new(),
+            signer_count: u16::try_from(fixture.key_packages.len())
+                .expect("test signer count fits in u16"),
+        };
+        let binding = tree_op_binding_message(
+            &attested,
+            parent_state.current_epoch(),
+            &fixture.group_public_key,
+        );
+        let mut commitments = BTreeMap::new();
+        let mut signing_inputs = Vec::new();
+        for (index, key_package) in fixture.key_packages.iter().enumerate() {
+            let mut rng = ChaCha20Rng::from_seed(
+                [u8::try_from(leaf_id + index as u64).expect("seed fits in u8"); 32],
+            );
+            let identifier = *key_package.identifier();
+            let (nonce, commitment) = frost::round1::commit(key_package.signing_share(), &mut rng);
+            commitments.insert(identifier, commitment);
+            signing_inputs.push((identifier, nonce, key_package));
+        }
+        let signing_package = frost::SigningPackage::new(commitments, &binding);
+        let signature_shares = signing_inputs
+            .into_iter()
+            .map(|(identifier, nonce, key_package)| {
+                let share = frost::round2::sign(&signing_package, &nonce, key_package)
+                    .expect("sign attested op");
+                (identifier, share)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let signature = frost::aggregate(
+            &signing_package,
+            &signature_shares,
+            &fixture.public_key_package,
+        )
+        .expect("aggregate attested op signature");
+        attested.agg_sig = signature.serialize().as_ref().to_vec();
+        attested
+    }
 
     #[tokio::test]
     async fn test_empty_digest() {
@@ -727,9 +1036,12 @@ mod tests {
     async fn test_merge_remote_ops() {
         let context_id = test_context(5);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
 
-        let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
-        let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
+        let op1 = signed_add_leaf_op(&anchor, &fixture, 2, None, None);
+        let state_after_op1 = AntiEntropyHandler::advance_state(&anchor, &op1).unwrap();
+        let op2 = signed_add_leaf_op(&state_after_op1, &fixture, 3, None, None);
 
         let peer = test_device(9);
         handler
@@ -739,6 +1051,132 @@ mod tests {
 
         let ops = handler.get_ops().await;
         assert_eq!(ops.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn merge_remote_ops_rejects_forged_signature() {
+        let context_id = test_context(8);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
+
+        let mut op = signed_add_leaf_op(&anchor, &fixture, 4, None, None);
+        op.agg_sig[0] ^= 0x55;
+
+        let error = handler
+            .merge_remote_ops(verified_ops_from_peer(test_device(10), vec![op]).unwrap())
+            .await
+            .expect_err("forged signature must be rejected");
+        assert!(matches!(
+            error,
+            SyncError::VerificationFailed {
+                target: "anti_entropy_attested_op",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_remote_ops_rejects_stale_epoch() {
+        let context_id = test_context(9);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
+
+        let stale_op = signed_add_leaf_op(
+            &anchor,
+            &fixture,
+            5,
+            Some(Epoch::initial()),
+            Some(anchor.current_commitment()),
+        );
+
+        let error = handler
+            .merge_remote_ops(verified_ops_from_peer(test_device(11), vec![stale_op]).unwrap())
+            .await
+            .expect_err("stale epoch must be rejected");
+        assert!(matches!(
+            error,
+            SyncError::VerificationFailed {
+                target: "anti_entropy_parent_chain"
+                    | "anti_entropy_parent_epoch"
+                    | "anti_entropy_remote_parent_chain",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_remote_ops_rejects_wrong_parent_commitment() {
+        let context_id = test_context(10);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
+
+        let wrong_parent =
+            signed_add_leaf_op(&anchor, &fixture, 6, None, Some(Hash32([9u8; 32]).0));
+
+        let error = handler
+            .merge_remote_ops(verified_ops_from_peer(test_device(12), vec![wrong_parent]).unwrap())
+            .await
+            .expect_err("wrong parent must be rejected");
+        assert!(matches!(
+            error,
+            SyncError::VerificationFailed {
+                target: "anti_entropy_remote_parent_chain" | "anti_entropy_parent_commitment",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_remote_ops_rejects_duplicate_operations() {
+        let context_id = test_context(11);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
+
+        let op = signed_add_leaf_op(&anchor, &fixture, 7, None, None);
+        handler
+            .merge_remote_ops(verified_ops_from_peer(test_device(13), vec![op.clone()]).unwrap())
+            .await
+            .expect("initial merge should succeed");
+
+        let error = handler
+            .merge_remote_ops(verified_ops_from_peer(test_device(13), vec![op]).unwrap())
+            .await
+            .expect_err("duplicate op must be rejected");
+        assert!(matches!(
+            error,
+            SyncError::VerificationFailed {
+                target: "anti_entropy_replay",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn merge_remote_ops_rejects_duplicate_operations_within_batch() {
+        let context_id = test_context(12);
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
+        let (anchor, fixture) = verification_anchor();
+        handler.set_verification_anchor(anchor.clone()).await;
+
+        let op = signed_add_leaf_op(&anchor, &fixture, 8, None, None);
+
+        let error = handler
+            .merge_remote_ops(
+                verified_ops_from_peer(test_device(14), vec![op.clone(), op]).unwrap(),
+            )
+            .await
+            .expect_err("batch duplicate must be rejected");
+        assert!(matches!(
+            error,
+            SyncError::VerificationFailed {
+                target: "anti_entropy_batch_replay",
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

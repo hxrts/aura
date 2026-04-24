@@ -237,9 +237,13 @@ For shared semantic flows, `aura-web` uses `Observed` for browser-side projectio
 
 - The harness bridge request/response surface carries explicit compatibility metadata so callers can detect versioned behavior changes.
 - Explicit bridge entrypoints currently include semantic command submission,
-  observed snapshot/render publication, semantic-submit readiness metadata, and
-  runtime identity staging for owned browser rebootstrap during create-account
-  style flows.
+  observed snapshot/render publication, semantic-submit readiness metadata,
+  and runtime identity staging for owned browser rebootstrap during
+  create-account style flows. Shared harness compatibility also covers the
+  native TUI harness command and snapshot plane: local IPC is only valid in
+  explicit harness mode, requires the per-run `AURA_HARNESS_RUN_TOKEN`, and
+  keeps `AURA_TUI_COMMAND_SOCKET`, `AURA_TUI_UI_STATE_SOCKET`, and
+  `AURA_TUI_UI_STATE_FILE` scoped under the harness-owned transient root.
 - The browser bootstrap/account-config compatibility surface also includes the
   persisted-account-context resolution rule in `src/bootstrap_storage.rs`:
   active home context wins, otherwise reuse the persisted context only when it

@@ -21,6 +21,7 @@ use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
 use aura_core::hash::hash;
+use aura_core::secrets::SecretExportContext;
 use aura_core::service::{EstablishPath, ServiceFamily};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -37,7 +38,6 @@ use aura_rendezvous::{
     EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -95,31 +95,9 @@ impl RendezvousHandler {
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
-        let Some(cache) = effects.biscuit_cache() else {
-            return Ok(None);
-        };
-
-        let engine = base64::engine::general_purpose::STANDARD;
-        let token_bytes = engine
-            .decode(cache.token_b64)
-            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
-        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
-            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
-        })?;
-        let root_public_key =
-            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
-                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
-            })?;
-        let biscuit =
-            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
-                .map_err(|error| {
-                    AgentError::effects(format!("parse biscuit token cache: {error}"))
-                })?;
-        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
-            root_public_key,
-            self.context.authority.authority_id(),
-        );
-        Ok(Some((biscuit, bridge)))
+        effects
+            .verified_biscuit_frontier()
+            .map_err(|error| AgentError::effects(format!("decode biscuit frontier cache: {error}")))
     }
 
     async fn build_rendezvous_capabilities(
@@ -127,7 +105,17 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
         now_ms: u64,
     ) -> AgentResult<Vec<aura_guards::types::CapabilityId>> {
-        let Some((token, bridge)) = self.decode_biscuit_frontier(effects)? else {
+        let Some((token, bridge)) = (match self.decode_biscuit_frontier(effects) {
+            Ok(frontier) => frontier,
+            Err(error) => {
+                tracing::warn!(
+                    authority = %self.context.authority.authority_id(),
+                    error = %error,
+                    "failed to decode Biscuit frontier for rendezvous guard snapshot"
+                );
+                return Ok(Vec::new());
+            }
+        }) else {
             tracing::debug!(
                 authority = %self.context.authority.authority_id(),
                 "no Biscuit frontier available for rendezvous guard snapshot"
@@ -1067,7 +1055,12 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 
     match effects.secure_retrieve(&location, &caps).await {
         Ok(bytes) => {
-            if let Ok(pkg) = SingleSignerKeyPackage::from_bytes(&bytes) {
+            if let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
+                &bytes,
+                SecretExportContext::secure_storage(
+                    "aura-agent::handlers::rendezvous::retrieve_identity_keys",
+                ),
+            ) {
                 let signing_key = pkg.signing_key().try_into().unwrap_or([0u8; 32]);
                 let verifying_key = pkg.verifying_key().try_into().unwrap_or([0u8; 32]);
                 Some((signing_key, verifying_key))
@@ -1107,6 +1100,7 @@ mod tests {
         let engine = base64::engine::general_purpose::STANDARD;
         effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
             token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: authority,
             root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
         });
     }
@@ -1149,6 +1143,35 @@ mod tests {
         let context_id = ContextId::new_from_entropy([152u8; 32]);
 
         effects.clear_biscuit_cache();
+
+        let snapshot = handler
+            .create_snapshot(effects.as_ref(), context_id)
+            .await
+            .unwrap();
+
+        assert!(snapshot.capabilities.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_snapshot_with_mismatched_biscuit_issuer_has_empty_capabilities() {
+        let authority_context = create_test_authority(53);
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let context_id = ContextId::new_from_entropy([153u8; 32]);
+        let issuer = aura_authorization::TokenAuthority::new(effects.authority_id());
+        let token = issuer
+            .create_token(
+                effects.authority_id(),
+                vec![RendezvousCapability::Publish.as_name()],
+            )
+            .expect("rendezvous test token should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: AuthorityId::new_from_entropy([0xEE; 32]),
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
 
         let snapshot = handler
             .create_snapshot(effects.as_ref(), context_id)

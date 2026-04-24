@@ -3,7 +3,7 @@ use super::super::common::{
 };
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -46,8 +46,8 @@ impl Query for HomesQuery {
                 "in",
                 vec![
                     DatalogValue::var("my_role"),
-                    DatalogValue::Symbol("admin".to_string()),
-                    DatalogValue::Symbol("owner".to_string()),
+                    DatalogValue::symbol("admin"),
+                    DatalogValue::symbol("owner"),
                 ],
             ));
         }
@@ -69,8 +69,8 @@ impl Query for HomesQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("homes")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("homes"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

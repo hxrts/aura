@@ -43,7 +43,11 @@ use std::sync::Arc;
 const GUARDIAN_SHARE_ENCRYPTION_PROTOCOL_VERSION: u8 = 1;
 const GUARDIAN_SHARE_ENCRYPTION_KDF_DOMAIN: &[u8] = b"aura.recovery.guardian-share.v1";
 
-/// Encrypted FROST key share for a guardian
+/// Encrypted FROST key share for a guardian.
+///
+/// Untrusted key material: remote guardian-share payload; guardian identity,
+/// recipient key, and ephemeral key bytes must be authenticated against
+/// trusted guardian setup state before use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedKeyShare {
     /// Guardian share encryption protocol version.
@@ -57,9 +61,12 @@ pub struct EncryptedKeyShare {
     pub encrypted_share: Vec<u8>,
     /// Nonce used for encryption
     pub nonce: [u8; 12],
-    /// X25519 ephemeral sender key derived via the reviewed Ed25519->X25519 conversion path.
+    /// Untrusted key material: remote X25519 ephemeral sender key bytes; bind to
+    /// the authenticated guardian-share transcript before deriving shared
+    /// secrets.
     pub ephemeral_public_key: Vec<u8>,
-    /// Recipient Ed25519 public key authenticated in the signed guardian acceptance.
+    /// Untrusted key material: remote recipient guardian key bytes; authenticate
+    /// against trusted guardian acceptance state before use.
     pub recipient_public_key: Vec<u8>,
     /// Hash of the setup completion public key package this share is bound to.
     pub public_key_package_hash: Hash32,
@@ -252,11 +259,17 @@ pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Resul
 }
 
 /// Build the final setup completion payload from guardian responses.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "guardian_setup_completion_build",
+    family = "runtime_helper"
+)]
 pub fn build_setup_completion(
     setup_id: &str,
     threshold: u16,
     acceptances: Vec<GuardianAcceptance>,
 ) -> Result<SetupCompletion, String> {
+    let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     build_setup_completion_with_material(setup_id, threshold, acceptances, Vec::new(), Vec::new())
 }
 
@@ -743,9 +756,9 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         &self,
         _request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
-        return Err(crate::RecoveryError::internal(
+        Err(crate::RecoveryError::internal(
             "guardian setup coordinator no longer fabricates local guardian acceptances; use the authenticated runtime choreography",
-        ));
+        ))
     }
 
     /// Execute as guardian (accept setup invitation).

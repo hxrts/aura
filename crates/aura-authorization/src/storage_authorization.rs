@@ -4,23 +4,17 @@
 //! to avoid improper domain coupling. Storage access control is fundamentally an
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
-use crate::biscuit_evaluator::VerifiedBiscuitToken;
+use crate::biscuit_evaluator::{VerifiedBiscuitToken, AURA_BISCUIT_LIMITS};
 use aura_core::types::scope::{ResourceScope, StoragePath};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
+    error::Token as BiscuitTokenError,
     macros::{fact, policy, rule},
     Authorizer, AuthorizerLimits, PublicKey,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 use tracing;
-
-const STORAGE_BISCUIT_LIMITS: AuthorizerLimits = AuthorizerLimits {
-    max_facts: 10_000,
-    max_iterations: 1_000,
-    max_time: Duration::from_millis(50),
-};
 
 /// Storage resource types for authorization
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +215,21 @@ impl BiscuitStorageEvaluator {
         resource_scope: &ResourceScope,
         operation: &str,
     ) -> Result<bool, BiscuitStorageError> {
+        self.check_biscuit_authorization_with_limits(
+            token,
+            resource_scope,
+            operation,
+            AURA_BISCUIT_LIMITS,
+        )
+    }
+
+    fn check_biscuit_authorization_with_limits(
+        &self,
+        token: &VerifiedBiscuitToken,
+        resource_scope: &ResourceScope,
+        operation: &str,
+        limits: AuthorizerLimits,
+    ) -> Result<bool, BiscuitStorageError> {
         // Token signature verification is captured in VerifiedBiscuitToken.
         // Here we enforce scope, capability, and authority binding using Datalog rules
         // that mirror the authority-centric model in docs/106_authorization.md.
@@ -235,9 +244,27 @@ impl BiscuitStorageEvaluator {
         // account-issued device tokens produced by AccountAuthority.
         self.add_authorization_policies(&mut authorizer)?;
 
-        Ok(authorizer
-            .authorize_with_limits(STORAGE_BISCUIT_LIMITS)
-            .is_ok())
+        match authorizer.authorize_with_limits(limits) {
+            Ok(_) => Ok(true),
+            Err(BiscuitTokenError::FailedLogic(_)) => {
+                tracing::debug!(
+                    operation,
+                    resource = %resource_scope.resource_pattern(),
+                    "Biscuit storage authorization denied by policy"
+                );
+                Ok(false)
+            }
+            Err(err @ BiscuitTokenError::RunLimit(_)) => {
+                tracing::warn!(
+                    operation,
+                    resource = %resource_scope.resource_pattern(),
+                    error = %err,
+                    "Biscuit storage authorization denied by resource limit"
+                );
+                Ok(false)
+            }
+            Err(err) => Err(BiscuitStorageError::TokenVerification(err.to_string())),
+        }
     }
 
     /// Verify that token is authorized for the specified authority
@@ -262,18 +289,24 @@ impl BiscuitStorageEvaluator {
         // matches the expected authority UUID (authority IDs are UUID-wrapped).
         let uuid = expected_authority.uuid().to_string();
 
-        let authority_match: Result<Vec<(String,)>, _> = authorizer.query(rule!(
-            "data($authority) <- authority_id($authority), $authority == {uuid};",
-            uuid = uuid.clone()
-        ));
+        let authority_match: Result<Vec<(String,)>, _> = authorizer.query_with_limits(
+            rule!(
+                "data($authority) <- authority_id($authority), $authority == {uuid};",
+                uuid = uuid.clone()
+            ),
+            AURA_BISCUIT_LIMITS,
+        );
         if matches!(authority_match, Ok(v) if !v.is_empty()) {
             return Ok(true);
         }
 
-        let account_match: Result<Vec<(String,)>, _> = authorizer.query(rule!(
-            "data($account) <- account($account), $account == {uuid};",
-            uuid = uuid
-        ));
+        let account_match: Result<Vec<(String,)>, _> = authorizer.query_with_limits(
+            rule!(
+                "data($account) <- account($account), $account == {uuid};",
+                uuid = uuid
+            ),
+            AURA_BISCUIT_LIMITS,
+        );
         if matches!(account_match, Ok(v) if !v.is_empty()) {
             return Ok(true);
         }
@@ -292,14 +325,15 @@ impl BiscuitStorageEvaluator {
         resource_scope: &ResourceScope,
         operation: &str,
     ) -> Result<Vec<biscuit_auth::builder::Fact>, BiscuitStorageError> {
-        let op_fact = fact!("operation({op})", op = operation.to_string());
-        let (authority_fact, resource_fact) = match resource_scope {
+        let requested_operation_fact =
+            fact!("requested_operation({op})", op = operation.to_string());
+        let (requested_authority_fact, requested_resource_fact) = match resource_scope {
             ResourceScope::Storage { authority_id, path } => {
                 let authority_fact = fact!(
-                    "authority_id({auth})",
+                    "requested_authority({auth})",
                     auth = authority_id.uuid().to_string()
                 );
-                let path_fact = fact!("resource({res})", res = path.to_string());
+                let path_fact = fact!("requested_resource({res})", res = path.to_string());
                 (authority_fact, path_fact)
             }
             _ => {
@@ -316,9 +350,9 @@ impl BiscuitStorageEvaluator {
 
         Ok(vec![
             expected_auth_fact,
-            authority_fact,
-            resource_fact,
-            op_fact,
+            requested_authority_fact,
+            requested_resource_fact,
+            requested_operation_fact,
         ])
     }
 
@@ -340,6 +374,20 @@ impl BiscuitStorageEvaluator {
         for fact in self.resource_facts(resource_scope, operation)? {
             Self::add_fact(authorizer, fact)?;
         }
+        if self.token_grants_requested_resource(authorizer, resource_scope)? {
+            let requested_resource = match resource_scope {
+                ResourceScope::Storage { path, .. } => path.to_string(),
+                _ => {
+                    return Err(BiscuitStorageError::InvalidResource(
+                        "Non-storage resource scopes are not supported".to_string(),
+                    ))
+                }
+            };
+            Self::add_fact(
+                authorizer,
+                fact!("granted_resource_match({res})", res = requested_resource),
+            )?;
+        }
         Ok(())
     }
 
@@ -353,7 +401,7 @@ impl BiscuitStorageEvaluator {
         // independent allow policies would allow an identity-only token to pass.
         Self::add_policy(
             authorizer,
-            policy!("allow if authority_id($auth), expected_authority($expected), $auth == $expected, capability($op), operation($op), resource($res);"),
+            policy!("allow if authority_id($auth), expected_authority($expected), requested_authority($requested), requested_resource($res), $auth == $expected, $requested == $expected, capability($op), requested_operation($op), granted_resource_match($res);"),
         )?;
 
         // Accept account(<uuid>) facts for backward compatibility with existing
@@ -361,7 +409,7 @@ impl BiscuitStorageEvaluator {
         // resource proof required.
         Self::add_policy(
             authorizer,
-            policy!("allow if account($acct), expected_authority($expected), $acct == $expected, capability($op), operation($op), resource($res);"),
+            policy!("allow if account($acct), expected_authority($expected), requested_authority($requested), requested_resource($res), $acct == $expected, $requested == $expected, capability($op), requested_operation($op), granted_resource_match($res);"),
         )?;
 
         // Default deny keeps evaluation strict.
@@ -410,6 +458,46 @@ impl BiscuitStorageEvaluator {
 
         FlowCost::from(base_cost * resource_multiplier)
     }
+
+    fn token_grants_requested_resource(
+        &self,
+        authorizer: &mut Authorizer,
+        resource_scope: &ResourceScope,
+    ) -> Result<bool, BiscuitStorageError> {
+        let requested_path = match resource_scope {
+            ResourceScope::Storage { path, .. } => path,
+            _ => {
+                return Err(BiscuitStorageError::InvalidResource(
+                    "Non-storage resource scopes are not supported".to_string(),
+                ))
+            }
+        };
+        let grants: Vec<(String,)> = match authorizer.query_with_limits(
+            rule!("data($resource) <- resource($resource);"),
+            AURA_BISCUIT_LIMITS,
+        ) {
+            Ok(grants) => grants,
+            Err(BiscuitTokenError::RunLimit(limit)) => {
+                tracing::warn!(
+                    requested_path = requested_path.as_str(),
+                    error = %limit,
+                    "Biscuit storage resource matching denied by resource limit"
+                );
+                return Ok(false);
+            }
+            Err(err) => return Err(BiscuitStorageError::AuthorizationFailed(err.to_string())),
+        };
+        Ok(grants
+            .into_iter()
+            .map(|(grant,)| grant)
+            .any(|grant| storage_grant_matches_requested(&grant, requested_path)))
+    }
+}
+
+fn storage_grant_matches_requested(grant: &str, requested: &StoragePath) -> bool {
+    StoragePath::parse(grant)
+        .map(|grant_path| grant_path.covers(requested))
+        .unwrap_or(false)
 }
 
 /// Permission mappings for storage operations
@@ -736,6 +824,8 @@ mod tests {
     use super::*;
     use crate::TokenAuthority;
     use aura_core::{capability_name, CapabilityName};
+    use biscuit_auth::{builder::BiscuitBuilder, macros::fact, AuthorizerLimits};
+    use std::time::Duration;
 
     fn test_authority_id(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])
@@ -762,6 +852,38 @@ mod tests {
     fn setup_test_evaluator() -> BiscuitStorageEvaluator {
         let (authority, authority_id) = setup_test_authority();
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
+    }
+
+    fn issue_storage_token(
+        authority: &TokenAuthority,
+        authority_binding: Option<AuthorityId>,
+        account_binding: Option<AuthorityId>,
+        capabilities: &[&str],
+        resources: &[&str],
+    ) -> VerifiedBiscuitToken {
+        let mut builder = BiscuitBuilder::new();
+        if let Some(bound) = authority_binding {
+            builder
+                .add_fact(fact!("authority_id({id})", id = bound.uuid().to_string()))
+                .unwrap();
+        }
+        if let Some(bound) = account_binding {
+            builder
+                .add_fact(fact!("account({id})", id = bound.uuid().to_string()))
+                .unwrap();
+        }
+        for capability in capabilities {
+            builder
+                .add_fact(fact!("capability({cap})", cap = capability.to_string()))
+                .unwrap();
+        }
+        for resource in resources {
+            builder
+                .add_fact(fact!("resource({res})", res = resource.to_string()))
+                .unwrap();
+        }
+        let token = builder.build(authority.root_keypair()).unwrap();
+        VerifiedBiscuitToken::from_token(&token, authority.root_public_key()).unwrap()
     }
 
     /// Content resource converts to Storage scope with the evaluator's authority
@@ -809,6 +931,25 @@ mod tests {
         } else {
             panic!("Expected Storage ResourceScope");
         }
+    }
+
+    #[test]
+    fn storage_grant_matching_is_segment_aware() {
+        let requested = StoragePath::parse("namespace/home/alice/messages").unwrap();
+        let sibling = StoragePath::parse("namespace/home/alice2/messages").unwrap();
+
+        assert!(storage_grant_matches_requested(
+            "namespace/home/alice/*",
+            &requested
+        ));
+        assert!(!storage_grant_matches_requested(
+            "namespace/home/alice/*",
+            &sibling
+        ));
+        assert!(!storage_grant_matches_requested(
+            "namespace/home/alice/*",
+            &StoragePath::parse("namespace/home/alice-messages").unwrap()
+        ));
     }
 
     /// Global resource converts to Storage scope with global/* path.
@@ -897,6 +1038,243 @@ mod tests {
             mappings.permission_to_operation(&StoragePermission::Admin),
             "admin"
         );
+    }
+
+    #[test]
+    fn storage_authorization_denies_authority_only_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(&authority, Some(authority_id), None, &[], &[]);
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_denies_account_only_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(&authority, None, Some(authority_id), &[], &[]);
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_denies_capability_only_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            None,
+            None,
+            &["read"],
+            &["content/user/alice/doc"],
+        );
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_denies_wrong_resource_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(authority_id),
+            None,
+            &["read"],
+            &["content/user/alice/other"],
+        );
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_denies_wrong_operation_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(authority_id),
+            None,
+            &["write"],
+            &["content/user/alice/doc"],
+        );
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_denies_wrong_authority_token() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(test_authority_id(42)),
+            None,
+            &["read"],
+            &["content/user/alice/doc"],
+        );
+
+        let allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        assert!(!allowed);
+    }
+
+    #[test]
+    fn storage_authorization_read_token_cannot_write_or_admin() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(authority_id),
+            None,
+            &["read"],
+            &["content/user/alice/doc"],
+        );
+
+        let read_allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        let write_allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Write,
+            )
+            .unwrap();
+        let admin_allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Admin,
+            )
+            .unwrap();
+
+        assert!(read_allowed);
+        assert!(!write_allowed);
+        assert!(!admin_allowed);
+    }
+
+    #[test]
+    fn storage_authorization_namespace_token_cannot_access_sibling_namespace() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(authority_id),
+            None,
+            &["read"],
+            &["namespace/user/alice/*"],
+        );
+
+        let alice_allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::namespace("user/alice"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+        let bob_allowed = evaluator
+            .check_access(
+                &token,
+                &StorageResource::namespace("user/bob"),
+                &StoragePermission::Read,
+            )
+            .unwrap();
+
+        assert!(alice_allowed);
+        assert!(!bob_allowed);
+    }
+
+    #[test]
+    fn storage_authorization_policy_ordering_regression_stays_denied() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(&authority, Some(authority_id), None, &[], &[]);
+
+        let denied = evaluator
+            .check_access(
+                &token,
+                &StorageResource::content("user/alice/doc"),
+                &StoragePermission::Admin,
+            )
+            .unwrap();
+        assert!(!denied);
+    }
+
+    #[test]
+    fn storage_authorization_fails_closed_when_resource_budget_is_exhausted() {
+        let (authority, authority_id) = setup_test_authority();
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let token = issue_storage_token(
+            &authority,
+            Some(authority_id),
+            None,
+            &["read"],
+            &["content/user/alice/doc"],
+        );
+        let scope = evaluator
+            .storage_resource_to_scope(&StorageResource::content("user/alice/doc"))
+            .expect("scope");
+
+        let allowed = evaluator
+            .check_biscuit_authorization_with_limits(
+                &token,
+                &scope,
+                "read",
+                AuthorizerLimits {
+                    max_facts: AURA_BISCUIT_LIMITS.max_facts,
+                    max_iterations: AURA_BISCUIT_LIMITS.max_iterations,
+                    max_time: Duration::ZERO,
+                },
+            )
+            .expect("resource-limit denial should fail closed");
+
+        assert!(!allowed);
     }
 
     // ========================================================================

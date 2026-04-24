@@ -24,6 +24,7 @@ use aura_journal::DomainFact;
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::HomeGrantModeratorFact;
+use base64::Engine;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -90,6 +91,7 @@ fn install_full_invitation_biscuit_cache(
     let engine = base64::engine::general_purpose::STANDARD;
     effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
         token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+        issuer_authority: authority,
         root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
     });
 }
@@ -111,6 +113,15 @@ fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
 #[track_caller]
 fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
     let config = AgentConfig {
+        storage: StorageConfig {
+            base_path: tempfile::Builder::new()
+                .prefix("aura-agent-invitation-prod-")
+                .tempdir()
+                .expect("production invitation root should build")
+                .into_path()
+                .join("aura"),
+            ..Default::default()
+        },
         device_id: authority.device_id(),
         ..Default::default()
     };
@@ -382,6 +393,7 @@ async fn test_execute_notify_peer() {
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([135u8; 32]);
+    let now_ms = 1_700_000_000_000;
     let effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
             &config,
@@ -395,6 +407,26 @@ async fn test_execute_notify_peer() {
             peer,
             shared_transport,
         );
+    let _authority_rendezvous_tasks =
+        attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
+    let _peer_rendezvous_tasks =
+        attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
+    cache_test_peer_descriptor(
+        effects.as_ref(),
+        authority.authority_id(),
+        peer,
+        "tcp://127.0.0.1:55011",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        _peer_effects.as_ref(),
+        peer,
+        authority.authority_id(),
+        "tcp://127.0.0.1:55012",
+        now_ms,
+    )
+    .await;
     let handler = handler_for(authority.clone());
 
     let invitation = handler
@@ -414,7 +446,18 @@ async fn test_execute_notify_peer() {
     }]);
 
     let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{result:?}");
+
+    let received = timeout(Duration::from_secs(2), _peer_effects.receive_envelope())
+        .await
+        .expect("invitation envelope should arrive before timeout")
+        .expect("invitation delivery should not fail receipt validation");
+    assert_eq!(received.destination, peer);
+    assert_eq!(received.source, authority.authority_id());
+    assert_eq!(
+        received.metadata.get("content-type").map(String::as_str),
+        Some("application/aura-invitation")
+    );
 }
 
 #[tokio::test]
@@ -428,7 +471,7 @@ async fn test_execute_record_receipt() {
     }]);
 
     let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{result:?}");
 }
 
 #[tokio::test]
@@ -437,6 +480,7 @@ async fn test_execute_multiple_commands() {
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([139u8; 32]);
+    let now_ms = 1_700_000_000_000;
     let effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
             &config,
@@ -450,6 +494,26 @@ async fn test_execute_multiple_commands() {
             peer,
             shared_transport,
         );
+    let _authority_rendezvous_tasks =
+        attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
+    let _peer_rendezvous_tasks =
+        attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
+    cache_test_peer_descriptor(
+        effects.as_ref(),
+        authority.authority_id(),
+        peer,
+        "tcp://127.0.0.1:55021",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        _peer_effects.as_ref(),
+        peer,
+        authority.authority_id(),
+        "tcp://127.0.0.1:55022",
+        now_ms,
+    )
+    .await;
     let handler = handler_for(authority.clone());
 
     let invitation = handler
@@ -477,7 +541,7 @@ async fn test_execute_multiple_commands() {
     ]);
 
     let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{result:?}");
 
     let received = timeout(Duration::from_secs(2), _peer_effects.receive_envelope())
         .await
@@ -519,8 +583,7 @@ async fn invitation_can_be_created() {
     assert!(invitation.expires_at.is_some());
 }
 
-#[tokio::test]
-async fn invitation_can_be_accepted() {
+large_stack_async_test!(invitation_can_be_accepted, {
     let sender_context = create_test_authority(93);
     let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
     let receiver_context = AuthorityContext::new(receiver_id);
@@ -554,7 +617,7 @@ async fn invitation_can_be_accepted() {
         .unwrap();
 
     assert_eq!(result.new_status, InvitationStatus::Accepted);
-}
+});
 
 #[tokio::test]
 async fn invitation_can_be_declined() {
@@ -780,6 +843,7 @@ async fn creating_invitation_is_denied_when_biscuit_lacks_invitation_send_capabi
     let engine = base64::engine::general_purpose::STANDARD;
     effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
         token_b64: engine.encode(&token_bytes),
+        issuer_authority: authority_context.authority_id(),
         root_pk_b64: engine.encode(keypair.public().to_bytes()),
     });
 
@@ -2746,8 +2810,7 @@ async fn created_invitation_is_retrievable_across_handler_instances() {
     assert_eq!(retrieved.sender_id, own_authority);
 }
 
-#[tokio::test]
-async fn accepted_imported_invitation_persists_status_across_handler_instances() {
+large_stack_async_test!(accepted_imported_invitation_persists_status_across_handler_instances, {
     let own_authority = AuthorityId::new_from_entropy([126u8; 32]);
     let sender_id = AuthorityId::new_from_entropy([127u8; 32]);
     let config = AgentConfig::default();
@@ -2790,10 +2853,9 @@ async fn accepted_imported_invitation_persists_status_across_handler_instances()
     assert_eq!(retrieved.status, InvitationStatus::Accepted);
     assert_eq!(retrieved.sender_id, sender_id);
     assert_eq!(retrieved.receiver_id, own_authority);
-}
+});
 
-#[tokio::test]
-async fn invitation_can_be_cancelled() {
+large_stack_async_test!(invitation_can_be_cancelled, {
     let authority_context = create_test_authority(98);
     let effects = effects_for(&authority_context);
     let handler = InvitationHandler::new(authority_context).unwrap();
@@ -2821,10 +2883,9 @@ async fn invitation_can_be_cancelled() {
     // Verify it was removed from pending
     let pending = handler.list_pending().await;
     assert!(pending.is_empty());
-}
+});
 
-#[tokio::test]
-async fn list_pending_shows_only_pending() {
+large_stack_async_test!(list_pending_shows_only_pending, {
     let authority_context = create_test_authority(100);
     let effects = effects_for(&authority_context);
     let handler = InvitationHandler::new(authority_context).unwrap();
@@ -2876,7 +2937,7 @@ async fn list_pending_shows_only_pending() {
     // Only inv3 should be pending
     let pending = handler.list_pending().await;
     assert_eq!(pending.len(), 1);
-}
+});
 
 // =========================================================================
 // ShareableInvitation Tests
@@ -3717,15 +3778,11 @@ fn shareable_invitation_from_invitation() {
     assert_eq!(decoded.invitation_id, invitation.invitation_id);
 }
 
-/// Test that importing and accepting multiple contact invitations works sequentially.
-///
-/// This test mimics the TUI demo mode flow where:
-/// 1. Alice's invitation is imported and accepted
-/// 2. Carol's invitation is imported and accepted
-///
-/// Both should succeed without interfering with each other.
-#[tokio::test]
-async fn importing_multiple_contact_invitations_sequentially() {
+// Test that importing and accepting multiple contact invitations works
+// sequentially. This mimics the TUI demo-mode flow where Alice's invitation is
+// imported and accepted before Carol's, and both should succeed without
+// interfering with each other.
+large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
     let own_authority = AuthorityId::new_from_entropy([150u8; 32]);
     let config = AgentConfig::default();
     let effects = Arc::new(
@@ -3841,4 +3898,4 @@ async fn importing_multiple_contact_invitations_sequentially() {
         "Carol should be in contacts, found: {:?}",
         contact_ids
     );
-}
+});

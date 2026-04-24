@@ -322,3 +322,58 @@ pub trait TreeEffects: Send + Sync {
     /// Snapshot must have valid threshold signature; no additional auth required.
     async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError>;
 }
+
+#[async_trait]
+impl<T: TreeEffects + ?Sized> TreeEffects for std::sync::Arc<T> {
+    async fn get_current_state(&self) -> Result<TreeState, AuraError> {
+        (**self).get_current_state().await
+    }
+
+    async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
+        (**self).get_current_commitment().await
+    }
+
+    async fn get_current_epoch(&self) -> Result<Epoch, AuraError> {
+        (**self).get_current_epoch().await
+    }
+
+    async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
+        (**self).apply_attested_op(op).await
+    }
+
+    async fn verify_aggregate_sig(
+        &self,
+        op: &AttestedOp,
+        state: &TreeState,
+    ) -> Result<bool, AuraError> {
+        (**self).verify_aggregate_sig(op, state).await
+    }
+
+    async fn add_leaf(&self, leaf: LeafNode, under: NodeIndex) -> Result<TreeOpKind, AuraError> {
+        (**self).add_leaf(leaf, under).await
+    }
+
+    async fn remove_leaf(&self, leaf_id: LeafId, reason: u8) -> Result<TreeOpKind, AuraError> {
+        (**self).remove_leaf(leaf_id, reason).await
+    }
+
+    async fn change_policy(
+        &self,
+        node: NodeIndex,
+        new_policy: Policy,
+    ) -> Result<TreeOpKind, AuraError> {
+        (**self).change_policy(node, new_policy).await
+    }
+
+    async fn rotate_epoch(&self, affected: Vec<NodeIndex>) -> Result<TreeOpKind, AuraError> {
+        (**self).rotate_epoch(affected).await
+    }
+
+    async fn propose_snapshot(&self, cut: Cut) -> Result<ProposalId, AuraError> {
+        (**self).propose_snapshot(cut).await
+    }
+
+    async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError> {
+        (**self).apply_snapshot(snapshot).await
+    }
+}

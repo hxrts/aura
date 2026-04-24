@@ -345,7 +345,7 @@ impl FilesystemStorageHandler {
         for byte in segment.bytes() {
             match byte {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => {
-                    encoded.push(byte as char)
+                    encoded.push(byte as char);
                 }
                 _ => {
                     encoded.push('%');

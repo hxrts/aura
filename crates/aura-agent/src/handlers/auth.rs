@@ -12,7 +12,7 @@ use aura_authentication::capabilities::AuthenticationCapability;
 #[cfg(test)]
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::{CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects};
-use aura_core::types::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{FlowCost, Hash32};
 use aura_guards::chain::create_send_guard;
 use aura_guards::{
@@ -20,6 +20,7 @@ use aura_guards::{
     VerifiedIngressMetadata,
 };
 use aura_protocol::effects::EffectApiEffects;
+use aura_signature::session::SessionScope;
 #[cfg(test)]
 use aura_signature::sign_ed25519_transcript;
 use aura_signature::{verify_ed25519_transcript, verify_frost_transcript, SecurityTranscript};
@@ -41,6 +42,8 @@ fn extract_group_public_key(public_key_package: &[u8]) -> AgentResult<Vec<u8>> {
 
     Ok(group_public_key)
 }
+
+const AUTH_CHALLENGE_PROTOCOL_VERSION: u16 = 1;
 
 /// Authentication method types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +69,18 @@ pub struct AuthChallenge {
     pub expires_at: u64,
     /// Authority being authenticated
     pub authority_id: AuthorityId,
+    /// Context for the authentication request
+    pub context_id: ContextId,
+    /// Device expected to answer the challenge
+    pub device_id: DeviceId,
+    /// Requested authentication scope
+    pub scope: SessionScope,
+    /// Authentication epoch associated with this challenge
+    pub epoch: u64,
+    /// Protocol version for transcript binding
+    pub protocol_version: u16,
+    /// Authority allowed to consume this challenge response.
+    pub audience_authority_id: AuthorityId,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,14 +90,21 @@ struct AuthChallengeTranscriptPayload {
     created_at: u64,
     expires_at: u64,
     authority_id: AuthorityId,
+    context_id: ContextId,
+    device_id: DeviceId,
+    scope: SessionScope,
+    epoch: u64,
+    protocol_version: u16,
+    audience_authority_id: AuthorityId,
     auth_method: AuthMethod,
-    response_public_key: Vec<u8>,
+    response_authority_id: AuthorityId,
+    response_device_id: Option<DeviceId>,
+    response_threshold_epoch: Option<u64>,
 }
 
 struct AuthChallengeTranscript<'a> {
     challenge: &'a AuthChallenge,
-    auth_method: AuthMethod,
-    response_public_key: &'a [u8],
+    response: &'a AuthResponse,
 }
 
 impl SecurityTranscript for AuthChallengeTranscript<'_> {
@@ -97,21 +119,27 @@ impl SecurityTranscript for AuthChallengeTranscript<'_> {
             created_at: self.challenge.created_at,
             expires_at: self.challenge.expires_at,
             authority_id: self.challenge.authority_id,
-            auth_method: self.auth_method.clone(),
-            response_public_key: self.response_public_key.to_vec(),
+            context_id: self.challenge.context_id,
+            device_id: self.challenge.device_id,
+            scope: self.challenge.scope.clone(),
+            epoch: self.challenge.epoch,
+            protocol_version: self.challenge.protocol_version,
+            audience_authority_id: self.challenge.audience_authority_id,
+            auth_method: self.response.auth_method.clone(),
+            response_authority_id: self.response.authority_id,
+            response_device_id: self.response.device_id,
+            response_threshold_epoch: self.response.threshold_epoch,
         }
     }
 }
 
 fn auth_challenge_transcript<'a>(
     challenge: &'a AuthChallenge,
-    auth_method: AuthMethod,
-    response_public_key: &'a [u8],
+    response: &'a AuthResponse,
 ) -> AuthChallengeTranscript<'a> {
     AuthChallengeTranscript {
         challenge,
-        auth_method,
-        response_public_key,
+        response,
     }
 }
 
@@ -122,10 +150,18 @@ pub struct AuthResponse {
     pub challenge_id: String,
     /// Signature over the challenge bytes
     pub signature: Vec<u8>,
-    /// Public key that created the signature
-    pub public_key: Vec<u8>,
     /// Authentication method used
     pub auth_method: AuthMethod,
+    /// Authority claiming to satisfy the challenge.
+    pub authority_id: AuthorityId,
+    /// Device identity for device-key authentication.
+    pub device_id: Option<DeviceId>,
+    /// Threshold epoch for authority threshold authentication.
+    pub threshold_epoch: Option<u64>,
+    /// Test-only untrusted key material retained for negative tests.
+    #[cfg(test)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub legacy_untrusted_public_key: Vec<u8>,
 }
 
 type VerifiedAuthResponse = VerifiedIngress<AuthResponse>;
@@ -201,6 +237,9 @@ impl AuthHandler {
 
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let challenge_id = format!("challenge-{}", effects.random_uuid().await.simple());
+        let scope = SessionScope::Protocol {
+            protocol_type: "authentication".to_string(),
+        };
 
         let challenge = AuthChallenge {
             challenge_id: challenge_id.clone(),
@@ -208,12 +247,19 @@ impl AuthHandler {
             created_at: current_time,
             expires_at: current_time + 300_000, // 5 minute expiry
             authority_id: self.context.authority.authority_id(),
+            context_id: self.context.authority.default_context_id(),
+            device_id: self.device_id(),
+            scope,
+            epoch: 0,
+            protocol_version: AUTH_CHALLENGE_PROTOCOL_VERSION,
+            audience_authority_id: self.context.authority.authority_id(),
         };
 
         // Store pending challenge
         self.challenge_manager
             .cache_challenge(challenge.clone())
-            .await;
+            .await
+            .map_err(AgentError::effects)?;
 
         Ok(challenge)
     }
@@ -374,12 +420,29 @@ impl AuthHandler {
         challenge: &AuthChallenge,
         response: &AuthResponse,
     ) -> AgentResult<bool> {
+        if response.authority_id != challenge.authority_id {
+            return Err(AgentError::effects(
+                "device authentication response authority does not match challenge",
+            ));
+        }
+        let response_device_id = response.device_id.ok_or_else(|| {
+            AgentError::effects("device authentication response is missing device id")
+        })?;
+        if response_device_id != challenge.device_id {
+            return Err(AgentError::effects(
+                "device authentication response device does not match challenge",
+            ));
+        }
+        if response.threshold_epoch.is_some() {
+            return Err(AgentError::effects(
+                "device authentication response must not carry a threshold epoch",
+            ));
+        }
         let trusted_key = self
             .key_resolver
-            .resolve_device_key(self.device_id())
+            .resolve_device_key(response_device_id)
             .map_err(|e| AgentError::effects(format!("device key resolution failed: {e}")))?;
-        let transcript =
-            auth_challenge_transcript(challenge, AuthMethod::DeviceKey, trusted_key.bytes());
+        let transcript = auth_challenge_transcript(challenge, response);
 
         let verified = verify_ed25519_transcript(
             effects,
@@ -406,6 +469,24 @@ impl AuthHandler {
         challenge: &AuthChallenge,
         response: &AuthResponse,
     ) -> AgentResult<bool> {
+        if response.authority_id != challenge.authority_id {
+            return Err(AgentError::effects(
+                "threshold authentication response authority does not match challenge",
+            ));
+        }
+        if response.device_id.is_some() {
+            return Err(AgentError::effects(
+                "threshold authentication response must not carry a device id",
+            ));
+        }
+        let threshold_epoch = response.threshold_epoch.ok_or_else(|| {
+            AgentError::effects("threshold authentication response is missing threshold epoch")
+        })?;
+        if threshold_epoch != challenge.epoch {
+            return Err(AgentError::effects(
+                "threshold authentication response epoch does not match challenge",
+            ));
+        }
         // Validate input lengths
         if response.signature.len() != 64 {
             return Err(AgentError::effects(format!(
@@ -415,14 +496,10 @@ impl AuthHandler {
         }
         let trusted_key = self
             .key_resolver
-            .resolve_authority_threshold_key(self.context.authority.authority_id(), 0)
+            .resolve_authority_threshold_key(response.authority_id, threshold_epoch)
             .map_err(|e| AgentError::effects(format!("threshold key resolution failed: {e}")))?;
 
-        let transcript = auth_challenge_transcript(
-            challenge,
-            AuthMethod::ThresholdSignature,
-            trusted_key.bytes(),
-        );
+        let transcript = auth_challenge_transcript(challenge, response);
 
         let verified = verify_frost_transcript(
             effects,
@@ -454,20 +531,24 @@ impl AuthHandler {
             .await
             .map_err(|e| AgentError::effects(format!("failed to generate signing key: {e}")))?;
 
-        let transcript = auth_challenge_transcript(challenge, AuthMethod::DeviceKey, &public_key);
+        let response = AuthResponse {
+            challenge_id: challenge.challenge_id.clone(),
+            signature: vec![0_u8; 64],
+            auth_method: AuthMethod::DeviceKey,
+            authority_id: challenge.authority_id,
+            device_id: Some(challenge.device_id),
+            threshold_epoch: None,
+            legacy_untrusted_public_key: public_key,
+        };
+        let transcript = auth_challenge_transcript(challenge, &response);
 
         let signature = sign_ed25519_transcript(effects, &transcript, &private_key)
             .await
             .map_err(|e| AgentError::effects(format!("failed to sign challenge: {e}")))?;
-        self.key_resolver
-            .register_device_key(self.device_id(), public_key.clone())
-            .map_err(|e| AgentError::effects(format!("register device auth key failed: {e}")))?;
 
         Ok(AuthResponse {
-            challenge_id: challenge.challenge_id.clone(),
             signature,
-            public_key,
-            auth_method: AuthMethod::DeviceKey,
+            ..response
         })
     }
 
@@ -513,15 +594,26 @@ impl AuthHandler {
         }
 
         let group_public_key = extract_group_public_key(public_key_package)?;
-        self.key_resolver
-            .register_authority_threshold_key(
-                self.context.authority.authority_id(),
-                0,
-                group_public_key.clone(),
-            )
-            .map_err(|e| AgentError::effects(format!("register threshold auth key failed: {e}")))?;
-        let transcript =
-            auth_challenge_transcript(challenge, AuthMethod::ThresholdSignature, &group_public_key);
+        let trusted_key = self
+            .key_resolver
+            .resolve_authority_threshold_key(challenge.authority_id, challenge.epoch)
+            .map_err(|e| AgentError::effects(format!("threshold key resolution failed: {e}")))?;
+        if trusted_key.bytes() != group_public_key.as_slice() {
+            return Err(AgentError::effects(
+                "threshold signing key package does not match enrolled authority threshold key",
+            ));
+        }
+        let response = AuthResponse {
+            challenge_id: challenge.challenge_id.clone(),
+            signature: vec![0_u8; 64],
+            auth_method: AuthMethod::ThresholdSignature,
+            authority_id: challenge.authority_id,
+            device_id: None,
+            threshold_epoch: Some(challenge.epoch),
+            #[cfg(test)]
+            legacy_untrusted_public_key: group_public_key.clone(),
+        };
+        let transcript = auth_challenge_transcript(challenge, &response);
         let transcript_bytes = transcript.transcript_bytes().map_err(|error| {
             AgentError::effects(format!("auth challenge transcript failed: {error}"))
         })?;
@@ -569,10 +661,8 @@ impl AuthHandler {
             .map_err(|e| AgentError::effects(format!("failed to aggregate signatures: {e}")))?;
 
         Ok(AuthResponse {
-            challenge_id: challenge.challenge_id.clone(),
             signature,
-            public_key: group_public_key,
-            auth_method: AuthMethod::ThresholdSignature,
+            ..response
         })
     }
 
@@ -611,8 +701,7 @@ impl AuthHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::AgentConfig;
-    use crate::core::AuthorityContext;
+    use crate::core::{default_context_id_for_authority, AgentConfig, AuthorityContext};
     use aura_core::types::identifiers::AuthorityId;
 
     #[tokio::test]
@@ -639,7 +728,13 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([91u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
 
-        let config = AgentConfig::default();
+        let config = AgentConfig {
+            storage: crate::core::config::StorageConfig {
+                encryption_policy: crate::core::config::StorageEncryptionPolicy::PlaintextForTests,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let effects = crate::testing::simulation_effect_system(&config);
         let handler = AuthHandler::new(authority_context).unwrap();
 
@@ -647,31 +742,63 @@ mod tests {
         assert!(!challenge.challenge_id.is_empty());
         assert_eq!(challenge.challenge_bytes.len(), 32);
         assert!(challenge.expires_at > challenge.created_at);
+        assert_eq!(challenge.protocol_version, AUTH_CHALLENGE_PROTOCOL_VERSION);
     }
 
     #[test]
-    fn auth_challenge_transcript_binds_method_and_public_key() {
+    fn auth_challenge_transcript_binds_method_authority_and_device() {
+        let authority_id = AuthorityId::new_from_entropy([9; 32]);
         let challenge = AuthChallenge {
             challenge_id: "challenge-1".to_string(),
             challenge_bytes: vec![1; 32],
             created_at: 100,
             expires_at: 200,
-            authority_id: AuthorityId::new_from_entropy([9; 32]),
+            authority_id,
+            context_id: default_context_id_for_authority(authority_id),
+            device_id: DeviceId::from_uuid(uuid::Uuid::from_u128(1)),
+            scope: SessionScope::Protocol {
+                protocol_type: "authentication".to_string(),
+            },
+            epoch: 0,
+            protocol_version: AUTH_CHALLENGE_PROTOCOL_VERSION,
+            audience_authority_id: authority_id,
         };
 
-        let device_key = auth_challenge_transcript(&challenge, AuthMethod::DeviceKey, &[1; 32])
+        let device_response = AuthResponse {
+            challenge_id: challenge.challenge_id.clone(),
+            signature: vec![1; 64],
+            auth_method: AuthMethod::DeviceKey,
+            authority_id,
+            device_id: Some(challenge.device_id),
+            threshold_epoch: None,
+            legacy_untrusted_public_key: vec![1; 32],
+        };
+        let threshold_response = AuthResponse {
+            challenge_id: challenge.challenge_id.clone(),
+            signature: vec![1; 64],
+            auth_method: AuthMethod::ThresholdSignature,
+            authority_id,
+            device_id: None,
+            threshold_epoch: Some(challenge.epoch),
+            legacy_untrusted_public_key: vec![1; 32],
+        };
+        let wrong_device_response = AuthResponse {
+            device_id: Some(DeviceId::from_uuid(uuid::Uuid::from_u128(2))),
+            ..device_response.clone()
+        };
+
+        let device_key = auth_challenge_transcript(&challenge, &device_response)
             .transcript_bytes()
             .unwrap();
-        let threshold =
-            auth_challenge_transcript(&challenge, AuthMethod::ThresholdSignature, &[1; 32])
-                .transcript_bytes()
-                .unwrap();
-        let different_key = auth_challenge_transcript(&challenge, AuthMethod::DeviceKey, &[2; 32])
+        let threshold = auth_challenge_transcript(&challenge, &threshold_response)
+            .transcript_bytes()
+            .unwrap();
+        let wrong_device = auth_challenge_transcript(&challenge, &wrong_device_response)
             .transcript_bytes()
             .unwrap();
 
         assert_ne!(device_key, threshold);
-        assert_ne!(device_key, different_key);
+        assert_ne!(device_key, wrong_device);
     }
 
     #[tokio::test]
@@ -687,8 +814,11 @@ mod tests {
         let response = AuthResponse {
             challenge_id: "nonexistent".to_string(),
             signature: vec![0u8; 64],
-            public_key: vec![0u8; 32],
             auth_method: AuthMethod::DeviceKey,
+            authority_id,
+            device_id: Some(handler.device_id()),
+            threshold_epoch: None,
+            legacy_untrusted_public_key: vec![0u8; 32],
         };
 
         let response = handler.build_response_ingress(response).unwrap();
@@ -698,7 +828,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn device_auth_uses_resolved_key_not_response_key() {
+    async fn device_auth_uses_enrolled_device_key_not_response_key() {
         let authority_id = AuthorityId::new_from_entropy([95u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
 
@@ -711,7 +841,12 @@ mod tests {
             .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
             .await
             .unwrap();
-        response.public_key = vec![0xAA; 32];
+        let enrolled_key = response.legacy_untrusted_public_key.clone();
+        handler
+            .key_resolver
+            .register_device_key(challenge.device_id, enrolled_key)
+            .unwrap();
+        response.legacy_untrusted_public_key = vec![0xAA; 32];
 
         let response = handler.build_response_ingress(response).unwrap();
         let result = handler.verify_response(&effects, &response).await.unwrap();
@@ -719,6 +854,44 @@ mod tests {
             result.authenticated,
             "auth verification should use the trusted registered device key, not the response key"
         );
+    }
+
+    #[tokio::test]
+    async fn stale_proof_replay_to_new_challenge_id_is_rejected() {
+        let authority_id = AuthorityId::new_from_entropy([96u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let old_challenge = handler.create_challenge(&effects).await.unwrap();
+        let fresh_challenge = handler.create_challenge(&effects).await.unwrap();
+        let signed_old = handler
+            .sign_challenge_with_ephemeral_key_for_tests(&effects, &old_challenge)
+            .await
+            .unwrap();
+        handler
+            .key_resolver
+            .register_device_key(
+                old_challenge.device_id,
+                signed_old.legacy_untrusted_public_key.clone(),
+            )
+            .unwrap();
+
+        let replay = AuthResponse {
+            challenge_id: fresh_challenge.challenge_id.clone(),
+            signature: signed_old.signature,
+            auth_method: signed_old.auth_method,
+            authority_id: signed_old.authority_id,
+            device_id: signed_old.device_id,
+            threshold_epoch: signed_old.threshold_epoch,
+            legacy_untrusted_public_key: signed_old.legacy_untrusted_public_key,
+        };
+
+        let replay = handler.build_response_ingress(replay).unwrap();
+        let result = handler.verify_response(&effects, &replay).await.unwrap();
+        assert!(!result.authenticated);
     }
 
     #[tokio::test]
@@ -745,8 +918,26 @@ mod tests {
         assert_eq!(key_gen_result.key_packages.len(), max_signers as usize);
 
         // Step 2: Create a challenge
-        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let mut challenge = handler.create_challenge(&effects).await.unwrap();
+        challenge.epoch = 7;
+        handler
+            .challenge_manager
+            .remove_challenge(&challenge.challenge_id)
+            .await;
+        handler
+            .challenge_manager
+            .cache_challenge(challenge.clone())
+            .await
+            .unwrap();
         assert_eq!(challenge.challenge_bytes.len(), 32);
+        handler
+            .key_resolver
+            .register_authority_threshold_key(
+                authority_id,
+                challenge.epoch,
+                extract_group_public_key(&key_gen_result.public_key_package).unwrap(),
+            )
+            .unwrap();
 
         // Step 3: Sign the challenge using threshold signature with participants 1 and 2
         let participants: Vec<u16> = vec![1, 2]; // 2-of-3 threshold
@@ -763,7 +954,7 @@ mod tests {
 
         assert_eq!(response.auth_method, AuthMethod::ThresholdSignature);
         assert_eq!(response.signature.len(), 64); // Ed25519 signature length
-        assert_eq!(response.public_key.len(), 32); // Ed25519 public key length
+        assert_eq!(response.legacy_untrusted_public_key.len(), 32); // Ed25519 public key length
 
         // Step 4: Verify the response
         let response = handler.build_response_ingress(response).unwrap();
@@ -787,14 +978,27 @@ mod tests {
         let handler = AuthHandler::new(authority_context).unwrap();
 
         // Create a challenge
-        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let mut challenge = handler.create_challenge(&effects).await.unwrap();
+        challenge.epoch = 4;
+        handler
+            .challenge_manager
+            .remove_challenge(&challenge.challenge_id)
+            .await;
+        handler
+            .challenge_manager
+            .cache_challenge(challenge.clone())
+            .await
+            .unwrap();
 
         // Create an invalid threshold signature response (wrong signature bytes)
         let response = AuthResponse {
             challenge_id: challenge.challenge_id.clone(),
-            signature: vec![0u8; 64],  // Invalid signature
-            public_key: vec![0u8; 32], // Invalid public key
+            signature: vec![0u8; 64], // Invalid signature
             auth_method: AuthMethod::ThresholdSignature,
+            authority_id,
+            device_id: None,
+            threshold_epoch: Some(challenge.epoch),
+            legacy_untrusted_public_key: vec![0u8; 32], // Invalid public key
         };
 
         // Verification should fail (not panic)
@@ -811,5 +1015,132 @@ mod tests {
                 // Error is also acceptable for invalid crypto inputs
             }
         }
+    }
+
+    #[tokio::test]
+    async fn attacker_generated_device_keypair_is_rejected_without_enrollment() {
+        let authority_id = AuthorityId::new_from_entropy([97u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let response = handler
+            .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
+            .await
+            .unwrap();
+
+        let response = handler.build_response_ingress(response).unwrap();
+        let result = handler.verify_response(&effects, &response).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn wrong_authority_id_is_rejected() {
+        let authority_id = AuthorityId::new_from_entropy([98u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let mut response = handler
+            .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
+            .await
+            .unwrap();
+        handler
+            .key_resolver
+            .register_device_key(
+                challenge.device_id,
+                response.legacy_untrusted_public_key.clone(),
+            )
+            .unwrap();
+        response.authority_id = AuthorityId::new_from_entropy([99u8; 32]);
+
+        let response = handler.build_response_ingress(response).unwrap();
+        let result = handler.verify_response(&effects, &response).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn wrong_device_id_is_rejected() {
+        let authority_id = AuthorityId::new_from_entropy([100u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let challenge = handler.create_challenge(&effects).await.unwrap();
+        let mut response = handler
+            .sign_challenge_with_ephemeral_key_for_tests(&effects, &challenge)
+            .await
+            .unwrap();
+        response.device_id = Some(DeviceId::new_from_entropy([101u8; 32]));
+
+        let response = handler.build_response_ingress(response).unwrap();
+        let result = handler.verify_response(&effects, &response).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn swapped_threshold_group_key_is_rejected() {
+        let authority_id = AuthorityId::new_from_entropy([102u8; 32]);
+        let authority_context = AuthorityContext::new(authority_id);
+
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system(&config);
+        let handler = AuthHandler::new(authority_context).unwrap();
+
+        let enrolled = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await
+            .unwrap();
+        let attacker = effects
+            .generate_signing_keys_with(
+                aura_core::effects::crypto::KeyGenerationMethod::DealerBased,
+                2,
+                3,
+            )
+            .await
+            .unwrap();
+
+        let mut challenge = handler.create_challenge(&effects).await.unwrap();
+        challenge.epoch = 9;
+        handler
+            .challenge_manager
+            .remove_challenge(&challenge.challenge_id)
+            .await;
+        handler
+            .challenge_manager
+            .cache_challenge(challenge.clone())
+            .await
+            .unwrap();
+        handler
+            .key_resolver
+            .register_authority_threshold_key(
+                authority_id,
+                challenge.epoch,
+                extract_group_public_key(&enrolled.public_key_package).unwrap(),
+            )
+            .unwrap();
+
+        let result = handler
+            .sign_challenge_threshold(
+                &effects,
+                &challenge,
+                &attacker.key_packages,
+                &attacker.public_key_package,
+                &[1, 2],
+            )
+            .await;
+        assert!(result.is_err());
     }
 }

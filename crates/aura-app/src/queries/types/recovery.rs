@@ -3,7 +3,7 @@
 use super::common::{get_authority_id, get_int, get_string};
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use aura_core::types::AuthorityId;
 use serde::{Deserialize, Serialize};
@@ -63,8 +63,8 @@ impl Query for GuardiansQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("guardians")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("guardians"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {
@@ -208,8 +208,8 @@ impl Query for RecoveryQuery {
         ])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("recovery")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("recovery"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

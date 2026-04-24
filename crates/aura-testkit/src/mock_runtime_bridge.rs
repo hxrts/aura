@@ -1379,14 +1379,16 @@ impl RuntimeBridge for MockRuntimeBridge {
         let data: serde_json::Value = serde_json::from_str(&json_str)
             .map_err(|e| IntentError::internal_error(format!("Invalid JSON: {e}")))?;
 
+        let payload = data.get("payload").unwrap_or(&data);
+
         // Extract fields
-        let invitation_id = data
+        let invitation_id = payload
             .get("invitation_id")
             .and_then(|v| v.as_str())
             .map(|s| InvitationId::new(s.to_string()))
             .unwrap_or_else(|| self.next_invitation_id());
 
-        let sender_uuid_str = data
+        let sender_uuid_str = payload
             .get("sender_id")
             .and_then(|v| v.as_str())
             .unwrap_or("00000000-0000-0000-0000-000000000000");
@@ -1394,14 +1396,14 @@ impl RuntimeBridge for MockRuntimeBridge {
         let sender_uuid = Uuid::parse_str(sender_uuid_str).unwrap_or(Uuid::from_bytes([0; 16]));
         let sender_id = AuthorityId::from_uuid(sender_uuid);
 
-        let expires_at_ms = data.get("expires_at").and_then(|v| v.as_u64());
-        let message = data
+        let expires_at_ms = payload.get("expires_at").and_then(|v| v.as_u64());
+        let message = payload
             .get("message")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
         // Parse invitation type
-        let invitation_type = if let Some(inv_type) = data.get("invitation_type") {
+        let invitation_type = if let Some(inv_type) = payload.get("invitation_type") {
             if inv_type.get("Contact").is_some() {
                 let nickname = inv_type
                     .get("Contact")

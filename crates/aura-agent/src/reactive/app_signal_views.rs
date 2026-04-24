@@ -1533,8 +1533,13 @@ impl ReactiveView for ChatSignalView {
                                         format!("[sealed: {} bytes]", sealed_len)
                                     })
                                 } else {
-                                    match amp_recv(self.effects.as_ref(), context, payload_bytes)
-                                        .await
+                                    match amp_recv(
+                                        self.effects.as_ref(),
+                                        context,
+                                        sender_id,
+                                        payload_bytes,
+                                    )
+                                    .await
                                     {
                                         Ok(msg) => {
                                             String::from_utf8(msg.payload).unwrap_or_else(|_| {

@@ -152,7 +152,19 @@ impl HarnessCoordinator {
                     (key == "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT")
                         .then(|| absolutize_path(PathBuf::from(value)))
                 })
-                .unwrap_or_else(|| instance_data_dir.join(".harness-transient"));
+                .unwrap_or_else(|| {
+                    fallback_instance_transient_dir(&config.run.name, &id, &instance_data_dir)
+                });
+            if !instance.env.iter().any(|entry| {
+                entry
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key == "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT")
+            }) {
+                instance.env.push(format!(
+                    "AURA_HARNESS_INSTANCE_TRANSIENT_ROOT={}",
+                    instance_transient_dir.display()
+                ));
+            }
             let backend = BackendHandle::from_config(instance, pty_rows, pty_cols)?;
             instance_order.push(id.clone());
             instance_modes.insert(id.clone(), instance_mode);
@@ -219,6 +231,14 @@ impl HarnessCoordinator {
         };
         coordinator.write_run_manifest()?;
         Ok(coordinator)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn instance_transient_dir(&self, instance_id: &str) -> Result<&Path> {
+        self.instance_transient_dirs
+            .get(instance_id)
+            .map(PathBuf::as_path)
+            .ok_or_else(|| anyhow!("missing transient_dir for instance_id: {instance_id}"))
     }
 
     pub fn start_all(&mut self) -> Result<()> {
@@ -1733,6 +1753,18 @@ fn instance_claim_key(
     data_dir.hash(&mut hasher);
     transient_dir.hash(&mut hasher);
     format!("{instance_id}-{:016x}", hasher.finish())
+}
+
+fn fallback_instance_transient_dir(run_name: &str, instance_id: &str, data_dir: &Path) -> PathBuf {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    run_name.hash(&mut hasher);
+    instance_id.hash(&mut hasher);
+    data_dir.hash(&mut hasher);
+    workspace_root()
+        .join(".tmp")
+        .join("harness")
+        .join("transient")
+        .join(format!("{:016x}", hasher.finish()))
 }
 
 fn clear_directory_contents(dir: &Path) -> Result<()> {

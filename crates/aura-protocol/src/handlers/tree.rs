@@ -265,7 +265,7 @@ struct SnapshotTranscript {
     snapshot_commitment: Hash32,
     root_node: NodeIndex,
     root_policy: Policy,
-    root_child_count: usize,
+    root_child_count: u32,
     required_signers: u16,
     participants: Vec<LeafId>,
 }
@@ -302,9 +302,13 @@ fn snapshot_transcript(
         .get_policy(&root_node)
         .copied()
         .ok_or_else(|| AuraError::invalid("Snapshot tree state is missing a root policy"))?;
-    let root_child_count = snapshot.tree_state.get_children(root_node).len();
+    let root_child_count = u32::try_from(snapshot.tree_state.get_children(root_node).len())
+        .map_err(|_| AuraError::invalid("Snapshot root child count exceeds u32"))?;
     let required_signers = root_policy
-        .required_signers(root_child_count)
+        .required_signers(
+            usize::try_from(root_child_count)
+                .map_err(|_| AuraError::invalid("Snapshot root child count exceeds usize"))?,
+        )
         .map_err(|error| {
             AuraError::invalid(format!("Invalid root snapshot threshold policy: {error}"))
         })?;

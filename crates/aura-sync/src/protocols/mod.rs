@@ -60,18 +60,23 @@ pub mod namespaced_sync;
 
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_guards::GuardContextProvider;
+use aura_protocol::effects::TreeEffects;
 
 pub trait SyncJournalEffects: JournalEffects + Send + Sync {}
 
 impl<T> SyncJournalEffects for T where T: JournalEffects + Send + Sync {}
 
 pub trait SyncProtocolEffects:
-    SyncJournalEffects + NetworkEffects + PhysicalTimeEffects + GuardContextProvider
+    SyncJournalEffects + NetworkEffects + PhysicalTimeEffects + GuardContextProvider + TreeEffects
 {
 }
 
 impl<T> SyncProtocolEffects for T where
-    T: SyncJournalEffects + NetworkEffects + PhysicalTimeEffects + GuardContextProvider
+    T: SyncJournalEffects
+        + NetworkEffects
+        + PhysicalTimeEffects
+        + GuardContextProvider
+        + TreeEffects
 {
 }
 

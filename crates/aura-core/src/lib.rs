@@ -270,8 +270,8 @@ pub use messages::{
 };
 #[doc = "stable: Canonical serialization with semver guarantees"]
 pub use util::serialization::{
-    from_slice, hash_canonical, to_vec, SemanticVersion as SerVersion, SerializationError,
-    VersionedMessage,
+    from_slice, from_slice_trusted, hash_canonical, to_vec, SemanticVersion as SerVersion,
+    SerializationError, VersionedMessage,
 };
 
 // Errors

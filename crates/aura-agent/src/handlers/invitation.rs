@@ -65,8 +65,6 @@ use aura_invitation::protocol::exchange::telltale_session_types_invitation::mess
     InvitationOffer as ExchangeInvitationOffer,
     InvitationResponse as ExchangeInvitationResponse,
 };
-#[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
-use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::GuardianAccept as GuardianInvitationAccept;
 use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
     GuardianConfirm as GuardianInvitationConfirm, GuardianRequest as GuardianInvitationRequest,
 };
@@ -74,8 +72,6 @@ use aura_invitation::protocol::device_enrollment::telltale_session_types_invitat
     DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
 };
-#[cfg(all(test, feature = "choreo-backend-telltale-machine"))]
-use aura_invitation::{GuardianAccept, InvitationResponse};
 use aura_invitation::{
     DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm, GuardianRequest,
     InvitationAck, InvitationOffer, InvitationOperation,
@@ -95,7 +91,6 @@ use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use base64::Engine;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(test)]
 use std::str::FromStr;
@@ -432,31 +427,9 @@ impl InvitationHandler {
             aura_authorization::BiscuitAuthorizationBridge,
         )>,
     > {
-        let Some(cache) = effects.biscuit_cache() else {
-            return Ok(None);
-        };
-
-        let engine = base64::engine::general_purpose::STANDARD;
-        let token_bytes = engine
-            .decode(cache.token_b64)
-            .map_err(|error| AgentError::effects(format!("decode biscuit token cache: {error}")))?;
-        let root_pk_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
-            AgentError::effects(format!("decode biscuit root public key cache: {error}"))
-        })?;
-        let root_public_key =
-            aura_authorization::PublicKey::from_bytes(&root_pk_bytes).map_err(|error| {
-                AgentError::effects(format!("parse biscuit root public key cache: {error}"))
-            })?;
-        let biscuit =
-            aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
-                .map_err(|error| {
-                    AgentError::effects(format!("parse biscuit token cache: {error}"))
-                })?;
-        let bridge = aura_authorization::BiscuitAuthorizationBridge::new(
-            root_public_key,
-            self.context.authority.authority_id(),
-        );
-        Ok(Some((biscuit, bridge)))
+        effects
+            .verified_biscuit_frontier()
+            .map_err(|error| AgentError::effects(format!("decode biscuit frontier cache: {error}")))
     }
 
     fn invitation_capability_check_timestamp_seconds(now_ms: u64) -> Option<u64> {

@@ -103,13 +103,16 @@ async fn test_device_key_auth_flow_via_agent() -> Result<(), Box<dyn std::error:
 
     let auth = agent.auth()?;
 
-    // Test the full device key authentication flow
-    let result = auth.authenticate_with_device_key().await?;
-
-    assert!(result.authenticated);
-    assert_eq!(result.authority_id, Some(authority_id));
-    assert!(result.device_id.is_some());
-    assert!(result.failure_reason.is_none());
+    let error = auth
+        .authenticate_with_device_key()
+        .await
+        .expect_err("device-key auth should fail closed without an enrolled signer");
+    assert!(
+        error
+            .to_string()
+            .contains("ephemeral challenge signing is disabled"),
+        "expected enrolled-signer requirement, got: {error}"
+    );
     Ok(())
 }
 
@@ -148,8 +151,10 @@ async fn test_invalid_challenge_rejected() -> Result<(), Box<dyn std::error::Err
     let invalid_response = aura_agent::AuthResponse {
         challenge_id: "invalid-challenge-id".to_string(),
         signature: vec![0u8; 64],
-        public_key: vec![0u8; 32],
         auth_method: AuthMethod::DeviceKey,
+        authority_id,
+        device_id: Some(auth.device_id()),
+        threshold_epoch: None,
     };
 
     let result = auth.verify(&invalid_response).await?;

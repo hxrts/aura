@@ -64,7 +64,7 @@ impl CompositeHandlerAdapter {
 
     fn handler_context(ctx: &AuraContext) -> aura_composition::HandlerContext {
         let context_id = ContextId::new_from_entropy(hash(&ctx.authority_id.to_bytes()));
-        let snapshot = ContextSnapshot::new(ctx.authority_id, context_id, ctx.execution_mode);
+        let snapshot = ContextSnapshot::fresh(ctx.authority_id, context_id, ctx.execution_mode);
         aura_composition::HandlerContext::from_snapshot(snapshot)
     }
 }

@@ -82,10 +82,28 @@ fn derive_operation_session_id(
     context_id: ContextId,
     execution_mode: ExecutionMode,
 ) -> OperationSessionId {
+    let mut material = operation_session_material(authority_id, context_id, execution_mode);
     let nonce = OPERATION_SESSION_NONCE.fetch_add(1, Ordering::Relaxed);
+    material.extend_from_slice(&nonce.to_le_bytes());
+    OperationSessionId::new(SessionId::new_from_entropy(hash(&material)))
+}
+
+fn deterministic_operation_session_id(
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    execution_mode: ExecutionMode,
+) -> OperationSessionId {
+    let material = operation_session_material(authority_id, context_id, execution_mode);
+    OperationSessionId::new(SessionId::new_from_entropy(hash(&material)))
+}
+
+fn operation_session_material(
+    authority_id: AuthorityId,
+    context_id: ContextId,
+    execution_mode: ExecutionMode,
+) -> Vec<u8> {
     let mut material = Vec::with_capacity(1 + 32 + 32 + 9 + 8);
     material.extend_from_slice(b"aura-session");
-    material.extend_from_slice(&nonce.to_le_bytes());
     material.extend_from_slice(&authority_id.to_bytes());
     material.extend_from_slice(&context_id.to_bytes());
     match execution_mode {
@@ -96,7 +114,11 @@ fn derive_operation_session_id(
             material.extend_from_slice(&seed.to_le_bytes());
         }
     }
-    OperationSessionId::new(SessionId::new_from_entropy(hash(&material)))
+    material
+}
+
+fn default_context_id_for_authority(authority_id: AuthorityId) -> ContextId {
+    ContextId::new_from_entropy(hash(&authority_id.to_bytes()))
 }
 
 impl EffectContext {
@@ -108,23 +130,69 @@ impl EffectContext {
         context_id: ContextId,
         execution_mode: ExecutionMode,
     ) -> Self {
+        Self::from_session_id(
+            authority_id,
+            context_id,
+            execution_mode,
+            derive_operation_session_id(authority_id, context_id, execution_mode),
+        )
+    }
+
+    /// Create a context with an explicit operation/session identity.
+    pub fn from_session_id(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+        session_id: OperationSessionId,
+    ) -> Self {
         Self {
             authority_id,
             context_id,
-            session_id: derive_operation_session_id(authority_id, context_id, execution_mode),
+            session_id,
             execution_mode,
             metadata: HashMap::new(),
         }
     }
 
-    /// Convenience for creating a context when only an authority is known.
+    /// Convenience for creating a fresh context in the authority's default context.
     ///
-    /// This derives a deterministic `ContextId` from the authority for callers that need a
-    /// stable default context. Prefer `new(...)` with an explicit `ContextId` when possible.
+    /// This derives a stable default `ContextId` from the authority but still allocates a
+    /// fresh operation/session id. Prefer `new(...)` with an explicit `ContextId` when possible.
     #[must_use]
-    pub fn with_authority(authority_id: AuthorityId) -> Self {
-        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-        Self::new(authority_id, context_id, ExecutionMode::Production)
+    pub fn with_default_context(authority_id: AuthorityId, execution_mode: ExecutionMode) -> Self {
+        let context_id = default_context_id_for_authority(authority_id);
+        Self::new(authority_id, context_id, execution_mode)
+    }
+
+    /// Create a deterministic context for testing or simulation.
+    ///
+    /// Production code must not treat deterministic operation/session ids as freshness evidence.
+    #[must_use]
+    pub fn deterministic(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        assert!(
+            execution_mode.is_deterministic(),
+            "deterministic EffectContext constructors are reserved for testing/simulation"
+        );
+        Self::from_session_id(
+            authority_id,
+            context_id,
+            execution_mode,
+            deterministic_operation_session_id(authority_id, context_id, execution_mode),
+        )
+    }
+
+    /// Create a deterministic context in the authority's default context for testing/simulation.
+    #[must_use]
+    pub fn deterministic_with_default_context(
+        authority_id: AuthorityId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        let context_id = default_context_id_for_authority(authority_id);
+        Self::deterministic(authority_id, context_id, execution_mode)
     }
 
     /// Authority performing the operation.
@@ -191,18 +259,51 @@ impl EffectContext {
 }
 
 impl ContextSnapshot {
-    /// Create a new snapshot with a fresh session id.
-    pub fn new(
+    /// Create a new snapshot with an explicit operation/session id.
+    pub fn from_session_id(
         authority_id: AuthorityId,
         context_id: ContextId,
         execution_mode: ExecutionMode,
+        session_id: OperationSessionId,
     ) -> Self {
         Self {
             authority_id,
             context_id,
-            session_id: derive_operation_session_id(authority_id, context_id, execution_mode),
+            session_id,
             execution_mode,
         }
+    }
+
+    /// Create a new snapshot with a fresh session id.
+    pub fn fresh(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        Self::from_session_id(
+            authority_id,
+            context_id,
+            execution_mode,
+            derive_operation_session_id(authority_id, context_id, execution_mode),
+        )
+    }
+
+    /// Create a deterministic snapshot for testing or simulation.
+    pub fn deterministic(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        execution_mode: ExecutionMode,
+    ) -> Self {
+        assert!(
+            execution_mode.is_deterministic(),
+            "deterministic ContextSnapshot constructors are reserved for testing/simulation"
+        );
+        Self::from_session_id(
+            authority_id,
+            context_id,
+            execution_mode,
+            deterministic_operation_session_id(authority_id, context_id, execution_mode),
+        )
     }
     /// Authority performing the operation.
     pub fn authority_id(&self) -> AuthorityId {
@@ -246,5 +347,51 @@ mod tests {
         let raw_session: SessionId = operation_session.into();
 
         assert_eq!(operation_session.raw(), raw_session);
+    }
+
+    #[test]
+    fn fresh_effect_context_allocates_distinct_session_ids_for_same_scope() {
+        let authority_id = AuthorityId::new_from_entropy([3; 32]);
+        let context_id = ContextId::new_from_entropy([4; 32]);
+
+        let first = EffectContext::new(authority_id, context_id, ExecutionMode::Production);
+        let second = EffectContext::new(authority_id, context_id, ExecutionMode::Production);
+
+        assert_ne!(first.session_id(), second.session_id());
+    }
+
+    #[test]
+    fn deterministic_effect_context_is_replayable_for_testing() {
+        let authority_id = AuthorityId::new_from_entropy([5; 32]);
+        let context_id = ContextId::new_from_entropy([6; 32]);
+
+        let first = EffectContext::deterministic(authority_id, context_id, ExecutionMode::Testing);
+        let second = EffectContext::deterministic(authority_id, context_id, ExecutionMode::Testing);
+
+        assert_eq!(first.session_id(), second.session_id());
+    }
+
+    #[test]
+    #[should_panic(expected = "deterministic EffectContext constructors are reserved")]
+    fn deterministic_effect_context_rejects_production_mode() {
+        let authority_id = AuthorityId::new_from_entropy([7; 32]);
+        let context_id = ContextId::new_from_entropy([8; 32]);
+        let _ = EffectContext::deterministic(authority_id, context_id, ExecutionMode::Production);
+    }
+
+    #[test]
+    fn context_snapshot_fresh_and_deterministic_constructors_match_semantics() {
+        let authority_id = AuthorityId::new_from_entropy([9; 32]);
+        let context_id = ContextId::new_from_entropy([10; 32]);
+
+        let fresh_a = ContextSnapshot::fresh(authority_id, context_id, ExecutionMode::Testing);
+        let fresh_b = ContextSnapshot::fresh(authority_id, context_id, ExecutionMode::Testing);
+        assert_ne!(fresh_a.session_id(), fresh_b.session_id());
+
+        let deterministic_a =
+            ContextSnapshot::deterministic(authority_id, context_id, ExecutionMode::Testing);
+        let deterministic_b =
+            ContextSnapshot::deterministic(authority_id, context_id, ExecutionMode::Testing);
+        assert_eq!(deterministic_a.session_id(), deterministic_b.session_id());
     }
 }

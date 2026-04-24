@@ -371,18 +371,13 @@ pub struct RecoveryCeremonyConfig {
 }
 
 /// Explicit emergency bypass policy for recovery ceremonies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EmergencyBypassPolicy {
     /// Emergency freeze still requires the configured recovery quorum.
+    #[default]
     RequireConfiguredQuorum,
     /// A single guardian may authorize EmergencyFreeze.
     AllowSingleGuardianEmergencyFreeze,
-}
-
-impl Default for EmergencyBypassPolicy {
-    fn default() -> Self {
-        Self::RequireConfiguredQuorum
-    }
 }
 
 impl Default for RecoveryCeremonyConfig {

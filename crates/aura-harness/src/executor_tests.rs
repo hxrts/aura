@@ -1166,14 +1166,17 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
         }],
     );
 
-    let mut api = ToolApi::new(
-        HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
-    );
+    let coordinator = HarnessCoordinator::from_run_config(&run)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let clipboard_path = coordinator
+        .instance_transient_dir("alice")
+        .unwrap_or_else(|error| panic!("{error}"))
+        .join("clipboard.txt");
+    let mut api = ToolApi::new(coordinator);
     if let Err(error) = api.start_all() {
         panic!("start_all failed: {error}");
     }
 
-    let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
     let mut writer = std::process::Command::new("sh")
         .arg("-c")
         .arg("sleep 0.2; printf 'invite-code-123\\n' > \"$1\"")
@@ -1301,14 +1304,17 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
         + &"x".repeat(CLIPBOARD_PASTE_CHUNK_CHARS * 3 + 7)
         + ":127.0.0.1:41001";
 
-    let mut api = ToolApi::new(
-        HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
-    );
+    let coordinator = HarnessCoordinator::from_run_config(&run)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let clipboard_path = coordinator
+        .instance_transient_dir("alice")
+        .unwrap_or_else(|error| panic!("{error}"))
+        .join("clipboard.txt");
+    let mut api = ToolApi::new(coordinator);
     if let Err(error) = api.start_all() {
         panic!("start_all failed: {error}");
     }
 
-    let clipboard_path = alice_data.join(".harness-transient/clipboard.txt");
     let _ = std::fs::write(&clipboard_path, format!("{long_payload}\n"));
 
     if let Err(error) =

@@ -197,6 +197,26 @@ where
         })
 }
 
+/// Verify an Ed25519 signature over a threshold signing context transcript.
+pub async fn verify_ed25519_threshold_signing_context_transcript<E>(
+    crypto: &E,
+    context: &SigningContext,
+    epoch: u64,
+    signature: &[u8],
+    public_key: &[u8],
+) -> Result<bool>
+where
+    E: CryptoEffects + Send + Sync + ?Sized,
+{
+    let bytes = threshold_signing_context_transcript_bytes(context, epoch)?;
+    crypto
+        .ed25519_verify(&bytes, signature, public_key)
+        .await
+        .map_err(|error| AuthenticationError::CryptoError {
+            details: format!("Ed25519 signing-context transcript verification failed: {error}"),
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

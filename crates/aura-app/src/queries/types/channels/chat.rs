@@ -1,7 +1,7 @@
 use super::super::common::{get_channel_id, get_int, get_optional_string, get_string};
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,11 +36,11 @@ impl Query for ChatQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected_with(
             QueryCapability::read("channels"),
-            QueryCapability::read("messages"),
-        ]
+            vec![QueryCapability::read("messages")],
+        )
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {

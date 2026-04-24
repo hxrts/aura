@@ -1,7 +1,7 @@
 use super::super::common::{get_channel_id, get_int, get_optional_string, get_string};
 use aura_core::query::{
     DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryCapability, QueryParseError,
+    QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -69,8 +69,8 @@ impl Query for ChannelsQuery {
         }])
     }
 
-    fn required_capabilities(&self) -> Vec<QueryCapability> {
-        vec![QueryCapability::read("channels")]
+    fn access_policy(&self) -> QueryAccessPolicy {
+        QueryAccessPolicy::protected(QueryCapability::read("channels"))
     }
 
     fn dependencies(&self) -> Vec<FactPredicate> {
