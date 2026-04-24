@@ -116,6 +116,7 @@ export type DriverResponse = DriverSuccessResponse | DriverErrorResponse;
 export interface StartPageParams extends Record<string, unknown> {
   instance_id: string;
   app_url?: string;
+  harness_run_token?: string;
   data_dir?: string;
   artifact_dir?: string;
   headless?: boolean;

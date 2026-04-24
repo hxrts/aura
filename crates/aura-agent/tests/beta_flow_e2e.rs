@@ -30,9 +30,37 @@ use aura_rendezvous::{
     EffectCommand as RendezvousEffectCommand, GuardOutcome as RendezvousGuardOutcome,
     RendezvousFact,
 };
+use std::future::Future;
 use std::sync::Arc;
 
 type TestResult<T = ()> = anyhow::Result<T>;
+
+fn run_async_test_on_large_stack<F, T>(future: F) -> T
+where
+    F: Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = match std::thread::Builder::new()
+        .name("beta-flow-e2e-large-stack".to_string())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => panic!("test runtime should build: {error}"),
+            };
+            runtime.block_on(future)
+        }) {
+        Ok(handle) => handle,
+        Err(error) => panic!("large-stack test thread should spawn: {error}"),
+    };
+    match handle.join() {
+        Ok(output) => output,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -81,236 +109,248 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
 }
 
 /// Test: Shareable invite code roundtrip
-#[tokio::test]
-async fn test_invitation_code_roundtrip() -> TestResult {
-    let crypto = RealCryptoHandler::for_simulation_seed([0xB7; 32]);
-    let (private_key, public_key) = crypto.ed25519_generate_keypair().await?;
+#[test]
+fn test_invitation_code_roundtrip() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let crypto = RealCryptoHandler::for_simulation_seed([0xB7; 32]);
+        let (private_key, public_key) = crypto.ed25519_generate_keypair().await?;
 
-    // Create shareable invitation
-    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
-    let shareable = ShareableInvitation {
-        version: 1,
-        invitation_id: InvitationId::new("inv-test-123"),
-        sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("alice".to_string()),
-        },
-        expires_at: Some(9999999999999),
-        message: Some("Hello from Alice!".to_string()),
-    };
+        // Create shareable invitation
+        let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
+        let shareable = ShareableInvitation {
+            version: 1,
+            invitation_id: InvitationId::new("inv-test-123"),
+            sender_id,
+            context_id: None,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("alice".to_string()),
+            },
+            expires_at: Some(9999999999999),
+            message: Some("Hello from Alice!".to_string()),
+        };
 
-    let signature = aura_signature::sign_ed25519_transcript(
-        &crypto,
-        &shareable.signing_transcript(),
-        &private_key,
-    )
-    .await?;
-    let code = shareable.to_signed_code(ShareableInvitationSenderProof {
-        scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
-        public_key,
-        signature,
-        sender_device_id: None,
-    })?;
-    assert!(code.starts_with("aura:v1:"));
+        let signature = aura_signature::sign_ed25519_transcript(
+            &crypto,
+            &shareable.signing_transcript(),
+            &private_key,
+        )
+        .await?;
+        let code = shareable.to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: None,
+        })?;
+        assert!(code.starts_with("aura:v1:"));
 
-    // Decode back
-    let decoded = ShareableInvitation::from_code(&code)?;
-    assert_eq!(decoded.invitation_id.as_str(), "inv-test-123");
-    assert_eq!(decoded.sender_id, sender_id);
-    assert_eq!(decoded.message, Some("Hello from Alice!".to_string()));
+        // Decode back
+        let decoded = ShareableInvitation::from_code(&code)?;
+        assert_eq!(decoded.invitation_id.as_str(), "inv-test-123");
+        assert_eq!(decoded.sender_id, sender_id);
+        assert_eq!(decoded.message, Some("Hello from Alice!".to_string()));
 
-    match decoded.invitation_type {
-        InvitationType::Contact { nickname } => {
-            assert_eq!(nickname, Some("alice".to_string()));
+        match decoded.invitation_type {
+            InvitationType::Contact { nickname } => {
+                assert_eq!(nickname, Some("alice".to_string()));
+            }
+            _ => panic!("Expected Contact invitation type"),
         }
-        _ => panic!("Expected Contact invitation type"),
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Test: Full invitation flow between two agents
-#[tokio::test]
-async fn test_two_agent_invitation_flow() -> TestResult {
-    // Create two agents (User A and User B)
-    let agent_a = create_test_agent(10).await?;
-    let agent_b = create_test_agent(20).await?;
+#[test]
+fn test_two_agent_invitation_flow() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        // Create two agents (User A and User B)
+        let agent_a = create_test_agent(10).await?;
+        let agent_b = create_test_agent(20).await?;
 
-    let authority_a = agent_a.authority_id();
-    let authority_b = agent_b.authority_id();
+        let authority_a = agent_a.authority_id();
+        let authority_b = agent_b.authority_id();
 
-    // User A creates an invitation for User B
-    let invitation_service_a = agent_a.invitations()?;
+        // User A creates an invitation for User B
+        let invitation_service_a = agent_a.invitations()?;
 
-    let invitation = invitation_service_a
-        .invite_as_contact(
-            authority_b,
-            Some("bob".to_string()),
-            None,
-            Some("Hey Bob, let's connect!".to_string()),
-            None,
-        )
-        .await?;
+        let invitation = invitation_service_a
+            .invite_as_contact(
+                authority_b,
+                Some("bob".to_string()),
+                None,
+                Some("Hey Bob, let's connect!".to_string()),
+                None,
+            )
+            .await?;
 
-    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
 
-    // User A exports invitation as shareable code
-    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
+        // User A exports invitation as shareable code
+        let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
-    assert!(code.starts_with("aura:v1:"));
+        assert!(code.starts_with("aura:v1:"));
 
-    // User B imports the invite code
-    let shareable = InvitationServiceApi::import_code(&code)?;
+        // User B imports the invite code
+        let shareable = InvitationServiceApi::import_code(&code)?;
 
-    assert_eq!(shareable.sender_id, authority_a);
-    assert_eq!(
-        shareable.message,
-        Some("Hey Bob, let's connect!".to_string())
-    );
+        assert_eq!(shareable.sender_id, authority_a);
+        assert_eq!(
+            shareable.message,
+            Some("Hey Bob, let's connect!".to_string())
+        );
 
-    // User A accepts the invitation (simulating what would happen after B receives it)
-    let accept_result = invitation_service_a
-        .accept(&invitation.invitation_id)
-        .await?;
+        // User A accepts the invitation (simulating what would happen after B receives it)
+        let accept_result = invitation_service_a
+            .accept(&invitation.invitation_id)
+            .await?;
 
-    assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
-    Ok(())
+        assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
+        Ok(())
+    })
 }
 
 /// Test: Chat group creation and messaging (single-agent local state)
 ///
 /// Note: In this test, we're testing local chat operations within a single agent.
 /// Multi-agent chat requires network sync which is tested separately.
-#[tokio::test]
-async fn test_chat_group_flow() -> TestResult {
-    let agent = create_test_agent(30).await?;
-    let authority = agent.authority_id();
-    let other_user = AuthorityId::new_from_entropy([31u8; 32]);
+#[test]
+fn test_chat_group_flow() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(30).await?;
+        let authority = agent.authority_id();
+        let other_user = AuthorityId::new_from_entropy([31u8; 32]);
 
-    // Get chat service
-    let chat = agent.chat()?;
+        // Get chat service
+        let chat = agent.chat()?;
 
-    // Create a chat group
-    let group = chat
-        .create_group("Test Group", authority, vec![other_user])
-        .await?;
+        // Create a chat group
+        let group = chat
+            .create_group("Test Group", authority, vec![other_user])
+            .await?;
 
-    assert_eq!(group.name, "Test Group");
-    assert!(group.members.iter().any(|m| m.authority_id == authority));
-    assert!(group.members.iter().any(|m| m.authority_id == other_user));
+        assert_eq!(group.name, "Test Group");
+        assert!(group.members.iter().any(|m| m.authority_id == authority));
+        assert!(group.members.iter().any(|m| m.authority_id == other_user));
 
-    let context_id = ContextId::from_uuid(group.id.0);
-    let journal = agent
-        .runtime()
-        .effects()
-        .fetch_context_journal(context_id)
-        .await?;
-    let mut saw_proposed_bump = false;
-    let mut saw_committed_bump = false;
-    for fact in journal.facts.iter() {
-        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
-            continue;
-        };
-        match protocol_fact {
-            ProtocolRelationalFact::AmpProposedChannelEpochBump(_) => {
-                saw_proposed_bump = true;
+        let context_id = ContextId::from_uuid(group.id.0);
+        let journal = agent
+            .runtime()
+            .effects()
+            .fetch_context_journal(context_id)
+            .await?;
+        let mut saw_proposed_bump = false;
+        let mut saw_committed_bump = false;
+        for fact in journal.facts.iter() {
+            let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content
+            else {
+                continue;
+            };
+            match protocol_fact {
+                ProtocolRelationalFact::AmpProposedChannelEpochBump(_) => {
+                    saw_proposed_bump = true;
+                }
+                ProtocolRelationalFact::AmpCommittedChannelEpochBump(_) => {
+                    saw_committed_bump = true;
+                }
+                _ => {}
             }
-            ProtocolRelationalFact::AmpCommittedChannelEpochBump(_) => {
-                saw_committed_bump = true;
-            }
-            _ => {}
         }
-    }
-    assert!(saw_proposed_bump, "Expected AMP proposed epoch bump fact");
-    let policy = aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
-    if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
-        && !agent.runtime().effects().is_testing()
-    {
-        assert!(saw_committed_bump, "Expected AMP committed epoch bump fact");
-    }
+        assert!(saw_proposed_bump, "Expected AMP proposed epoch bump fact");
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
+        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
+            && !agent.runtime().effects().is_testing()
+        {
+            assert!(saw_committed_bump, "Expected AMP committed epoch bump fact");
+        }
 
-    // Send a message as the creator
-    let message1 = chat
-        .send_message(&group.id, authority, "Hello, world!".to_string())
-        .await?;
+        // Send a message as the creator
+        let message1 = chat
+            .send_message(&group.id, authority, "Hello, world!".to_string())
+            .await?;
 
-    assert_eq!(message1.content, "Hello, world!");
-    assert_eq!(message1.sender_id, authority);
+        assert_eq!(message1.content, "Hello, world!");
+        assert_eq!(message1.sender_id, authority);
 
-    // Simulate Bob replying (within same agent state for testing)
-    let message2 = chat
-        .send_message(&group.id, other_user, "Hi Alice!".to_string())
-        .await?;
+        // Simulate Bob replying (within same agent state for testing)
+        let message2 = chat
+            .send_message(&group.id, other_user, "Hi Alice!".to_string())
+            .await?;
 
-    assert_eq!(message2.content, "Hi Alice!");
-    assert_eq!(message2.sender_id, other_user);
+        assert_eq!(message2.content, "Hi Alice!");
+        assert_eq!(message2.sender_id, other_user);
 
-    // Get message history - should have at least our 2 messages
-    let history = chat.get_history(&group.id, Some(10), None).await?;
+        // Get message history - should have at least our 2 messages
+        let history = chat.get_history(&group.id, Some(10), None).await?;
 
-    // Note: Due to potential effect system state sharing in tests, we check >= 2
-    assert!(
-        history.len() >= 2,
-        "Expected at least 2 messages, got {}",
-        history.len()
-    );
-    let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
-    assert!(messages.contains(&"Hello, world!"));
-    assert!(messages.contains(&"Hi Alice!"));
-    Ok(())
+        // Note: Due to potential effect system state sharing in tests, we check >= 2
+        assert!(
+            history.len() >= 2,
+            "Expected at least 2 messages, got {}",
+            history.len()
+        );
+        let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
+        assert!(messages.contains(&"Hello, world!"));
+        assert!(messages.contains(&"Hi Alice!"));
+        Ok(())
+    })
 }
 
 /// Test: Rendezvous channel establishment emits consensus evidence.
-#[tokio::test]
-async fn test_rendezvous_channel_established_finalized() -> TestResult {
-    let agent = create_test_agent(40).await?;
-    let authority = agent.authority_id();
-    let authority_ctx = agent.context().clone();
-    let effects = agent.runtime().effects();
+#[test]
+fn test_rendezvous_channel_established_finalized() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(40).await?;
+        let authority = agent.authority_id();
+        let authority_ctx = agent.context().clone();
+        let effects = agent.runtime().effects();
 
-    let fact = RendezvousFact::ChannelEstablished {
-        initiator: authority,
-        responder: AuthorityId::new_from_entropy([41u8; 32]),
-        channel_id: [7u8; 32],
-        epoch: 1,
-    };
-    let context_id = fact.context_id_for_fact();
-    let outcome = RendezvousGuardOutcome::allowed(vec![RendezvousEffectCommand::JournalAppend {
-        fact: fact.clone(),
-    }]);
-
-    aura_agent::handlers::rendezvous::execute_guard_outcome(
-        outcome,
-        &authority_ctx,
-        context_id,
-        effects.as_ref(),
-    )
-    .await?;
-
-    let journal = effects.fetch_context_journal(context_id).await?;
-    let mut saw_consensus = false;
-    for fact in journal.facts.iter() {
-        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
-            continue;
+        let fact = RendezvousFact::ChannelEstablished {
+            initiator: authority,
+            responder: AuthorityId::new_from_entropy([41u8; 32]),
+            channel_id: [7u8; 32],
+            epoch: 1,
         };
-        if matches!(protocol_fact, ProtocolRelationalFact::Consensus { .. }) {
-            saw_consensus = true;
-            break;
-        }
-    }
+        let context_id = fact.context_id_for_fact();
+        let outcome =
+            RendezvousGuardOutcome::allowed(vec![RendezvousEffectCommand::JournalAppend {
+                fact: fact.clone(),
+            }]);
 
-    let policy = aura_core::threshold::policy_for(
-        aura_core::threshold::CeremonyFlow::RendezvousSecureChannel,
-    );
-    if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
-        && !effects.is_testing()
-    {
-        assert!(
-            saw_consensus,
-            "Expected consensus evidence for rendezvous channel establishment"
+        aura_agent::handlers::rendezvous::execute_guard_outcome(
+            outcome,
+            &authority_ctx,
+            context_id,
+            effects.as_ref(),
+        )
+        .await?;
+
+        let journal = effects.fetch_context_journal(context_id).await?;
+        let mut saw_consensus = false;
+        for fact in journal.facts.iter() {
+            let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content
+            else {
+                continue;
+            };
+            if matches!(protocol_fact, ProtocolRelationalFact::Consensus { .. }) {
+                saw_consensus = true;
+                break;
+            }
+        }
+
+        let policy = aura_core::threshold::policy_for(
+            aura_core::threshold::CeremonyFlow::RendezvousSecureChannel,
         );
-    }
-    Ok(())
+        if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
+            && !effects.is_testing()
+        {
+            assert!(
+                saw_consensus,
+                "Expected consensus evidence for rendezvous channel establishment"
+            );
+        }
+        Ok(())
+    })
 }
 
 /// Test: Complete beta flow simulation
@@ -323,207 +363,217 @@ async fn test_rendezvous_channel_established_finalized() -> TestResult {
 ///
 /// Note: Multi-agent messaging over network is tested separately.
 /// This test validates the invitation flow and local chat operations.
-#[tokio::test]
-async fn test_complete_beta_flow() -> TestResult {
-    // === Setup: Create two agents ===
-    let agent_alice = create_test_agent(100).await?;
-    let _agent_bob = create_test_agent(200).await?;
+#[test]
+fn test_complete_beta_flow() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        // === Setup: Create two agents ===
+        let agent_alice = create_test_agent(100).await?;
+        let _agent_bob = create_test_agent(200).await?;
 
-    let alice_id = agent_alice.authority_id();
-    let bob_id = AuthorityId::new_from_entropy([200u8; 32]); // Bob's authority ID
+        let alice_id = agent_alice.authority_id();
+        let bob_id = AuthorityId::new_from_entropy([200u8; 32]); // Bob's authority ID
 
-    // === Step 1: Alice creates an invitation ===
-    let alice_invitations = agent_alice.invitations()?;
+        // === Step 1: Alice creates an invitation ===
+        let alice_invitations = agent_alice.invitations()?;
 
-    let invitation = alice_invitations
-        .invite_as_contact(bob_id, Some("bob".to_string()), None, None, None)
-        .await?;
+        let invitation = alice_invitations
+            .invite_as_contact(bob_id, Some("bob".to_string()), None, None, None)
+            .await?;
 
-    // === Step 2: Alice exports invite code ===
-    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
+        // === Step 2: Alice exports invite code ===
+        let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
-    // === Step 3: Bob imports the code (out-of-band transfer simulation) ===
-    let shareable = InvitationServiceApi::import_code(&code)?;
-    assert_eq!(shareable.sender_id, alice_id);
+        // === Step 3: Bob imports the code (out-of-band transfer simulation) ===
+        let shareable = InvitationServiceApi::import_code(&code)?;
+        assert_eq!(shareable.sender_id, alice_id);
 
-    // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
-    let result = alice_invitations.accept(&invitation.invitation_id).await?;
-    assert_eq!(result.new_status, InvitationStatus::Accepted);
+        // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
+        let result = alice_invitations.accept(&invitation.invitation_id).await?;
+        assert_eq!(result.new_status, InvitationStatus::Accepted);
 
-    // === Step 5: Chat operations (single-agent for testing) ===
-    let alice_chat = agent_alice.chat()?;
+        // === Step 5: Chat operations (single-agent for testing) ===
+        let alice_chat = agent_alice.chat()?;
 
-    // Alice creates a group with Bob
-    let group = alice_chat
-        .create_group("Alice & Bob", alice_id, vec![bob_id])
-        .await?;
+        // Alice creates a group with Bob
+        let group = alice_chat
+            .create_group("Alice & Bob", alice_id, vec![bob_id])
+            .await?;
 
-    // Alice sends a message
-    let msg1 = alice_chat
-        .send_message(&group.id, alice_id, "Hi Bob!".to_string())
-        .await?;
+        // Alice sends a message
+        let msg1 = alice_chat
+            .send_message(&group.id, alice_id, "Hi Bob!".to_string())
+            .await?;
 
-    assert_eq!(msg1.content, "Hi Bob!");
-    assert_eq!(msg1.sender_id, alice_id);
+        assert_eq!(msg1.content, "Hi Bob!");
+        assert_eq!(msg1.sender_id, alice_id);
 
-    // Simulate Bob's reply (within Alice's local state for testing)
-    let msg2 = alice_chat
-        .send_message(&group.id, bob_id, "Hi Alice!".to_string())
-        .await?;
+        // Simulate Bob's reply (within Alice's local state for testing)
+        let msg2 = alice_chat
+            .send_message(&group.id, bob_id, "Hi Alice!".to_string())
+            .await?;
 
-    assert_eq!(msg2.content, "Hi Alice!");
-    assert_eq!(msg2.sender_id, bob_id);
+        assert_eq!(msg2.content, "Hi Alice!");
+        assert_eq!(msg2.sender_id, bob_id);
 
-    // Verify message history
-    let history = alice_chat.get_history(&group.id, Some(10), None).await?;
+        // Verify message history
+        let history = alice_chat.get_history(&group.id, Some(10), None).await?;
 
-    // Note: Due to potential effect system state sharing in tests, we check >= 2
-    assert!(
-        history.len() >= 2,
-        "Expected at least 2 messages, got {}",
-        history.len()
-    );
+        // Note: Due to potential effect system state sharing in tests, we check >= 2
+        assert!(
+            history.len() >= 2,
+            "Expected at least 2 messages, got {}",
+            history.len()
+        );
 
-    // Messages should be present
-    let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
-    assert!(messages.contains(&"Hi Bob!"));
-    assert!(messages.contains(&"Hi Alice!"));
-    Ok(())
+        // Messages should be present
+        let messages: Vec<&str> = history.iter().map(|m| m.content.as_str()).collect();
+        assert!(messages.contains(&"Hi Bob!"));
+        assert!(messages.contains(&"Hi Alice!"));
+        Ok(())
+    })
 }
 
 /// Test: Guardian invitation type
-#[tokio::test]
-async fn test_guardian_invitation() -> TestResult {
-    let agent = create_test_agent(50).await?;
-    let authority = agent.authority_id();
-    let guardian_candidate = AuthorityId::new_from_entropy([51u8; 32]);
+#[test]
+fn test_guardian_invitation() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(50).await?;
+        let authority = agent.authority_id();
+        let guardian_candidate = AuthorityId::new_from_entropy([51u8; 32]);
 
-    let invitations = agent.invitations()?;
+        let invitations = agent.invitations()?;
 
-    // Create guardian invitation
-    let invitation = invitations
-        .invite_as_guardian(
-            guardian_candidate,
-            authority,
-            Some("Please be my recovery guardian".to_string()),
-            Some(604800000), // 1 week expiry
-        )
-        .await?;
+        // Create guardian invitation
+        let invitation = invitations
+            .invite_as_guardian(
+                guardian_candidate,
+                authority,
+                Some("Please be my recovery guardian".to_string()),
+                Some(604800000), // 1 week expiry
+            )
+            .await?;
 
-    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
-    assert!(invitation.expires_at.is_some());
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
+        assert!(invitation.expires_at.is_some());
 
-    // Export and verify
-    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
+        // Export and verify
+        let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
-    let shareable = InvitationServiceApi::import_code(&code)?;
+        let shareable = InvitationServiceApi::import_code(&code)?;
 
-    match shareable.invitation_type {
-        InvitationType::Guardian { subject_authority } => {
-            assert_eq!(subject_authority, authority);
+        match shareable.invitation_type {
+            InvitationType::Guardian { subject_authority } => {
+                assert_eq!(subject_authority, authority);
+            }
+            _ => panic!("Expected Guardian invitation type"),
         }
-        _ => panic!("Expected Guardian invitation type"),
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Test: Channel invitation type
-#[tokio::test]
-async fn test_channel_invitation() -> TestResult {
-    let agent = create_test_agent(60).await?;
-    let invitee = AuthorityId::new_from_entropy([61u8; 32]);
-    let context_id = ContextId::new_from_entropy([62u8; 32]);
-    let home_id = ChannelId::from_bytes([61u8; 32]);
-    agent
-        .runtime()
-        .effects()
-        .create_channel(ChannelCreateParams {
-            context: context_id,
-            channel: Some(home_id),
-            skip_window: None,
-            topic: None,
-        })
-        .await?;
+#[test]
+fn test_channel_invitation() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(60).await?;
+        let invitee = AuthorityId::new_from_entropy([61u8; 32]);
+        let context_id = ContextId::new_from_entropy([62u8; 32]);
+        let home_id = ChannelId::from_bytes([61u8; 32]);
+        agent
+            .runtime()
+            .effects()
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(home_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await?;
 
-    let invitations = agent.invitations()?;
+        let invitations = agent.invitations()?;
 
-    // Create channel invitation
-    let invitation = invitations
-        .invite_to_channel(
-            invitee,
-            home_id.to_string(),
-            Some(context_id),
-            Some("shared-parity-lab".to_string()), // nickname_suggestion
-            None,                                  // bootstrap
-            Some("Join our discussion channel".to_string()),
-            None, // expires_in_ms
-        )
-        .await?;
+        // Create channel invitation
+        let invitation = invitations
+            .invite_to_channel(
+                invitee,
+                home_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()), // nickname_suggestion
+                None,                                  // bootstrap
+                Some("Join our discussion channel".to_string()),
+                None, // expires_in_ms
+            )
+            .await?;
 
-    // Export and verify
-    let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
+        // Export and verify
+        let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
-    let shareable = InvitationServiceApi::import_code(&code)?;
+        let shareable = InvitationServiceApi::import_code(&code)?;
 
-    match shareable.invitation_type {
-        InvitationType::Channel { home_id, .. } => {
-            assert_eq!(home_id, ChannelId::from_bytes([61u8; 32]));
+        match shareable.invitation_type {
+            InvitationType::Channel { home_id, .. } => {
+                assert_eq!(home_id, ChannelId::from_bytes([61u8; 32]));
+            }
+            _ => panic!("Expected Channel invitation type"),
         }
-        _ => panic!("Expected Channel invitation type"),
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Test: Invitation decline flow
-#[tokio::test]
-async fn test_invitation_decline() -> TestResult {
-    let agent = create_test_agent(70).await?;
-    let invitee = AuthorityId::new_from_entropy([71u8; 32]);
+#[test]
+fn test_invitation_decline() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(70).await?;
+        let invitee = AuthorityId::new_from_entropy([71u8; 32]);
 
-    let invitations = agent.invitations()?;
+        let invitations = agent.invitations()?;
 
-    // Create invitation
-    let invitation = invitations
-        .invite_as_contact(invitee, None, None, None, None)
-        .await?;
+        // Create invitation
+        let invitation = invitations
+            .invite_as_contact(invitee, None, None, None, None)
+            .await?;
 
-    // Verify it's pending
-    assert!(invitations.is_pending(&invitation.invitation_id).await);
+        // Verify it's pending
+        assert!(invitations.is_pending(&invitation.invitation_id).await);
 
-    // Decline it
-    let result = invitations.decline(&invitation.invitation_id).await?;
+        // Decline it
+        let result = invitations.decline(&invitation.invitation_id).await?;
 
-    assert_eq!(result.new_status, InvitationStatus::Declined);
+        assert_eq!(result.new_status, InvitationStatus::Declined);
 
-    // No longer pending
-    assert!(!invitations.is_pending(&invitation.invitation_id).await);
-    Ok(())
+        // No longer pending
+        assert!(!invitations.is_pending(&invitation.invitation_id).await);
+        Ok(())
+    })
 }
 
 /// Test: Invitation cancel flow
-#[tokio::test]
-async fn test_invitation_cancel() -> TestResult {
-    let agent = create_test_agent(80).await?;
-    let invitee = AuthorityId::new_from_entropy([81u8; 32]);
+#[test]
+fn test_invitation_cancel() -> TestResult {
+    run_async_test_on_large_stack(async move {
+        let agent = create_test_agent(80).await?;
+        let invitee = AuthorityId::new_from_entropy([81u8; 32]);
 
-    let invitations = agent.invitations()?;
+        let invitations = agent.invitations()?;
 
-    // Create invitation
-    let invitation = invitations
-        .invite_as_contact(invitee, None, None, None, None)
-        .await?;
+        // Create invitation
+        let invitation = invitations
+            .invite_as_contact(invitee, None, None, None, None)
+            .await?;
 
-    // Verify pending
-    let pending = invitations.list_pending().await;
-    assert_eq!(pending.len(), 1);
+        // Verify pending
+        let pending = invitations.list_pending().await;
+        assert_eq!(pending.len(), 1);
 
-    // Cancel it
-    let result = invitations.cancel(&invitation.invitation_id).await?;
+        // Cancel it
+        let result = invitations.cancel(&invitation.invitation_id).await?;
 
-    assert_eq!(result.new_status, InvitationStatus::Cancelled);
+        assert_eq!(result.new_status, InvitationStatus::Cancelled);
 
-    // No longer in pending list
-    let pending = invitations.list_pending().await;
-    assert_eq!(pending.len(), 0);
-    Ok(())
+        // No longer in pending list
+        let pending = invitations.list_pending().await;
+        assert_eq!(pending.len(), 0);
+        Ok(())
+    })
 }

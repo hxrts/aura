@@ -540,6 +540,22 @@ impl InvitationHandler {
         Self::persist_imported_invitation(effects, own_id, &invitation).await
     }
 
+    async fn update_created_invitation_status_if_present(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+        status: InvitationStatus,
+    ) -> AgentResult<()> {
+        let own_id = self.context.authority.authority_id();
+        let Some(mut invitation) =
+            Self::load_created_invitation(effects, own_id, invitation_id).await
+        else {
+            return Ok(());
+        };
+        invitation.status = status;
+        Self::persist_created_invitation(effects, own_id, &invitation).await
+    }
+
     async fn validate_importable_shareable_invitation(
         &self,
         effects: &AuraEffectSystem,
@@ -1165,6 +1181,12 @@ impl InvitationHandler {
             invitation_id,
             InvitationStatus::Accepted,
             now_ms,
+        )
+        .await?;
+        self.update_created_invitation_status_if_present(
+            effects.as_ref(),
+            invitation_id,
+            InvitationStatus::Accepted,
         )
         .await?;
 
@@ -1868,6 +1890,12 @@ impl InvitationHandler {
             invitation_id,
             InvitationStatus::Declined,
             now_ms,
+        )
+        .await?;
+        self.update_created_invitation_status_if_present(
+            effects.as_ref(),
+            invitation_id,
+            InvitationStatus::Declined,
         )
         .await?;
 

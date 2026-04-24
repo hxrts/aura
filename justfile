@@ -1011,6 +1011,8 @@ ci-dry-run profile="push":
     failure_tail_lines="${AURA_CI_DRY_RUN_FAILURE_TAIL_LINES:-60}"
     run_id="$(date +%Y%m%d-%H%M%S)"
     log_root="${PWD}/artifacts/ci-dry-run/${profile}/${run_id}"
+    ci_min_free_gib="${AURA_CI_DRY_RUN_MIN_FREE_GIB:-10}"
+    ci_prune_target_gib="${AURA_CI_DRY_RUN_PRUNE_TARGET_GIB:-20}"
     mkdir -p "$log_root"
 
     add_step() {
@@ -1034,6 +1036,48 @@ ci-dry-run profile="push":
             printf 'tempdir:::check TMPDIR and workspace temp directory permissions'
         else
             printf 'step-failure:::inspect the step log for the primary assertion or compiler error'
+        fi
+    }
+
+    free_gib() {
+        df -Pk "${PWD}" | awk 'NR == 2 { printf "%d", ($4 / 1024 / 1024) }'
+    }
+
+    best_effort_prune() {
+        local path="$1"
+        chmod -R u+w "$path" 2>/dev/null || true
+        rm -rf "$path" 2>/dev/null || true
+    }
+
+    prune_rebuildable_artifacts() {
+        local reason="$1"
+        local freed_after
+        echo "  pruning rebuildable artifacts (${reason})"
+        best_effort_prune "${PWD}/target/debug/incremental"
+        best_effort_prune "${PWD}/target/tests"
+        best_effort_prune "${PWD}/target/dylint/target"
+        best_effort_prune "${PWD}/target/tmp"
+        best_effort_prune "${PWD}/.tmp"
+        if [[ -d "${PWD}/target/wasm32-unknown-unknown" ]] && [[ "$(free_gib)" -lt "$ci_prune_target_gib" ]]; then
+            best_effort_prune "${PWD}/target/wasm32-unknown-unknown"
+        fi
+        mkdir -p "${PWD}/target/dylint/target"
+        mkdir -p "${PWD}/.tmp"
+        freed_after="$(free_gib)"
+        echo "  disk free: ${freed_after}GiB"
+    }
+
+    ensure_disk_headroom() {
+        local phase="$1"
+        local free_now
+        free_now="$(free_gib)"
+        if [[ "$free_now" -lt "$ci_prune_target_gib" ]]; then
+            echo "  low disk headroom before ${phase}: ${free_now}GiB free"
+            prune_rebuildable_artifacts "$phase"
+            free_now="$(free_gib)"
+        fi
+        if [[ "$free_now" -lt "$ci_min_free_gib" ]]; then
+            echo "  warning: continuing with only ${free_now}GiB free before ${phase}"
         fi
     }
 
@@ -1152,6 +1196,8 @@ ci-dry-run profile="push":
     echo "Logs: $log_root"
     echo ""
 
+    prune_rebuildable_artifacts "startup"
+
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
     printf "[0/%d] Rust version... " "$total"
@@ -1167,6 +1213,7 @@ ci-dry-run profile="push":
     for step in "${STEPS[@]}"; do
         name="${step%%:::*}"
         cmd="${step#*:::}"
+        ensure_disk_headroom "$name"
         run_step "$name" "$cmd"
         if [[ "$infra_abort" -eq 1 ]]; then
             break

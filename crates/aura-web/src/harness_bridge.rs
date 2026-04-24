@@ -248,6 +248,9 @@ pub fn set_controller(controller: Arc<UiController>) {
             controller.reset_published_ui_snapshot();
         }
         reset_published_ui_snapshot_dedup();
+        if let Some(controller) = generation::current_controller() {
+            controller.publish_ui_snapshot(controller.semantic_model_snapshot());
+        }
     }
     if let Some(window) = web_sys::window() {
         publication::refresh_semantic_submit_surface(

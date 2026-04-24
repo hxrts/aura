@@ -1052,6 +1052,27 @@ mod tests {
     use aura_core::effects::amp::ChannelCreateParams;
     use aura_core::effects::time::PhysicalTimeEffects;
     use aura_effects::AmpChannelEffects;
+    use std::future::Future;
+
+    #[track_caller]
+    fn run_async_test_on_large_stack<F>(future: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        std::thread::Builder::new()
+            .name("invitation-service-large-stack".to_string())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap_or_else(|error| panic!("test runtime should build: {error}"));
+                runtime.block_on(future);
+            })
+            .unwrap_or_else(|error| panic!("large-stack test thread should spawn: {error}"))
+            .join()
+            .unwrap_or_else(|error| panic!("large-stack test thread should complete: {error:?}"));
+    }
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -1258,61 +1279,98 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_accept_decline_flow() {
-        let authority_context = create_test_authority(117);
-        let effects = effects_for(&authority_context);
-        let service = service_for(authority_context, effects);
+    #[test]
+    fn test_accept_decline_flow() {
+        run_async_test_on_large_stack(async move {
+            let sender_context = create_test_authority(117);
+            let sender_effects = effects_for(&sender_context);
+            let sender_service = service_for(sender_context, sender_effects);
+            let receiver_context = create_test_authority(118);
+            let receiver_effects = effects_for(&receiver_context);
+            let receiver_service = service_for(receiver_context.clone(), receiver_effects);
+            let receiver_id = receiver_context.authority_id();
 
-        let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
+            // Create two invitations
+            let inv1 = sender_service
+                .invite_as_contact(receiver_id, None, None, None, None)
+                .await
+                .unwrap();
+            let inv2 = sender_service
+                .invite_as_contact(receiver_id, None, None, None, None)
+                .await
+                .unwrap();
+            let imported1 = receiver_service
+                .import_and_cache(
+                    &sender_service
+                        .export_invitation_with_sender_hint(&inv1)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let imported2 = receiver_service
+                .import_and_cache(
+                    &sender_service
+                        .export_invitation_with_sender_hint(&inv2)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
 
-        // Create two invitations
-        let inv1 = service
-            .invite_as_contact(receiver_id, None, None, None, None)
-            .await
-            .unwrap();
-        let inv2 = service
-            .invite_as_contact(
-                AuthorityId::new_from_entropy([119u8; 32]),
-                None,
-                None,
-                None,
-                None,
-            )
-            .await
-            .unwrap();
+            // Accept one
+            let accept_result = receiver_service
+                .accept(&imported1.invitation_id)
+                .await
+                .unwrap();
+            assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
 
-        // Accept one
-        let accept_result = service.accept(&inv1.invitation_id).await.unwrap();
-        assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
+            // Decline the other
+            let decline_result = receiver_service
+                .decline(&imported2.invitation_id)
+                .await
+                .unwrap();
+            assert_eq!(decline_result.new_status, InvitationStatus::Declined);
 
-        // Decline the other
-        let decline_result = service.decline(&inv2.invitation_id).await.unwrap();
-        assert_eq!(decline_result.new_status, InvitationStatus::Declined);
-
-        // Check pending is empty
-        let pending = service.list_pending().await;
-        assert!(pending.is_empty());
+            // Check pending is empty
+            let pending = receiver_service.list_pending().await;
+            assert!(pending.is_empty());
+        });
     }
 
-    #[tokio::test]
-    async fn test_is_pending() {
-        let authority_context = create_test_authority(120);
-        let effects = effects_for(&authority_context);
-        let service = service_for(authority_context, effects);
+    #[test]
+    fn test_is_pending() {
+        run_async_test_on_large_stack(async move {
+            let sender_context = create_test_authority(120);
+            let sender_effects = effects_for(&sender_context);
+            let sender_service = service_for(sender_context, sender_effects);
+            let receiver_context = create_test_authority(121);
+            let receiver_effects = effects_for(&receiver_context);
+            let receiver_id = receiver_context.authority_id();
+            let receiver_service = service_for(receiver_context, receiver_effects);
 
-        let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);
-        let invitation = service
-            .invite_as_contact(receiver_id, None, None, None, None)
-            .await
-            .unwrap();
+            let invitation = sender_service
+                .invite_as_contact(receiver_id, None, None, None, None)
+                .await
+                .unwrap();
+            let imported = receiver_service
+                .import_and_cache(
+                    &sender_service
+                        .export_invitation_with_sender_hint(&invitation)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
 
-        assert!(service.is_pending(&invitation.invitation_id).await);
+            assert!(receiver_service.is_pending(&imported.invitation_id).await);
 
-        // Accept it
-        service.accept(&invitation.invitation_id).await.unwrap();
+            receiver_service
+                .accept(&imported.invitation_id)
+                .await
+                .unwrap();
 
-        // No longer pending
-        assert!(!service.is_pending(&invitation.invitation_id).await);
+            assert!(!receiver_service.is_pending(&imported.invitation_id).await);
+        });
     }
 }

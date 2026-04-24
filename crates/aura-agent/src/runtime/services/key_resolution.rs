@@ -4,10 +4,11 @@
 //! or epoch, but verification must resolve the expected key from trusted local
 //! state. This service is the runtime-owned registry for that lookup.
 
+#![allow(clippy::disallowed_types)]
+
 use aura_core::{hash::hash, AuthorityId, DeviceId, Hash32};
-use parking_lot::RwLock;
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub use aura_core::key_resolution::{
     KeyResolutionError, TrustedKeyDomain, TrustedKeyResolver, TrustedKeyStatus, TrustedPublicKey,
@@ -44,7 +45,7 @@ impl TrustedKeyResolutionService {
         key: Vec<u8>,
     ) -> Result<(), KeyResolutionError> {
         ensure_key(TrustedKeyDomain::AuthorityThreshold, &key)?;
-        let mut registry = self.registry.write();
+        let mut registry = self.write_registry();
         for ((stored_authority, stored_epoch), stored_key) in &mut registry.authority_threshold {
             if *stored_authority == authority
                 && *stored_epoch < epoch
@@ -71,6 +72,7 @@ impl TrustedKeyResolutionService {
         ensure_key(TrustedKeyDomain::Device, &key)?;
         self.registry
             .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .devices
             .insert(device, active_key(TrustedKeyDomain::Device, None, key));
         Ok(())
@@ -85,6 +87,7 @@ impl TrustedKeyResolutionService {
         ensure_key(TrustedKeyDomain::Guardian, &key)?;
         self.registry
             .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .guardians
             .insert(guardian, active_key(TrustedKeyDomain::Guardian, None, key));
         Ok(())
@@ -99,6 +102,7 @@ impl TrustedKeyResolutionService {
         ensure_key(TrustedKeyDomain::Release, &key)?;
         self.registry
             .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .releases
             .insert(authority, active_key(TrustedKeyDomain::Release, None, key));
         Ok(())
@@ -114,6 +118,7 @@ impl TrustedKeyResolutionService {
         revoke(
             self.registry
                 .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .authority_threshold
                 .get_mut(&(authority, epoch)),
             TrustedKeyDomain::AuthorityThreshold,
@@ -128,7 +133,11 @@ impl TrustedKeyResolutionService {
         reason: impl Into<String>,
     ) -> Result<(), KeyResolutionError> {
         revoke(
-            self.registry.write().devices.get_mut(&device),
+            self.registry
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .devices
+                .get_mut(&device),
             TrustedKeyDomain::Device,
             reason,
         )
@@ -141,7 +150,11 @@ impl TrustedKeyResolutionService {
         reason: impl Into<String>,
     ) -> Result<(), KeyResolutionError> {
         revoke(
-            self.registry.write().guardians.get_mut(&guardian),
+            self.registry
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .guardians
+                .get_mut(&guardian),
             TrustedKeyDomain::Guardian,
             reason,
         )
@@ -154,7 +167,11 @@ impl TrustedKeyResolutionService {
         reason: impl Into<String>,
     ) -> Result<(), KeyResolutionError> {
         revoke(
-            self.registry.write().releases.get_mut(&authority),
+            self.registry
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .releases
+                .get_mut(&authority),
             TrustedKeyDomain::Release,
             reason,
         )
@@ -166,7 +183,7 @@ impl TrustedKeyResolutionService {
         authority: AuthorityId,
         epoch: u64,
     ) -> Result<TrustedPublicKey, KeyResolutionError> {
-        let registry = self.registry.read();
+        let registry = self.read_registry();
         resolve(
             registry.authority_threshold.get(&(authority, epoch)),
             TrustedKeyDomain::AuthorityThreshold,
@@ -178,7 +195,7 @@ impl TrustedKeyResolutionService {
         &self,
         device: DeviceId,
     ) -> Result<TrustedPublicKey, KeyResolutionError> {
-        let registry = self.registry.read();
+        let registry = self.read_registry();
         resolve(registry.devices.get(&device), TrustedKeyDomain::Device)
     }
 
@@ -187,7 +204,7 @@ impl TrustedKeyResolutionService {
         &self,
         guardian: AuthorityId,
     ) -> Result<TrustedPublicKey, KeyResolutionError> {
-        let registry = self.registry.read();
+        let registry = self.read_registry();
         resolve(
             registry.guardians.get(&guardian),
             TrustedKeyDomain::Guardian,
@@ -199,8 +216,20 @@ impl TrustedKeyResolutionService {
         &self,
         authority: AuthorityId,
     ) -> Result<TrustedPublicKey, KeyResolutionError> {
-        let registry = self.registry.read();
+        let registry = self.read_registry();
         resolve(registry.releases.get(&authority), TrustedKeyDomain::Release)
+    }
+
+    fn read_registry(&self) -> RwLockReadGuard<'_, TrustedKeyRegistry> {
+        self.registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn write_registry(&self) -> RwLockWriteGuard<'_, TrustedKeyRegistry> {
+        self.registry
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 

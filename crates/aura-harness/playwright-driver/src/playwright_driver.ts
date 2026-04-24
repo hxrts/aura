@@ -3090,6 +3090,11 @@ function parseBoundedInt(params, key, fallback, min, max) {
 function parseStartOptions(params) {
   const instanceId = normalizeInstanceId(params);
   const appUrl = String(params?.app_url ?? "http://127.0.0.1:4173");
+  const harnessRunToken =
+    typeof params?.harness_run_token === "string" &&
+    params.harness_run_token.trim().length > 0
+      ? params.harness_run_token.trim()
+      : null;
   const scenarioSeed = params?.scenario_seed ?? null;
   const dataDir = String(
     params?.data_dir ?? path.join(".tmp", "harness", instanceId),
@@ -3130,6 +3135,7 @@ function parseStartOptions(params) {
   return {
     instanceId,
     appUrl,
+    harnessRunToken,
     scenarioSeed,
     dataDir,
     headless,
@@ -3178,9 +3184,12 @@ function requestTimeoutMs(method, params) {
   }
 }
 
-function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed) {
+function withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed, harnessRunToken) {
   const url = new URL(appUrl);
   url.searchParams.set("__aura_harness_instance", instanceId);
+  if (harnessRunToken) {
+    url.searchParams.set("__aura_harness_token", harnessRunToken);
+  }
   if (
     scenarioSeed !== undefined &&
     scenarioSeed !== null &&
@@ -3203,6 +3212,7 @@ async function startPage(params) {
   const {
     instanceId,
     appUrl,
+    harnessRunToken,
     scenarioSeed,
     dataDir,
     headless,
@@ -3214,7 +3224,12 @@ async function startPage(params) {
     resetStorage,
     startupReadiness,
   } = options;
-  const targetUrl = withHarnessHarnessQuery(appUrl, instanceId, scenarioSeed);
+  const targetUrl = withHarnessHarnessQuery(
+    appUrl,
+    instanceId,
+    scenarioSeed,
+    harnessRunToken,
+  );
 
   if (sessions.has(instanceId)) {
     await stop({ instance_id: instanceId });
@@ -3374,6 +3389,19 @@ async function startPage(params) {
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} goto done`,
       );
+      const navigationLocation = await withOperationTimeout(
+        `start_page_location:${instanceId}`,
+        page.evaluate(() => ({
+          href: window.location.href,
+          search: window.location.search,
+        })),
+        2000,
+      ).catch((error) => ({
+        error: error?.message ?? String(error),
+      }));
+      console.error(
+        `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} location=${JSON.stringify(navigationLocation)}`,
+      );
       console.error(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} profile_reset_mode=${
           resetStorage ? "prelaunch_profile_reset" : "preserve_profile"
@@ -3429,9 +3457,9 @@ async function startPage(params) {
             `start_page_harness_ready:${instanceId}`,
             ensureHarnessWithTimeout(
               page,
-              Math.min(harnessReadyTimeoutMs, 5000),
+              harnessReadyTimeoutMs,
             ),
-            Math.min(harnessReadyTimeoutMs, 5000) + 2000,
+            harnessReadyTimeoutMs + 2000,
           );
           console.error(
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} ensureHarnessWithTimeout done`,
@@ -3485,17 +3513,21 @@ async function startPage(params) {
           );
           await withOperationTimeout(
             `startup_semantic_push_${instanceId}`,
-            waitForUiStateVersion(
-              session,
-              -1,
-              Math.min(harnessReadyTimeoutMs, 5000),
-            ),
-            Math.min(harnessReadyTimeoutMs, 5000),
+            waitForUiState({
+              instance_id: instanceId,
+              after_version: -1,
+              timeout_ms: harnessReadyTimeoutMs,
+            }),
+            harnessReadyTimeoutMs,
           );
-          await waitForSubmitQueueReady(
-            session,
-            `startup_semantic:${instanceId}`,
-            Math.min(harnessReadyTimeoutMs, 5000),
+          await withOperationTimeout(
+            `startup_submit_queue_ready_${instanceId}`,
+            waitForSubmitQueueReady(
+              session,
+              `startup_semantic:${instanceId}`,
+              harnessReadyTimeoutMs,
+            ),
+            harnessReadyTimeoutMs,
           );
           traceDriver(
             `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} semantic_ready done`,

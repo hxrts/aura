@@ -511,6 +511,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
             json!({
                 "instance_id": self.config.id,
                 "app_url": self.app_url,
+                "harness_run_token": env_value("AURA_HARNESS_RUN_TOKEN", &self.config.env),
                 "scenario_seed": env_value("AURA_HARNESS_SCENARIO_SEED", &self.config.env),
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),

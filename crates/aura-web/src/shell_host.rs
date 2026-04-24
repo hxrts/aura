@@ -526,6 +526,16 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
         harness_bridge::publish_ui_snapshot(&snapshot);
     }));
 
+    install_window_harness_api_early();
+    harness_bridge::set_active_generation(generation_id);
+    harness_bridge::set_controller(controller.clone());
+    let _ = harness_bridge::publish_semantic_controller_snapshot(controller);
+}
+
+fn install_window_harness_api_early() {
+    if !harness_mode_enabled() {
+        return;
+    }
     if let Err(error) = harness_bridge::install_window_harness_api() {
         log_web_error(
             "error",
@@ -536,9 +546,6 @@ fn install_harness_instrumentation(controller: Arc<UiController>, generation_id:
             ),
         );
     }
-    harness_bridge::set_active_generation(generation_id);
-    harness_bridge::set_controller(controller.clone());
-    let _ = harness_bridge::publish_semantic_controller_snapshot(controller);
 }
 
 async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebUiError> {
@@ -567,6 +574,7 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
     );
     phase.advance_to(BootstrapPhase::ResolveRuntimeIdentity)?;
     let harness_instance = harness_instance_id();
+    install_window_harness_api_early();
     let clipboard = Arc::new(WebClipboardAdapter::default());
     if let Some(runtime_identity) = selected_runtime_identity {
         let persisted_account_config =

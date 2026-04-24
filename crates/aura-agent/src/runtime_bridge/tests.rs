@@ -291,72 +291,74 @@ async fn resolve_amp_channel_context_finds_registered_amp_checkpoint_context() {
     assert_eq!(resolved, Some(context));
 }
 
-#[tokio::test]
-async fn amp_list_channel_participants_includes_accepted_channel_invitees() {
-    let authority = AuthorityId::new_from_entropy([10u8; 32]);
-    let receiver = AuthorityId::new_from_entropy([11u8; 32]);
-    let build_context = EffectContext::new(
-        authority,
-        ContextId::new_from_entropy([12u8; 32]),
-        ExecutionMode::Testing,
-    );
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .build_testing_async(&build_context)
+#[test]
+fn amp_list_channel_participants_includes_accepted_channel_invitees() {
+    run_async_test_on_large_stack(async move {
+        let authority = AuthorityId::new_from_entropy([10u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([11u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([12u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        let context = ContextId::new_from_entropy([13u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"accepted-channel-invitee-visible"));
+
+        bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
             .await
-            .expect("build testing agent"),
-    );
-    let bridge = AgentRuntimeBridge::new(agent.clone());
-    let context = ContextId::new_from_entropy([13u8; 32]);
-    let channel = ChannelId::from_bytes(hash(b"accepted-channel-invitee-visible"));
+            .expect("create channel");
+        bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
 
-    bridge
-        .amp_create_channel(ChannelCreateParams {
-            context,
-            channel: Some(channel),
-            skip_window: None,
-            topic: None,
-        })
-        .await
-        .expect("create channel");
-    bridge
-        .amp_join_channel(ChannelJoinParams {
-            context,
-            channel,
-            participant: authority,
-        })
-        .await
-        .expect("join channel");
+        let invitations = agent.invitations().expect("invitation service");
+        let invitation = invitations
+            .invite_to_channel(
+                receiver,
+                channel.to_string(),
+                Some(context),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create channel invitation");
+        invitations
+            .accept(&invitation.invitation_id)
+            .await
+            .expect("mark invitation accepted");
 
-    let invitations = agent.invitations().expect("invitation service");
-    let invitation = invitations
-        .invite_to_channel(
-            receiver,
-            channel.to_string(),
-            Some(context),
-            Some("shared-parity-lab".to_string()),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("create channel invitation");
-    invitations
-        .accept(&invitation.invitation_id)
-        .await
-        .expect("mark invitation accepted");
+        let participants = bridge
+            .amp_list_channel_participants(context, channel)
+            .await
+            .expect("list authoritative participants");
 
-    let participants = bridge
-        .amp_list_channel_participants(context, channel)
-        .await
-        .expect("list authoritative participants");
-
-    assert!(participants.contains(&authority));
-    assert!(
-        participants.contains(&receiver),
-        "accepted invitee should appear in authoritative participant set"
-    );
+        assert!(participants.contains(&authority));
+        assert!(
+            participants.contains(&receiver),
+            "accepted invitee should appear in authoritative participant set"
+        );
+    });
 }
 
 #[test]

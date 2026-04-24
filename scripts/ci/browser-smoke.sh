@@ -44,7 +44,7 @@ run_dx_build() {
     mkdir -p \
       "$repo_root/target/dx/aura-web/release/web/public/assets" \
       "$repo_root/target/dx/aura-web/release/web/public/fonts"
-    if NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web >/dev/null; then
+    if NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web,harness >/dev/null; then
       return 0
     fi
     if [ "$attempt" -ge "$max_attempts" ]; then
@@ -72,7 +72,6 @@ prepare_browser_web_assets() {
   )
 }
 
-rm -rf "$web_tools_cache_root"
 mkdir -p "$web_tools_cache_root"
 
 (

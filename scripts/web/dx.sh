@@ -77,6 +77,21 @@ if [[ -z "$dioxus_version" || -z "$wasm_bindgen_version" ]]; then
   exit 1
 fi
 
+install_cached_cargo_tool() {
+  local package_name="$1"
+  local package_version="$2"
+  local install_root="$3"
+
+  echo "[dx-runner] installing ${package_name} ${package_version} to ${install_root}" >&2
+  if cargo install --locked --offline "$package_name" --version "$package_version" --root "$install_root" >/dev/null; then
+    return 0
+  fi
+
+  echo "[dx-runner] offline install unavailable for ${package_name} ${package_version}; retrying with network" >&2
+  rm -rf "$install_root"
+  cargo install --locked "$package_name" --version "$package_version" --root "$install_root" >/dev/null
+}
+
 binaryen_version="version_123"
 
 resolve_binaryen_archive() {
@@ -117,13 +132,11 @@ if [[ -f Dioxus.toml ]]; then
 fi
 
 if [[ ! -x "$dx_bin" ]]; then
-  echo "[dx-runner] installing dioxus-cli $dioxus_version to $dx_root" >&2
-  cargo install --locked dioxus-cli --version "$dioxus_version" --root "$dx_root" >/dev/null
+  install_cached_cargo_tool dioxus-cli "$dioxus_version" "$dx_root"
 fi
 
 if [[ ! -x "$wasm_bin" ]]; then
-  echo "[dx-runner] installing wasm-bindgen-cli $wasm_bindgen_version to $wasm_root" >&2
-  cargo install --locked wasm-bindgen-cli --version "$wasm_bindgen_version" --root "$wasm_root" >/dev/null
+  install_cached_cargo_tool wasm-bindgen-cli "$wasm_bindgen_version" "$wasm_root"
 fi
 
 if [[ ! -x "$wasm_opt_bin" ]]; then

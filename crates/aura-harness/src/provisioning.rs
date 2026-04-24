@@ -175,7 +175,11 @@ pub(crate) fn run_token() -> Option<String> {
         })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| format!("{counter:x}"));
-    Some(format!("pid{pid}-run{counter}-{suffix}"))
+    let mut token = format!("pid{pid}-run{counter}-{suffix}");
+    if token.len() < 16 {
+        token.push_str(&format!("-{counter:08x}"));
+    }
+    Some(token)
 }
 
 fn isolate_run_root(base: PathBuf, token: Option<&str>) -> PathBuf {
