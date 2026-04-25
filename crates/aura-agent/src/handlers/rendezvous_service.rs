@@ -614,10 +614,40 @@ use aura_protocol::effects::EffectApiEffects;
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use aura_core::crypto::single_signer::SingleSignerKeyPackage;
+    use aura_core::effects::secure::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::secrets::SecretExportContext;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         AuthorityContext::new(authority_id)
+    }
+
+    async fn install_identity_key(effects: &AuraEffectSystem, authority: AuthorityId) -> [u8; 32] {
+        let (signing_key, verifying_key) = effects
+            .ed25519_generate_keypair()
+            .await
+            .expect("test signing keypair should generate");
+        let public_key: [u8; 32] = verifying_key
+            .clone()
+            .try_into()
+            .expect("test verifying key should be 32 bytes");
+        let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key);
+        let bytes = key_package
+            .export_for_secure_storage(SecretExportContext::secure_storage(
+                "aura-agent::handlers::rendezvous::retrieve_identity_keys",
+            ))
+            .expect("test signing key package should serialize");
+        let location =
+            SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
+        effects
+            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+            .await
+            .expect("test signing key package should store");
+        public_key
     }
 
     #[tokio::test]
@@ -635,6 +665,7 @@ mod tests {
         let authority_context = create_test_authority(61);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
+        install_identity_key(&effects, authority_context.authority_id()).await;
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
@@ -663,8 +694,8 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -683,6 +714,8 @@ mod tests {
         let authority_context = create_test_authority(64);
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
+        let peer_public_key =
+            install_identity_key(&effects, authority_context.authority_id()).await;
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
@@ -695,8 +728,8 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: peer_public_key,
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],

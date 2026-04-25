@@ -1405,13 +1405,31 @@ pub(crate) async fn publish_lan_descriptor_with(
     async fn install_lan_descriptor(
         rendezvous_manager: &RendezvousManager,
         descriptor: RendezvousDescriptor,
+        signing_key: [u8; 32],
     ) -> Result<(), ServiceError> {
         rendezvous_manager
             .cache_descriptor(descriptor.clone())
             .await
             .map_err(|error| ServiceError::startup_failed("rendezvous_cache", error.to_string()))?;
-        rendezvous_manager.set_lan_descriptor(descriptor).await;
+        rendezvous_manager
+            .set_lan_descriptor(descriptor, signing_key)
+            .await;
         Ok(())
+    }
+
+    async fn retrieve_lan_identity_signing_key(
+        effects: &AuraEffectSystem,
+        authority: AuthorityId,
+    ) -> Result<[u8; 32], ServiceError> {
+        effects
+            .lan_discovery_signing_key(&authority)
+            .await
+            .map_err(|error| {
+                ServiceError::startup_failed(
+                    "lan_discovery_identity",
+                    format!("invalid LAN discovery identity key: {error}"),
+                )
+            })
     }
 
     let authority_context = AuthorityContext::new_with_device(authority_id, device_id);
@@ -1470,7 +1488,8 @@ pub(crate) async fn publish_lan_descriptor_with(
         .await
         .map_err(|error| ServiceError::startup_failed("rendezvous_publish", error.to_string()))?;
     let descriptor = require_published_lan_descriptor(result, device_id)?;
-    install_lan_descriptor(rendezvous_manager, descriptor).await?;
+    let signing_key = retrieve_lan_identity_signing_key(&effects, authority_id).await?;
+    install_lan_descriptor(rendezvous_manager, descriptor, signing_key).await?;
 
     if let Err(error) = register_bootstrap_candidate_with(rendezvous_manager, lan_transport).await {
         tracing::debug!(

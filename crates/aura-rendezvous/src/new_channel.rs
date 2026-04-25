@@ -608,6 +608,7 @@ impl Handshaker {
         message: &[u8],
         epoch: u64,
         local_private_key: &[u8], // Ed25519 seed
+        remote_public_key: &[u8], // Ed25519 public
         effects: &E,
     ) -> AuraResult<()> {
         if self.state != HandshakeStatus::Initial {
@@ -618,16 +619,9 @@ impl Handshaker {
         let x25519_local = effects
             .convert_ed25519_to_x25519_private(local_private_key)
             .await?;
-        // Note: remote public key not needed for responder in IK pattern initially?
-        // But NoiseParams expects it.
-        // If we don't know it, we might need a different NoiseParams or allow placeholder.
-        // However, for IK, the responder usually learns identity.
-        // BUT `Noise_IKpsk2` assumes static key exchange.
-        // Snow builder `build_responder` documentation says `remote_public_key` is optional if it will be received.
-        // I'll assume we can pass all-zeros if unknown, or Snow handles it.
-        // Wait, Snow's builder methods might panic if key missing when required?
-        // I'll use a placeholder for now, assuming responder learns it.
-        let x25519_remote = [0u8; 32];
+        let x25519_remote = effects
+            .convert_ed25519_to_x25519_public(remote_public_key)
+            .await?;
 
         let params = NoiseParams {
             local_private_key: x25519_local,

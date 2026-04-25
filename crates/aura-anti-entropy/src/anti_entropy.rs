@@ -20,7 +20,7 @@ use aura_guards::{
     VerifiedIngressMetadata,
 };
 use aura_guards::{GuardOperation, GuardOperationId};
-use aura_journal::commitment_tree::{apply_verified_sync, TreeState};
+use aura_journal::commitment_tree::{apply_structurally_verified, TreeState};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -256,9 +256,11 @@ impl AntiEntropyHandler {
 
     fn advance_state(parent: &TreeState, op: &AttestedOp) -> Result<TreeState, SyncError> {
         let mut next = parent.clone();
-        apply_verified_sync(&mut next, op).map_err(|error| SyncError::VerificationFailed {
-            target: "anti_entropy_apply_verified",
-            detail: error.to_string(),
+        apply_structurally_verified(&mut next, op).map_err(|error| {
+            SyncError::VerificationFailed {
+                target: "anti_entropy_apply_verified",
+                detail: error.to_string(),
+            }
         })?;
         Ok(next)
     }

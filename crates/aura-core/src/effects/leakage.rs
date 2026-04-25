@@ -128,7 +128,8 @@ impl LeakageBudget {
 }
 
 /// Effect trait for leakage tracking
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait LeakageEffects: Send + Sync {
     /// Record a leakage event
     async fn record_leakage(&self, event: LeakageEvent) -> Result<()>;
@@ -157,7 +158,8 @@ pub trait LeakageEffects: Send + Sync {
 }
 
 /// Extension trait for choreography integration
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait LeakageChoreographyExt: LeakageEffects {
     /// Record leakage for a send operation
     ///
@@ -219,7 +221,9 @@ pub trait LeakageChoreographyExt: LeakageEffects {
 // Blanket implementation
 impl<T: LeakageEffects> LeakageChoreographyExt for T {}
 
-impl_arc_effect!(LeakageEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: LeakageEffects + Send + Sync + ?Sized> LeakageEffects for std::sync::Arc<T> {
     async fn record_leakage(&self, event: LeakageEvent) -> Result<()> {
         (**self).record_leakage(event).await
     }
@@ -248,7 +252,7 @@ impl_arc_effect!(LeakageEffects {
             .get_leakage_history(context_id, since_timestamp)
             .await
     }
-});
+}
 
 #[cfg(test)]
 mod tests {

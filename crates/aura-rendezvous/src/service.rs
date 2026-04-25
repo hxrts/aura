@@ -209,6 +209,24 @@ impl RendezvousService {
         types::check_flow_budget(snapshot, required_cost)
     }
 
+    fn reject_zero_key(label: &str, key: &[u8]) -> AuraResult<()> {
+        if key.len() != 32 {
+            return Err(AuraError::invalid(format!("{label} must be 32 bytes")));
+        }
+        if key.iter().all(|byte| *byte == 0) {
+            return Err(AuraError::invalid(format!("{label} must not be all zero")));
+        }
+        Ok(())
+    }
+
+    fn reject_placeholder_descriptor_crypto(descriptor: &RendezvousDescriptor) -> AuraResult<()> {
+        Self::reject_zero_key("peer descriptor public key", &descriptor.public_key)?;
+        Self::reject_zero_key(
+            "peer descriptor PSK commitment",
+            &descriptor.handshake_psk_commitment,
+        )
+    }
+
     fn record_receipt(operation: &str, peer: AuthorityId) -> EffectCommand {
         EffectCommand::RecordReceipt {
             operation: operation.to_string(),
@@ -287,13 +305,14 @@ impl RendezvousService {
         transport_hints: Vec<TransportHint>,
         public_key: [u8; 32],
         now_ms: u64,
-    ) -> GuardOutcome {
+    ) -> AuraResult<GuardOutcome> {
+        Self::reject_zero_key("descriptor public key", &public_key)?;
         if let Some(outcome) = Self::check_capability_and_budget(
             snapshot,
             RendezvousCapability::Publish,
             guards::DESCRIPTOR_PUBLISH_COST,
         ) {
-            return outcome;
+            return Ok(outcome);
         }
 
         let descriptor =
@@ -306,7 +325,10 @@ impl RendezvousService {
             Self::record_receipt("publish_descriptor", self.authority_id),
         ];
 
-        Self::finalize_effects_with_charge(guards::DESCRIPTOR_PUBLISH_COST, effects)
+        Ok(Self::finalize_effects_with_charge(
+            guards::DESCRIPTOR_PUBLISH_COST,
+            effects,
+        ))
     }
 
     /// Prepare to refresh an existing descriptor.
@@ -317,7 +339,7 @@ impl RendezvousService {
         transport_hints: Vec<TransportHint>,
         public_key: [u8; 32],
         now_ms: u64,
-    ) -> GuardOutcome {
+    ) -> AuraResult<GuardOutcome> {
         self.prepare_publish_descriptor(snapshot, context_id, transport_hints, public_key, now_ms)
     }
 
@@ -351,6 +373,10 @@ impl RendezvousService {
         if peer_descriptor.authority_id != peer {
             return Err(AuraError::invalid("Peer descriptor does not match peer"));
         }
+        Self::reject_placeholder_descriptor_crypto(peer_descriptor)?;
+        Self::reject_zero_key("local private key", local_private_key)?;
+        Self::reject_zero_key("remote public key", remote_public_key)?;
+        Self::reject_zero_key("channel PSK", psk)?;
         if !peer_descriptor.is_valid(now_ms) {
             return Err(AuraError::invalid(
                 "Peer descriptor is expired or not yet valid",
@@ -452,6 +478,7 @@ impl RendezvousService {
         init_message: NoiseHandshake,
         psk: &[u8; 32],
         local_private_key: &[u8], // Ed25519 seed
+        remote_public_key: &[u8], // Ed25519 public
         effects: &E,
     ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
         if let Some(outcome) = Self::check_capability_and_budget(
@@ -463,6 +490,10 @@ impl RendezvousService {
         }
 
         let expected_commitment = compute_psk_commitment(psk);
+        Self::reject_zero_key("local private key", local_private_key)?;
+        Self::reject_zero_key("remote public key", remote_public_key)?;
+        Self::reject_zero_key("channel PSK", psk)?;
+        Self::reject_zero_key("handshake PSK commitment", &init_message.psk_commitment)?;
         if init_message.psk_commitment != expected_commitment {
             return Ok((
                 GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch")),
@@ -487,6 +518,7 @@ impl RendezvousService {
                 &init_message.noise_message,
                 init_message.epoch,
                 local_private_key,
+                remote_public_key,
                 effects,
             )
             .await?;
@@ -794,16 +826,36 @@ mod tests {
         let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
         let snapshot = test_snapshot();
 
-        let outcome = service.prepare_publish_descriptor(
-            &snapshot,
-            test_context(),
-            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            [0u8; 32],
-            1000,
-        );
+        let outcome = service
+            .prepare_publish_descriptor(
+                &snapshot,
+                test_context(),
+                vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+                [7u8; 32],
+                1000,
+            )
+            .unwrap();
 
         assert!(outcome.decision.is_allowed());
         assert_eq!(outcome.effects.len(), 3);
+    }
+
+    #[test]
+    fn test_prepare_publish_descriptor_rejects_zero_public_key() {
+        let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
+        let snapshot = test_snapshot();
+
+        let error = service
+            .prepare_publish_descriptor(
+                &snapshot,
+                test_context(),
+                vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+                [0u8; 32],
+                1000,
+            )
+            .unwrap_err();
+
+        assert!(error.to_string().contains("descriptor public key"));
     }
 
     #[tokio::test]
@@ -819,8 +871,8 @@ mod tests {
             device_id: None,
             context_id: test_context(),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: compute_psk_commitment(&psk),
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
@@ -839,8 +891,8 @@ mod tests {
                 peer,
                 &establish_path,
                 &psk,
-                &[0u8; 32], // local private key
-                &[0u8; 32], // remote public key
+                &[9u8; 32], // local private key
+                &[8u8; 32], // remote public key
                 100,
                 &descriptor,
                 &mock_effects,
@@ -853,6 +905,86 @@ mod tests {
         // Check if handshaker was stored
         let handshakers = service.handshakers.read().await;
         assert!(handshakers.contains_key(&(test_context(), peer)));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_establish_channel_rejects_zero_key_material() {
+        let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
+        let snapshot = test_snapshot();
+        let peer = AuthorityId::new_from_entropy([3u8; 32]);
+        let psk = [42u8; 32];
+        let mock_effects = MockNoise;
+
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer,
+            device_id: None,
+            context_id: test_context(),
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+            handshake_psk_commitment: compute_psk_commitment(&psk),
+            public_key: [8u8; 32],
+            valid_from: 0,
+            valid_until: 10000,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+        let establish_path = descriptor
+            .advertised_establish_paths()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("establish path"));
+
+        let error = service
+            .prepare_establish_channel(
+                &snapshot,
+                test_context(),
+                peer,
+                &establish_path,
+                &psk,
+                &[0u8; 32],
+                &[8u8; 32],
+                100,
+                &descriptor,
+                &mock_effects,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("local private key"));
+
+        let error = service
+            .prepare_establish_channel(
+                &snapshot,
+                test_context(),
+                peer,
+                &establish_path,
+                &psk,
+                &[9u8; 32],
+                &[0u8; 32],
+                100,
+                &descriptor,
+                &mock_effects,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("remote public key"));
+
+        let mut placeholder_descriptor = descriptor;
+        placeholder_descriptor.handshake_psk_commitment = [0u8; 32];
+        let error = service
+            .prepare_establish_channel(
+                &snapshot,
+                test_context(),
+                peer,
+                &establish_path,
+                &psk,
+                &[9u8; 32],
+                &[8u8; 32],
+                100,
+                &placeholder_descriptor,
+                &mock_effects,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("PSK commitment"));
     }
 
     #[tokio::test]
@@ -921,8 +1053,8 @@ mod tests {
             device_id: None,
             context_id: test_context(),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: compute_psk_commitment(&psk),
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
@@ -941,8 +1073,8 @@ mod tests {
                 peer_b,
                 &establish_path,
                 &psk,
-                &[0u8; 32],
-                &[0u8; 32],
+                &[9u8; 32],
+                &[8u8; 32],
                 100,
                 &descriptor,
                 &mock_effects,

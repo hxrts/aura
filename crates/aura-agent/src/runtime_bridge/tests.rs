@@ -150,8 +150,8 @@ async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
                 "127.0.0.1:6555",
             )
             .expect("tcp hint")],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -217,8 +217,8 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
                 "127.0.0.1:6556",
             )
             .expect("tcp hint")],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -280,9 +280,9 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         nickname_suggestion: None,
     };
     manager
+        .registry()
         .cache_descriptor(placeholder_descriptor)
-        .await
-        .expect("cache placeholder descriptor");
+        .await;
 
     let mut non_placeholder_descriptor = aura_rendezvous::facts::RendezvousDescriptor {
         authority_id: peer,
@@ -1296,8 +1296,8 @@ async fn is_peer_online_requires_current_context_descriptor() {
                 "127.0.0.1:6553",
             )
             .expect("tcp hint")],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -1377,8 +1377,8 @@ async fn pull_remote_relational_facts_stays_disabled_even_with_rendezvous_hints(
                 "127.0.0.1:6554",
             )
             .expect("tcp hint")],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],

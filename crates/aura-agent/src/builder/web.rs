@@ -53,7 +53,8 @@ use crate::{AgentResult, AuraAgent};
 /// | Effect | Web Implementation |
 /// |--------|-------------------|
 /// | `CryptoEffects` | Web Crypto API (SubtleCrypto) |
-/// | `StorageEffects` | IndexedDB |
+/// | `StorageEffects` | Browser storage for non-secret records |
+/// | `SecureStorageEffects` | WebCrypto non-extractable wrapping key + IndexedDB encrypted records |
 /// | `PhysicalTimeEffects` | `Date.now()` / `performance.now()` |
 /// | `RandomEffects` | `crypto.getRandomValues()` |
 /// | `ConsoleEffects` | `console.log/warn/error` |
@@ -61,8 +62,8 @@ use crate::{AgentResult, AuraAgent};
 ///
 /// # Security Considerations
 ///
-/// - Keys are stored in IndexedDB which is accessible to JavaScript
-/// - Consider using non-extractable CryptoKeys where possible
+/// - Secret bytes are encrypted before persistence; raw secure-storage records must not be stored in browser storage
+/// - Secure storage depends on WebCrypto non-extractable `CryptoKey` support
 /// - Cross-origin isolation affects some APIs
 /// - Service Workers may be needed for background operations
 pub struct WebPresetBuilder {

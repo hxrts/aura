@@ -8,20 +8,16 @@ use super::shared::{
     HandlerUtilities,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::handlers::rendezvous_identity::retrieve_identity_keys;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::{RendezvousManager, ServiceRegistry};
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
-use aura_core::crypto::single_signer::SingleSignerKeyPackage;
-use aura_core::effects::secure::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-};
 use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
 use aura_core::hash::hash;
-use aura_core::secrets::SecretExportContext;
 use aura_core::service::{EstablishPath, ServiceFamily};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
@@ -238,19 +234,27 @@ impl RendezvousHandler {
 
         // Retrieve identity keys to get public key
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
-        let public_key = keys.map(|(_, pub_key)| pub_key).unwrap_or([0u8; 32]);
+        let (_, public_key) = keys.ok_or_else(|| {
+            AgentError::effects(format!(
+                "missing local identity key for authority {}",
+                self.context.authority.authority_id()
+            ))
+        })?;
 
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare the descriptor through the service
-        let outcome = self.service.prepare_publish_descriptor(
-            &snapshot,
-            context_id,
-            transport_hints,
-            public_key,
-            current_time,
-        );
+        let outcome = self
+            .service
+            .prepare_publish_descriptor(
+                &snapshot,
+                context_id,
+                transport_hints,
+                public_key,
+                current_time,
+            )
+            .map_err(|e| AgentError::effects(format!("prepare descriptor failed: {e}")))?;
 
         // Check guard outcome and execute effects via the bridge
         if !outcome.decision.is_allowed() {
@@ -297,6 +301,14 @@ impl RendezvousHandler {
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
+        if descriptor.public_key == [0u8; 32] || descriptor.handshake_psk_commitment == [0u8; 32] {
+            tracing::debug!(
+                peer = %descriptor.authority_id,
+                context = %descriptor.context_id,
+                "Rejected rendezvous descriptor with placeholder cryptographic fields"
+            );
+            return;
+        }
         if let Some(manager) = self.rendezvous_manager.as_ref() {
             if let Err(err) = manager.cache_descriptor(descriptor).await {
                 tracing::debug!(error = %err, "Failed to cache descriptor in rendezvous manager");
@@ -390,9 +402,13 @@ impl RendezvousHandler {
             .await
             .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
-        // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
-        let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+        let (local_private_key, _) = keys.ok_or_else(|| {
+            AgentError::effects(format!(
+                "missing local identity key for authority {}",
+                self.context.authority.authority_id()
+            ))
+        })?;
 
         // Retrieve remote public key from descriptor
         let remote_public_key = peer_descriptor.public_key;
@@ -680,7 +696,18 @@ impl RendezvousHandler {
         let psk = derive_channel_psk(context_id, initiator, self.context.authority.authority_id());
 
         let keys = retrieve_identity_keys(&*effects, &self.context.authority.authority_id()).await;
-        let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+        let (local_private_key, _) = keys.ok_or_else(|| {
+            AgentError::effects(format!(
+                "missing local identity key for authority {}",
+                self.context.authority.authority_id()
+            ))
+        })?;
+
+        let initiator_descriptor = self
+            .get_peer_descriptor(context_id, initiator)
+            .await
+            .ok_or_else(|| AgentError::invalid("Initiator descriptor not found in cache"))?;
+        let remote_public_key = initiator_descriptor.public_key;
 
         let (outcome, _channel) = self
             .service
@@ -691,6 +718,7 @@ impl RendezvousHandler {
                 init.handshake,
                 &psk,
                 &local_private_key,
+                &remote_public_key,
                 &*effects,
             )
             .await
@@ -1044,39 +1072,17 @@ async fn execute_record_receipt(
     Ok(())
 }
 
-async fn retrieve_identity_keys<E: SecureStorageEffects>(
-    effects: &E,
-    authority: &AuthorityId,
-) -> Option<([u8; 32], [u8; 32])> {
-    // Try to retrieve key from epoch 1 (bootstrap epoch)
-    let location =
-        SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
-    let caps = vec![SecureStorageCapability::Read];
-
-    match effects.secure_retrieve(&location, &caps).await {
-        Ok(bytes) => {
-            if let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
-                &bytes,
-                SecretExportContext::secure_storage(
-                    "aura-agent::handlers::rendezvous::retrieve_identity_keys",
-                ),
-            ) {
-                let signing_key = pkg.signing_key().try_into().unwrap_or([0u8; 32]);
-                let verifying_key = pkg.verifying_key().try_into().unwrap_or([0u8; 32]);
-                Some((signing_key, verifying_key))
-            } else {
-                None
-            }
-        }
-        Err(_) => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
+    use aura_core::crypto::single_signer::SingleSignerKeyPackage;
+    use aura_core::effects::secure::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_core::secrets::SecretExportContext;
     use aura_core::CapabilityName;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::GuardContextProvider;
@@ -1086,6 +1092,30 @@ mod tests {
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         AuthorityContext::new(authority_id)
+    }
+
+    async fn install_identity_key(effects: &AuraEffectSystem, authority: AuthorityId) -> [u8; 32] {
+        let (signing_key, verifying_key) = effects
+            .ed25519_generate_keypair()
+            .await
+            .expect("test signing keypair should generate");
+        let public_key: [u8; 32] = verifying_key
+            .clone()
+            .try_into()
+            .expect("test verifying key should be 32 bytes");
+        let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key);
+        let bytes = key_package
+            .export_for_secure_storage(SecretExportContext::secure_storage(
+                "aura-agent::handlers::rendezvous::retrieve_identity_keys",
+            ))
+            .expect("test signing key package should serialize");
+        let location =
+            SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
+        effects
+            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+            .await
+            .expect("test signing key package should store");
+        public_key
     }
 
     fn install_biscuit_cache(
@@ -1300,6 +1330,7 @@ mod tests {
 
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
+        install_identity_key(&effects, authority_context.authority_id()).await;
 
         let context_id = ContextId::new_from_entropy([151u8; 32]);
         let result = handler
@@ -1330,8 +1361,8 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -1364,8 +1395,8 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -1397,6 +1428,8 @@ mod tests {
 
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
+        let peer_public_key =
+            install_identity_key(&effects, authority_context.authority_id()).await;
 
         let context_id = ContextId::new_from_entropy([154u8; 32]);
         let peer = AuthorityId::new_from_entropy([55u8; 32]);
@@ -1407,8 +1440,8 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: peer_public_key,
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],

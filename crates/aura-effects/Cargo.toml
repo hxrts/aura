@@ -65,6 +65,10 @@ telltale-machine = { workspace = true, optional = true, features = ["multi-threa
 tempfile = { workspace = true }
 proptest = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+base64 = { workspace = true }
+wasm-bindgen-test = "0.3"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["fs", "net"] }
 tokio-tungstenite = { workspace = true }
@@ -83,10 +87,10 @@ keyring = { version = "3.6.3", default-features = false, features = ["linux-nati
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-indexed_db_futures = { version = "0.6.4", features = ["serde"] }
+indexed_db_futures = { version = "0.6.4", features = ["serde", "cursors"] }
 js-sys = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 wasm-bindgen = { workspace = true }
 web-time = "1"
-web-sys = { workspace = true, features = ["Window", "Storage"] }
+web-sys = { workspace = true, features = ["Window", "Storage", "Crypto", "SubtleCrypto", "CryptoKey", "AesGcmParams"] }
 gloo-timers = { version = "0.3", features = ["futures"] }

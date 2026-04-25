@@ -179,18 +179,26 @@ pub async fn apply_verified(
     apply_verified_common(state, attested)
 }
 
-/// Synchronous version for backwards compatibility
+/// Apply an operation after the caller has already verified its aggregate signature.
 ///
-/// This version skips FROST verification but performs all other validation.
-/// Use this for existing code that doesn't have access to CryptoEffects.
-/// Migrate to `apply_verified` when crypto effects are available.
-pub fn apply_verified_sync(state: &mut TreeState, attested: &AttestedOp) -> ApplicationResult<()> {
-    // Skip FROST verification (Step 1)
-    tracing::warn!(
-        "Using apply_verified_sync: FROST verification skipped. Migrate to apply_verified for full security."
-    );
+/// This helper exists for protocol paths that perform cryptographic verification
+/// before application, such as anti-entropy pipelines that need to validate a
+/// sequence against intermediate states. It is not a substitute for
+/// [`apply_verified`]; callers must pass only operations that have crossed an
+/// authenticated verification boundary.
+pub fn apply_structurally_verified(
+    state: &mut TreeState,
+    attested: &AttestedOp,
+) -> ApplicationResult<()> {
+    apply_verified_common(state, attested)
+}
 
-    // Steps 2-6: Shared logic
+/// Test-only helper for structural application without FROST verification.
+#[cfg(test)]
+pub fn apply_unverified_for_tests(
+    state: &mut TreeState,
+    attested: &AttestedOp,
+) -> ApplicationResult<()> {
     apply_verified_common(state, attested)
 }
 

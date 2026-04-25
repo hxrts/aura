@@ -34,7 +34,8 @@ pub mod state;
 pub mod storage;
 
 pub use application::{
-    apply_verified, apply_verified_sync, validate_invariants, ApplicationError, ApplicationResult,
+    apply_structurally_verified, apply_verified, validate_invariants, ApplicationError,
+    ApplicationResult,
 };
 pub use compaction::{compact, CompactionError};
 pub use operations::{

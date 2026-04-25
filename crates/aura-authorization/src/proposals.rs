@@ -478,7 +478,8 @@ impl ProposalState {
             return;
         }
 
-        // Check if threshold is met
+        // Only threshold types that do not require the eligible voter count can
+        // transition automatically during reduction.
         let threshold_met = self.check_threshold_met();
         if threshold_met {
             self.status = ProposalStatus::Approved;
@@ -493,34 +494,55 @@ impl ProposalState {
 
     /// Check if the approval threshold has been met
     ///
-    /// Note: For `Unanimous` and `Percentage` thresholds, the total eligible
-    /// count must be tracked separately. This method uses the approval count
-    /// as a simple check against the threshold type. For full threshold
-    /// evaluation, use `ApprovalThreshold::is_met()` with the total eligible count.
+    /// `Unanimous` and `Percentage` thresholds require the total eligible voter
+    /// count and therefore never pass this total-less check. Use
+    /// [`Self::check_threshold_met_with_total`] or [`Self::update_status_with_total`]
+    /// at execution/completion boundaries.
     pub fn check_threshold_met(&self) -> bool {
         let approval_count = self.approvals.len();
 
         match &self.approval_requirement {
             ApprovalThreshold::Any => approval_count >= 1,
-            ApprovalThreshold::Unanimous => {
-                // Without knowing total eligible, we can't verify unanimous
-                // This will be checked at completion time with full context
-                false
-            }
+            ApprovalThreshold::Unanimous => false,
             ApprovalThreshold::Threshold { required } => (approval_count as u32) >= *required,
-            ApprovalThreshold::Percentage { percent } => {
-                // Without knowing total eligible, we use approvals as proxy
-                // For strict evaluation, use is_met() at completion time
-                let required = (approval_count as f64 * *percent as f64 / 100.0).ceil() as u32;
-                (approval_count as u32) >= required
-            }
+            ApprovalThreshold::Percentage { .. } => false,
         }
     }
 
     /// Check if the approval threshold has been met given total eligible voters
     pub fn check_threshold_met_with_total(&self, total_eligible: usize) -> bool {
+        if total_eligible == 0 {
+            return false;
+        }
         self.approval_requirement
             .is_met(self.approvals.len() as u32, total_eligible as u32)
+    }
+
+    /// Update status using a known total eligible voter count.
+    ///
+    /// This is required for percentage and unanimous thresholds. Reducers that
+    /// do not have the electorate size must leave these proposals pending until
+    /// an execution/completion boundary supplies the total.
+    pub fn update_status_with_total(&mut self, total_eligible: usize) {
+        if matches!(
+            self.status,
+            ProposalStatus::Approved
+                | ProposalStatus::Rejected
+                | ProposalStatus::Withdrawn
+                | ProposalStatus::Expired
+        ) {
+            return;
+        }
+
+        if self.check_threshold_met_with_total(total_eligible) {
+            self.status = ProposalStatus::Approved;
+        } else {
+            self.status = ProposalStatus::Pending {
+                approvals: self.approvals.len() as u16,
+                rejections: self.rejections.len() as u16,
+                required: self.approval_requirement.clone(),
+            };
+        }
     }
 
     /// Check if the proposal has expired
@@ -853,14 +875,19 @@ mod tests {
         );
 
         let mut state = ProposalState::from_created(&created).unwrap();
+        assert!(state.is_pending());
+        assert!(!state.check_threshold_met());
 
-        // Add approvals
         state.apply(&ProposalFact::approved(
             "prop-4".to_string(),
             test_authority_id(2),
             2000,
             None,
         ));
+        assert!(!state.check_threshold_met());
+        assert!(!state.check_threshold_met_with_total(5));
+        assert!(state.is_pending());
+
         state.apply(&ProposalFact::approved(
             "prop-4".to_string(),
             test_authority_id(3),
@@ -870,6 +897,7 @@ mod tests {
 
         // With total eligible = 5, need 51% = 3 approvals (ceil(5 * 0.51) = 3)
         assert!(!state.check_threshold_met_with_total(5)); // Only 2 approvals
+        assert!(state.is_pending());
 
         state.apply(&ProposalFact::approved(
             "prop-4".to_string(),
@@ -878,6 +906,10 @@ mod tests {
             None,
         ));
         assert!(state.check_threshold_met_with_total(5)); // 3 approvals meets 51% of 5
+        assert!(state.is_pending());
+
+        state.update_status_with_total(5);
+        assert_eq!(state.status, ProposalStatus::Approved);
     }
 
     #[test]

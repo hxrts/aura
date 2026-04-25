@@ -190,7 +190,8 @@ impl SecureStorageCapability {
 ///
 /// # Stability: EXPERIMENTAL
 /// This API is under development and may change in future versions.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait SecureStorageEffects: Send + Sync {
     /// Store data securely with optional capabilities
     ///

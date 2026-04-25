@@ -4,10 +4,11 @@
 //! including validation, application, and state synchronization.
 
 use super::{
-    application::{apply_verified_sync, validate_invariants, ApplicationError},
+    application::{apply_verified, validate_invariants, ApplicationError},
     reduction::{reduce, ReductionError},
     TreeState,
 };
+use aura_core::effects::CryptoEffects;
 use aura_core::{AttestedOp, Epoch, Hash32, LeafId, NodeIndex, TreeOp};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -112,9 +113,10 @@ impl TreeOperationProcessor {
     /// - Validation and application
     /// - State updates
     /// - History tracking
-    pub fn process_operation(
+    pub async fn process_operation(
         &mut self,
         attested: &AttestedOp,
+        crypto_effects: &dyn CryptoEffects,
     ) -> Result<ProcessedOperation, OperationProcessorError> {
         let operation_hash = self.compute_operation_hash(attested);
 
@@ -128,8 +130,8 @@ impl TreeOperationProcessor {
         let mut error_msg = None;
         let mut affected_nodes = Vec::new();
 
-        // Attempt to apply the operation (using sync version for backwards compatibility)
-        match apply_verified_sync(&mut self.current_state, attested) {
+        // Attempt to apply the operation with full FROST verification.
+        match apply_verified(&mut self.current_state, attested, crypto_effects).await {
             Ok(()) => {
                 // Extract affected nodes based on operation type
                 affected_nodes = self.extract_affected_nodes(&attested.op);
@@ -174,15 +176,16 @@ impl TreeOperationProcessor {
     ///
     /// Processes operations one by one, stopping on first failure if `fail_fast` is true.
     /// Returns a vector of results for each operation.
-    pub fn process_operations(
+    pub async fn process_operations(
         &mut self,
         operations: &[AttestedOp],
         fail_fast: bool,
+        crypto_effects: &dyn CryptoEffects,
     ) -> Vec<Result<ProcessedOperation, OperationProcessorError>> {
         let mut results = Vec::new();
 
         for op in operations {
-            let result = self.process_operation(op);
+            let result = self.process_operation(op, crypto_effects).await;
             let should_continue = result.is_ok();
 
             results.push(result);
@@ -202,21 +205,21 @@ impl TreeOperationProcessor {
     /// - Initial state loading from persistent storage
     /// - Recovery after state corruption
     /// - Synchronization with remote peers
-    pub fn sync_from_oplog(&mut self, ops: &[AttestedOp]) -> Result<(), OperationProcessorError> {
-        // Reduce the complete OpLog to get the correct state
-        let new_state = reduce(ops)?;
-
-        // Update our state
-        self.current_state = new_state;
-
-        // Clear and rebuild processed operations set
-        self.processed_ops.clear();
+    pub async fn sync_from_oplog(
+        &mut self,
+        ops: &[AttestedOp],
+        crypto_effects: &dyn CryptoEffects,
+    ) -> Result<(), OperationProcessorError> {
+        let mut verified_processor = TreeOperationProcessor::from_state(self.current_state.clone());
         for op in ops {
-            let op_hash = self.compute_operation_hash(op);
-            self.processed_ops.insert(op_hash);
+            verified_processor
+                .process_operation(op, crypto_effects)
+                .await?;
         }
 
-        // Clear operation history (it's no longer accurate after sync)
+        let reduced_state = reduce(ops)?;
+        self.current_state = reduced_state;
+        self.processed_ops = verified_processor.processed_ops;
         self.operation_history.clear();
 
         tracing::info!(
@@ -374,14 +377,18 @@ impl BatchProcessor {
     }
 
     /// Process operations in batches
-    pub fn process_batched(
+    pub async fn process_batched(
         &mut self,
         operations: &[AttestedOp],
+        crypto_effects: &dyn CryptoEffects,
     ) -> Result<Vec<ProcessedOperation>, OperationProcessorError> {
         let mut results = Vec::new();
 
         for chunk in operations.chunks(self.batch_size as usize) {
-            let batch_results = self.processor.process_operations(chunk, false);
+            let batch_results = self
+                .processor
+                .process_operations(chunk, false, crypto_effects)
+                .await;
 
             // Extract successful operations
             for result in batch_results {
@@ -488,7 +495,87 @@ impl<'a> TreeStateQuery<'a> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use aura_core::{LeafId, LeafNode, LeafRole, TreeOp, TreeOpKind};
+    use async_trait::async_trait;
+    use aura_core::effects::{
+        CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+    };
+    use aura_core::tree::BranchSigningKey;
+    use aura_core::{BranchNode, LeafId, LeafNode, LeafRole, Policy, TreeOp, TreeOpKind};
+
+    struct MockCrypto {
+        frost_valid: bool,
+    }
+
+    #[async_trait]
+    impl RandomCoreEffects for MockCrypto {
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            vec![0; len]
+        }
+
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0u8; 32]
+        }
+
+        async fn random_u64(&self) -> u64 {
+            0
+        }
+    }
+
+    #[async_trait]
+    impl CryptoCoreEffects for MockCrypto {
+        async fn kdf_derive(
+            &self,
+            _: &[u8],
+            _: &[u8],
+            _: &[u8],
+            output_len: u32,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![0; output_len as usize])
+        }
+
+        async fn derive_key(
+            &self,
+            _: &[u8],
+            _: &aura_core::effects::crypto::KeyDerivationContext,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+
+        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+            Ok((vec![1u8; 32], vec![2u8; 32]))
+        }
+
+        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![1u8; 64])
+        }
+
+        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
+            Ok(true)
+        }
+
+        fn is_simulated(&self) -> bool {
+            true
+        }
+
+        fn crypto_capabilities(&self) -> Vec<String> {
+            vec!["mock".to_string()]
+        }
+
+        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+            a == b
+        }
+
+        fn secure_zero(&self, data: &mut [u8]) {
+            data.fill(0);
+        }
+    }
+
+    #[async_trait]
+    impl CryptoExtendedEffects for MockCrypto {
+        async fn frost_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
+            Ok(self.frost_valid)
+        }
+    }
 
     fn create_test_leaf(id: u32) -> LeafNode {
         LeafNode::new_device(
@@ -497,6 +584,28 @@ mod tests {
             vec![id as u8; 32],
         )
         .expect("valid leaf")
+    }
+
+    fn test_processor() -> TreeOperationProcessor {
+        let mut state = TreeState::new();
+        state.add_branch(BranchNode {
+            node: NodeIndex(0),
+            policy: Policy::Any,
+            commitment: [0u8; 32],
+        });
+        state.add_branch_with_parent(
+            BranchNode {
+                node: NodeIndex(1),
+                policy: Policy::Any,
+                commitment: [1u8; 32],
+            },
+            Some(NodeIndex(0)),
+        );
+        state.set_signing_key(
+            NodeIndex(0),
+            BranchSigningKey::new([3u8; 32], Epoch::initial()),
+        );
+        TreeOperationProcessor::from_state(state)
     }
 
     fn create_test_operation(leaf_id: u32, parent_epoch: Epoch) -> AttestedOp {
@@ -525,12 +634,13 @@ mod tests {
         assert_eq!(processor.operation_history().len(), 0);
     }
 
-    #[test]
-    fn test_process_single_operation() {
-        let mut processor = TreeOperationProcessor::new();
+    #[tokio::test]
+    async fn test_process_single_operation() {
+        let mut processor = test_processor();
         let op = create_test_operation(1, Epoch::initial());
+        let crypto = MockCrypto { frost_valid: true };
 
-        let result = processor.process_operation(&op);
+        let result = processor.process_operation(&op, &crypto).await;
         assert!(result.is_ok());
 
         let processed = result.unwrap();
@@ -539,17 +649,18 @@ mod tests {
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[test]
-    fn test_duplicate_operation_rejection() {
-        let mut processor = TreeOperationProcessor::new();
+    #[tokio::test]
+    async fn test_duplicate_operation_rejection() {
+        let mut processor = test_processor();
         let op = create_test_operation(1, Epoch::initial());
+        let crypto = MockCrypto { frost_valid: true };
 
         // Process first time - should succeed
-        let result1 = processor.process_operation(&op);
+        let result1 = processor.process_operation(&op, &crypto).await;
         assert!(result1.is_ok());
 
         // Process second time - should fail
-        let result2 = processor.process_operation(&op);
+        let result2 = processor.process_operation(&op, &crypto).await;
         assert!(result2.is_err());
         assert!(matches!(
             result2.unwrap_err(),
@@ -557,9 +668,14 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_batch_processing() {
-        let mut batch_processor = BatchProcessor::new(2, true);
+    #[tokio::test]
+    async fn test_batch_processing() {
+        let mut batch_processor = BatchProcessor {
+            processor: test_processor(),
+            batch_size: 2,
+            validate_batches: true,
+        };
+        let crypto = MockCrypto { frost_valid: true };
 
         let ops = vec![
             create_test_operation(1, Epoch::initial()),
@@ -567,7 +683,7 @@ mod tests {
             create_test_operation(3, Epoch::initial()),
         ];
 
-        let results = batch_processor.process_batched(&ops);
+        let results = batch_processor.process_batched(&ops, &crypto).await;
         assert!(results.is_ok());
 
         let processed = results.unwrap();
@@ -575,9 +691,10 @@ mod tests {
         assert!(processed.iter().all(|p| p.success));
     }
 
-    #[test]
-    fn test_sync_from_oplog() {
-        let mut processor = TreeOperationProcessor::new();
+    #[tokio::test]
+    async fn test_sync_from_oplog() {
+        let mut processor = test_processor();
+        let crypto = MockCrypto { frost_valid: true };
 
         let ops = vec![
             create_test_operation(1, Epoch::initial()),
@@ -585,17 +702,18 @@ mod tests {
             create_test_operation(3, Epoch::initial()),
         ];
 
-        let result = processor.sync_from_oplog(&ops);
+        let result = processor.sync_from_oplog(&ops, &crypto).await;
         assert!(result.is_ok());
         assert_eq!(processor.current_state().num_leaves(), 1);
     }
 
-    #[test]
-    fn test_query_interface() {
-        let mut processor = TreeOperationProcessor::new();
+    #[tokio::test]
+    async fn test_query_interface() {
+        let mut processor = test_processor();
         let op = create_test_operation(1, Epoch::initial());
+        let crypto = MockCrypto { frost_valid: true };
 
-        processor.process_operation(&op).unwrap();
+        processor.process_operation(&op, &crypto).await.unwrap();
 
         let query = TreeStateQuery::new(processor.current_state());
         let leaves = query.all_leaves();
@@ -605,19 +723,39 @@ mod tests {
         assert_eq!(device_leaves.len(), 1);
     }
 
-    #[test]
-    fn test_processing_stats() {
-        let mut processor = TreeOperationProcessor::new();
+    #[tokio::test]
+    async fn test_processing_stats() {
+        let mut processor = test_processor();
+        let crypto = MockCrypto { frost_valid: true };
 
         let op1 = create_test_operation(1, Epoch::initial());
         let op2 = create_test_operation(2, Epoch::initial());
 
-        processor.process_operation(&op1).unwrap();
-        processor.process_operation(&op2).unwrap();
+        processor.process_operation(&op1, &crypto).await.unwrap();
+        processor.process_operation(&op2, &crypto).await.unwrap();
 
         let stats = processor.get_stats();
         assert_eq!(stats.successful_operations, 2);
         assert_eq!(stats.failed_operations, 0);
         assert_eq!(stats.num_leaves, 2);
+    }
+
+    #[tokio::test]
+    async fn test_process_operation_rejects_forged_signature() {
+        let mut processor = test_processor();
+        let op = create_test_operation(1, Epoch::initial());
+        let crypto = MockCrypto { frost_valid: false };
+
+        let processed = processor
+            .process_operation(&op, &crypto)
+            .await
+            .expect("verification failure is recorded as a processed result");
+
+        assert!(!processed.success);
+        assert!(processed
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("FROST signature verification failed")));
+        assert_eq!(processor.current_state().num_leaves(), 0);
     }
 }

@@ -1,6 +1,6 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
-use aura_core::crypto::single_signer::SigningMode;
+use aura_core::crypto::single_signer::{SigningMode, SingleSignerKeyPackage};
 use aura_core::crypto::tree_signing;
 use aura_core::effects::crypto::{
     FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, KeyGenerationMethod,
@@ -10,6 +10,7 @@ use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
+use aura_core::secrets::SecretExportContext;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::{AuraError, AuthorityId};
 use aura_signature::threshold_signing_context_transcript_bytes;
@@ -194,6 +195,71 @@ impl AuraEffectSystem {
             format!("{}", authority),
             format!("{}", epoch),
         )
+    }
+
+    pub(crate) async fn lan_discovery_signing_key(
+        &self,
+        authority: &AuthorityId,
+    ) -> Result<[u8; 32], AuraError> {
+        let current_epoch = self.get_current_epoch(authority).await;
+        if self.signing_mode_for_epoch(authority, current_epoch).await != SigningMode::SingleSigner
+        {
+            return Err(AuraError::invalid(
+                "LAN discovery announcements require a single-signer identity key",
+            ));
+        }
+
+        let caps = [SecureStorageCapability::Read];
+        let participant = ParticipantIdentity::guardian(*authority);
+        let envelope = match self
+            .crypto
+            .secure_storage()
+            .secure_retrieve(
+                &Self::solo_signing_key_location(authority, current_epoch),
+                &caps,
+            )
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(solo_error) => self
+                .crypto
+                .secure_storage()
+                .secure_retrieve(
+                    &Self::participant_share_location(authority, current_epoch, &participant),
+                    &caps,
+                )
+                .await
+                .map_err(|share_error| {
+                    AuraError::storage(format!(
+                        "missing LAN discovery identity key for epoch {current_epoch}: \
+                         signing_keys error: {solo_error}; participant_shares error: {share_error}"
+                    ))
+                })?,
+        };
+
+        let key_package = self
+            .decrypt_participant_key_package(authority, current_epoch, &participant, &envelope)
+            .await?;
+        let package = SingleSignerKeyPackage::import_from_secure_storage(
+            &key_package,
+            SecretExportContext::secure_storage(
+                "aura-agent::runtime::effects::lan_discovery_signing_key",
+            ),
+        )
+        .map_err(|error| {
+            AuraError::internal(format!(
+                "invalid LAN discovery single-signer identity key: {error}"
+            ))
+        })?;
+        let signing_key: [u8; 32] = package.signing_key().try_into().map_err(|_| {
+            AuraError::internal("LAN discovery identity signing key must be 32 bytes")
+        })?;
+        if signing_key.iter().all(|byte| *byte == 0) {
+            return Err(AuraError::invalid(
+                "LAN discovery identity signing key must not be all zero",
+            ));
+        }
+        Ok(signing_key)
     }
 }
 

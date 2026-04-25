@@ -391,6 +391,9 @@ pub enum ApprovalThreshold {
 impl ApprovalThreshold {
     /// Check if this threshold is met given approvals and total eligible
     pub fn is_met(&self, approvals: u32, total_eligible: u32) -> bool {
+        if total_eligible == 0 {
+            return false;
+        }
         match self {
             ApprovalThreshold::Any => approvals >= 1,
             ApprovalThreshold::Unanimous => approvals >= total_eligible,

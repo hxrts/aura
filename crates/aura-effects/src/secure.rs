@@ -6,22 +6,24 @@
 //! **Layer Constraint**: No mock handlers - those belong in aura-testkit (Layer 8).
 //! This module contains only production stateless handlers.
 
-#[cfg(target_arch = "wasm32")]
-use crate::storage::FilesystemStorageHandler;
 use async_trait::async_trait;
 use aura_core::crypto::{ed25519_verifying_key, Ed25519SigningKey};
 use aura_core::effects::{
     SecureGeneratedKey, SecureStorageCapability, SecureStorageEffects, SecureStorageError,
     SecureStorageLocation,
 };
-#[cfg(target_arch = "wasm32")]
-use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
 use cfg_if::cfg_if;
 #[cfg(not(target_arch = "wasm32"))]
 use chacha20poly1305::{
     aead::{Aead, Payload},
     ChaCha20Poly1305, KeyInit, Nonce,
 };
+#[cfg(target_arch = "wasm32")]
+use indexed_db_futures::{
+    database::Database, prelude::*, query_source::QuerySource, transaction::TransactionMode,
+};
+#[cfg(target_arch = "wasm32")]
+use js_sys::{Array, Object, Reflect, Uint8Array};
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,6 +33,12 @@ use std::io::Write;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::Mutex;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::{JsCast, JsValue};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+#[cfg(target_arch = "wasm32")]
+use web_sys::{AesGcmParams, CryptoKey, SubtleCrypto};
 
 #[cfg(any(
     target_os = "macos",
@@ -62,6 +70,18 @@ const SECURE_ACCESS_TOKEN_VERSION: u8 = 1;
 const SECURE_ACCESS_TOKEN_NONCE_LEN: usize = 12;
 #[cfg(not(target_arch = "wasm32"))]
 const SECURE_ACCESS_TOKEN_AAD_DOMAIN: &str = "aura:secure-storage-access-token:v1";
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_DB_VERSION: u8 = 1;
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_RECORD_STORE: &str = "secure_records";
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_WRAPPING_KEY_STORE: &str = "wrapping_keys";
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_WRAPPING_KEY_ID: &str = "aura-secure-storage-wrapping-key-v1";
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_RECORD_MAGIC: &[u8] = b"AURA-WASM-SECURE-V1";
+#[cfg(target_arch = "wasm32")]
+const WASM_SECURE_NONCE_LEN: usize = 12;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), SecureStorageError> {
@@ -269,9 +289,10 @@ async fn verify_authenticated_access_token(
 /// Production secure storage selector.
 ///
 /// Production mode uses the platform credential store on supported native
-/// targets. Unsupported production targets fail closed instead of silently using
-/// filesystem fallback storage. Tests and simulations may explicitly construct
-/// the named filesystem fallback variant.
+/// targets and the WebCrypto/IndexedDB secure-storage adapter on wasm. Other
+/// unsupported production targets fail closed instead of silently storing
+/// plaintext secret material. Tests and simulations may explicitly construct the
+/// named filesystem fallback variant.
 #[derive(Debug)]
 pub enum ProductionSecureStorageHandler {
     #[cfg(any(
@@ -284,7 +305,8 @@ pub enum ProductionSecureStorageHandler {
     ))]
     /// Platform credential-store backed secure storage.
     Platform(PlatformSecureStorageHandler),
-    /// Explicit non-production filesystem fallback.
+    /// Explicit fallback adapter. On wasm this is WebCrypto plus IndexedDB; on
+    /// native targets this is filesystem-backed and non-production only.
     FilesystemFallback(FilesystemFallbackSecureStorageHandler),
     /// Fail-closed production handler for targets without platform support.
     UnavailablePlatform {
@@ -296,26 +318,39 @@ pub enum ProductionSecureStorageHandler {
 impl ProductionSecureStorageHandler {
     /// Create production secure storage. Unsupported targets fail closed.
     pub fn for_production(base_path: PathBuf) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Self::FilesystemFallback(
+                FilesystemFallbackSecureStorageHandler::with_base_path(base_path),
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
         let _ = base_path;
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd"
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd"
+            )
         ))]
         {
             Self::Platform(PlatformSecureStorageHandler::new())
         }
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd"
-        )))]
+        #[cfg(all(
+            not(target_arch = "wasm32"),
+            not(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "windows",
+                target_os = "linux",
+                target_os = "freebsd",
+                target_os = "openbsd"
+            ))
+        ))]
         {
             Self::UnavailablePlatform {
                 target: "unsupported",
@@ -337,7 +372,8 @@ impl ProductionSecureStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SecureStorageEffects for ProductionSecureStorageHandler {
     async fn secure_store(
         &self,
@@ -729,7 +765,8 @@ impl Default for PlatformSecureStorageHandler {
     target_os = "freebsd",
     target_os = "openbsd"
 ))]
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SecureStorageEffects for PlatformSecureStorageHandler {
     async fn secure_store(
         &self,
@@ -1041,8 +1078,315 @@ impl FilesystemFallbackSecureStorageHandler {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn wasm_storage(&self) -> FilesystemStorageHandler {
-        FilesystemStorageHandler::new(self.base_path.clone())
+    fn wasm_secure_db_name(&self) -> String {
+        let path = self.base_path.to_string_lossy();
+        let digest = aura_core::hash::hash(path.as_bytes());
+        format!("hxrts_aura_secure_storage_{}", hex::encode(&digest[..8]))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn map_js_error(context: &str, error: impl std::fmt::Debug) -> SecureStorageError {
+        SecureStorageError::storage(format!("{context}: {error:?}"))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_open_secure_db(&self) -> Result<Database, SecureStorageError> {
+        Database::open(self.wasm_secure_db_name())
+            .with_version(WASM_SECURE_DB_VERSION)
+            .with_on_upgrade_needed(|_, db| {
+                if !db
+                    .object_store_names()
+                    .any(|name| name == WASM_SECURE_RECORD_STORE)
+                {
+                    db.create_object_store(WASM_SECURE_RECORD_STORE).build()?;
+                }
+                if !db
+                    .object_store_names()
+                    .any(|name| name == WASM_SECURE_WRAPPING_KEY_STORE)
+                {
+                    db.create_object_store(WASM_SECURE_WRAPPING_KEY_STORE)
+                        .build()?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure storage open failed", e))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_subtle_crypto() -> Result<SubtleCrypto, SecureStorageError> {
+        let window = web_sys::window().ok_or_else(|| {
+            SecureStorageError::storage("WebCrypto secure storage unavailable: window missing")
+        })?;
+        let crypto = window.crypto().map_err(|e| {
+            Self::map_js_error(
+                "WebCrypto secure storage unavailable: crypto lookup failed",
+                e,
+            )
+        })?;
+        Ok(crypto.subtle())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_generate_wrapping_key() -> Result<CryptoKey, SecureStorageError> {
+        let algorithm = Object::new();
+        Reflect::set(
+            &algorithm,
+            &JsValue::from_str("name"),
+            &JsValue::from_str("AES-GCM"),
+        )
+        .map_err(|e| Self::map_js_error("WebCrypto AES-GCM algorithm setup failed", e))?;
+        Reflect::set(
+            &algorithm,
+            &JsValue::from_str("length"),
+            &JsValue::from_f64(256.0),
+        )
+        .map_err(|e| Self::map_js_error("WebCrypto AES-GCM key length setup failed", e))?;
+
+        let usages = Array::new();
+        usages.push(&JsValue::from_str("encrypt"));
+        usages.push(&JsValue::from_str("decrypt"));
+
+        let promise = Self::wasm_subtle_crypto()?
+            .generate_key_with_object(&algorithm, false, &usages.into())
+            .map_err(|e| {
+                Self::map_js_error("WebCrypto non-extractable key generation failed", e)
+            })?;
+        let key = JsFuture::from(promise).await.map_err(|e| {
+            Self::map_js_error("WebCrypto non-extractable key generation rejected", e)
+        })?;
+        key.dyn_into::<CryptoKey>().map_err(|e| {
+            Self::map_js_error("WebCrypto key generation returned unexpected value", e)
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_wrapping_key(&self) -> Result<CryptoKey, SecureStorageError> {
+        let db = self.wasm_open_secure_db().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_WRAPPING_KEY_STORE)
+            .build()
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key transaction failed", e))?;
+        let store = transaction
+            .object_store(WASM_SECURE_WRAPPING_KEY_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key store lookup failed", e))?;
+        let stored: Option<JsValue> = store
+            .get(WASM_SECURE_WRAPPING_KEY_ID)
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key read request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key read failed", e))?;
+        if let Some(stored) = stored {
+            return stored.dyn_into::<CryptoKey>().map_err(|e| {
+                Self::map_js_error("IndexedDB wrapping-key record is not a CryptoKey", e)
+            });
+        }
+
+        let key = Self::wasm_generate_wrapping_key().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_WRAPPING_KEY_STORE)
+            .with_mode(TransactionMode::Readwrite)
+            .build()
+            .map_err(|e| {
+                Self::map_js_error("IndexedDB wrapping-key write transaction failed", e)
+            })?;
+        let store = transaction
+            .object_store(WASM_SECURE_WRAPPING_KEY_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key store lookup failed", e))?;
+        store
+            .put(JsValue::from(key.clone()))
+            .with_key(WASM_SECURE_WRAPPING_KEY_ID)
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key write request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key write failed", e))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB wrapping-key commit failed", e))?;
+        Ok(key)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_encrypt_record(
+        &self,
+        location: &SecureStorageLocation,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        let wrapping_key = self.wasm_wrapping_key().await?;
+        let mut nonce = [0u8; WASM_SECURE_NONCE_LEN];
+        getrandom::getrandom(&mut nonce).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+        let params = AesGcmParams::new_with_u8_slice("AES-GCM", &mut nonce);
+        let mut aad = location.full_path().into_bytes();
+        params.set_additional_data_u8_slice(&mut aad);
+        params.set_tag_length(128);
+
+        let promise = Self::wasm_subtle_crypto()?
+            .encrypt_with_object_and_u8_array(&params, &wrapping_key, plaintext)
+            .map_err(|e| Self::map_js_error("WebCrypto secure-record encryption failed", e))?;
+        let encrypted = JsFuture::from(promise)
+            .await
+            .map_err(|e| Self::map_js_error("WebCrypto secure-record encryption rejected", e))?;
+        let ciphertext = Uint8Array::new(&encrypted).to_vec();
+
+        let mut record = Vec::with_capacity(
+            WASM_SECURE_RECORD_MAGIC.len() + WASM_SECURE_NONCE_LEN + ciphertext.len(),
+        );
+        record.extend_from_slice(WASM_SECURE_RECORD_MAGIC);
+        record.extend_from_slice(&nonce);
+        record.extend_from_slice(&ciphertext);
+        Ok(record)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_decrypt_record(
+        &self,
+        location: &SecureStorageLocation,
+        record: &[u8],
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        if !record.starts_with(WASM_SECURE_RECORD_MAGIC) {
+            return Err(SecureStorageError::storage(
+                "wasm secure-storage record is not encrypted",
+            ));
+        }
+        let nonce_start = WASM_SECURE_RECORD_MAGIC.len();
+        let ciphertext_start = nonce_start + WASM_SECURE_NONCE_LEN;
+        if record.len() < ciphertext_start {
+            return Err(SecureStorageError::storage(
+                "wasm secure-storage record is truncated",
+            ));
+        }
+
+        let wrapping_key = self.wasm_wrapping_key().await?;
+        let mut nonce = record[nonce_start..ciphertext_start].to_vec();
+        let params = AesGcmParams::new_with_u8_slice("AES-GCM", &mut nonce);
+        let mut aad = location.full_path().into_bytes();
+        params.set_additional_data_u8_slice(&mut aad);
+        params.set_tag_length(128);
+
+        let promise = Self::wasm_subtle_crypto()?
+            .decrypt_with_object_and_u8_array(&params, &wrapping_key, &record[ciphertext_start..])
+            .map_err(|e| Self::map_js_error("WebCrypto secure-record decryption failed", e))?;
+        let plaintext = JsFuture::from(promise)
+            .await
+            .map_err(|e| Self::map_js_error("WebCrypto secure-record decryption rejected", e))?;
+        Ok(Uint8Array::new(&plaintext).to_vec())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_put_record(
+        &self,
+        location: &SecureStorageLocation,
+        record: &[u8],
+    ) -> Result<(), SecureStorageError> {
+        let db = self.wasm_open_secure_db().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_RECORD_STORE)
+            .with_mode(TransactionMode::Readwrite)
+            .build()
+            .map_err(|e| {
+                Self::map_js_error("IndexedDB secure-record write transaction failed", e)
+            })?;
+        let store = transaction
+            .object_store(WASM_SECURE_RECORD_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record store lookup failed", e))?;
+        let value = Uint8Array::from(record);
+        store
+            .put(JsValue::from(value))
+            .with_key(location.full_path())
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record write request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record write failed", e))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record commit failed", e))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_get_record(
+        &self,
+        location: &SecureStorageLocation,
+    ) -> Result<Option<Vec<u8>>, SecureStorageError> {
+        let db = self.wasm_open_secure_db().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_RECORD_STORE)
+            .build()
+            .map_err(|e| {
+                Self::map_js_error("IndexedDB secure-record read transaction failed", e)
+            })?;
+        let store = transaction
+            .object_store(WASM_SECURE_RECORD_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record store lookup failed", e))?;
+        let stored: Option<JsValue> = store
+            .get(location.full_path())
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record read request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record read failed", e))?;
+        Ok(stored.map(|value| Uint8Array::new(&value).to_vec()))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_delete_record(
+        &self,
+        location: &SecureStorageLocation,
+    ) -> Result<(), SecureStorageError> {
+        let db = self.wasm_open_secure_db().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_RECORD_STORE)
+            .with_mode(TransactionMode::Readwrite)
+            .build()
+            .map_err(|e| {
+                Self::map_js_error("IndexedDB secure-record delete transaction failed", e)
+            })?;
+        let store = transaction
+            .object_store(WASM_SECURE_RECORD_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record store lookup failed", e))?;
+        store
+            .delete(location.full_path())
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record delete request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record delete failed", e))?;
+        transaction
+            .commit()
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record delete commit failed", e))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn wasm_list_record_keys(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<String>, SecureStorageError> {
+        let db = self.wasm_open_secure_db().await?;
+        let transaction = db
+            .transaction(WASM_SECURE_RECORD_STORE)
+            .build()
+            .map_err(|e| {
+                Self::map_js_error("IndexedDB secure-record list transaction failed", e)
+            })?;
+        let store = transaction
+            .object_store(WASM_SECURE_RECORD_STORE)
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record store lookup failed", e))?;
+        let keys = store
+            .get_all_keys::<String>()
+            .primitive()
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record list request failed", e))?
+            .await
+            .map_err(|e| Self::map_js_error("IndexedDB secure-record list failed", e))?;
+        let prefix = format!("{namespace}/");
+        keys.into_iter()
+            .filter_map(|key| match key {
+                Ok(key) => key.strip_prefix(&prefix).map(ToOwned::to_owned).map(Ok),
+                Err(error) => Some(Err(Self::map_js_error(
+                    "IndexedDB secure-record key decode failed",
+                    error,
+                ))),
+            })
+            .collect()
     }
 
     fn validate_location(location: &SecureStorageLocation) -> Result<(), SecureStorageError> {
@@ -1156,7 +1500,8 @@ impl FilesystemFallbackSecureStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
     async fn secure_store(
         &self,
@@ -1168,11 +1513,8 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         #[cfg(target_arch = "wasm32")]
         {
             Self::validate_location(location)?;
-            return self
-                .wasm_storage()
-                .store(&location.full_path(), key.to_vec())
-                .await
-                .map_err(|e| SecureStorageError::storage(e.to_string()));
+            let record = self.wasm_encrypt_record(location, key).await?;
+            return self.wasm_put_record(location, &record).await;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1195,12 +1537,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         #[cfg(target_arch = "wasm32")]
         {
             Self::validate_location(location)?;
-            return self
-                .wasm_storage()
-                .retrieve(&location.full_path())
-                .await
-                .map_err(|e| SecureStorageError::storage(e.to_string()))?
-                .ok_or_else(|| SecureStorageError::storage("secure key not found"));
+            let record = self
+                .wasm_get_record(location)
+                .await?
+                .ok_or_else(|| SecureStorageError::storage("secure key not found"))?;
+            return self.wasm_decrypt_record(location, &record).await;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1219,12 +1560,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         #[cfg(target_arch = "wasm32")]
         {
             Self::validate_location(location)?;
-            let _ = self
-                .wasm_storage()
-                .remove(&location.full_path())
-                .await
-                .map_err(|e| SecureStorageError::storage(e.to_string()))?;
-            return Ok(());
+            return self.wasm_delete_record(location).await;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1244,10 +1580,9 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         {
             Self::validate_location(location)?;
             return self
-                .wasm_storage()
-                .exists(&location.full_path())
+                .wasm_get_record(location)
                 .await
-                .map_err(|e| SecureStorageError::storage(e.to_string()));
+                .map(|record| record.is_some());
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1265,11 +1600,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         Self::validate_component("namespace", namespace)?;
         #[cfg(target_arch = "wasm32")]
         {
-            return self
-                .wasm_storage()
-                .list_keys(Some(&format!("{namespace}/")))
-                .await
-                .map_err(|e| SecureStorageError::storage(e.to_string()));
+            return self.wasm_list_record_keys(namespace).await;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1313,7 +1644,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         {
             let _ = (location, expires_at);
             Err(SecureStorageError::storage(
-                "authenticated secure access tokens are unavailable for wasm filesystem fallback",
+                "authenticated secure access tokens are unavailable for wasm WebCrypto IndexedDB secure storage",
             ))
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1337,7 +1668,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         {
             let _ = (token, location);
             Err(SecureStorageError::storage(
-                "authenticated secure access tokens are unavailable for wasm filesystem fallback",
+                "authenticated secure access tokens are unavailable for wasm WebCrypto IndexedDB secure storage",
             ))
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1711,5 +2042,22 @@ mod tests {
                 "stored {key_type} secret material must not include type metadata"
             );
         }
+    }
+
+    #[test]
+    fn wasm_secure_storage_does_not_delegate_to_plain_storage() {
+        let source = include_str!("secure.rs");
+        assert!(
+            !source.contains(concat!(".wasm", "_storage()")),
+            "wasm secure storage must not route secret material through plaintext StorageEffects"
+        );
+        assert!(
+            source.contains("wasm_encrypt_record"),
+            "wasm secure storage must encrypt records before persistence"
+        );
+        assert!(
+            source.contains("WASM_SECURE_RECORD_STORE"),
+            "wasm secure storage must persist encrypted records in its IndexedDB store"
+        );
     }
 }

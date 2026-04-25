@@ -13,6 +13,7 @@ pub mod ota_activation_service;
 pub mod recovery;
 pub mod recovery_service;
 pub mod rendezvous;
+pub(crate) mod rendezvous_identity;
 pub mod rendezvous_service;
 pub mod sessions;
 pub mod shared;

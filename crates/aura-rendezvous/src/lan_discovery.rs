@@ -27,6 +27,9 @@ pub const MAGIC_BYTES: &[u8; 4] = b"AURA";
 /// Protocol version.
 pub const PROTOCOL_VERSION: u8 = 1;
 
+/// Maximum age accepted for LAN discovery packets.
+pub const LAN_DISCOVERY_FRESHNESS_WINDOW_MS: u64 = 60_000;
+
 // =============================================================================
 // CONFIGURATION
 // =============================================================================
@@ -73,6 +76,8 @@ pub struct LanDiscoveryPacket {
     pub descriptor: RendezvousDescriptor,
     /// Timestamp (ms since epoch).
     pub timestamp_ms: u64,
+    /// Ed25519 signature over the packet signing payload.
+    pub signature: Vec<u8>,
 }
 
 impl LanDiscoveryPacket {
@@ -87,7 +92,43 @@ impl LanDiscoveryPacket {
             authority_id,
             descriptor,
             timestamp_ms,
+            signature: Vec::new(),
         }
+    }
+
+    /// Create a signed discovery packet.
+    pub fn new_signed(
+        authority_id: AuthorityId,
+        descriptor: RendezvousDescriptor,
+        timestamp_ms: u64,
+        signature: Vec<u8>,
+    ) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            authority_id,
+            descriptor,
+            timestamp_ms,
+            signature,
+        }
+    }
+
+    /// Canonical payload that must be signed by the announcing authority.
+    pub fn signing_payload(&self) -> Option<Vec<u8>> {
+        #[derive(Serialize)]
+        struct LanDiscoverySigningPayload<'a> {
+            version: u8,
+            authority_id: AuthorityId,
+            descriptor: &'a RendezvousDescriptor,
+            timestamp_ms: u64,
+        }
+
+        serde_json::to_vec(&LanDiscoverySigningPayload {
+            version: self.version,
+            authority_id: self.authority_id,
+            descriptor: &self.descriptor,
+            timestamp_ms: self.timestamp_ms,
+        })
+        .ok()
     }
 
     /// Serialize packet with magic header.

@@ -41,6 +41,14 @@ fn test_context(seed: u8) -> ContextId {
     ContextId::new_from_entropy([seed; 32])
 }
 
+fn test_private_key(seed: u8) -> [u8; 32] {
+    [seed; 32]
+}
+
+fn test_public_key(seed: u8) -> [u8; 32] {
+    [seed; 32]
+}
+
 fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
     GuardSnapshot {
         authority_id: authority,
@@ -61,7 +69,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
         context_id: context,
         transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
         handshake_psk_commitment: [42u8; 32],
-        public_key: [0u8; 32],
+        public_key: test_public_key(8),
         device_id: None,
         valid_from: 0,
         valid_until: 10_000,
@@ -194,7 +202,9 @@ fn test_descriptor_publication_flow() {
     let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
     // Act: Prepare descriptor publication
-    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, [0u8; 32], 1000);
+    let outcome = service
+        .prepare_publish_descriptor(&snapshot, context, hints, test_public_key(7), 1000)
+        .unwrap();
 
     // Assert: Should be allowed with correct effects
     assert!(matches!(outcome.decision, GuardDecision::Allow));
@@ -247,8 +257,8 @@ async fn test_channel_establishment_flow() {
             bob,
             &establish_path,
             &psk,
-            &[0u8; 32],
-            &[0u8; 32],
+            &test_private_key(9),
+            &test_public_key(8),
             1000,
             &bob_descriptor,
             &mock_effects,
@@ -294,8 +304,8 @@ async fn test_channel_establishment_uses_explicit_context_over_descriptor_contex
             bob,
             &mismatched_path,
             &psk,
-            &[0u8; 32],
-            &[0u8; 32],
+            &test_private_key(9),
+            &test_public_key(8),
             1000,
             &mismatched_descriptor,
             &mock_effects,
@@ -346,8 +356,8 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
             bob,
             &expired_path,
             &psk,
-            &[0u8; 32],
-            &[0u8; 32],
+            &test_private_key(9),
+            &test_public_key(8),
             1000,
             &expired_descriptor,
             &mock_effects,
@@ -392,14 +402,25 @@ async fn test_handshake_initiator_responder_flow() {
 
     // Step 1: Alice creates init message
     let init_msg = alice_handshaker
-        .create_init_message(epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
+        .create_init_message(
+            epoch,
+            &test_private_key(9),
+            &test_public_key(8),
+            &mock_effects,
+        )
         .await
         .unwrap();
     assert!(!init_msg.is_empty());
 
     // Step 2: Bob processes init
     bob_handshaker
-        .process_init(&init_msg, epoch, &[0u8; 32], &mock_effects)
+        .process_init(
+            &init_msg,
+            epoch,
+            &test_private_key(10),
+            &test_public_key(7),
+            &mock_effects,
+        )
         .await
         .unwrap();
 
@@ -465,7 +486,8 @@ async fn test_handshake_psk_mismatch_detection() {
             alice,
             handshake,
             &expected_psk,
-            &[0u8; 32],
+            &test_private_key(10),
+            &test_public_key(7),
             &mock_effects,
         )
         .await
@@ -563,7 +585,9 @@ fn test_insufficient_flow_budget_blocks_publish() {
 
     let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
-    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, [0u8; 32], 1000);
+    let outcome = service
+        .prepare_publish_descriptor(&snapshot, context, hints, test_public_key(7), 1000)
+        .unwrap();
 
     // Should be denied
     assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
@@ -603,8 +627,8 @@ async fn test_missing_capability_blocks_connect() {
             bob,
             &establish_path,
             &psk,
-            &[0u8; 32],
-            &[0u8; 32],
+            &test_private_key(9),
+            &test_public_key(8),
             1000,
             &bob_descriptor,
             &mock_effects,
@@ -645,8 +669,9 @@ async fn test_complete_discovery_to_channel_flow() {
     // Step 1: Bob publishes his descriptor
     let bob_snapshot = test_snapshot(bob, context);
     let bob_hints = vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()];
-    let publish_outcome =
-        bob_service.prepare_publish_descriptor(&bob_snapshot, context, bob_hints, [0u8; 32], 1000);
+    let publish_outcome = bob_service
+        .prepare_publish_descriptor(&bob_snapshot, context, bob_hints, test_public_key(8), 1000)
+        .unwrap();
     assert!(matches!(publish_outcome.decision, GuardDecision::Allow));
 
     // Step 2: Alice receives Bob's descriptor (simulated journal sync)
@@ -668,8 +693,8 @@ async fn test_complete_discovery_to_channel_flow() {
             bob,
             &establish_path,
             &psk,
-            &[0u8; 32],
-            &[0u8; 32],
+            &test_private_key(9),
+            &test_public_key(8),
             1000,
             &bob_descriptor,
             &mock_effects,
@@ -698,11 +723,22 @@ async fn test_complete_discovery_to_channel_flow() {
     let mut bob_handshaker = Handshaker::new(bob_hs_config);
 
     let init = alice_handshaker
-        .create_init_message(epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
+        .create_init_message(
+            epoch,
+            &test_private_key(9),
+            &test_public_key(8),
+            &mock_effects,
+        )
         .await
         .unwrap();
     bob_handshaker
-        .process_init(&init, epoch, &[0u8; 32], &mock_effects)
+        .process_init(
+            &init,
+            epoch,
+            &test_private_key(10),
+            &test_public_key(7),
+            &mock_effects,
+        )
         .await
         .unwrap();
     let response = bob_handshaker

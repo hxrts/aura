@@ -132,7 +132,8 @@ pub struct StorageStats {
 /// - Production: Filesystem-based persistent storage
 /// - Testing: In-memory storage for fast tests
 /// - Simulation: Configurable storage with fault injection
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait StorageCoreEffects: Send + Sync {
     /// Store a value under the given key
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError>;
@@ -148,7 +149,8 @@ pub trait StorageCoreEffects: Send + Sync {
 }
 
 /// Optional storage effects that build on core storage.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait StorageExtendedEffects: StorageCoreEffects + Send + Sync {
     /// Check if a key exists
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
@@ -195,7 +197,9 @@ pub trait StorageEffects: StorageCoreEffects + StorageExtendedEffects {}
 
 impl<T: StorageCoreEffects + StorageExtendedEffects + ?Sized> StorageEffects for T {}
 
-impl_arc_effect!(StorageCoreEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: StorageCoreEffects + Send + Sync + ?Sized> StorageCoreEffects for std::sync::Arc<T> {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         (**self).store(key, value).await
     }
@@ -211,9 +215,13 @@ impl_arc_effect!(StorageCoreEffects {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         (**self).list_keys(prefix).await
     }
-});
+}
 
-impl_arc_effect!(StorageExtendedEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: StorageExtendedEffects + Send + Sync + ?Sized> StorageExtendedEffects
+    for std::sync::Arc<T>
+{
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         (**self).exists(key).await
     }
@@ -236,4 +244,4 @@ impl_arc_effect!(StorageExtendedEffects {
     async fn stats(&self) -> Result<StorageStats, StorageError> {
         (**self).stats().await
     }
-});
+}

@@ -64,7 +64,7 @@ use aura_guards::{
     IngressVerificationError, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata, REQUIRED_INGRESS_VERIFICATION_CHECKS,
 };
-use aura_journal::commitment_tree::apply_verified_sync;
+use aura_journal::commitment_tree::apply_structurally_verified;
 use aura_protocol::effects::TreeEffects;
 
 const ANTI_ENTROPY_OPERATION_ID: &str = "anti_entropy";
@@ -1079,7 +1079,7 @@ impl AntiEntropyProtocol {
                 ));
             }
 
-            apply_verified_sync(&mut shadow_state, op).map_err(|error| {
+            apply_structurally_verified(&mut shadow_state, op).map_err(|error| {
                 crate::core::errors::sync_protocol_with_peer(
                     "anti_entropy",
                     format!(
@@ -1600,7 +1600,7 @@ mod tests {
 
         async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
             let mut state = self.state.lock().unwrap();
-            apply_verified_sync(&mut state, &op)
+            apply_structurally_verified(&mut state, &op)
                 .map_err(|error| AuraError::invalid(format!("apply attested op: {error}")))?;
             let commitment = Hash32(state.current_commitment());
             self.applied.lock().unwrap().push(op);
@@ -1695,7 +1695,7 @@ mod tests {
                 agg_sig: vec![1, ordinal as u8],
                 signer_count: 1,
             };
-            apply_verified_sync(&mut state, &op).expect("test op should reduce");
+            apply_structurally_verified(&mut state, &op).expect("test op should reduce");
             ops.push(op);
         }
 

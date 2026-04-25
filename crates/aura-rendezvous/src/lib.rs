@@ -132,5 +132,5 @@ pub use flood::{DecryptedPayload, FloodPropagation, PacketBuilder, PacketCrypto,
 // Re-export LAN discovery types
 pub use lan_discovery::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, DEFAULT_ANNOUNCE_INTERVAL_MS,
-    DEFAULT_LAN_PORT, MAX_PACKET_SIZE,
+    DEFAULT_LAN_PORT, LAN_DISCOVERY_FRESHNESS_WINDOW_MS, MAX_PACKET_SIZE,
 };

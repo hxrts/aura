@@ -10,7 +10,9 @@ use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::types::identifiers::AuthorityId;
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
+    LAN_DISCOVERY_FRESHNESS_WINDOW_MS,
 };
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -19,6 +21,88 @@ use tracing::{debug, error, info, trace, warn};
 struct LanDiscoveryShared {
     state: Mutex<LanDiscoveryState>,
     metrics: Mutex<LanDiscoveryMetrics>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::hash::hash;
+    use aura_core::types::identifiers::ContextId;
+    use aura_rendezvous::TransportHint;
+
+    fn test_descriptor(authority_id: AuthorityId, public_key: [u8; 32]) -> RendezvousDescriptor {
+        RendezvousDescriptor {
+            authority_id,
+            device_id: None,
+            context_id: ContextId::new_from_entropy(hash(&authority_id.to_bytes())),
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:9000").unwrap()],
+            handshake_psk_commitment: [7u8; 32],
+            public_key,
+            valid_from: 0,
+            valid_until: u64::MAX,
+            nonce: [1u8; 32],
+            nickname_suggestion: None,
+        }
+    }
+
+    fn signed_packet(
+        authority_id: AuthorityId,
+        signing_key: &SigningKey,
+        timestamp_ms: u64,
+    ) -> LanDiscoveryPacket {
+        let descriptor = test_descriptor(authority_id, signing_key.verifying_key().to_bytes());
+        let unsigned = LanDiscoveryPacket::new(authority_id, descriptor.clone(), timestamp_ms);
+        let payload = unsigned.signing_payload().unwrap();
+        LanDiscoveryPacket::new_signed(
+            authority_id,
+            descriptor,
+            timestamp_ms,
+            signing_key.sign(&payload).to_bytes().to_vec(),
+        )
+    }
+
+    #[test]
+    fn rejects_forged_lan_packet_for_another_authority() {
+        let claimed = AuthorityId::new_from_entropy([1u8; 32]);
+        let attacker = SigningKey::from_bytes(&[9u8; 32]);
+        let victim = SigningKey::from_bytes(&[8u8; 32]);
+        let mut packet = signed_packet(claimed, &attacker, 1_000);
+        packet.descriptor.public_key = victim.verifying_key().to_bytes();
+
+        assert!(!validate_authenticated_packet(&packet, 1_000));
+    }
+
+    #[test]
+    fn rejects_authority_descriptor_mismatch() {
+        let authority = AuthorityId::new_from_entropy([1u8; 32]);
+        let other = AuthorityId::new_from_entropy([2u8; 32]);
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let mut packet = signed_packet(authority, &signing_key, 1_000);
+        packet.descriptor.authority_id = other;
+
+        assert!(!validate_authenticated_packet(&packet, 1_000));
+    }
+
+    #[test]
+    fn rejects_stale_lan_packet() {
+        let authority = AuthorityId::new_from_entropy([1u8; 32]);
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let packet = signed_packet(authority, &signing_key, 1_000);
+
+        assert!(!validate_authenticated_packet(
+            &packet,
+            1_000 + LAN_DISCOVERY_FRESHNESS_WINDOW_MS + 1
+        ));
+    }
+
+    #[test]
+    fn accepts_fresh_authenticated_lan_packet() {
+        let authority = AuthorityId::new_from_entropy([1u8; 32]);
+        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let packet = signed_packet(authority, &signing_key, 1_000);
+
+        assert!(validate_authenticated_packet(&packet, 1_000));
+    }
 }
 
 /// LAN discovery service combining announcer and listener tasks.
@@ -38,7 +122,13 @@ pub struct LanDiscoveryService {
 
 #[derive(Debug, Default)]
 struct LanDiscoveryState {
-    descriptor: Option<RendezvousDescriptor>,
+    descriptor: Option<AuthenticatedLanDescriptor>,
+}
+
+#[derive(Debug, Clone)]
+struct AuthenticatedLanDescriptor {
+    descriptor: RendezvousDescriptor,
+    signing_key: [u8; 32],
 }
 
 /// Runtime metrics for LAN discovery.
@@ -61,6 +151,38 @@ impl LanDiscoveryState {
     fn validate(&self) -> Result<(), super::invariant::InvariantViolation> {
         Ok(())
     }
+}
+
+fn descriptor_has_placeholder_crypto(descriptor: &RendezvousDescriptor) -> bool {
+    descriptor.public_key == [0u8; 32] || descriptor.handshake_psk_commitment == [0u8; 32]
+}
+
+fn validate_authenticated_packet(packet: &LanDiscoveryPacket, received_at_ms: u64) -> bool {
+    if packet.authority_id != packet.descriptor.authority_id {
+        return false;
+    }
+    if descriptor_has_placeholder_crypto(&packet.descriptor) {
+        return false;
+    }
+    if received_at_ms > 0 {
+        let age = received_at_ms.abs_diff(packet.timestamp_ms);
+        if age > LAN_DISCOVERY_FRESHNESS_WINDOW_MS {
+            return false;
+        }
+    }
+    if packet.signature.len() != 64 {
+        return false;
+    }
+    let Some(payload) = packet.signing_payload() else {
+        return false;
+    };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&packet.descriptor.public_key) else {
+        return false;
+    };
+    let Ok(signature) = Signature::from_slice(&packet.signature) else {
+        return false;
+    };
+    verifying_key.verify(&payload, &signature).is_ok()
 }
 
 impl LanDiscoveryService {
@@ -135,10 +257,13 @@ impl LanDiscoveryService {
         self.start_listener(tasks, on_discovered);
     }
 
-    /// Set the descriptor to announce.
-    pub async fn set_descriptor(&self, descriptor: RendezvousDescriptor) {
+    /// Set the descriptor and local identity signing key used for authenticated announcements.
+    pub async fn set_descriptor(&self, descriptor: RendezvousDescriptor, signing_key: [u8; 32]) {
         self.with_state_mut(|state| {
-            state.descriptor = Some(descriptor);
+            state.descriptor = Some(AuthenticatedLanDescriptor {
+                descriptor,
+                signing_key,
+            });
         })
         .await;
     }
@@ -185,7 +310,7 @@ impl LanDiscoveryService {
                     let guard = shared.state.lock().await;
                     guard.descriptor.clone()
                 };
-                let Some(desc) = descriptor.as_ref() else {
+                let Some(announcement) = descriptor.as_ref() else {
                     continue;
                 };
 
@@ -199,7 +324,26 @@ impl LanDiscoveryService {
                     }
                 };
 
-                let packet = LanDiscoveryPacket::new(authority_id, desc.clone(), timestamp_ms);
+                let unsigned = LanDiscoveryPacket::new(
+                    authority_id,
+                    announcement.descriptor.clone(),
+                    timestamp_ms,
+                );
+                let Some(payload) = unsigned.signing_payload() else {
+                    warn!("LAN announcer: failed to serialize signing payload");
+                    let mut metrics = shared.metrics.lock().await;
+                    metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
+                    metrics.last_error_ms = timestamp_ms;
+                    continue;
+                };
+                let signing_key = SigningKey::from_bytes(&announcement.signing_key);
+                let signature = signing_key.sign(&payload).to_bytes().to_vec();
+                let packet = LanDiscoveryPacket::new_signed(
+                    authority_id,
+                    announcement.descriptor.clone(),
+                    timestamp_ms,
+                    signature,
+                );
                 let Some(bytes) = packet.to_bytes() else {
                     warn!("LAN announcer: failed to serialize packet");
                     let mut metrics = shared.metrics.lock().await;
@@ -286,6 +430,15 @@ impl LanDiscoveryService {
                         }
 
                         let discovered_at_ms = received_at_ms;
+                        if !validate_authenticated_packet(&packet, discovered_at_ms) {
+                            trace!(addr = %src_addr, "Rejected unauthenticated LAN discovery packet");
+                            let mut metrics = shared.metrics.lock().await;
+                            metrics.packets_invalid = metrics.packets_invalid.saturating_add(1);
+                            if discovered_at_ms > 0 {
+                                metrics.last_error_ms = discovered_at_ms;
+                            }
+                            continue;
+                        }
 
                         let peer = DiscoveredPeer::new(
                             packet.authority_id,

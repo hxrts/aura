@@ -117,6 +117,7 @@ just check-arch
 | EncryptedStorage key separation fails | `src/encrypted_storage.rs` `test_different_keys_produce_different_ciphertext` | Covered |
 | EncryptedStorage explicit test-only plaintext path broken | `src/encrypted_storage.rs` `test_disabled_encryption_passes_through_plaintext` | Covered |
 | EncryptedStorage rejects tampered blob | `src/encrypted_storage.rs` `test_plaintext_read_rejected` | Covered |
+| WASM secure storage routes secrets through plaintext browser storage | `src/secure.rs` `wasm_secure_storage_does_not_delegate_to_plain_storage`; web implementation uses WebCrypto AES-GCM with a non-extractable wrapping `CryptoKey` persisted in IndexedDB and encrypted records in a separate IndexedDB store | Covered |
 | Guard interpreter misinterprets plan | `src/guard_interpreter.rs` (inline), `tests/handlers/guard_interpreter.rs` | Covered |
 | Impure API used outside effect impl | `tests/handlers/impure_api_confinement.rs` | Covered |
 | Handler retains state between calls | `src/transport/real.rs` (inline) | Covered |

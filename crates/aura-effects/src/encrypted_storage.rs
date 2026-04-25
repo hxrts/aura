@@ -422,7 +422,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S, C, Sec> StorageCoreEffects for EncryptedStorage<S, C, Sec>
 where
     S: StorageCoreEffects + StorageExtendedEffects + Send + Sync,
@@ -482,7 +483,8 @@ where
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S, C, Sec> StorageExtendedEffects for EncryptedStorage<S, C, Sec>
 where
     S: StorageCoreEffects + StorageExtendedEffects + Send + Sync,

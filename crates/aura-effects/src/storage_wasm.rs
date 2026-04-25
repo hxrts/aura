@@ -69,7 +69,8 @@ impl FilesystemStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageCoreEffects for FilesystemStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         Self::invalid_key(key)?;
@@ -136,7 +137,8 @@ impl StorageCoreEffects for FilesystemStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageExtendedEffects for FilesystemStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         Ok(self.retrieve(key).await?.is_some())
