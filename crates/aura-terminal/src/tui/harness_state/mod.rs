@@ -420,30 +420,27 @@ mod tests {
         assert_eq!(state.settings.section, SettingsSection::Devices);
         assert!(matches!(
             followup.as_slice(),
-            [TuiCommand::HarnessRemoveVisibleDevice { device_id: Some(device_id) }]
-                if device_id == "device:removable"
+            [TuiCommand::HarnessRemoveVisibleDevice { device_id: None }]
         ));
     }
 
     #[test]
-    fn harness_command_remove_device_falls_back_to_last_visible_device_when_flags_drift() {
+    fn harness_command_remove_device_preserves_explicit_device_id() {
         let mut state = TuiState::new();
-        let devices = vec![
-            TuiDevice::new("device:current", "Current").current(),
-            TuiDevice::new("device:removable", "Backup").current(),
-        ];
         let followup = apply_harness_command(
             &mut state,
-            HarnessUiCommand::RemoveSelectedDevice { device_id: None },
+            HarnessUiCommand::RemoveSelectedDevice {
+                device_id: Some("device:removable".to_string()),
+            },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
                 contacts: &[],
-                settings_devices: &devices,
+                settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
             },
         )
-        .unwrap_or_else(|error| panic!("remove device fallback should apply: {error}"));
+        .unwrap_or_else(|error| panic!("remove device command should apply: {error}"));
 
         assert!(matches!(
             followup.as_slice(),
@@ -499,6 +496,28 @@ mod tests {
         assert!(matches!(
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::CreateAccount { name })] if name == "AliceUser"
+        ));
+    }
+
+    #[test]
+    fn harness_command_refresh_account_emits_harness_followup() {
+        let mut state = TuiState::new();
+        let followup = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::RefreshAccount,
+            TuiSemanticInputs {
+                app_snapshot: &StateSnapshot::default(),
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        )
+        .unwrap_or_else(|error| panic!("refresh account command should apply: {error}"));
+
+        assert!(matches!(
+            followup.as_slice(),
+            [TuiCommand::HarnessRefreshAccount]
         ));
     }
 
@@ -657,6 +676,8 @@ mod tests {
             HarnessUiCommand::InviteActorToChannel {
                 authority_id: authority_id.to_string(),
                 channel_id: channel_id.to_string(),
+                context_id: Some("ctx-7".to_string()),
+                channel_name: Some("general".to_string()),
             },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
@@ -673,7 +694,11 @@ mod tests {
             [TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
                 authority_id: dispatched_id,
                 channel_id: dispatched_channel_id,
+                context_id,
+                channel_name,
             })] if dispatched_id == &authority_id && dispatched_channel_id == &channel_id.to_string()
+                && context_id.as_deref() == Some("ctx-7")
+                && channel_name.as_deref() == Some("general")
         ));
     }
 

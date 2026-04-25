@@ -125,8 +125,13 @@ action = "launch_actors"
         Err(error) => panic!("failed running harness binary: {error}"),
     };
     assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("shared semantic scenarios require explicit shared-semantic backends"));
+    let combined_output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined_output
+        .contains("shared semantic scenarios require explicit shared-semantic backends"));
 }
 
 #[allow(clippy::disallowed_methods)]

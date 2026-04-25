@@ -40,7 +40,11 @@ use aura_protocol::{
 };
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
+use base64::{engine::general_purpose::STANDARD, Engine};
+#[cfg(not(target_arch = "wasm32"))]
 use futures::{SinkExt, StreamExt};
+#[cfg(not(target_arch = "wasm32"))]
+use serde::Deserialize;
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,6 +79,13 @@ mod lifecycle;
 struct PeerIngressWindow {
     window_started_ms: u64,
     frames_seen: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Deserialize)]
+struct HarnessTransportEnvelopeMessage {
+    kind: String,
+    envelope_b64: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -122,6 +133,35 @@ fn lan_websocket_config() -> WebSocketConfig {
         max_frame_size: Some(MAX_LAN_FRAME_BYTES),
         ..WebSocketConfig::default()
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn decode_lan_websocket_message(
+    message: tokio_tungstenite::tungstenite::Message,
+) -> Result<Vec<u8>, String> {
+    if message.is_binary() {
+        return Ok(message.into_data().clone());
+    }
+
+    if !message.is_text() {
+        return Err("unsupported websocket message kind".to_string());
+    }
+
+    let payload = message
+        .into_text()
+        .map_err(|error| format!("decode websocket text frame: {error}"))?;
+    let wrapped: HarnessTransportEnvelopeMessage = serde_json::from_str(&payload)
+        .map_err(|error| format!("decode harness transport wrapper: {error}"))?;
+    if wrapped.kind != "transport_envelope" {
+        return Err(format!(
+            "unsupported harness transport wrapper kind: {}",
+            wrapped.kind
+        ));
+    }
+
+    STANDARD
+        .decode(wrapped.envelope_b64.as_bytes())
+        .map_err(|error| format!("decode harness transport payload: {error}"))
 }
 
 pub(crate) fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
@@ -1098,11 +1138,19 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                                 }
                             };
 
-                            if !message.is_binary() {
-                                continue;
-                            }
-
-                            let payload = message.into_data();
+                            let payload = match decode_lan_websocket_message(message) {
+                                Ok(payload) => payload,
+                                Err(err) => {
+                                    tracing::debug!(
+                                        error = %err,
+                                        addr = %addr,
+                                        "LAN websocket decode failed"
+                                    );
+                                    let mut metrics = metrics.write().await;
+                                    metrics.decode_errors = metrics.decode_errors.saturating_add(1);
+                                    continue;
+                                }
+                            };
                             if payload.len() > MAX_LAN_FRAME_BYTES {
                                 let now_ms = time_effects
                                     .physical_time()
@@ -1143,10 +1191,10 @@ pub(crate) fn spawn_lan_transport_listener_tasks(
                                 }
                                 return;
                             }
-                            let envelope = match aura_core::util::serialization::from_slice::<
-                                TransportEnvelope,
-                            >(&payload)
-                            {
+                            let envelope =
+                                match aura_core::util::serialization::from_slice::<TransportEnvelope>(
+                                    &payload,
+                                ) {
                                 Ok(envelope) => envelope,
                                 Err(err) => {
                                     tracing::debug!(
@@ -1652,6 +1700,39 @@ mod tests {
 
         assert_eq!(config.max_message_size, Some(MAX_LAN_FRAME_BYTES));
         assert_eq!(config.max_frame_size, Some(MAX_LAN_FRAME_BYTES));
+    }
+
+    #[test]
+    fn lan_websocket_decoder_accepts_binary_transport_envelopes() {
+        let envelope = test_envelope();
+        let payload =
+            aura_core::util::serialization::to_vec(&envelope).expect("serialize test envelope");
+
+        let decoded = decode_lan_websocket_message(
+            tokio_tungstenite::tungstenite::Message::Binary(payload.clone()),
+        )
+        .expect("binary websocket payload should decode");
+
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn lan_websocket_decoder_accepts_wrapped_harness_transport_envelopes() {
+        let envelope = test_envelope();
+        let payload =
+            aura_core::util::serialization::to_vec(&envelope).expect("serialize test envelope");
+        let wrapped = serde_json::json!({
+            "kind": "transport_envelope",
+            "destination": envelope.destination.to_string(),
+            "envelope_b64": STANDARD.encode(payload.as_slice()),
+        });
+
+        let decoded = decode_lan_websocket_message(tokio_tungstenite::tungstenite::Message::Text(
+            wrapped.to_string(),
+        ))
+        .expect("wrapped harness websocket payload should decode");
+
+        assert_eq!(decoded, payload);
     }
 
     #[tokio::test]

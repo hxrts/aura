@@ -1198,29 +1198,31 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::InviteActorToChannel {
             authority_id,
             channel_id,
+            context_id,
+            channel_name,
         } => {
-            let channels = shared_channels_for_dispatch.read().clone();
-            let channel_id_string = channel_id.clone();
-            let Some(channel) = channels
+            let live_channel = shared_channels_for_dispatch
+                .read()
                 .iter()
-                .find(|channel| channel.id == channel_id_string)
-            else {
+                .find(|channel| channel.id == channel_id)
+                .cloned();
+            let resolved_context_id = context_id.or_else(|| {
+                let selected = tui_selected_for_events.read().clone();
+                live_channel
+                    .as_ref()
+                    .and_then(|channel| {
+                        strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    })
+                    .and_then(|binding| binding.context_id)
+            });
+            let Some(context_id) = resolved_context_id else {
                 new_state.toast_error(format!(
-                    "Selected channel is stale or unavailable: {channel_id}"
+                    "Selected channel lacks authoritative context: {channel_id}"
                 ));
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let selected = tui_selected_for_events.read().clone();
-            let context_id =
-                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
-                    .and_then(|binding| binding.context_id);
-            let Some(context_id) = context_id else {
-                new_state.toast_error(format!(
-                    "Selected channel lacks authoritative context: {}",
-                    channel.id
-                ));
-                return EventCommandLoopAction::ContinueCommand;
-            };
+            let channel_name_hint =
+                channel_name.or_else(|| live_channel.as_ref().map(|channel| channel.name.clone()));
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
@@ -1235,10 +1237,17 @@ pub(super) fn handle_dispatch_command_match(
             new_state.clear_runtime_fact_kind(RuntimeEventKind::PendingHomeInvitationReady);
             (cb.contacts.on_invite_to_channel)(
                 authority_id.to_string(),
-                channel.id.clone(),
+                channel_id,
                 Some(context_id),
                 operation,
             );
+            if let Some(channel_name_hint) = channel_name_hint {
+                tracing::trace!(
+                    authority_id = %authority_id,
+                    channel_name = %channel_name_hint,
+                    "invite_actor_to_channel dispatch preserved harness channel hint"
+                );
+            }
         }
         DispatchCommand::RemoveContact { contact_id } => {
             let Some(update_tx) = update_tx_for_events else {

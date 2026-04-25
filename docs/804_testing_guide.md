@@ -179,6 +179,15 @@ Browser-owned semantic snapshot publication should flow through one helper align
 
 Browser-owned async account/bootstrap flows must also fail closed on shell-state publication. If a Dioxus signal write collides with an unmounting or busy component, the browser shell may retry on the next browser tick for the active generation, but it must not silently drop the state transition.
 
+Browser harness mode now has an authenticated runtime bootstrap rule as well.
+When the wasm agent runtime is launched under the browser harness, the
+authenticated query parameters `__aura_harness_instance` and
+`__aura_harness_token` are part of the canonical harness-mode contract. The
+browser shell and runtime must agree on that authenticated handoff before
+taking any harness-only invitation or device-enrollment relaxation path, and
+browser build or cache reuse must preserve the `web,harness` feature set that
+installs that bridge.
+
 ### Shared-Flow Coverage Anchors
 
 The canonical shared-flow coverage anchors for the current parity-critical user flows are listed below.
@@ -202,6 +211,21 @@ metadata should point at the owner modules that now carry those flows:
 invitation acceptance, and `workflows/messaging/{channel_refs,channels,send}.rs`
 for chat navigation, join, and message-send paths. The `aura-app::ui_contract`
 facade remains the canonical export surface for that coverage metadata.
+
+Scenario 12 has an additional browser parity rule now. The shared semantic
+snapshot does not fabricate a selected row for `ListId::Devices`; current-device
+markers and removable-device targeting remain separate concepts. Browser harness
+submission for `remove_selected_device` must therefore fall back to the
+authoritative removable device from settings state when the snapshot has no
+explicit list selection, and the canonical mixed-runtime anchor remains
+`scenario12-mixed-device-enrollment-removal-e2e.toml`.
+
+Scenario 13 has an additional mixed-runtime receive contract now. On the
+current TUI/browser path, authoritative inbound shared-channel messages may
+surface as sealed placeholders rather than plaintext payloads. Harness
+assertions for `scenario13-mixed-contact-channel-message-e2e.toml` should treat
+the `[sealed:` prefix as the canonical browser/TUI parity expectation for those
+receives instead of requiring renderer-local plaintext recovery.
 
 Harness-mode timing exceptions remain narrowly allowlisted. The current shared allowlist includes the browser maintenance cadence plus the runtime and workflow instrumentation hooks that feed observed-shell timing helpers; those branches may tune observation cadence only and must not change business-flow semantics.
 

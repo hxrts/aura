@@ -1,5 +1,5 @@
 use aura_app::ui::contract::ListId;
-use aura_app::ui::signals::CHAT_SIGNAL;
+use aura_app::ui::signals::{CHAT_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui_contract::ChannelBindingWitness;
 use aura_core::types::identifiers::ChannelId;
 use aura_effects::ReactiveEffects;
@@ -87,6 +87,39 @@ pub(crate) fn selected_device_id(controller: &UiController) -> Result<String, Se
         .selected_item_id(ListId::Devices)
         .map(str::to_string)
         .ok_or(SelectionError::NoSelectedDevice)
+}
+
+pub(crate) async fn selected_or_removable_device_id(
+    controller: &UiController,
+) -> Result<String, SelectionError> {
+    match selected_device_id(controller) {
+        Ok(device_id) => Ok(device_id),
+        Err(SelectionError::NoSelectedDevice) => {
+            authoritative_removable_device_id(controller).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn authoritative_removable_device_id(
+    controller: &UiController,
+) -> Result<String, SelectionError> {
+    let app_core = controller.app_core().clone();
+    let removable_device_id = {
+        let core = app_core.read().await;
+        core.read(&*SETTINGS_SIGNAL)
+            .await
+            .ok()
+            .and_then(|settings| {
+                settings
+                    .devices
+                    .into_iter()
+                    .find(|device| !device.is_current)
+                    .map(|device| device.id.to_string())
+            })
+    };
+
+    removable_device_id.ok_or(SelectionError::NoSelectedDevice)
 }
 
 pub(crate) fn selected_authority_id(controller: &UiController) -> Option<String> {

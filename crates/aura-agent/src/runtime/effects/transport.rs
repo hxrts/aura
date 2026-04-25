@@ -253,7 +253,9 @@ async fn resolve_move_route(
 ) -> Option<Route> {
     let manager = effects.rendezvous_manager()?;
     let descriptor = manager.get_descriptor(context, peer).await?;
-    if descriptor_has_placeholder_crypto(&descriptor) {
+    if descriptor_has_placeholder_crypto(&descriptor)
+        && !(effects.is_testing() || effects.harness_mode_enabled())
+    {
         tracing::warn!(
             peer = %peer,
             context = %context,
@@ -283,7 +285,7 @@ fn descriptor_has_placeholder_crypto(descriptor: &RendezvousDescriptor) -> bool 
 }
 
 fn direct_route_allowed(effects: &AuraEffectSystem, route: &Route) -> bool {
-    if effects.is_testing() || !route.is_direct() {
+    if effects.is_testing() || effects.harness_mode_enabled() || !route.is_direct() {
         return true;
     }
 
@@ -818,7 +820,32 @@ mod tests {
     use aura_core::effects::TransportEffects;
     use aura_rendezvous::{RendezvousDescriptor, TransportHint};
     use std::collections::HashMap;
+    use std::ffi::OsString;
     use std::sync::Arc;
+
+    struct EnvRestore {
+        key: &'static str,
+        value: Option<OsString>,
+    }
+
+    impl EnvRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                value: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            if let Some(value) = self.value.take() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     fn descriptor(
         authority_id: AuthorityId,
@@ -925,6 +952,47 @@ mod tests {
         RuntimeService::stop(&manager).await.unwrap();
     }
 
+    #[tokio::test]
+    async fn resolve_peer_addr_allows_placeholder_direct_descriptor_in_harness_mode() {
+        let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_restore = EnvRestore::capture(harness_mode_env);
+        std::env::set_var(harness_mode_env, "1");
+
+        let authority = AuthorityId::new_from_entropy([213u8; 32]);
+        let peer = AuthorityId::new_from_entropy([214u8; 32]);
+        let context = default_context_id_for_authority(peer);
+
+        let config = AgentConfig::default();
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
+        let manager = RendezvousManager::new_with_default_udp(
+            authority,
+            RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let service_context = RuntimeServiceContext::new(
+            Arc::new(TaskSupervisor::new()),
+            Arc::new(effects.time_effects().clone()),
+        );
+        RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
+
+        manager
+            .cache_descriptor(descriptor(
+                peer,
+                context,
+                vec![TransportHint::tcp_direct("127.0.0.1:55003").unwrap()],
+            ))
+            .await
+            .unwrap();
+
+        let resolved = resolve_peer_addr(&effects, context, peer).await;
+        assert_eq!(resolved.as_deref(), Some("127.0.0.1:55003"));
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
     #[test]
     fn production_direct_egress_rejects_local_and_private_ip_literals() {
         assert!(!direct_addr_allowed_in_production("127.0.0.1:55001"));
@@ -943,6 +1011,24 @@ mod tests {
         assert!(direct_addr_allowed_in_production(
             "[2001:4860:4860::8888]:443"
         ));
+    }
+
+    #[test]
+    fn harness_mode_allows_loopback_direct_routes() {
+        let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_restore = EnvRestore::capture(harness_mode_env);
+        std::env::set_var(harness_mode_env, "1");
+
+        let config = AgentConfig::default();
+        let authority = AuthorityId::new_from_entropy([229u8; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(&config, authority)
+            .expect("transport harness effects should build");
+        let route = Route::direct(LinkEndpoint::direct(
+            LinkProtocol::Tcp,
+            "127.0.0.1:55001".to_string(),
+        ));
+
+        assert!(direct_route_allowed(&effects, &route));
     }
 
     #[tokio::test]

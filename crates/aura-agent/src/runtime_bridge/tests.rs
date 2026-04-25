@@ -241,6 +241,90 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
 }
 
 #[tokio::test]
+async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_context() {
+    let local_authority = AuthorityId::new_from_entropy([82u8; 32]);
+    let peer = AuthorityId::new_from_entropy([83u8; 32]);
+    let peer_authority_context = default_context_id_for_authority(peer);
+    let other_cached_context = ContextId::new_from_entropy([84u8; 32]);
+    let build_context = EffectContext::new(
+        local_authority,
+        ContextId::new_from_entropy([85u8; 32]),
+        ExecutionMode::Testing,
+    );
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(local_authority)
+            .with_rendezvous()
+            .build_testing_async(&build_context)
+            .await
+            .expect("build testing agent"),
+    );
+    let manager = agent
+        .runtime()
+        .rendezvous()
+        .expect("runtime rendezvous service");
+
+    let placeholder_descriptor = aura_rendezvous::facts::RendezvousDescriptor {
+        authority_id: peer,
+        device_id: None,
+        context_id: peer_authority_context,
+        transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+            "127.0.0.1:6557",
+        )
+        .expect("tcp hint")],
+        handshake_psk_commitment: [0u8; 32],
+        public_key: [0u8; 32],
+        valid_from: 0,
+        valid_until: u64::MAX,
+        nonce: [0u8; 32],
+        nickname_suggestion: None,
+    };
+    manager
+        .cache_descriptor(placeholder_descriptor)
+        .await
+        .expect("cache placeholder descriptor");
+
+    let mut non_placeholder_descriptor = aura_rendezvous::facts::RendezvousDescriptor {
+        authority_id: peer,
+        device_id: None,
+        context_id: other_cached_context,
+        transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
+            "127.0.0.1:6558",
+        )
+        .expect("tcp hint")],
+        handshake_psk_commitment: [7u8; 32],
+        public_key: [9u8; 32],
+        valid_from: 0,
+        valid_until: u64::MAX,
+        nonce: [0u8; 32],
+        nickname_suggestion: None,
+    };
+    manager
+        .cache_descriptor(non_placeholder_descriptor.clone())
+        .await
+        .expect("cache non-placeholder descriptor");
+
+    seed_authority_route_descriptor_if_needed(
+        agent.runtime().effects().as_ref(),
+        local_authority,
+        peer,
+    )
+    .await;
+
+    let repaired_descriptor = manager
+        .get_descriptor(peer_authority_context, peer)
+        .await
+        .expect("authority route descriptor should be present");
+    assert!(!descriptor_has_placeholder_crypto(&repaired_descriptor));
+    non_placeholder_descriptor.context_id = peer_authority_context;
+    assert_eq!(repaired_descriptor.public_key, non_placeholder_descriptor.public_key);
+    assert_eq!(
+        repaired_descriptor.handshake_psk_commitment,
+        non_placeholder_descriptor.handshake_psk_commitment
+    );
+}
+
+#[tokio::test]
 async fn resolve_amp_channel_context_finds_registered_amp_checkpoint_context() {
     let authority = AuthorityId::new_from_entropy([7u8; 32]);
     let build_context = EffectContext::new(

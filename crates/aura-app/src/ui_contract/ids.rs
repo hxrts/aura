@@ -65,6 +65,7 @@ pub enum ModalId {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarnessUiCommand {
     Ping,
+    RefreshAccount,
     NavigateScreen {
         screen: ScreenId,
     },
@@ -114,6 +115,10 @@ pub enum HarnessUiCommand {
     InviteActorToChannel {
         authority_id: String,
         channel_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_name: Option<String>,
     },
     AcceptPendingChannelInvitation,
     JoinChannel {

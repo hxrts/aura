@@ -159,6 +159,7 @@ pub(crate) fn apply_harness_command(
 ) -> Result<Vec<TuiCommand>, String> {
     match command {
         HarnessUiCommand::Ping => Ok(Vec::new()),
+        HarnessUiCommand::RefreshAccount => Ok(vec![TuiCommand::HarnessRefreshAccount]),
         HarnessUiCommand::ObserveRuntimeFact { fact } => {
             state.upsert_runtime_fact(*fact);
             Ok(Vec::new())
@@ -347,23 +348,6 @@ pub(crate) fn apply_harness_command(
         )]),
         HarnessUiCommand::RemoveSelectedDevice { device_id } => {
             select_settings_section(state, SettingsSection::Devices);
-            let device_id = device_id.or_else(|| {
-                semantic_inputs
-                    .settings_devices
-                    .iter()
-                    .find(|device| !device.is_current)
-                    .map(|device| device.id.clone())
-                    .or_else(|| {
-                        (semantic_inputs.settings_devices.len() > 1)
-                            .then(|| {
-                                semantic_inputs
-                                    .settings_devices
-                                    .last()
-                                    .map(|device| device.id.clone())
-                            })
-                            .flatten()
-                    })
-            });
             Ok(vec![TuiCommand::HarnessRemoveVisibleDevice { device_id }])
         }
         HarnessUiCommand::SwitchAuthority { authority_id } => {
@@ -416,6 +400,8 @@ pub(crate) fn apply_harness_command(
         HarnessUiCommand::InviteActorToChannel {
             authority_id,
             channel_id,
+            context_id,
+            channel_name,
         } => {
             let authority_id = authority_id
                 .parse::<aura_core::AuthorityId>()
@@ -427,6 +413,8 @@ pub(crate) fn apply_harness_command(
                 DispatchCommand::InviteActorToChannel {
                     authority_id,
                     channel_id,
+                    context_id,
+                    channel_name,
                 },
             )])
         }

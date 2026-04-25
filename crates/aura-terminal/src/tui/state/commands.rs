@@ -149,6 +149,9 @@ pub enum TuiCommand {
     /// Harness-only follow-up that removes the targeted or currently visible non-current device.
     HarnessRemoveVisibleDevice { device_id: Option<String> },
 
+    /// Harness-only follow-up that nudges account refresh and runtime ingestion.
+    HarnessRefreshAccount,
+
     /// Request a re-render
     Render,
 }
@@ -212,6 +215,8 @@ pub enum DispatchCommand {
     InviteActorToChannel {
         authority_id: AuthorityId,
         channel_id: String,
+        context_id: Option<String>,
+        channel_name: Option<String>,
     },
     /// Invite the currently selected LAN peer.
     InviteLanPeer,

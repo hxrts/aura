@@ -41,7 +41,7 @@ use crate::browser_promises::await_browser_promise_with_timeout;
 use crate::harness::browser_contract::SEMANTIC_DEBUG_KEY;
 use crate::harness::channel_selection::{
     authoritative_channel_binding, selected_authority_id, selected_channel_binding,
-    selected_device_id, SelectionError,
+    selected_or_removable_device_id, SelectionError,
 };
 use crate::harness_bridge::{
     BootstrapHandoff, PendingAccountBootstrapSource, RuntimeIdentityStageSource,
@@ -602,7 +602,7 @@ async fn route_semantic_intent(
         IntentAction::RemoveSelectedDevice { device_id } => {
             let device_id = match device_id {
                 Some(device_id) => device_id,
-                None => selected_device_id(controller)?,
+                None => selected_or_removable_device_id(controller).await?,
             };
             Ok(RoutedSemanticIntent::RemoveSelectedDevice { device_id })
         }
@@ -1603,6 +1603,24 @@ mod tests {
         assert!(
             body.contains("materialize_authoritative_channel_binding_observed("),
             "browser join fallback should materialize the recovered binding under the requested channel name"
+        );
+    }
+
+    #[test]
+    fn remove_selected_device_uses_authoritative_removable_fallback_when_snapshot_lacks_selection()
+    {
+        let source = include_str!("commands.rs");
+        let start = source
+            .find("IntentAction::RemoveSelectedDevice { device_id } => {")
+            .expect("remove selected device branch");
+        let end = source[start..]
+            .find("IntentAction::SwitchAuthority { authority_id } => {")
+            .map(|offset| start + offset)
+            .expect("switch authority branch marker");
+        let body = &source[start..end];
+        assert!(
+            body.contains("selected_or_removable_device_id(controller).await?"),
+            "browser remove-device routing should fall back to the authoritative removable device when the snapshot exports no explicit selection"
         );
     }
 }

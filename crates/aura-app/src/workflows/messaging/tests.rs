@@ -2672,7 +2672,7 @@ fn invite_authority_with_context_keeps_peer_channel_followup_off_critical_path()
 }
 
 #[test]
-fn invite_authority_handoff_runs_post_success_followups() {
+fn invite_authority_handoff_spawns_post_success_followups_off_critical_path() {
     let source = include_str!("../messaging.rs");
     let start = source
         .find("pub async fn invite_authority_to_channel(")
@@ -2687,9 +2687,34 @@ fn invite_authority_handoff_runs_post_success_followups() {
         "handoff invite_authority_to_channel must gate post-success propagation on workflow success"
     );
     assert!(
-        body.contains(
-            "run_post_channel_invite_followups(app_core, receiver, authoritative_channel)"
-        ),
-        "handoff invite_authority_to_channel must run post-success propagation for channel invites"
+        body.contains("spawn_post_terminal_invite_followups(&spawner, async move {"),
+        "handoff invite_authority_to_channel must move post-success propagation off the terminal-critical path"
+    );
+    assert!(
+        body.contains("core.runtime().map(|runtime| runtime.task_spawner())"),
+        "handoff invite_authority_to_channel must use the sanctioned runtime task spawner for post-terminal followups"
+    );
+}
+
+#[test]
+fn send_message_publishes_success_before_remote_delivery_followups() {
+    let source = include_str!("send.rs");
+    let start = source
+        .find("async fn send_message_ref_owned(")
+        .expect("send_message_ref_owned definition");
+    let end = source[start..]
+        .find("    Ok(message_id)\n}")
+        .map(|offset| start + offset)
+        .expect("send_message_ref_owned return");
+    let body = &source[start..end];
+    let success_idx = body
+        .find(".publish_success_with(issue_message_committed_proof(message_id.clone()))")
+        .expect("message committed success publication");
+    let followup_idx = body
+        .find("spawn_post_terminal_message_followups(&spawner, async move {")
+        .expect("post-terminal message followup spawn");
+    assert!(
+        success_idx < followup_idx,
+        "send_message_ref_owned must publish terminal success before best-effort remote delivery followups"
     );
 }

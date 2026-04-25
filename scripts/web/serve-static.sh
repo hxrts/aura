@@ -55,10 +55,25 @@ web_sources_stale() {
     [[ -n "$newest_src" || "$repo_root/Cargo.lock" -nt "$build_output" || "$repo_root/Cargo.toml" -nt "$build_output" ]]
 }
 
+web_build_has_harness_support() {
+    local public_dir="$1"
+    local js_bundle="$public_dir/wasm/aura-web.js"
+    [[ -f "$js_bundle" ]] || return 1
+    grep -q "__AURA_HARNESS__" "$js_bundle"
+}
+
 for profile in debug release; do
     build_output="$repo_root/target/dx/aura-web/$profile/web/public/index.html"
     if web_sources_stale "$build_output"; then
         echo "[serve-web-static] source files changed, clearing $profile dx cache"
+        rm -rf "$repo_root/target/dx/aura-web/$profile"
+        mkdir -p "$repo_root/target/dx/aura-web/$profile/web/public/assets" \
+                 "$repo_root/target/dx/aura-web/$profile/web/public/fonts"
+        rm -f "$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+        ln -s "$source_css" "$repo_root/target/dx/aura-web/$profile/web/public/assets/tailwind.css"
+    fi
+    if [[ -f "$build_output" ]] && ! web_build_has_harness_support "$repo_root/target/dx/aura-web/$profile/web/public"; then
+        echo "[serve-web-static] cached $profile web assets are missing harness support, clearing dx cache"
         rm -rf "$repo_root/target/dx/aura-web/$profile"
         mkdir -p "$repo_root/target/dx/aura-web/$profile/web/public/assets" \
                  "$repo_root/target/dx/aura-web/$profile/web/public/fonts"
@@ -79,14 +94,14 @@ case "$build_profile" in
     release)
         public_dir="$repo_root/target/dx/aura-web/release/web/public"
         if [[ ! -f "$public_dir/index.html" ]]; then
-            NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web
+            NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web,harness
         else
             echo "[serve-web-static] reusing prebuilt release web assets at $public_dir"
         fi
         if [[ ! -f "$public_dir/index.html" ]]; then
             public_dir="$repo_root/target/dx/aura-web/debug/web/public"
             if [[ ! -f "$public_dir/index.html" ]]; then
-                NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+                NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web,harness
             else
                 echo "[serve-web-static] reusing prebuilt debug web assets at $public_dir"
             fi
@@ -95,7 +110,7 @@ case "$build_profile" in
     debug)
         public_dir="$repo_root/target/dx/aura-web/debug/web/public"
         if [[ ! -f "$public_dir/index.html" ]]; then
-            NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web
+            NO_COLOR=true ../../scripts/web/dx.sh build --platform web --package aura-web --bin aura-web --features web,harness
         else
             echo "[serve-web-static] reusing prebuilt debug web assets at $public_dir"
         fi

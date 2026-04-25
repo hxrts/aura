@@ -549,6 +549,22 @@ pub async fn send_direct_message_to_authority(
 pub mod handoff {
     use super::*;
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spawn_post_terminal_invite_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        spawner.spawn(Box::pin(fut));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn spawn_post_terminal_invite_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        spawner.spawn_local(Box::pin(fut));
+    }
+
     /// Strongest available target for a chat-send handoff.
     #[derive(Debug, Clone)]
     pub enum SendChatTarget {
@@ -696,11 +712,24 @@ pub mod handoff {
         .await;
         if outcome.result.is_ok() {
             if let Some(context_id) = context_id {
-                let authoritative_channel =
-                    super::authoritative_channel_ref(channel_id, context_id);
-                super::run_post_channel_invite_followups(app_core, receiver, authoritative_channel)
-                    .await;
-                let _ = crate::workflows::system::refresh_account(app_core).await;
+                let spawner = {
+                    let core = app_core.read().await;
+                    core.runtime().map(|runtime| runtime.task_spawner())
+                };
+                if let Some(spawner) = spawner {
+                    let app_core = app_core.clone();
+                    spawn_post_terminal_invite_followups(&spawner, async move {
+                        let authoritative_channel =
+                            super::authoritative_channel_ref(channel_id, context_id);
+                        super::run_post_channel_invite_followups(
+                            &app_core,
+                            receiver,
+                            authoritative_channel,
+                        )
+                        .await;
+                        let _ = crate::workflows::system::refresh_account(&app_core).await;
+                    });
+                }
             }
         }
         outcome

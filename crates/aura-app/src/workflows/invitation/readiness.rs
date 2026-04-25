@@ -1,6 +1,8 @@
 #![allow(missing_docs)]
 
 use super::*;
+#[cfg(feature = "signals")]
+use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
 
 pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
     app_core: &Arc<RwLock<AppCore>>,
@@ -14,9 +16,17 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
     #[cfg(not(feature = "signals"))]
     let signal_has_pending = false;
 
-    let runtime_has_pending = authoritative_pending_home_or_channel_invitation(&runtime)
-        .await?
-        .is_some();
+    let runtime_has_pending = if signal_has_pending {
+        true
+    } else if crate::harness_mode_enabled()
+        && harness_invitation_accept_operation_in_flight(app_core).await
+    {
+        false
+    } else {
+        authoritative_pending_home_or_channel_invitation(&runtime)
+            .await?
+            .is_some()
+    };
     let replacements = if signal_has_pending || runtime_has_pending {
         vec![AuthoritativeSemanticFact::PendingHomeInvitationReady]
     } else {
@@ -33,6 +43,29 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
         ),
     )
     .await
+}
+
+#[cfg(feature = "signals")]
+async fn harness_invitation_accept_operation_in_flight(app_core: &Arc<RwLock<AppCore>>) -> bool {
+    read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+        .await
+        .iter()
+        .any(|fact| {
+            matches!(
+                fact,
+                AuthoritativeSemanticFact::OperationStatus { status, .. }
+                    if matches!(
+                        status.kind,
+                        SemanticOperationKind::AcceptContactInvitation
+                            | SemanticOperationKind::AcceptPendingChannelInvitation
+                    ) && !status.phase.is_terminal()
+            )
+        })
+}
+
+#[cfg(not(feature = "signals"))]
+async fn harness_invitation_accept_operation_in_flight(_app_core: &Arc<RwLock<AppCore>>) -> bool {
+    false
 }
 
 pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(

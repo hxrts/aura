@@ -27,6 +27,7 @@
 
 use iocraft::prelude::*;
 
+use aura_app::harness_mode_enabled;
 use aura_app::ui::contract::{contacts_friend_action_controls, ControlId};
 use aura_app::ui::signals::{
     CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, SETTINGS_SIGNAL,
@@ -34,20 +35,18 @@ use aura_app::ui::signals::{
 
 use crate::tui::callbacks::{StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
-    DetailPanel, DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState,
-    InvitePeerCallback, KeyValue, ListPanel, StatusIndicator,
+    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, InvitePeerCallback,
 };
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ContactsViewProps;
-use crate::tui::theme::{Spacing, Theme};
+use crate::tui::theme::{focus_border_color, Spacing, Theme};
 use crate::tui::types::{
     short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
     InvitationType, ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
-use aura_app::ui::types::format_relative_time_from;
-use aura_app::ui::types::ContactRelationshipState;
+use aura_app::ui::types::{format_relative_time_from, ContactRelationshipState, EffectiveName};
 use std::collections::HashSet;
 
 fn contact_relationship_label(state: ContactRelationshipState) -> &'static str {
@@ -126,13 +125,6 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
         Theme::LIST_TEXT_NORMAL
     };
 
-    let status = match c.status {
-        ContactStatus::Active => crate::tui::components::Status::Online,
-        ContactStatus::Offline => crate::tui::components::Status::Offline,
-        ContactStatus::Pending => crate::tui::components::Status::Warning,
-        ContactStatus::Blocked => crate::tui::components::Status::Error,
-    };
-
     let name = if !c.nickname.is_empty() {
         c.nickname.clone()
     } else if let Some(suggested) = &c.nickname_suggestion {
@@ -158,20 +150,22 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     } else {
         text_color
     };
+    let line = format!(
+        "{} {} {}{}",
+        indicator,
+        c.status.icon(),
+        name,
+        relationship_badge
+    );
 
     element! {
         View(
-            flex_direction: FlexDirection::Row,
             background_color: bg,
+            padding_left: 1,
             padding_right: 1,
             overflow: Overflow::Hidden,
         ) {
-            Text(content: format!("{} ", indicator), color: indicator_color)
-            StatusIndicator(status: status, icon_only: true)
-            View(margin_left: Spacing::XS) {
-                Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
-            }
-            Text(content: relationship_badge, color: Theme::SECONDARY)
+            Text(content: line, color: indicator_color)
         }
     }
 }
@@ -189,31 +183,52 @@ pub struct ContactListProps {
 pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
     let contacts = props.contacts.clone();
     let selected = props.selected_index;
-
-    // Build list items
-    let items: Vec<AnyElement<'static>> = contacts
-        .iter()
-        .enumerate()
-        .map(|(idx, contact)| {
-            let is_selected = idx == selected;
-            let id = contact.id.clone();
-            element! {
-                View(key: id) {
-                    ContactItem(contact: contact.clone(), is_selected: is_selected)
-                }
-            }
-            .into_any()
-        })
-        .collect();
+    let border_color = focus_border_color(props.focused);
 
     element! {
-        ListPanel(
-            title: "Contacts".to_string(),
-            count: contacts.len(),
-            focused: props.focused,
-            items: items,
-            empty_message: "No contacts yet".to_string(),
-        )
+        View(
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
+            overflow: Overflow::Hidden,
+        ) {
+            View(padding_left: Spacing::PANEL_PADDING) {
+                Text(
+                    content: format!("Contacts ({})", contacts.len()),
+                    weight: Weight::Bold,
+                    color: Theme::PRIMARY,
+                )
+            }
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding: Spacing::PANEL_PADDING,
+                overflow: Overflow::Hidden,
+            ) {
+                #(if contacts.is_empty() {
+                    Some(element! {
+                        Text(content: "No contacts yet", color: Theme::TEXT_MUTED)
+                    })
+                } else {
+                    None
+                })
+                #(contacts
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, contact)| {
+                        let is_selected = idx == selected;
+                        let id = contact.id.clone();
+                        element! {
+                            View(key: id) {
+                                ContactItem(contact: contact.clone(), is_selected: is_selected)
+                            }
+                        }
+                    }))
+            }
+        }
     }
 }
 
@@ -227,8 +242,8 @@ pub struct ContactDetailProps {
 /// Detail panel for selected contact
 #[component]
 pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static>> {
-    // Build content based on whether a contact is selected
-    let content: Vec<AnyElement<'static>> = if let Some(c) = &props.contact {
+    let border_color = focus_border_color(props.focused);
+    let detail_lines = props.contact.as_ref().map(|c| {
         let status_label = match c.status {
             ContactStatus::Active => "Active",
             ContactStatus::Offline => "Offline",
@@ -237,40 +252,66 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
         };
         let guardian = if c.is_guardian { "Yes" } else { "No" };
         let read_receipts = c.read_receipt_policy.label();
-        let friend_actions = contact_friend_action_hint(c.relationship_state);
-
-        let mut content = vec![
-            element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
-                .into_any(),
-            element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
-                .into_any(),
-            element! { KeyValue(label: "Relationship".to_string(), value: contact_relationship_label(c.relationship_state).to_string()) }
-                .into_any(),
-            element! { KeyValue(label: "Authority".to_string(), value: "User/Home/Neighborhood".to_string()) }
-                .into_any(),
-            element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
-                .into_any(),
-            element! { KeyValue(label: "Read Receipts".to_string(), value: read_receipts.to_string()) }
-                .into_any(),
+        let nickname = if c.nickname.is_empty() {
+            "Unknown".to_string()
+        } else {
+            c.nickname.clone()
+        };
+        let mut lines = vec![
+            format!("Nickname: {nickname}"),
+            format!("Status: {status_label}"),
+            format!(
+                "Relationship: {}",
+                contact_relationship_label(c.relationship_state)
+            ),
+            "Authority: User/Home/Neighborhood".to_string(),
+            format!("Guardian: {guardian}"),
+            format!("Read Receipts: {read_receipts}"),
         ];
-        if let Some(friend_actions) = friend_actions {
-            content.push(
-                element! { KeyValue(label: "Friend Actions".to_string(), value: friend_actions) }
-                    .into_any(),
-            );
+        if let Some(friend_actions) = contact_friend_action_hint(c.relationship_state) {
+            lines.push(format!("Friend Actions: {friend_actions}"));
         }
-        content
-    } else {
-        vec![]
-    };
+        lines
+    });
 
     element! {
-        DetailPanel(
-            title: "Details".to_string(),
-            focused: props.focused,
-            content: content,
-            empty_message: "Select a contact to view details".to_string(),
-        )
+        View(
+            flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            border_style: BorderStyle::Round,
+            border_color: border_color,
+            overflow: Overflow::Hidden,
+        ) {
+            View(padding_left: Spacing::PANEL_PADDING) {
+                Text(content: "Details", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                padding: Spacing::PANEL_PADDING,
+                overflow: Overflow::Hidden,
+            ) {
+                #(if let Some(lines) = detail_lines {
+                    lines
+                        .into_iter()
+                        .map(|line| {
+                            element! {
+                                Text(content: line, color: Theme::TEXT)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    vec![element! {
+                        Text(
+                            content: "Select a contact to view details",
+                            color: Theme::TEXT_MUTED,
+                        )
+                    }]
+                })
+            }
+        }
     }
 }
 
@@ -479,6 +520,62 @@ pub fn ContactsScreen(
     let lan_focused = list_focused && props.view.list_focus.is_lan();
     let contacts_focused = list_focused && props.view.list_focus.is_contacts();
 
+    if harness_mode_enabled() {
+        let selected_label = selected_contact
+            .as_ref()
+            .map(|contact| contact.effective_name())
+            .unwrap_or_else(|| "None".to_string());
+        let detail_lines = selected_contact
+            .as_ref()
+            .map(|contact| {
+                let status_label = match contact.status {
+                    ContactStatus::Active => "Active",
+                    ContactStatus::Offline => "Offline",
+                    ContactStatus::Pending => "Pending",
+                    ContactStatus::Blocked => "Blocked",
+                };
+                vec![
+                    format!("Selected contact: {selected_label}"),
+                    format!("Status: {status_label}"),
+                    format!(
+                        "Relationship: {}",
+                        contact_relationship_label(contact.relationship_state)
+                    ),
+                    format!(
+                        "Guardian: {}",
+                        if contact.is_guardian { "Yes" } else { "No" }
+                    ),
+                ]
+            })
+            .unwrap_or_else(|| vec![format!("Selected contact: {selected_label}")]);
+
+        return element! {
+            View(
+                flex_direction: FlexDirection::Column,
+                width: dim::TOTAL_WIDTH,
+                height: dim::MIDDLE_HEIGHT,
+                overflow: Overflow::Hidden,
+                padding_left: 1,
+                padding_right: 1,
+            ) {
+                Text(content: "Contacts", weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(
+                    content: format!("Nearby peers: {}", lan_peers_state.read().peers.len()),
+                    color: Theme::TEXT_MUTED,
+                )
+                Text(
+                    content: format!("Contacts: {}", display_contacts.len()),
+                    color: Theme::TEXT,
+                )
+                #(detail_lines.into_iter().map(|line| {
+                    element! {
+                        Text(content: line, color: Theme::TEXT)
+                    }
+                }))
+            }
+        };
+    }
+
     // Layout: Full 25 rows for content (no input bar on this screen)
     element! {
         View(
@@ -497,6 +594,7 @@ pub fn ContactsScreen(
                 // Left column: bootstrap candidates + contacts list (matches settings screen)
                 View(
                     width: dim::TWO_PANEL_LEFT_WIDTH,
+                    height: dim::MIDDLE_HEIGHT,
                     flex_direction: FlexDirection::Column,
                     overflow: Overflow::Hidden,
                     gap: 0,
@@ -548,10 +646,16 @@ pub fn ContactsScreen(
                     )
                 }
                 // Detail (matches settings screen width)
-                ContactDetail(
-                    contact: selected_contact,
-                    focused: props.view.focus.is_detail(),
-                )
+                View(
+                    width: dim::TWO_PANEL_RIGHT_WIDTH,
+                    height: dim::MIDDLE_HEIGHT,
+                    overflow: Overflow::Hidden,
+                ) {
+                    ContactDetail(
+                        contact: selected_contact,
+                        focused: props.view.focus.is_detail(),
+                    )
+                }
             }
         }
     }

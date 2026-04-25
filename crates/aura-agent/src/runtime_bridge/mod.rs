@@ -37,6 +37,7 @@ use aura_core::effects::{
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
     time::PhysicalTimeEffects,
+    transport::TransportReceipt,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
     TransportEnvelope,
 };
@@ -46,9 +47,12 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
+use aura_core::FlowBudgetEffects;
+use aura_core::FlowCost;
 use aura_core::Hash32;
 use aura_core::OwnedTaskSpawner;
 use aura_core::Prestate;
+use aura_core::Receipt;
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 use aura_journal::fact::FactContent;
 use aura_journal::fact::{
@@ -101,6 +105,104 @@ const HARNESS_SYNC_ROUNDS_ENV_VAR: &str = "AURA_HARNESS_SYNC_ROUNDS";
 const HARNESS_SYNC_BACKOFF_MS_ENV_VAR: &str = "AURA_HARNESS_SYNC_BACKOFF_MS";
 const DEFAULT_HARNESS_SYNC_ROUNDS: usize = 3;
 const DEFAULT_HARNESS_SYNC_BACKOFF_MS: u64 = 75;
+
+fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
+    TransportReceipt {
+        context: receipt.ctx,
+        src: receipt.src,
+        dst: receipt.dst,
+        epoch: receipt.epoch.value(),
+        cost: receipt.cost.value(),
+        nonce: receipt.nonce.value(),
+        prev: receipt.prev.0,
+        sig: receipt.sig.into_bytes(),
+    }
+}
+
+fn deterministic_test_transport_receipt(envelope: &TransportEnvelope) -> TransportReceipt {
+    TransportReceipt {
+        context: envelope.context,
+        src: envelope.source,
+        dst: envelope.destination,
+        epoch: 1,
+        cost: 1,
+        nonce: 1,
+        prev: [0u8; 32],
+        sig: vec![1u8],
+    }
+}
+
+fn attach_chat_fact_test_receipt_if_needed(
+    effects: &crate::runtime::AuraEffectSystem,
+    envelope: &mut TransportEnvelope,
+) {
+    let should_normalize = effects.is_testing()
+        || (effects.harness_mode_enabled()
+            && envelope
+                .receipt
+                .as_ref()
+                .map_or(true, |receipt| receipt.sig.is_empty()));
+    if should_normalize
+        && envelope
+            .receipt
+            .as_ref()
+            .map_or(true, |receipt| receipt.sig.is_empty())
+    {
+        envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
+    }
+}
+
+fn descriptor_has_placeholder_crypto(descriptor: &aura_rendezvous::RendezvousDescriptor) -> bool {
+    descriptor.public_key == [0u8; 32] || descriptor.handshake_psk_commitment == [0u8; 32]
+}
+
+async fn seed_authority_route_descriptor_if_needed(
+    effects: &crate::runtime::AuraEffectSystem,
+    local_authority: AuthorityId,
+    peer: AuthorityId,
+) {
+    let Some(rendezvous) = effects.rendezvous_manager() else {
+        return;
+    };
+
+    let authority_context = default_context_id_for_authority(peer);
+    if rendezvous
+        .get_descriptor(authority_context, peer)
+        .await
+        .is_some_and(|descriptor| !descriptor_has_placeholder_crypto(&descriptor))
+    {
+        return;
+    }
+
+    let local_context = default_context_id_for_authority(local_authority);
+    let source_descriptor = if let Some(descriptor) = rendezvous
+        .get_descriptor(local_context, peer)
+        .await
+        .filter(|descriptor| !descriptor_has_placeholder_crypto(descriptor))
+    {
+        Some(descriptor)
+    } else if let Some(descriptor) = rendezvous
+        .list_cached_descriptors_for_authority(peer)
+        .await
+        .into_iter()
+        .find(|descriptor| !descriptor_has_placeholder_crypto(descriptor))
+    {
+        Some(descriptor)
+    } else {
+        rendezvous
+            .get_lan_discovered_peer(peer)
+            .await
+            .map(|peer| peer.descriptor)
+            .filter(|descriptor| !descriptor_has_placeholder_crypto(descriptor))
+    };
+
+    let Some(mut descriptor) = source_descriptor else {
+        return;
+    };
+
+    descriptor.context_id = authority_context;
+    let _ = rendezvous.cache_descriptor(descriptor).await;
+}
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
@@ -419,6 +521,11 @@ fn harness_mode_enabled() -> bool {
     std::env::var_os(HARNESS_MODE_ENV_VAR).is_some()
 }
 
+#[cfg(test)]
+pub(crate) fn harness_mode_env_key_for_tests() -> &'static str {
+    HARNESS_MODE_ENV_VAR
+}
+
 fn harness_sync_rounds() -> usize {
     std::env::var(HARNESS_SYNC_ROUNDS_ENV_VAR)
         .ok()
@@ -603,6 +710,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         metadata.insert("target-authority-id".to_string(), peer.to_string());
 
         let effects = self.agent.runtime().effects();
+        seed_authority_route_descriptor_if_needed(
+            effects.as_ref(),
+            self.agent.authority_id(),
+            peer,
+        )
+        .await;
         let reachable_device_count = if let Some(rendezvous) = self.agent.runtime().rendezvous() {
             rendezvous
                 .list_reachable_peer_devices_for_authority(peer)
@@ -612,7 +725,22 @@ impl RuntimeBridge for AgentRuntimeBridge {
             0
         };
 
-        let envelope = TransportEnvelope {
+        let flow_receipt = if effects.is_testing() {
+            None
+        } else {
+            Some(
+                effects
+                    .charge_flow(
+                        &default_context_id_for_authority(peer),
+                        &peer,
+                        FlowCost::new(1),
+                    )
+                    .await
+                    .map_err(|e| bridge_network("Charge chat fact flow failed", e))?,
+            )
+        };
+
+        let mut envelope = TransportEnvelope {
             destination: peer,
             source: self.agent.authority_id(),
             // Chat-fact payloads carry the authoritative channel context already.
@@ -621,8 +749,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             context: default_context_id_for_authority(peer),
             payload,
             metadata,
-            receipt: None,
+            receipt: flow_receipt.map(transport_receipt_from_flow),
         };
+        attach_chat_fact_test_receipt_if_needed(effects.as_ref(), &mut envelope);
 
         tracing::debug!(
             source = %self.agent.authority_id(),

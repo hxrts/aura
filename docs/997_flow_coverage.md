@@ -148,6 +148,16 @@ and continue to map to the same canonical coverage anchors:
   `scenario12-mixed-device-enrollment-removal-e2e.toml` plus
   `shared-settings-parity.toml`, while notifications navigation and authority
   switching remain bound to `shared-notifications-and-authority.toml`.
+- Scenario 12 now also carries the browser-specific removable-device parity
+  rule: the shared semantic snapshot exports current-device markers without
+  fabricating a selected device row, so mixed browser runs must resolve
+  `remove_selected_device` from the authoritative removable device in settings
+  state when no explicit `ListId::Devices` selection exists.
+- Scenario 13 now also carries the mixed-runtime sealed-message receive rule:
+  the current TUI/browser shared-channel receive path may converge on sealed
+  authoritative placeholders, so the canonical receive assertions for the
+  mixed-runtime anchor match the `[sealed:` prefix instead of renderer-local
+  plaintext recovery.
 - AMP channel transition frontend observation is covered by shared semantic AMP
   transition scenarios plus runtime-event parity contract tests. TUI and web
   consume `RuntimeFact::AmpChannelTransitionUpdated` through

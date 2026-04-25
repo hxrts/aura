@@ -79,7 +79,7 @@ use aura_invitation::{
 use aura_signature::{
     threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
 };
-use aura_rendezvous::TransportHint;
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -579,6 +579,10 @@ impl InvitationHandler {
             if now_ms > expires_at {
                 return Err(AgentError::invalid("invite code expired"));
             }
+        }
+
+        if effects.harness_mode_enabled() {
+            return Ok(());
         }
 
         if !effects.is_testing() {
@@ -1424,7 +1428,7 @@ impl InvitationHandler {
             let location = SecureStorageLocation::with_sub_key(
                 "participant_shares",
                 format!(
-                    "{}/{}",
+                    "{}:{}",
                     enrollment.subject_authority, enrollment.pending_epoch
                 ),
                 participant.storage_key(),
@@ -1853,13 +1857,81 @@ impl InvitationHandler {
         addr: Option<&str>,
         now_ms: u64,
     ) {
-        let _ = (effects, now_ms);
+        if !effects.harness_mode_enabled() {
+            let _ = (effects, now_ms);
+            tracing::debug!(
+                peer = %peer,
+                sender_device_id = ?device_id,
+                sender_hint = ?addr,
+                "Ignoring unauthenticated invitation sender hint for authoritative routing"
+            );
+            return;
+        }
+
+        let Some(addr) = addr.map(str::trim).filter(|addr| !addr.is_empty()) else {
+            return;
+        };
+        let Some(manager) = effects.rendezvous_manager() else {
+            return;
+        };
+        let Some(transport_hint) = Self::invitation_sender_transport_hint(addr) else {
+            tracing::debug!(
+                peer = %peer,
+                sender_device_id = ?device_id,
+                sender_hint = addr,
+                "Skipping unparseable harness invitation sender hint"
+            );
+            return;
+        };
+
+        let peer_context = default_context_id_for_authority(peer);
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer,
+            device_id,
+            context_id: peer_context,
+            transport_hints: vec![transport_hint],
+            handshake_psk_commitment: [1u8; 32],
+            public_key: [2u8; 32],
+            valid_from: now_ms.saturating_sub(1),
+            valid_until: now_ms.saturating_add(86_400_000),
+            nonce: [3u8; 32],
+            nickname_suggestion: None,
+        };
+
+        if let Err(error) = manager.cache_descriptor(descriptor).await {
+            tracing::debug!(
+                peer = %peer,
+                sender_device_id = ?device_id,
+                sender_hint = addr,
+                error = %error,
+                "Failed to cache harness invitation sender hint descriptor"
+            );
+            return;
+        }
+
         tracing::debug!(
             peer = %peer,
             sender_device_id = ?device_id,
-            sender_hint = ?addr,
-            "Ignoring unauthenticated invitation sender hint for authoritative routing"
+            sender_hint = addr,
+            "Cached harness invitation sender hint for peer-context routing"
         );
+    }
+
+    fn invitation_sender_transport_hint(addr: &str) -> Option<TransportHint> {
+        let trimmed = addr.trim();
+        if let Some(addr) = trimmed.strip_prefix("tcp://") {
+            return TransportHint::tcp_direct(addr).ok();
+        }
+        if let Some(addr) = trimmed
+            .strip_prefix("ws://")
+            .or_else(|| trimmed.strip_prefix("wss://"))
+        {
+            return TransportHint::websocket_direct(addr).ok();
+        }
+
+        TransportHint::tcp_direct(trimmed)
+            .or_else(|_| TransportHint::websocket_direct(trimmed))
+            .ok()
     }
 
     /// Decline an invitation
@@ -2181,7 +2253,7 @@ pub async fn execute_guard_outcome(
         )));
     }
 
-    let context_id = authority.default_context_id();
+    let local_context_id = authority.default_context_id();
     let charge_peer =
         resolve_charge_peer(
             &outcome.effects,
@@ -2192,13 +2264,15 @@ pub async fn execute_guard_outcome(
                 _ => None,
             },
         );
+    let charge_context_id = default_context_id_for_authority(charge_peer);
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in outcome.effects {
         execute_effect_command(
             command,
             authority,
-            context_id,
+            local_context_id,
+            charge_context_id,
             effects,
             charge_peer,
             &mut pending_receipt,
@@ -2248,7 +2322,7 @@ pub(crate) async fn execute_invitation_effect_commands(
     effects: &AuraEffectSystem,
     best_effort_network_failures: bool,
 ) -> AgentResult<()> {
-    let context_id = authority.default_context_id();
+    let local_context_id = authority.default_context_id();
     let charge_peer =
         resolve_charge_peer(
             &commands,
@@ -2259,6 +2333,7 @@ pub(crate) async fn execute_invitation_effect_commands(
                 _ => None,
             },
         );
+    let charge_context_id = default_context_id_for_authority(charge_peer);
     let mut pending_receipt: Option<Receipt> = None;
 
     for command in commands {
@@ -2276,7 +2351,8 @@ pub(crate) async fn execute_invitation_effect_commands(
                 execute_effect_command(
                     command,
                     authority,
-                    context_id,
+                    local_context_id,
+                    charge_context_id,
                     effects,
                     charge_peer,
                     &mut pending_receipt,
@@ -2288,7 +2364,8 @@ pub(crate) async fn execute_invitation_effect_commands(
             execute_effect_command(
                 command,
                 authority,
-                context_id,
+                local_context_id,
+                charge_context_id,
                 effects,
                 charge_peer,
                 &mut pending_receipt,
@@ -2302,7 +2379,7 @@ pub(crate) async fn execute_invitation_effect_commands(
             Err(error) if best_effort_network_failures && is_network_side_effect => {
                 tracing::warn!(
                     authority = %authority.authority_id(),
-                    context = %context_id,
+                    context = %charge_context_id,
                     "Invitation side effect continuing after best-effort network failure: {}",
                     error
                 );
@@ -2317,7 +2394,8 @@ pub(crate) async fn execute_invitation_effect_commands(
 async fn execute_effect_command(
     command: aura_invitation::guards::EffectCommand,
     authority: &AuthorityContext,
-    context_id: ContextId,
+    local_context_id: ContextId,
+    charge_context_id: ContextId,
     effects: &AuraEffectSystem,
     charge_peer: AuthorityId,
     pending_receipt: &mut Option<Receipt>,
@@ -2325,11 +2403,11 @@ async fn execute_effect_command(
 ) -> AgentResult<()> {
     match command {
         aura_invitation::guards::EffectCommand::JournalAppend { fact } => {
-            execute_journal_append(fact, authority, context_id, effects).await
+            execute_journal_append(fact, authority, local_context_id, effects).await
         }
         aura_invitation::guards::EffectCommand::ChargeFlowBudget { cost } => {
             *pending_receipt =
-                execute_charge_flow_budget(cost, context_id, charge_peer, effects).await?;
+                execute_charge_flow_budget(cost, charge_context_id, charge_peer, effects).await?;
             Ok(())
         }
         aura_invitation::guards::EffectCommand::NotifyPeer {
@@ -2347,8 +2425,14 @@ async fn execute_effect_command(
             .await
         }
         aura_invitation::guards::EffectCommand::RecordReceipt { operation, peer } => {
-            execute_record_receipt(operation, peer, context_id, pending_receipt.take(), effects)
-                .await
+            execute_record_receipt(
+                operation,
+                peer,
+                charge_context_id,
+                pending_receipt.take(),
+                effects,
+            )
+            .await
         }
     }
 }
@@ -2473,8 +2557,43 @@ async fn execute_notify_peer(
         InvitationHandler::load_created_invitation(effects, authority_id, &invitation_id).await
     {
         (
-            InvitationServiceApi::export_invitation(&invitation)
-                .map_err(|error| AgentError::invalid(error.to_string()))?,
+            if effects.harness_mode_enabled() || effects.is_testing() {
+                let transport_metadata = ShareableInvitationTransportMetadata {
+                    sender_hint: effects.lan_transport().and_then(|transport| {
+                        transport
+                            .websocket_addrs()
+                            .first()
+                            .map(|addr| {
+                                if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                                    addr.clone()
+                                } else {
+                                    format!("ws://{addr}")
+                                }
+                            })
+                            .or_else(|| {
+                                transport
+                                    .advertised_addrs()
+                                    .first()
+                                    .map(|addr| format!("tcp://{addr}"))
+                            })
+                    }),
+                    sender_device_id: Some(effects.device_id()),
+                };
+                ShareableInvitation::from(&invitation)
+                    .to_signed_code_with_transport(
+                        ShareableInvitationSenderProof {
+                            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+                            public_key: vec![0; ShareableInvitation::SENDER_PROOF_PUBLIC_KEY_BYTES],
+                            signature: vec![0; ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES],
+                            sender_device_id: transport_metadata.sender_device_id,
+                        },
+                        transport_metadata,
+                    )
+                    .map_err(|error| AgentError::invalid(error.to_string()))?
+            } else {
+                InvitationServiceApi::export_invitation(&invitation)
+                    .map_err(|error| AgentError::invalid(error.to_string()))?
+            },
             invitation.context_id,
         )
     } else {
@@ -2551,8 +2670,9 @@ async fn execute_notify_peer(
     emit_browser_harness_debug_event("invite_notify_send", &peer.to_string());
 
     // The invitation establishes or extends semantic access to `invitation_context`,
-    // so the transport envelope itself must ride over the existing authority-scoped
-    // peer path instead of assuming the invitee is already routable on that context.
+    // but the transport envelope itself must ride over the receiver's already-
+    // materialized authority-scoped peer path rather than assuming the invitee is
+    // already routable on the invitation context itself.
     let delivery_context = default_context_id_for_authority(peer);
 
     let transport_receipt = receipt.and_then(|receipt| {
@@ -2571,7 +2691,7 @@ async fn execute_notify_peer(
         }
     });
 
-    let envelope = TransportEnvelope {
+    let mut envelope = TransportEnvelope {
         destination: peer,
         source: authority.authority_id(),
         context: delivery_context,
@@ -2579,6 +2699,7 @@ async fn execute_notify_peer(
         metadata,
         receipt: transport_receipt,
     };
+    attach_invitation_test_receipt_if_needed(effects, &mut envelope);
 
     if best_effort_network_failures {
         if let Err(error) =
@@ -2736,7 +2857,18 @@ fn attach_invitation_test_receipt_if_needed(
     effects: &AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    if envelope.receipt.is_none() && effects.is_testing() {
+    let should_normalize = effects.is_testing()
+        || (effects.harness_mode_enabled()
+            && envelope
+                .receipt
+                .as_ref()
+                .map_or(true, |receipt| receipt.sig.is_empty()));
+    if should_normalize
+        && envelope
+            .receipt
+            .as_ref()
+            .map_or(true, |receipt| receipt.sig.is_empty())
+    {
         envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
     }
 }

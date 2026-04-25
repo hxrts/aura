@@ -546,7 +546,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             .secure_store(&location, &key_package_envelope, &caps)
             .await?;
 
-        // Store public key package
+        // Store public key package in both the legacy single-signer path and the
+        // canonical threshold path so runtime bootstrap implementations share one layout.
         let pub_location = SecureStorageLocation::new(
             format!("{}_public", key_prefix),
             format!("{}:0", authority),
@@ -554,6 +555,14 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         self.crypto
             .secure_storage()
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
+            .await?;
+        self.crypto
+            .secure_storage()
+            .secure_store(
+                &Self::threshold_public_key_location(authority, 0),
+                &signing_keys.public_key_package,
+                &caps,
+            )
             .await?;
 
         // Store threshold config metadata for epoch 0 (bootstrap case: 1-of-1 single signer)
@@ -607,14 +616,29 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                     )
                     .await?;
 
-                let public_key_package = self
+                let public_key_package = match self
                     .crypto
                     .secure_storage()
                     .secure_retrieve(
                         &Self::solo_public_key_location(&context.authority, current_epoch),
                         &caps,
                     )
-                    .await?;
+                    .await
+                {
+                    Ok(bytes) => bytes,
+                    Err(_) => {
+                        self.crypto
+                            .secure_storage()
+                            .secure_retrieve(
+                                &Self::threshold_public_key_location(
+                                    &context.authority,
+                                    current_epoch,
+                                ),
+                                &caps,
+                            )
+                            .await?
+                    }
+                };
 
                 let signature = self
                     .crypto
@@ -768,16 +792,38 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
         let current_epoch = self.get_current_epoch(authority).await;
-        let location = match self.signing_mode_for_epoch(authority, current_epoch).await {
-            SigningMode::SingleSigner => Self::solo_public_key_location(authority, current_epoch),
-            SigningMode::Threshold => Self::threshold_public_key_location(authority, current_epoch),
-        };
         let caps = vec![SecureStorageCapability::Read];
-        self.crypto
-            .secure_storage()
-            .secure_retrieve(&location, &caps)
-            .await
-            .ok()
+        match self.signing_mode_for_epoch(authority, current_epoch).await {
+            SigningMode::SingleSigner => match self
+                .crypto
+                .secure_storage()
+                .secure_retrieve(
+                    &Self::solo_public_key_location(authority, current_epoch),
+                    &caps,
+                )
+                .await
+            {
+                Ok(bytes) => Some(bytes),
+                Err(_) => self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(
+                        &Self::threshold_public_key_location(authority, current_epoch),
+                        &caps,
+                    )
+                    .await
+                    .ok(),
+            },
+            SigningMode::Threshold => self
+                .crypto
+                .secure_storage()
+                .secure_retrieve(
+                    &Self::threshold_public_key_location(authority, current_epoch),
+                    &caps,
+                )
+                .await
+                .ok(),
+        }
     }
 
     async fn rotate_keys(

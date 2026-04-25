@@ -142,9 +142,29 @@ impl<'a> InvitationChannelHandler<'a> {
         if invitation.sender_id == acceptor_id {
             return Ok(());
         }
-        self.ensure_sender_peer_channel(effects, invitation.sender_id, invitation_context)
-            .await?;
+        let delivery_context = default_context_id_for_authority(invitation.sender_id);
+        if let Err(error) = self
+            .ensure_sender_peer_channel(effects, invitation.sender_id, delivery_context)
+            .await
+        {
+            tracing::debug!(
+                invitation_id = %invitation.invitation_id,
+                sender_id = %invitation.sender_id,
+                acceptor_id = %acceptor_id,
+                invitation_context = %invitation_context,
+                delivery_context = %delivery_context,
+                error = %error,
+                "channel acceptance peer-channel warmup did not converge before notify"
+            );
+        }
 
+        tracing::debug!(
+            invitation_id = %invitation.invitation_id,
+            sender_id = %invitation.sender_id,
+            acceptor_id = %acceptor_id,
+            invitation_context = %invitation_context,
+            "channel acceptance notify signing transcript"
+        );
         let signature = sign_invitation_acceptance_transcript(
             effects,
             acceptor_id,
@@ -156,7 +176,18 @@ impl<'a> InvitationChannelHandler<'a> {
                 nickname_suggestion.clone(),
             ),
         )
-        .await?;
+        .await
+        .map_err(|error| {
+            tracing::debug!(
+                invitation_id = %invitation.invitation_id,
+                sender_id = %invitation.sender_id,
+                acceptor_id = %acceptor_id,
+                invitation_context = %invitation_context,
+                error = %error,
+                "channel acceptance notify signing transcript failed"
+            );
+            error
+        })?;
         let acceptance = ChannelInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
@@ -198,25 +229,49 @@ impl<'a> InvitationChannelHandler<'a> {
         if let Some(acceptor_hint) = acceptor_hint {
             metadata.insert("acceptor-addr".to_string(), acceptor_hint);
         }
+        let membership_flow_receipt = execute_charge_flow_budget(
+            FlowCost::new(1),
+            delivery_context,
+            invitation.sender_id,
+            effects,
+        )
+        .await?;
 
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
             source: acceptor_id,
-            context: invitation_context,
+            context: delivery_context,
             payload,
             metadata,
-            receipt: None,
+            receipt: membership_flow_receipt.map(transport_receipt_from_flow),
         };
         let mut envelope = envelope;
         attach_invitation_test_receipt_if_needed(effects, &mut envelope);
 
+        tracing::debug!(
+            invitation_id = %invitation.invitation_id,
+            sender_id = %invitation.sender_id,
+            acceptor_id = %acceptor_id,
+            invitation_context = %invitation_context,
+            "channel acceptance notify sending membership envelope"
+        );
         attempt_network_send_envelope(
             effects,
             "channel invitation acceptance membership envelope send failed",
             envelope,
         )
         .await
-        .map_err(|error| AgentError::effects(error.to_string()))?;
+        .map_err(|error| {
+            tracing::debug!(
+                invitation_id = %invitation.invitation_id,
+                sender_id = %invitation.sender_id,
+                acceptor_id = %acceptor_id,
+                invitation_context = %invitation_context,
+                error = %error,
+                "channel acceptance notify membership envelope send failed"
+            );
+            AgentError::effects(error.to_string())
+        })?;
 
         if let Some(channel_name) = nickname_suggestion
             .as_ref()
@@ -249,17 +304,43 @@ impl<'a> InvitationChannelHandler<'a> {
                         ("invitation-id", invitation.invitation_id.to_string()),
                     ],
                 ),
-                receipt: None,
+                receipt: execute_charge_flow_budget(
+                    FlowCost::new(1),
+                    delivery_context,
+                    invitation.sender_id,
+                    effects,
+                )
+                .await?
+                .map(transport_receipt_from_flow),
             };
             let mut update_envelope = update_envelope;
             attach_invitation_test_receipt_if_needed(effects, &mut update_envelope);
+            tracing::debug!(
+                invitation_id = %invitation.invitation_id,
+                sender_id = %invitation.sender_id,
+                acceptor_id = %acceptor_id,
+                invitation_context = %invitation_context,
+                channel_id = %home_id,
+                "channel acceptance notify sending chat projection envelope"
+            );
             attempt_network_send_envelope(
                 effects,
                 "channel invitation acceptance chat projection envelope send failed",
                 update_envelope,
             )
             .await
-            .map_err(|error| AgentError::effects(error.to_string()))?;
+            .map_err(|error| {
+                tracing::debug!(
+                    invitation_id = %invitation.invitation_id,
+                    sender_id = %invitation.sender_id,
+                    acceptor_id = %acceptor_id,
+                    invitation_context = %invitation_context,
+                    channel_id = %home_id,
+                    error = %error,
+                    "channel acceptance notify chat projection envelope send failed"
+                );
+                AgentError::effects(error.to_string())
+            })?;
         }
 
         Ok(())

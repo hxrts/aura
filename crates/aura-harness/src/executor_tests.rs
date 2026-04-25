@@ -392,6 +392,25 @@ fn action_precondition_wait_success_returns_without_bailing() {
 }
 
 #[test]
+fn remove_selected_device_submission_keeps_original_intent_shape() {
+    let source = include_str!("executor.rs");
+    let branch_anchor = "IntentAction::RemoveSelectedDevice { .. } => {";
+    let branch_start = source
+        .find(branch_anchor)
+        .unwrap_or_else(|| panic!("missing remove-selected-device branch"));
+    let branch = &source[branch_start..];
+
+    assert!(
+        branch.contains("intent.clone()"),
+        "remove-selected-device branch must submit the original intent instead of rewriting the device id"
+    );
+    assert!(
+        !branch.contains("device_id: Some(device_id)"),
+        "remove-selected-device branch must not freeze a device id from a pre-submission snapshot"
+    );
+}
+
+#[test]
 fn semantic_wait_can_require_confirmed_list_items() {
     let step = crate::config::CompatibilityStep {
         id: "wait-confirmed-contact".to_string(),

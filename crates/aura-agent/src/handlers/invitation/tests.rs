@@ -166,6 +166,21 @@ async fn sign_test_channel_acceptance(
     .expect("channel acceptance transcript should sign")
 }
 
+async fn sign_test_contact_acceptance(
+    effects: &Arc<AuraEffectSystem>,
+    invitation: &Invitation,
+    acceptor_id: AuthorityId,
+) -> ThresholdSignature {
+    bootstrap_test_signing_authority(effects, acceptor_id).await;
+    sign_invitation_acceptance_transcript(
+        effects.as_ref(),
+        acceptor_id,
+        &contact_invitation_acceptance_transcript(invitation, acceptor_id),
+    )
+    .await
+    .expect("contact acceptance transcript should sign")
+}
+
 fn canonical_home_id(seed: u8) -> ChannelId {
     ChannelId::from_bytes([seed; 32])
 }
@@ -315,6 +330,33 @@ macro_rules! large_stack_async_test {
     };
 }
 
+struct EnvRestore {
+    values: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+impl EnvRestore {
+    fn capture(keys: &[&'static str]) -> Self {
+        Self {
+            values: keys
+                .iter()
+                .map(|key| (*key, std::env::var_os(key)))
+                .collect(),
+        }
+    }
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        for (key, value) in self.values.drain(..) {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn channel_home_materialization_requires_registered_homes_signal() {
     let reactive = ReactiveHandler::new();
@@ -393,7 +435,7 @@ async fn test_execute_notify_peer() {
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([135u8; 32]);
-    let now_ms = 1_700_000_000_000;
+    let now_ms: u64 = 1_700_000_000_000;
     let effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
             &config,
@@ -455,9 +497,24 @@ async fn test_execute_notify_peer() {
     assert_eq!(received.destination, peer);
     assert_eq!(received.source, authority.authority_id());
     assert_eq!(
+        received.context,
+        default_context_id_for_authority(peer)
+    );
+    assert_eq!(
         received.metadata.get("content-type").map(String::as_str),
         Some("application/aura-invitation")
     );
+    let code = String::from_utf8(received.payload).expect("invitation payload should be utf-8");
+    if effects.lan_transport().is_some() {
+        assert!(
+            ShareableInvitation::sender_addr_from_code(&code).is_some(),
+            "invitation notify should carry a sender hint when LAN transport is attached"
+        );
+        assert_eq!(
+            ShareableInvitation::sender_device_id_from_code(&code),
+            Some(authority.device_id())
+        );
+    }
 }
 
 #[tokio::test]
@@ -475,12 +532,58 @@ async fn test_execute_record_receipt() {
 }
 
 #[tokio::test]
+async fn send_invitation_records_receipt_in_peer_delivery_context() {
+    let authority = create_test_authority(137);
+    let effects = production_effects_for(&authority);
+    let peer = AuthorityId::new_from_entropy([138u8; 32]);
+    let outcome = GuardOutcome::allowed(vec![
+        EffectCommand::ChargeFlowBudget {
+            cost: FlowCost::new(1),
+        },
+        EffectCommand::RecordReceipt {
+            operation: InvitationOperation::SendInvitation,
+            peer: Some(peer),
+        },
+    ]);
+
+    execute_guard_outcome(outcome, &authority, effects.as_ref())
+        .await
+        .expect("production invitation receipt record should succeed");
+
+    let delivery_context = default_context_id_for_authority(peer);
+    let key_prefix = format!(
+        "invitation/receipts/{}/{}/send_invitation/",
+        delivery_context, peer
+    );
+
+    let mut found = None;
+    for nonce in 0..=4 {
+        let key = format!("{key_prefix}{nonce}");
+        if let Some(bytes) = effects
+            .retrieve(&key)
+            .await
+            .expect("receipt lookup should succeed")
+        {
+            found = Some((key, bytes));
+            break;
+        }
+    }
+
+    let (_, bytes) = found.expect("send invitation receipt should be stored under delivery context");
+    let stored: Receipt =
+        serde_json::from_slice(&bytes).expect("stored invitation receipt should deserialize");
+    assert_eq!(stored.ctx, delivery_context);
+    assert_eq!(stored.dst, peer);
+    assert_eq!(stored.src, authority.authority_id());
+}
+
+#[tokio::test]
 async fn test_execute_multiple_commands() {
     let authority = create_test_authority(138);
     let shared_transport = crate::runtime::SharedTransport::new();
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([139u8; 32]);
-    let now_ms = 1_700_000_000_000;
+    let now_ms: u64 = 1_700_000_000_000;
     let effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
             &config,
@@ -549,6 +652,10 @@ async fn test_execute_multiple_commands() {
         .expect("invitation delivery should not fail receipt validation");
     assert_eq!(received.destination, peer);
     assert_eq!(received.source, authority.authority_id());
+    assert_eq!(
+        received.context,
+        default_context_id_for_authority(peer)
+    );
     assert_eq!(
         received.metadata.get("content-type").map(String::as_str),
         Some("application/aura-invitation")
@@ -1301,6 +1408,207 @@ large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes,
     assert!(processed >= 1);
 });
 
+large_stack_async_test!(contact_acceptance_processing_seeds_peer_default_descriptor_from_local_context, {
+    let shared_transport = crate::runtime::SharedTransport::new();
+    let config = AgentConfig::default();
+
+    let sender_id = AuthorityId::new_from_entropy([198u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([199u8; 32]);
+
+    let sender_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            sender_id,
+            shared_transport.clone(),
+        );
+    let receiver_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            receiver_id,
+            shared_transport,
+        );
+
+    let sender_handler = handler_for_id(sender_id);
+    let _sender_rendezvous_tasks =
+        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+    let sender_manager = sender_effects
+        .rendezvous_manager()
+        .expect("sender rendezvous manager should be attached");
+    let now_ms: u64 = 1_700_000_000_000;
+    let sender_local_context = default_context_id_for_authority(sender_id);
+    let receiver_peer_context = default_context_id_for_authority(receiver_id);
+    sender_manager
+        .cache_descriptor(RendezvousDescriptor {
+            authority_id: receiver_id,
+            device_id: None,
+            context_id: sender_local_context,
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:55041").unwrap()],
+            handshake_psk_commitment: [41u8; 32],
+            public_key: [42u8; 32],
+            valid_from: now_ms.saturating_sub(1),
+            valid_until: now_ms.saturating_add(86_400_000),
+            nonce: [43u8; 32],
+            nickname_suggestion: None,
+        })
+        .await
+        .unwrap();
+    assert!(
+        sender_manager
+            .get_descriptor(receiver_peer_context, receiver_id)
+            .await
+            .is_none(),
+        "peer-default descriptor should start unset"
+    );
+
+    let invitation = sender_handler
+        .create_invitation(
+            sender_effects.clone(),
+            receiver_id,
+            InvitationType::Contact { nickname: None },
+            Some("Contact invitation from sender".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+    let acceptance = ContactInvitationAcceptance {
+        invitation_id: invitation.invitation_id.clone(),
+        acceptor_id: receiver_id,
+        signature: sign_test_contact_acceptance(&receiver_effects, &invitation, receiver_id).await,
+    };
+    let payload = serde_json::to_vec(&acceptance).unwrap();
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
+    );
+    metadata.insert(
+        "invitation-id".to_string(),
+        invitation.invitation_id.to_string(),
+    );
+    metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
+
+    send_invitation_test_verified_envelope(
+        &sender_effects,
+        TransportEnvelope {
+            destination: sender_id,
+            source: receiver_id,
+            context: default_context_id_for_authority(sender_id),
+            payload,
+            metadata,
+            receipt: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let processed = sender_handler
+        .process_contact_invitation_acceptances(sender_effects.clone())
+        .await
+        .unwrap();
+    assert!(processed >= 1);
+
+    let descriptor = sender_manager
+        .get_descriptor(receiver_peer_context, receiver_id)
+        .await
+        .expect("processed contact acceptance should seed peer-default descriptor");
+    assert!(matches!(
+        descriptor.transport_hints.as_slice(),
+        [TransportHint::TcpDirect { addr, .. }] if addr.to_string() == "127.0.0.1:55041"
+    ));
+    assert_eq!(descriptor.handshake_psk_commitment, [41u8; 32]);
+    assert_eq!(descriptor.public_key, [42u8; 32]);
+    assert_eq!(descriptor.nonce, [43u8; 32]);
+});
+
+large_stack_async_test!(invite_to_channel_imports_pending_invitation_in_harness_mode, {
+    let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_restore = EnvRestore::capture(&[harness_mode_env]);
+    std::env::set_var(harness_mode_env, "1");
+
+    let shared_transport = crate::runtime::SharedTransport::new();
+    let config = AgentConfig::default();
+    let sender_id = AuthorityId::new_from_entropy([200u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([201u8; 32]);
+    let sender_effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+            &config,
+            sender_id,
+            shared_transport.clone(),
+        )
+        .unwrap(),
+    );
+    let receiver_effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+            &config,
+            receiver_id,
+            shared_transport,
+        )
+        .unwrap(),
+    );
+
+    let sender_service =
+        invitation_service_for(AuthorityContext::new(sender_id), sender_effects.clone());
+    let receiver_handler = handler_for_id(receiver_id);
+
+    let context_id = ContextId::new_from_entropy([202u8; 32]);
+    let channel_id = ChannelId::from_bytes(hash(b"harness-mode-channel-invite-import"));
+    sender_effects
+        .create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(channel_id),
+            skip_window: None,
+            topic: None,
+        })
+        .await
+        .unwrap();
+    sender_effects
+        .join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: channel_id,
+            participant: sender_id,
+        })
+        .await
+        .unwrap();
+
+    let invitation = sender_service
+        .invite_to_channel(
+            receiver_id,
+            channel_id.to_string(),
+            Some(context_id),
+            Some("shared-parity-lab".to_string()),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let mut imported = None;
+    for _ in 0..20 {
+        let _ = receiver_handler
+            .process_contact_invitation_acceptances(receiver_effects.clone())
+            .await
+            .unwrap();
+        let pending = receiver_handler
+            .list_pending_with_storage(receiver_effects.as_ref())
+            .await;
+        if let Some(found) = pending
+            .into_iter()
+            .find(|candidate| candidate.invitation_id == invitation.invitation_id)
+        {
+            imported = Some(found);
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    let imported = imported.expect("receiver should import the pending channel invitation");
+    assert!(matches!(imported.invitation_type, InvitationType::Channel { .. }));
+    assert_eq!(imported.status, InvitationStatus::Pending);
+    assert_eq!(imported.sender_id, sender_id);
+    assert_eq!(imported.receiver_id, receiver_id);
+});
+
 large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelopes, {
     let authority = AuthorityId::new_from_entropy([201u8; 32]);
     let peer = AuthorityId::new_from_entropy([202u8; 32]);
@@ -1857,6 +2165,58 @@ async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
     assert!(
         local_descriptor.is_none(),
         "unauthenticated invitation sender hints must not seed local-context routing"
+    );
+}
+
+#[tokio::test]
+async fn cache_peer_descriptor_seeds_peer_context_routing_in_harness_mode() {
+    let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_restore = EnvRestore::capture(&[harness_mode_env]);
+    std::env::set_var(harness_mode_env, "1");
+
+    let authority_id = AuthorityId::new_from_entropy([227u8; 32]);
+    let peer_id = AuthorityId::new_from_entropy([228u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority(&config, authority_id).unwrap(),
+    );
+    let handler = InvitationHandler::new(AuthorityContext::new(authority_id)).unwrap();
+    let manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+        authority_id,
+        crate::runtime::services::RendezvousManagerConfig::default(),
+        Arc::new(effects.time_effects().clone()),
+    );
+    effects.attach_rendezvous_manager(manager.clone());
+
+    let now_ms = 1_700_000_000_000;
+    handler
+        .cache_peer_descriptor_for_peer(
+            effects.as_ref(),
+            peer_id,
+            None,
+            Some("ws://127.0.0.1:43011"),
+            now_ms,
+        )
+        .await;
+
+    let peer_descriptor = manager
+        .get_descriptor(default_context_id_for_authority(peer_id), peer_id)
+        .await
+        .expect("harness sender hints should seed peer-context routing");
+    assert!(matches!(
+        peer_descriptor.transport_hints.as_slice(),
+        [TransportHint::WebSocketDirect { addr, .. }] if addr.to_string() == "127.0.0.1:43011"
+    ));
+    assert_ne!(peer_descriptor.handshake_psk_commitment, [0u8; 32]);
+    assert_ne!(peer_descriptor.public_key, [0u8; 32]);
+    assert_ne!(peer_descriptor.nonce, [0u8; 32]);
+
+    let local_descriptor = manager
+        .get_descriptor(default_context_id_for_authority(authority_id), peer_id)
+        .await;
+    assert!(
+        local_descriptor.is_none(),
+        "harness sender hints should still avoid seeding local-context routing"
     );
 }
 

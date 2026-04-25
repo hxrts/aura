@@ -585,7 +585,9 @@ mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{
+        AuthoritativeSemanticFact, AuthoritativeSemanticFactsSnapshot, ProjectionRevision,
         SemanticFailureCode, SemanticFailureDomain, SemanticOperationKind, SemanticOperationPhase,
+        SemanticOperationStatus,
     };
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
@@ -593,7 +595,39 @@ mod tests {
     use crate::workflows::semantic_facts::assert_terminal_failure_status;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
-    use std::{fs, path::PathBuf};
+    use async_lock::Mutex;
+    use std::{ffi::OsString, fs, path::PathBuf, sync::OnceLock};
+
+    fn harness_env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvRestore {
+        saved: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                saved: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.saved {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
 
     fn read_invitation_workflow_source(relative_path: &str) -> String {
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_path))
@@ -1002,6 +1036,119 @@ mod tests {
         assert!(facts
             .iter()
             .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn refresh_authoritative_invitation_readiness_harness_uses_runtime_pending_when_no_accept_operation_is_in_flight(
+    ) {
+        let _env_guard = harness_env_lock().lock().await;
+        let _restore = EnvRestore::capture(&[
+            "AURA_HARNESS_MODE",
+            "AURA_HARNESS_SCENARIO_SEED",
+            "AURA_HARNESS_INSTANCE_ID",
+        ]);
+        std::env::set_var("AURA_HARNESS_MODE", "1");
+        std::env::set_var("AURA_HARNESS_SCENARIO_SEED", "13");
+        std::env::set_var("AURA_HARNESS_INSTANCE_ID", "invitation-readiness-test");
+
+        let authority = AuthorityId::new_from_entropy([166u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_pending_invitations(vec![InvitationInfo {
+            invitation_id: InvitationId::new("runtime-pending-channel"),
+            sender_id: AuthorityId::new_from_entropy([167u8; 32]),
+            receiver_id: authority,
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: ChannelId::from_bytes([168u8; 32]).to_string(),
+                context_id: Some(ContextId::new_from_entropy([169u8; 32])),
+                nickname_suggestion: Some("shared-parity-lab".to_string()),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+            receiver_nickname: None,
+        }]);
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+
+        refresh_authoritative_invitation_readiness(&app_core)
+            .await
+            .expect("harness readiness should still consult runtime for real pending invites");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(facts
+            .iter()
+            .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)));
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn refresh_authoritative_invitation_readiness_harness_skips_empty_runtime_lookup_while_accept_is_in_flight(
+    ) {
+        let _env_guard = harness_env_lock().lock().await;
+        let _restore = EnvRestore::capture(&[
+            "AURA_HARNESS_MODE",
+            "AURA_HARNESS_SCENARIO_SEED",
+            "AURA_HARNESS_INSTANCE_ID",
+        ]);
+        std::env::set_var("AURA_HARNESS_MODE", "1");
+        std::env::set_var("AURA_HARNESS_SCENARIO_SEED", "14");
+        std::env::set_var(
+            "AURA_HARNESS_INSTANCE_ID",
+            "invitation-accept-in-flight-test",
+        );
+
+        let authority = AuthorityId::new_from_entropy([170u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_pending_invitations(Vec::new());
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        emit_signal(
+            &app_core,
+            &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+            AuthoritativeSemanticFactsSnapshot {
+                revision: ProjectionRevision::default(),
+                facts: vec![AuthoritativeSemanticFact::OperationStatus {
+                    operation_id: OperationId::invitation_accept_contact(),
+                    instance_id: Some(OperationInstanceId("accept-in-flight".to_string())),
+                    causality: None,
+                    status: SemanticOperationStatus::new(
+                        SemanticOperationKind::AcceptContactInvitation,
+                        SemanticOperationPhase::WorkflowDispatched,
+                    ),
+                }],
+            },
+            "authoritative_semantic_facts",
+        )
+        .await
+        .unwrap();
+
+        refresh_authoritative_invitation_readiness(&app_core)
+            .await
+            .expect("harness readiness should tolerate in-flight contact acceptance");
+
+        let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+        assert!(
+            !facts
+                .iter()
+                .any(|fact| matches!(fact, AuthoritativeSemanticFact::PendingHomeInvitationReady)),
+            "empty pending-invitation readiness must stay cleared while accept is in flight"
+        );
     }
 
     #[tokio::test]

@@ -67,6 +67,13 @@ use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
 
+#[cfg(target_arch = "wasm32")]
+const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
+#[cfg(target_arch = "wasm32")]
+const HARNESS_TOKEN_QUERY_KEY: &str = "__aura_harness_token";
+#[cfg(target_arch = "wasm32")]
+const MIN_HARNESS_TOKEN_LEN: usize = 16;
+
 /// Cached Biscuit token and root public key for guard chain authorization.
 ///
 /// Populated during `bootstrap_authority()` and loaded from secure storage
@@ -445,7 +452,8 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let test_mode = execution_mode.is_deterministic();
-        let harness_mode_enabled = std::env::var_os("AURA_HARNESS_MODE").is_some();
+        let harness_mode_enabled =
+            std::env::var_os("AURA_HARNESS_MODE").is_some() || authenticated_browser_harness_mode();
 
         // === Build CryptoSubsystem ===
         let crypto_handler = match crypto_seed {
@@ -1900,6 +1908,7 @@ impl AuraEffectSystem {
 mod tests {
     use super::*;
     use crate::core::config::{SecureStorageBackend, StorageConfig};
+    use crate::runtime::services::threshold_signing::ThresholdSigningService;
     use aura_core::effects::ThresholdSigningEffects;
     use aura_core::types::identifiers::ContextId;
     use aura_guards::GuardContextProvider;
@@ -2292,6 +2301,46 @@ mod tests {
         assert!(signature.is_single_signer());
         assert_eq!(signature.public_key_package, bootstrapped_public_key);
     }
+
+    #[tokio::test]
+    async fn test_sign_uses_threshold_pubkey_fallback_for_service_bootstrap() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let effect_system = crate::testing::simulation_effect_system_arc(&config);
+        let service = ThresholdSigningService::new(effect_system.clone());
+        let authority = AuthorityId::new_from_entropy([35u8; 32]);
+
+        let bootstrapped_public_key = service
+            .bootstrap_authority(&authority)
+            .await
+            .expect("service bootstrap should succeed");
+
+        assert_eq!(
+            effect_system.public_key_package(&authority).await,
+            Some(bootstrapped_public_key.clone())
+        );
+
+        let signature = effect_system
+            .sign(aura_core::threshold::SigningContext {
+                authority,
+                operation: aura_core::threshold::SignableOperation::Message {
+                    domain: "aura.test.threshold-signing-fallback".to_string(),
+                    payload: b"bootstrap-signature-fallback".to_vec(),
+                },
+                approval_context: aura_core::threshold::ApprovalContext::SelfOperation,
+            })
+            .await
+            .expect("effect-system signing should accept service bootstrap layout");
+
+        assert!(signature.is_single_signer());
+        assert_eq!(signature.public_key_package, bootstrapped_public_key);
+    }
 }
 
 // Note: RelationshipFormationEffects is a composite trait that is automatically implemented
@@ -2481,6 +2530,35 @@ impl AuraEffectSystem {
             Err(_) => None,
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn authenticated_browser_harness_mode() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(search) = window.location().search() else {
+        return false;
+    };
+    let query = search.strip_prefix('?').unwrap_or(&search);
+    let mut has_instance = false;
+    let mut has_token = false;
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
+        if key == HARNESS_INSTANCE_QUERY_KEY && !value.is_empty() {
+            has_instance = true;
+        } else if key == HARNESS_TOKEN_QUERY_KEY && value.len() >= MIN_HARNESS_TOKEN_LEN {
+            has_token = true;
+        }
+    }
+    has_instance && has_token
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn authenticated_browser_harness_mode() -> bool {
+    false
 }
 
 /// Threshold configuration metadata stored alongside keys

@@ -297,6 +297,18 @@ pub(super) fn execute_harness_followup_command(
     let last_exported_devices = ctx.last_exported_devices;
     let selected_channel = ctx.selected_channel;
     match command {
+        TuiCommand::HarnessRefreshAccount => {
+            let app_core = app_ctx.app_core.raw().clone();
+            let tasks = app_ctx.tasks();
+            tasks.spawn(async move {
+                if let Err(error) =
+                    aura_app::ui::workflows::system::refresh_account(&app_core).await
+                {
+                    tracing::debug!(error = %error, "harness refresh_account nudge failed");
+                }
+            });
+            Ok(None)
+        }
         TuiCommand::Dispatch(DispatchCommand::CreateAccount { name }) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("App callbacks are unavailable".to_string());
@@ -631,25 +643,26 @@ pub(super) fn execute_harness_followup_command(
         TuiCommand::Dispatch(DispatchCommand::InviteActorToChannel {
             authority_id,
             channel_id,
+            context_id,
+            channel_name,
         }) => {
-            let channels = shared_channels.read().clone();
-            let channel_id_string = channel_id.clone();
-            let Some(channel) = channels
+            let live_channel = shared_channels
+                .read()
                 .iter()
-                .find(|channel| channel.id == channel_id_string)
-            else {
+                .find(|channel| channel.id == channel_id)
+                .cloned();
+            let resolved_context_id = context_id.or_else(|| {
+                let selected = selected_channel.read().clone();
+                live_channel
+                    .as_ref()
+                    .and_then(|channel| {
+                        strongest_authoritative_binding_for_channel(channel, selected.as_ref())
+                    })
+                    .and_then(|binding| binding.context_id)
+            });
+            let Some(context_id) = resolved_context_id else {
                 return Err(format!(
-                    "Selected channel is stale or unavailable: {channel_id}"
-                ));
-            };
-            let selected = selected_channel.read().clone();
-            let context_id =
-                strongest_authoritative_binding_for_channel(channel, selected.as_ref())
-                    .and_then(|binding| binding.context_id);
-            let Some(context_id) = context_id else {
-                return Err(format!(
-                    "Selected channel lacks authoritative context: {}",
-                    channel.id
+                    "Selected channel lacks authoritative context: {channel_id}"
                 ));
             };
             let Some(update_tx) = update_tx.clone() else {
@@ -667,9 +680,9 @@ pub(super) fn execute_harness_followup_command(
             let app_core = app_ctx.app_core.raw().clone();
             let tasks = app_ctx.tasks();
             let receiver = authority_id;
-            let channel_name_hint = channel.name.clone();
-            let channel_id = channel
-                .id
+            let channel_name_hint =
+                channel_name.or_else(|| live_channel.as_ref().map(|channel| channel.name.clone()));
+            let channel_id = channel_id
                 .parse::<aura_core::ChannelId>()
                 .map_err(|error| {
                     format!("selected channel id is not canonical for harness invite: {error}")
@@ -689,7 +702,7 @@ pub(super) fn execute_harness_followup_command(
                         receiver,
                         channel_id,
                         context_id: Some(context_id),
-                        channel_name_hint: Some(channel_name_hint),
+                        channel_name_hint,
                         operation_instance_id,
                         message: None,
                         ttl_ms: None,

@@ -824,6 +824,14 @@ impl RendezvousManager {
         }
     }
 
+    /// Get all cached descriptors for a peer authority across contexts.
+    pub async fn list_cached_descriptors_for_authority(
+        &self,
+        peer: AuthorityId,
+    ) -> Vec<RendezvousDescriptor> {
+        self.registry.list_descriptors_for_authority(peer).await
+    }
+
     /// Check if our descriptor needs refresh in a context
     pub async fn needs_refresh(&self, context_id: ContextId, now_ms: u64) -> bool {
         let refresh_window_ms = self.config.refresh_window.as_millis() as u64;

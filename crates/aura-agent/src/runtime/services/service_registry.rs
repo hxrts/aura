@@ -210,6 +210,29 @@ impl ServiceRegistryService {
             .cloned()
     }
 
+    pub async fn list_descriptors_for_authority(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Vec<RendezvousDescriptor> {
+        let mut descriptors = self
+            .state
+            .read()
+            .await
+            .descriptors
+            .values()
+            .filter(|descriptor| descriptor.authority_id == authority_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        descriptors.sort_by_key(|descriptor| {
+            (
+                descriptor.context_id,
+                descriptor.authority_id,
+                descriptor.device_id,
+            )
+        });
+        descriptors
+    }
+
     pub async fn descriptor_needs_refresh(
         &self,
         context_id: ContextId,

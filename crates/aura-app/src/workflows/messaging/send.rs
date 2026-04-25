@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use super::*;
+use std::future::Future;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub(super) enum SendMessageError {
@@ -80,6 +81,15 @@ impl From<SendMessageError> for AuraError {
         AuraError::agent(error.to_string())
     }
 }
+
+type PostTerminalDelivery = (
+    Arc<dyn RuntimeBridge>,
+    AuthoritativeChannelRef,
+    RelationalFact,
+    AuthorityId,
+    ContextId,
+    String,
+);
 
 async fn fail_send_message<T>(
     owner: &SemanticWorkflowOwner,
@@ -248,6 +258,22 @@ async fn deliver_message_fact_remotely(
     }
 
     Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_post_terminal_message_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    spawner.spawn(Box::pin(fut));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_post_terminal_message_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+where
+    F: Future<Output = ()> + 'static,
+{
+    spawner.spawn_local(Box::pin(fut));
 }
 
 pub async fn send_message(
@@ -472,6 +498,7 @@ async fn send_message_ref_owned(
         .await?;
 
     let backend = messaging_backend(app_core).await;
+    let mut post_terminal_delivery: Option<PostTerminalDelivery> = None;
     let (channel_id, channel_label) = match &channel {
         ChannelRef::Id(id) => (*id, id.to_string()),
         ChannelRef::Name(name) => {
@@ -793,51 +820,14 @@ async fn send_message_ref_owned(
                 .await
                 .map_err(|e| super::super::error::runtime_call("persist message", e))?
                 .map_err(|e| super::super::error::runtime_call("persist message", e))?;
-
-                if let Err(error) = deliver_message_fact_remotely(
-                    app_core,
-                    &runtime,
+                post_terminal_delivery = Some((
+                    runtime.clone(),
                     authoritative_channel,
+                    fact,
                     sender_id,
-                    &fact,
-                )
-                .await
-                {
-                    #[cfg(feature = "instrumented")]
-                    tracing::warn!(
-                        error = %error,
-                        channel_id = %channel_id,
-                        message_id = %message_id,
-                        "remote message delivery failed before terminal send success"
-                    );
-                    if let Err(_mark_error) = mark_message_delivery_failed(
-                        app_core,
-                        context_id,
-                        channel_id,
-                        &message_id,
-                        sender_id,
-                    )
-                    .await
-                    {
-                        #[cfg(feature = "instrumented")]
-                        tracing::error!(
-                            delivery_error = %error,
-                            mark_error = %_mark_error,
-                            message_id = %message_id,
-                            "message delivery failed and mark-failed also failed"
-                        );
-                    }
-                    return fail_send_message(
-                        owner,
-                        SendMessageError::Transport {
-                            channel_id,
-                            detail: format!(
-                                "context_id={context_id}; remote delivery failed after local commit: {error}"
-                            ),
-                        },
-                    )
-                    .await;
-                }
+                    context_id,
+                    message_id.clone(),
+                ));
             } else {
                 return fail_send_message(
                     owner,
@@ -921,6 +911,61 @@ async fn send_message_ref_owned(
     owner
         .publish_success_with(issue_message_committed_proof(message_id.clone()))
         .await?;
+
+    if let Some((
+        runtime,
+        authoritative_channel,
+        fact,
+        sender_id,
+        context_id,
+        followup_message_id,
+    )) = post_terminal_delivery
+    {
+        let spawner = runtime.task_spawner();
+        let app_core = app_core.clone();
+        spawn_post_terminal_message_followups(&spawner, async move {
+            let mut best_effort = workflow_best_effort();
+            let _ = best_effort
+                .capture(async {
+                    if let Err(error) = deliver_message_fact_remotely(
+                        &app_core,
+                        &runtime,
+                        authoritative_channel,
+                        sender_id,
+                        &fact,
+                    )
+                    .await
+                    {
+                        messaging_warn!(
+                            error = %error,
+                            channel_id = %channel_id,
+                            message_id = %followup_message_id,
+                            "post-terminal remote message delivery failed"
+                        );
+                        if let Err(_mark_error) = mark_message_delivery_failed(
+                            &app_core,
+                            context_id,
+                            channel_id,
+                            &followup_message_id,
+                            sender_id,
+                        )
+                        .await
+                        {
+                            messaging_warn!(
+                                delivery_error = %error,
+                                mark_error = %_mark_error,
+                                message_id = %followup_message_id,
+                                "post-terminal remote message delivery failed and mark-failed also failed"
+                            );
+                        }
+                        return Err(error);
+                    }
+                    Ok(())
+                })
+                .await;
+            let _ = best_effort.finish();
+        });
+    }
 
     Ok(message_id)
 }

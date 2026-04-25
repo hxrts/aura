@@ -611,6 +611,17 @@ impl<'a> InvitationContactHandler<'a> {
                         .invitation_cache
                         .cache_invitation(updated)
                         .await;
+                    if let Err(error) = self
+                        .ensure_sender_peer_channel(effects.as_ref(), acceptance.acceptor_id)
+                        .await
+                    {
+                        tracing::debug!(
+                            invitation_id = %acceptance.invitation_id,
+                            acceptor_id = %acceptance.acceptor_id,
+                            error = %error,
+                            "contact acceptance sender peer-channel warmup did not converge after acceptance processing"
+                        );
+                    }
 
                     processed = processed.saturating_add(1);
                     in_flight_envelope = None;

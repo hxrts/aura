@@ -442,6 +442,7 @@ fn channel_invitation_bootstrap_timeout(
     stage: &'static str,
     context_id: Option<ContextId>,
 ) -> Result<Duration, ChannelInvitationBootstrapError> {
+    let stage_timeout = channel_invitation_create_timeout();
     match deadline {
         Some(deadline) => {
             if deadline.timeout_ms() == 0 {
@@ -456,11 +457,20 @@ fn channel_invitation_bootstrap_timeout(
             }
             Ok(std::cmp::min(
                 Duration::from_millis(deadline.timeout_ms()),
-                Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
+                stage_timeout,
             ))
         }
-        None => Ok(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS)),
+        None => Ok(stage_timeout),
     }
+}
+
+fn channel_invitation_create_timeout() -> Duration {
+    let timeout_ms = if crate::workflows::harness_determinism::harness_mode_enabled() {
+        CHANNEL_INVITATION_CREATE_TIMEOUT_MS.saturating_mul(4)
+    } else {
+        CHANNEL_INVITATION_CREATE_TIMEOUT_MS
+    };
+    Duration::from_millis(timeout_ms)
 }
 
 pub(super) async fn fail_channel_invitation<T>(
@@ -781,17 +791,14 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
             detail: error.to_string(),
         }
     })?;
-    let operation_budget = workflow_timeout_budget(
-        &runtime,
-        Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS),
-    )
-    .await
-    .map_err(
-        |error| ChannelInvitationBootstrapError::BootstrapTransport {
-            channel_id,
-            detail: error.to_string(),
-        },
-    )?;
+    let operation_budget = workflow_timeout_budget(&runtime, channel_invitation_create_timeout())
+        .await
+        .map_err(
+            |error| ChannelInvitationBootstrapError::BootstrapTransport {
+                channel_id,
+                detail: error.to_string(),
+            },
+        )?;
     let invitation_result =
         execute_with_runtime_timeout_budget(&runtime, &operation_budget, || async {
             update_channel_invitation_stage(&stage_tracker, "publish_workflow_dispatched");

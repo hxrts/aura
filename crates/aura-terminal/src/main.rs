@@ -49,8 +49,18 @@ fn usage_output(to_stderr: bool) -> CliOutput {
     out
 }
 
-#[tokio::main]
-async fn main() -> Result<(), AuraError> {
+const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 32 * 1024 * 1024;
+
+fn main() -> Result<(), AuraError> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(TOKIO_WORKER_STACK_SIZE_BYTES)
+        .build()
+        .map_err(|error| AuraError::internal(format!("build terminal runtime: {error}")))?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<(), AuraError> {
     // Check if no arguments were provided (just "aura" with no command)
     let raw_args: Vec<String> = std::env::args().collect();
     if raw_args.len() == 1 {

@@ -511,16 +511,15 @@ impl InvitationServiceApi {
             .await?;
         let invitation = prepared.invitation;
         let deferred_network_effects = prepared.deferred_network_effects;
-        #[cfg(target_arch = "wasm32")]
         if self.effects.harness_mode_enabled() {
-            if let Err(error) = execute_invitation_effect_commands(
+            execute_invitation_effect_commands(
                 deferred_network_effects.into_commands(),
                 self.handler.authority_context(),
                 self.effects.as_ref(),
-                true,
+                false,
             )
             .await
-            {
+            .map_err(|error| {
                 tracing::warn!(
                     invitation_id = %invitation.invitation_id,
                     sender_id = %invitation.sender_id,
@@ -528,12 +527,11 @@ impl InvitationServiceApi {
                     error = %error,
                     "Inline harness channel invitation delivery failed"
                 );
-            }
+                error
+            })?;
         } else {
             self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
         self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
@@ -907,20 +905,23 @@ impl InvitationServiceApi {
         None
     }
 
-    async fn export_testing_invitation(
+    async fn export_signed_invitation(
         &self,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
+        allow_ephemeral_fallback: bool,
     ) -> Result<String, ShareableInvitationError> {
         let shareable = ShareableInvitation::from(invitation);
         let (private_key, public_key) =
             match self.retrieve_identity_keys(&shareable.sender_id).await {
                 Some(identity_keys) => identity_keys,
-                None => self
-                    .effects
-                    .ed25519_generate_keypair()
-                    .await
-                    .map_err(|_| ShareableInvitationError::SerializationFailed)?,
+                None if allow_ephemeral_fallback => {
+                    self.effects
+                        .ed25519_generate_keypair()
+                        .await
+                        .map_err(|_| ShareableInvitationError::SerializationFailed)?
+                }
+                None => return Err(ShareableInvitationError::MissingSenderProof),
             };
         let signature = sign_ed25519_transcript(
             self.effects.as_ref(),
@@ -970,14 +971,14 @@ impl InvitationServiceApi {
         invitation: &Invitation,
     ) -> Result<String, ShareableInvitationError> {
         let transport = self.sender_transport_metadata();
-        if self.effects.is_testing() {
-            let code = self
-                .export_testing_invitation(invitation, &transport)
-                .await?;
-            return Ok(self.append_sender_hint(code, &transport));
-        }
-
-        Err(ShareableInvitationError::MissingSenderProof)
+        let code = self
+            .export_signed_invitation(
+                invitation,
+                &transport,
+                self.effects.is_testing() || self.effects.harness_mode_enabled(),
+            )
+            .await?;
+        Ok(self.append_sender_hint(code, &transport))
     }
 
     /// Export an invitation by ID as a shareable code string
@@ -1253,12 +1254,18 @@ mod tests {
         assert!(
             body.contains(
                 "self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);"
+            ) || body.contains(
+                "self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);"
             ),
-            "channel invites must defer best-effort delivery instead of blocking terminal settlement"
+            "channel invites must keep non-harness delivery on the deferred best-effort path"
         );
         assert!(
-            !body.contains("execute_invitation_effect_commands(\n            prepared.deferred_network_effects.into_commands(),"),
-            "channel invites must not execute deferred network effects inline"
+            body.contains("if self.effects.harness_mode_enabled()"),
+            "channel invites must reserve the inline delivery shortcut for harness mode only"
+        );
+        assert!(
+            body.contains("execute_invitation_effect_commands("),
+            "channel invites must support inline harness delivery for deterministic harness-mode propagation"
         );
     }
 

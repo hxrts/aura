@@ -86,6 +86,25 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
                 timeout_runtime_call(
                     &runtime,
                     "refresh_account",
+                    "process_ceremony_messages",
+                    SYSTEM_RUNTIME_TIMEOUT,
+                    || runtime.process_ceremony_messages(),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| {
+                    AuraError::from(super::super::error::runtime_call(
+                        "process ceremony messages",
+                        error,
+                    ))
+                })
+            })
+            .await;
+        let _ = best_effort
+            .capture(async {
+                timeout_runtime_call(
+                    &runtime,
+                    "refresh_account",
                     "trigger_discovery",
                     SYSTEM_RUNTIME_TIMEOUT,
                     || runtime.trigger_discovery(),

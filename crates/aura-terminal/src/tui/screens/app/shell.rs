@@ -1184,6 +1184,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 );
                                 (cb.settings.on_remove_device)(device_id.into(), operation);
                             }
+                            TuiCommand::HarnessRefreshAccount => {
+                                let app_core = app_ctx_for_dispatch.app_core.raw().clone();
+                                tasks_for_events.clone().spawn(async move {
+                                    if let Err(error) =
+                                        aura_app::ui::workflows::system::refresh_account(&app_core)
+                                            .await
+                                    {
+                                        tracing::debug!(
+                                            error = %error,
+                                            "harness refresh_account nudge failed"
+                                        );
+                                    }
+                                });
+                            }
                             TuiCommand::Dispatch(dispatch_cmd) => {
                                 let outcome = handle_dispatch_command(
                                     dispatch_cmd,

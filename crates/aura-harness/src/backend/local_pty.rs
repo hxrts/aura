@@ -304,9 +304,12 @@ pub struct LocalPtyBackend {
     pty_rows: u16,
     pty_cols: u16,
     last_authoritative_screen: Arc<Mutex<Option<String>>>,
+    last_refresh_nudge_at: Arc<Mutex<Option<Instant>>>,
 }
 
 impl LocalPtyBackend {
+    const HARNESS_REFRESH_NUDGE_INTERVAL: Duration = Duration::from_millis(250);
+
     fn reader_thread_alive(session: &RunningSession) -> bool {
         session
             .reader_thread
@@ -445,6 +448,42 @@ impl LocalPtyBackend {
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
             last_authoritative_screen: Arc::new(Mutex::new(None)),
+            last_refresh_nudge_at: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn refresh_nudge_due(&self) -> bool {
+        let mut guard = self.last_refresh_nudge_at.blocking_lock();
+        let now = Instant::now();
+        if guard
+            .as_ref()
+            .is_some_and(|last| now.duration_since(*last) < Self::HARNESS_REFRESH_NUDGE_INTERVAL)
+        {
+            return false;
+        }
+        *guard = Some(now);
+        true
+    }
+
+    fn nudge_refresh_account(&self) {
+        if !self.requires_tui_readiness() || !self.refresh_nudge_due() {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let snapshot = session
+            .ui_snapshot_feed
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .latest
+            .clone();
+        if snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.readiness == UiReadiness::Ready)
+        {
+            let _ = self.send_harness_command_receipt(&HarnessUiCommand::RefreshAccount);
         }
     }
 
@@ -1303,6 +1342,9 @@ impl ObservationBackend for LocalPtyBackend {
     ) -> Option<Result<UiSnapshotEvent>> {
         let session = self.session.as_ref()?;
         let deadline = Instant::now() + timeout;
+        if after_version.is_some() {
+            self.nudge_refresh_account();
+        }
         let mut guard = session
             .ui_snapshot_feed
             .state
@@ -1316,6 +1358,9 @@ impl ObservationBackend for LocalPtyBackend {
                 }
             }
             drop(guard);
+            if after_version.is_some() {
+                self.nudge_refresh_account();
+            }
             if let Err(error) =
                 self.ensure_session_alive(session, "publishing a newer UI snapshot event")
             {
@@ -1826,14 +1871,14 @@ impl SharedSemanticBackend for LocalPtyBackend {
             IntentAction::InviteActorToChannel {
                 authority_id,
                 channel_id,
-                context_id: _,
-                channel_name: _,
+                context_id,
+                channel_name,
             } => {
                 let submitted = self.submit_invite_actor_to_channel(
                     &authority_id,
                     channel_id.as_deref(),
-                    None,
-                    None,
+                    context_id.as_deref(),
+                    channel_name.as_deref(),
                 )?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
@@ -1962,8 +2007,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
         &mut self,
         authority_id: &str,
         channel_id: Option<&str>,
-        _context_id: Option<&str>,
-        _channel_name: Option<&str>,
+        context_id: Option<&str>,
+        channel_name: Option<&str>,
     ) -> Result<SubmittedAction<()>> {
         let channel_id = channel_id.map(ToOwned::to_owned).ok_or_else(|| {
             anyhow::anyhow!(
@@ -1974,6 +2019,8 @@ impl SharedSemanticBackend for LocalPtyBackend {
             self.send_harness_command(&HarnessUiCommand::InviteActorToChannel {
                 authority_id: authority_id.to_string(),
                 channel_id,
+                context_id: context_id.map(ToOwned::to_owned),
+                channel_name: channel_name.map(ToOwned::to_owned),
             })?,
             "invite_actor_to_channel",
         )?;

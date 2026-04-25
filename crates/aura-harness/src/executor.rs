@@ -1284,7 +1284,7 @@ fn execute_semantic_intent(
                 &instance_id,
                 timeout_ms,
             )?;
-            let Some(device_id) = removable_device_id_from_snapshot(&snapshot) else {
+            if removable_device_id_from_snapshot(&snapshot).is_none() {
                 let current_devices = snapshot
                     .lists
                     .iter()
@@ -1300,15 +1300,13 @@ fn execute_semantic_intent(
                 bail!(
                     "no removable device was present in the successful device snapshot (instance={instance_id} devices={current_devices})"
                 );
-            };
+            }
             let response = submit_shared_intent(
                 &metadata_step,
                 tool_api,
                 context,
                 &instance_id,
-                IntentAction::RemoveSelectedDevice {
-                    device_id: Some(device_id),
-                },
+                intent.clone(),
             )?;
             record_submission_handle(
                 context,

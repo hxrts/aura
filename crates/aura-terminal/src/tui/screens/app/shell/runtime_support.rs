@@ -62,6 +62,9 @@ pub(super) async fn authoritative_settings_devices_for_command(
     shared_devices: &SharedDevices,
 ) -> Vec<Device> {
     let shared = shared_devices.read().clone();
+    if harness_mode_enabled() {
+        let _ = refresh_settings_from_runtime(app_ctx.app_core.raw()).await;
+    }
     let mut from_signal = {
         let core = app_ctx.app_core.raw().read().await;
         core.reactive().read(&*SETTINGS_SIGNAL).await.ok()
