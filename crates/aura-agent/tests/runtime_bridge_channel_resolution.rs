@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use async_lock::RwLock;
-use aura_agent::AgentBuilder;
+use aura_agent::{AgentBuilder, AgentConfig};
 use aura_app::core::{AppConfig, AppCore};
 use aura_app::ui::workflows::messaging::invite_user_to_channel_with_context;
 use aura_core::context::EffectContext;
@@ -15,6 +15,28 @@ use aura_core::effects::amp::{ChannelCreateParams, ChannelJoinParams};
 use aura_core::effects::ExecutionMode;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use std::sync::Arc;
+
+fn isolated_config() -> Result<(tempfile::TempDir, AgentConfig)> {
+    let temp = tempfile::tempdir()?;
+    let mut config = AgentConfig::default();
+    config.storage.base_path = temp.path().join("aura");
+    Ok((temp, config))
+}
+
+async fn build_isolated_agent(
+    authority: AuthorityId,
+    ctx: &EffectContext,
+) -> Result<(tempfile::TempDir, Arc<aura_agent::AuraAgent>)> {
+    let (temp, config) = isolated_config()?;
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(authority)
+            .with_config(config)
+            .build_testing_async(ctx)
+            .await?,
+    );
+    Ok((temp, agent))
+}
 
 async fn register_runtime_context(
     agent: &Arc<aura_agent::AuraAgent>,
@@ -36,12 +58,7 @@ async fn create_channel_produces_runtime_resolvable_channel_context() -> Result<
         ContextId::new_from_entropy([12u8; 32]),
         ExecutionMode::Testing,
     );
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .build_testing_async(&ctx)
-            .await?,
-    );
+    let (_temp, agent) = build_isolated_agent(authority, &ctx).await?;
     let runtime = agent.clone().as_runtime_bridge();
     let context_id = register_runtime_context(&agent, authority, 42).await?;
 
@@ -76,12 +93,7 @@ async fn create_channel_in_active_home_context_produces_runtime_resolvable_chann
         ContextId::new_from_entropy([22u8; 32]),
         ExecutionMode::Testing,
     );
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .build_testing_async(&ctx)
-            .await?,
-    );
+    let (_temp, agent) = build_isolated_agent(authority, &ctx).await?;
     let runtime = agent.clone().as_runtime_bridge();
     let context_id = register_runtime_context(&agent, authority, 42).await?;
 
@@ -115,12 +127,7 @@ async fn create_channel_then_invite_user_requires_canonical_channel_metadata() -
         ContextId::new_from_entropy([32u8; 32]),
         ExecutionMode::Testing,
     );
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .build_testing_async(&ctx)
-            .await?,
-    );
+    let (_temp, agent) = build_isolated_agent(authority, &ctx).await?;
     let runtime = agent.clone().as_runtime_bridge();
     let app_core = Arc::new(RwLock::new(AppCore::with_runtime(
         AppConfig::default(),
@@ -172,12 +179,7 @@ async fn create_channel_then_invite_user_with_active_home_context_requires_canon
         ContextId::new_from_entropy([42u8; 32]),
         ExecutionMode::Testing,
     );
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .build_testing_async(&ctx)
-            .await?,
-    );
+    let (_temp, agent) = build_isolated_agent(authority, &ctx).await?;
     let runtime = agent.clone().as_runtime_bridge();
     let app_core = Arc::new(RwLock::new(AppCore::with_runtime(
         AppConfig::default(),

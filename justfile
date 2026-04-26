@@ -386,7 +386,15 @@ audit:
 
 # Run dependency advisory policy gate
 ci-security-audit:
-    GIT_CONFIG_GLOBAL=/dev/null cargo deny check advisories --hide-inclusion-graph
+    GIT_CONFIG_GLOBAL=/dev/null "${AURA_CARGO_DENY_BIN:-cargo-deny}" check advisories --hide-inclusion-graph
+
+# Check that blocking GitHub push replay commands are represented in ci-dry-run.
+ci-dry-run-parity:
+    bash scripts/check/ci-dry-run-parity.sh
+
+# Dispatch blocking GitHub push workflows for the current branch and wait for completion.
+ci-github-dry-run:
+    bash scripts/ci/github-dry-run.sh
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Architecture Checks
@@ -1123,6 +1131,7 @@ ci-dry-run profile="push":
     esac
 
     # CI / Fast (push + pull_request)
+    add_step "CI Dry-Run Parity"         "nix develop .#ci --command just ci-dry-run-parity"
     add_step "Preflight"                  "nix develop --command just ci-preflight"
     add_step "Format Check"               "nix develop --command just ci-format"
     add_step "Docs Links"                 "nix develop --command just ci-docs-links"
@@ -1136,6 +1145,7 @@ ci-dry-run profile="push":
     add_step "Shared Flow Policy"         "nix develop --command just ci-shared-flow-policy"
     add_step "Build Check"                "nix develop --command just ci-build"
     add_step "Clippy Check"               "nix develop --command just ci-clippy"
+    add_step "Dependency Advisory Audit"  "nix develop .#ci --command just ci-security-audit"
     add_step "Security Boundary Policy"   "nix develop --command just ci-security-boundary-policy"
     add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
     add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"

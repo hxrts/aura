@@ -1,7 +1,6 @@
 [advisories]
 db-urls = ["https://github.com/RustSec/advisory-db"]
 yanked = "deny"
-unsound = "all"
 unmaintained = "none"
 ignore = [
     { id = "RUSTSEC-2024-0344", reason = "curve25519-dalek is pinned to 4.1.2 by frost-ed25519 1.0.0; replace or update FROST stack before 2026-06-30" },

@@ -25,17 +25,31 @@ fn session(seed: u8) -> SessionId {
     SessionId::from_uuid(Uuid::from_bytes([seed; 16]))
 }
 
+fn isolated_agent_config() -> (tempfile::TempDir, AgentConfig) {
+    let temp = tempfile::tempdir().expect("test storage tempdir");
+    let mut config = AgentConfig::default();
+    config.storage.base_path = temp.path().join("aura-storage");
+    (temp, config)
+}
+
+fn isolated_effects_for_authority(
+    authority: AuthorityId,
+    salt: u64,
+) -> (tempfile::TempDir, AuraEffectSystem) {
+    let (temp, config) = isolated_agent_config();
+    let effects =
+        AuraEffectSystem::simulation_for_test_for_authority_with_salt(&config, authority, salt)
+            .expect("simulation effect system");
+    (temp, effects)
+}
+
 #[tokio::test]
 async fn device_migration_delegation_persists_audit_fact_and_coherence() {
     let from_authority = authority(1);
     let to_authority = authority(2);
     let session_id = session(9);
 
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(from_authority, 1);
     let manager = ReconfigurationManager::new();
     let preloaded = manager
         .bundle("device_migration")
@@ -101,11 +115,7 @@ async fn delegation_requires_pre_registered_bundle_evidence() {
     let from_authority = authority(4);
     let to_authority = authority(5);
     let session_id = session(10);
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(from_authority, 4);
     let manager = ReconfigurationManager::new();
     manager
         .record_native_session(from_authority, session_id)
@@ -135,11 +145,7 @@ async fn delegation_requires_reconfiguration_capability() {
     let from_authority = authority(11);
     let to_authority = authority(12);
     let session_id = session(13);
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(from_authority, 11);
     let manager =
         ReconfigurationManager::with_runtime_capabilities(RuntimeCapabilityHandler::from_pairs([
             ("reconfiguration", false),
@@ -172,11 +178,7 @@ async fn delegation_without_recorded_source_ownership_fails_closed() {
     let from_authority = authority(14);
     let to_authority = authority(15);
     let session_id = session(16);
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(from_authority, 14);
     let manager = ReconfigurationManager::new();
 
     let err = manager
@@ -203,11 +205,7 @@ async fn delegation_rejects_boundary_scope_mismatch() {
     let from_authority = authority(31);
     let to_authority = authority(32);
     let session_id = session(33);
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(from_authority, 31);
     let manager = ReconfigurationManager::new();
     manager
         .record_native_session(from_authority, session_id)
@@ -322,9 +320,7 @@ async fn guardian_handoff_delegation_records_guardian_bundle() {
     let replacement_guardian = authority(8);
     let session_id = session(33);
 
-    let effects =
-        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), authority(9))
-            .expect("simulation effect system");
+    let (_storage, effects) = isolated_effects_for_authority(authority(9), 9);
     let manager = ReconfigurationManager::new();
     manager
         .record_native_session(previous_guardian, session_id)

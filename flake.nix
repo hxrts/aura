@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs-cargo-deny.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -34,6 +35,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-cargo-deny,
       flake-utils,
       rust-overlay,
       crate2nix,
@@ -48,6 +50,10 @@
         pkgs = import nixpkgs {
           inherit system overlays;
         };
+        cargoDenyPkgs = import nixpkgs-cargo-deny {
+          inherit system;
+        };
+        cargoDeny = cargoDenyPkgs.cargo-deny;
         toolkitSupport = toolkit.lib.${system}.consumerShellSupport;
         toolkitCommands = with toolkit.packages.${system}; [
           toolkit-clippy
@@ -219,6 +225,7 @@
             cargo-watch
             cargo-edit
             cargo-audit
+            cargoDeny
             cargo-sweep
 
             # WASM tools
@@ -284,6 +291,7 @@
             export AURA_SUPPRESS_NIX_WELCOME=1
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
+            export AURA_CARGO_DENY_BIN="${cargoDeny}/bin/cargo-deny"
             if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
               echo "Aura Development Environment"
               echo "============================"
@@ -354,6 +362,7 @@
             # Build tools
             pkg-config
             openssl
+            cargoDeny
 
             # Task runner
             just
@@ -395,6 +404,7 @@
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
             export AURA_TOOLKIT_NIGHTLY_BIN="${rustToolchainNightly}/bin"
+            export AURA_CARGO_DENY_BIN="${cargoDeny}/bin/cargo-deny"
           '';
         };
 
@@ -424,6 +434,9 @@
             # Kani itself is bootstrapped by `just _ensure-kani` into a repo-local tool root.
             # Keep z3 in the shell because Kani can delegate to it at verification time.
             z3 # SMT solver for Kani
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+            dbus
           ];
 
           shellHook = ''
