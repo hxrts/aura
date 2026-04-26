@@ -16,7 +16,8 @@ use crate::{
 use async_trait::async_trait;
 
 /// Pure trait for journal/CRDT operations
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait JournalEffects: Send + Sync {
     /// Merge facts using join semilattice operation
     ///
@@ -58,7 +59,9 @@ pub trait JournalEffects: Send + Sync {
     ) -> Result<FlowBudget, AuraError>;
 }
 
-impl_arc_effect!(JournalEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: JournalEffects + Send + Sync + ?Sized> JournalEffects for std::sync::Arc<T> {
     async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         (**self).merge_facts(target, delta).await
     }
@@ -104,4 +107,4 @@ impl_arc_effect!(JournalEffects {
     ) -> Result<FlowBudget, AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await
     }
-});
+}

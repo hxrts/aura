@@ -580,7 +580,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
 }
 
 // Implementation of ThresholdSigningEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
         // Generate 1-of-1 signing keys (uses Ed25519 for single-signer mode)

@@ -60,7 +60,8 @@ pub(crate) fn evidence_key(cid: ConsensusId) -> String {
 ///
 /// Evidence is not required to reconstruct AMP channel state, so we keep it in
 /// StorageEffects behind an explicit trait to avoid conflating it with journal facts.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait AmpEvidenceEffects: StorageEffects + Sized {
     /// Carry evidence deltas keyed by consensus id.
     async fn merge_evidence_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()>;
@@ -86,7 +87,8 @@ pub trait AmpEvidenceEffects: StorageEffects + Sized {
 }
 
 /// Blanket implementation of `AmpEvidenceEffects` for any type implementing `StorageEffects`.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl<E: StorageEffects> AmpEvidenceEffects for E {
     async fn merge_evidence_delta(&self, cid: ConsensusId, delta: EvidenceDelta) -> Result<()> {
         self.evidence_store().merge_delta(cid, delta).await

@@ -367,11 +367,11 @@ async fn delegation_carries_runtime_upgrade_artifacts_explicitly() {
     let to_authority = authority(42);
     let session_id = session(43);
 
-    let effects = AuraEffectSystem::simulation_for_test_for_authority(
-        &AgentConfig::default(),
-        from_authority,
-    )
-    .expect("simulation effect system");
+    let storage_dir = tempfile::tempdir().expect("runtime-upgrade storage tempdir");
+    let mut config = AgentConfig::default();
+    config.storage.base_path = storage_dir.path().join("aura-storage");
+    let effects = AuraEffectSystem::simulation_for_test_for_authority(&config, from_authority)
+        .expect("simulation effect system");
     let manager = ReconfigurationManager::new();
     manager
         .record_native_session(from_authority, session_id)

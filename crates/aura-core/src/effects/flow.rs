@@ -69,7 +69,8 @@ impl FlowHint {
 ///
 /// The trait itself is pure and stateless - all state management is handled
 /// by the implementing effect handlers.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait FlowBudgetEffects: Send + Sync {
     /// Charge a flow budget for information sent to a peer.
     ///
@@ -101,7 +102,9 @@ pub trait FlowBudgetEffects: Send + Sync {
     ) -> AuraResult<Receipt>;
 }
 
-impl_arc_effect!(FlowBudgetEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: FlowBudgetEffects + Send + Sync + ?Sized> FlowBudgetEffects for std::sync::Arc<T> {
     async fn charge_flow(
         &self,
         context: &ContextId,
@@ -110,4 +113,4 @@ impl_arc_effect!(FlowBudgetEffects {
     ) -> AuraResult<Receipt> {
         (**self).charge_flow(context, peer, cost).await
     }
-});
+}

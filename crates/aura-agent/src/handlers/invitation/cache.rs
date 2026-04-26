@@ -84,13 +84,117 @@ impl<'a> InvitationCacheHandler<'a> {
         )
     }
 
+    fn secret_payload_location(
+        authority_id: AuthorityId,
+        invitation_id: &InvitationId,
+        kind: &'static str,
+    ) -> SecureStorageLocation {
+        SecureStorageLocation::with_sub_key(
+            "invitation_secret_payloads",
+            authority_id.to_string(),
+            format!("{kind}:{}", invitation_id.as_str()),
+        )
+    }
+
+    fn has_device_enrollment_payload(invitation_type: &InvitationType) -> bool {
+        matches!(invitation_type, InvitationType::DeviceEnrollment { .. })
+    }
+
+    fn redact_device_enrollment_payload(invitation: &Invitation) -> Invitation {
+        let mut redacted = invitation.clone();
+        if let InvitationType::DeviceEnrollment {
+            key_package,
+            threshold_config,
+            public_key_package,
+            baseline_tree_ops,
+            ..
+        } = &mut redacted.invitation_type
+        {
+            key_package.clear();
+            threshold_config.clear();
+            public_key_package.clear();
+            baseline_tree_ops.clear();
+        }
+        redacted
+    }
+
+    fn redact_imported_device_enrollment_payload(
+        invitation: &StoredImportedInvitation,
+    ) -> StoredImportedInvitation {
+        let mut redacted = invitation.clone();
+        if let InvitationType::DeviceEnrollment {
+            key_package,
+            threshold_config,
+            public_key_package,
+            baseline_tree_ops,
+            ..
+        } = &mut redacted.shareable.invitation_type
+        {
+            key_package.clear();
+            threshold_config.clear();
+            public_key_package.clear();
+            baseline_tree_ops.clear();
+        }
+        redacted
+    }
+
+    async fn secure_store_secret_payload(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation_id: &InvitationId,
+        kind: &'static str,
+        bytes: &[u8],
+    ) -> AgentResult<()> {
+        let location = Self::secret_payload_location(authority_id, invitation_id, kind);
+        effects
+            .secure_store(
+                &location,
+                bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))
+    }
+
+    async fn secure_retrieve_secret_payload(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation_id: &InvitationId,
+        kind: &'static str,
+    ) -> Option<Vec<u8>> {
+        let location = Self::secret_payload_location(authority_id, invitation_id, kind);
+        effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .ok()
+    }
+
     pub(super) async fn persist_created_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
         invitation: &Invitation,
     ) -> AgentResult<()> {
         let key = Self::created_invitation_key(authority_id, &invitation.invitation_id);
-        let bytes = serde_json::to_vec(invitation)
+        let regular_invitation = if Self::has_device_enrollment_payload(&invitation.invitation_type)
+        {
+            let secure_bytes = serde_json::to_vec(invitation)
+                .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
+            Self::secure_store_secret_payload(
+                effects,
+                authority_id,
+                &invitation.invitation_id,
+                "created",
+                &secure_bytes,
+            )
+            .await?;
+            Self::redact_device_enrollment_payload(invitation)
+        } else {
+            invitation.clone()
+        };
+        let bytes = serde_json::to_vec(&regular_invitation)
             .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
         effects
             .store(&key, bytes)
@@ -108,7 +212,20 @@ impl<'a> InvitationCacheHandler<'a> {
         let Ok(Some(bytes)) = effects.retrieve(&key).await else {
             return None;
         };
-        serde_json::from_slice::<Invitation>(&bytes).ok()
+        let invitation = serde_json::from_slice::<Invitation>(&bytes).ok()?;
+        if Self::has_device_enrollment_payload(&invitation.invitation_type) {
+            if let Some(secure_bytes) = Self::secure_retrieve_secret_payload(
+                effects,
+                authority_id,
+                invitation_id,
+                "created",
+            )
+            .await
+            {
+                return serde_json::from_slice::<Invitation>(&secure_bytes).ok();
+            }
+        }
+        Some(invitation)
     }
 
     pub(super) async fn persist_imported_invitation(
@@ -117,7 +234,23 @@ impl<'a> InvitationCacheHandler<'a> {
         invitation: &StoredImportedInvitation,
     ) -> AgentResult<()> {
         let key = Self::imported_invitation_key(authority_id, &invitation.invitation_id);
-        let bytes = serde_json::to_vec(invitation)
+        let regular_invitation =
+            if Self::has_device_enrollment_payload(&invitation.shareable.invitation_type) {
+                let secure_bytes = serde_json::to_vec(invitation)
+                    .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
+                Self::secure_store_secret_payload(
+                    effects,
+                    authority_id,
+                    &invitation.invitation_id,
+                    "imported",
+                    &secure_bytes,
+                )
+                .await?;
+                Self::redact_imported_device_enrollment_payload(invitation)
+            } else {
+                invitation.clone()
+            };
+        let bytes = serde_json::to_vec(&regular_invitation)
             .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
         effects
             .store(&key, bytes)
@@ -136,7 +269,20 @@ impl<'a> InvitationCacheHandler<'a> {
         let Ok(Some(bytes)) = effects.retrieve(&key).await else {
             return None;
         };
-        Self::parse_imported_invitation_bytes(&bytes, preserved)
+        let stored = Self::parse_imported_invitation_bytes(&bytes, preserved)?;
+        if Self::has_device_enrollment_payload(&stored.shareable.invitation_type) {
+            if let Some(secure_bytes) = Self::secure_retrieve_secret_payload(
+                effects,
+                authority_id,
+                invitation_id,
+                "imported",
+            )
+            .await
+            {
+                return Self::parse_imported_invitation_bytes(&secure_bytes, preserved);
+            }
+        }
+        Some(stored)
     }
 
     pub(super) fn parse_imported_invitation_bytes(

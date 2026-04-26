@@ -8,7 +8,8 @@ use aura_core::effects::{
 use std::collections::HashMap;
 
 // Implementation of StorageEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageCoreEffects for AuraEffectSystem {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         self.storage_handler.store(key, value).await
@@ -27,7 +28,8 @@ impl StorageCoreEffects for AuraEffectSystem {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageExtendedEffects for AuraEffectSystem {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         self.storage_handler.exists(key).await
@@ -54,7 +56,8 @@ impl StorageExtendedEffects for AuraEffectSystem {
 }
 
 // Implementation of SecureStorageEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SecureStorageEffects for AuraEffectSystem {
     async fn secure_store(
         &self,

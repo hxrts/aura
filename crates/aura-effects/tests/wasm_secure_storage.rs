@@ -1,5 +1,5 @@
-#![cfg(target_arch = "wasm32")]
 //! Browser regression tests for the WASM secure-storage backend.
+#![cfg(target_arch = "wasm32")]
 
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_effects::FilesystemFallbackSecureStorageHandler;

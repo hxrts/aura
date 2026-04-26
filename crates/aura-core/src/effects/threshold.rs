@@ -57,7 +57,8 @@ pub type PublicKeyPackage = Vec<u8>;
 ///
 /// # Stability: UNSTABLE
 /// This API is under active development and may change.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait ThresholdSigningEffects: Send + Sync {
     /// Bootstrap a new authority with 1-of-1 keys
     ///
@@ -191,7 +192,11 @@ pub trait ThresholdSigningEffects: Send + Sync {
     ) -> Result<(), ThresholdSigningError>;
 }
 
-impl_arc_effect!(ThresholdSigningEffects {
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+impl<T: ThresholdSigningEffects + Send + Sync + ?Sized> ThresholdSigningEffects
+    for std::sync::Arc<T>
+{
     async fn bootstrap_authority(
         &self,
         authority: &AuthorityId,
@@ -230,7 +235,12 @@ impl_arc_effect!(ThresholdSigningEffects {
         participants: &[ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError> {
         (**self)
-            .rotate_keys(authority, new_threshold, new_total_participants, participants)
+            .rotate_keys(
+                authority,
+                new_threshold,
+                new_total_participants,
+                participants,
+            )
             .await
     }
 
@@ -251,7 +261,7 @@ impl_arc_effect!(ThresholdSigningEffects {
             .rollback_key_rotation(authority, failed_epoch)
             .await
     }
-});
+}
 
 #[cfg(test)]
 mod tests {

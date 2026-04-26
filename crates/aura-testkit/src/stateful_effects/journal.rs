@@ -68,7 +68,8 @@ impl Default for MockJournalHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl JournalEffects for MockJournalHandler {
     async fn merge_facts(
         &self,

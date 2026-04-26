@@ -184,7 +184,8 @@ async fn apply_delta_merge(
 }
 
 /// Protocol with journal coupling
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait JournalCoupling {
     /// Get all journal annotations for this protocol
     fn journal_annotations(&self) -> &HashMap<String, JournalAnnotation>;

@@ -87,6 +87,7 @@ async fn encode_signed_invite_code(invitation: &ShareableInvitation) -> TestResu
         public_key,
         signature,
         sender_device_id: None,
+        key_epoch: Some(1),
     })?)
 }
 
@@ -140,6 +141,7 @@ fn test_invitation_code_roundtrip() -> TestResult {
             public_key,
             signature,
             sender_device_id: None,
+            key_epoch: Some(1),
         })?;
         assert!(code.starts_with("aura:v1:"));
 

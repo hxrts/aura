@@ -79,7 +79,8 @@ impl<J: JournalEffects> JournalBackedFlowBudgetHandler<J> {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<J: JournalEffects + Send + Sync> FlowBudgetEffects for JournalBackedFlowBudgetHandler<J> {
     async fn charge_flow(
         &self,

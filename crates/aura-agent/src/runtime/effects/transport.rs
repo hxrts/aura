@@ -857,11 +857,11 @@ mod tests {
             device_id: None,
             context_id,
             transport_hints,
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [3u8; 32],
+            public_key: [4u8; 32],
             valid_from: 1,
             valid_until: u64::MAX,
-            nonce: [0u8; 32],
+            nonce: [5u8; 32],
             nickname_suggestion: None,
         }
     }
@@ -953,7 +953,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_peer_addr_allows_placeholder_direct_descriptor_in_harness_mode() {
+    async fn resolve_peer_addr_allows_loopback_direct_descriptor_in_harness_mode() {
         let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
         let _env_restore = EnvRestore::capture(harness_mode_env);
         std::env::set_var(harness_mode_env, "1");

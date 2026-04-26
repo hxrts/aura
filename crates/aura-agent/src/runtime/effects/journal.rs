@@ -5,7 +5,8 @@ use aura_core::effects::{BloomFilter, IndexedJournalEffects, JournalEffects};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Journal};
 
 // Implementation of JournalEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl JournalEffects for AuraEffectSystem {
     async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         self.journal_handler().merge_facts(target, delta).await

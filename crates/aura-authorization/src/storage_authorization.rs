@@ -733,7 +733,8 @@ impl<S: StorageCoreEffects + StorageExtendedEffects> AuthorizedStorageHandler<S>
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageCoreEffects
     for AuthorizedStorageHandler<S>
 {
@@ -769,7 +770,8 @@ impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageCoreEf
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S: StorageCoreEffects + StorageExtendedEffects + Send + Sync> StorageExtendedEffects
     for AuthorizedStorageHandler<S>
 {

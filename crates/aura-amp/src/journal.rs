@@ -25,7 +25,8 @@ use aura_journal::{
 ///
 /// This trait extends `JournalEffects` and `OrderClockEffects` to provide
 /// AMP-specific operations for managing context journals and relational facts.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait AmpJournalEffects: JournalEffects + OrderClockEffects + Sized {
     /// Fetch the full context journal (fact-based) for reduction.
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal>;
@@ -44,7 +45,8 @@ pub trait AmpJournalEffects: JournalEffects + OrderClockEffects + Sized {
 
 /// Blanket implementation of `AmpJournalEffects` for any type implementing
 /// `JournalEffects + OrderClockEffects`.
-#[async_trait::async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 impl<E: JournalEffects + OrderClockEffects> AmpJournalEffects for E {
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
         let journal = self.get_journal().await?;

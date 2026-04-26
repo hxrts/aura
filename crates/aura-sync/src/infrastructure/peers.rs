@@ -923,10 +923,14 @@ mod tests {
 
     fn sync_token(keypair: &KeyPair, authority_id: AuthorityId, capability: &str) -> Vec<u8> {
         let authority = authority_id.to_string();
+        let scope_authority = authority.clone();
         let mut builder = BiscuitBuilder::new();
         builder
             .add_fact(fact!("capability({capability})"))
             .expect("capability fact");
+        builder
+            .add_fact(fact!("scope_authority({scope_authority})"))
+            .expect("authority scope fact");
         builder
             .add_check(check!("check if authority_id({authority})"))
             .expect("authority scope check");

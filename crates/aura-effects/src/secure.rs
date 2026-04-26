@@ -29,7 +29,7 @@ use std::collections::HashSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::Mutex;
@@ -84,22 +84,204 @@ const WASM_SECURE_RECORD_MAGIC: &[u8] = b"AURA-WASM-SECURE-V1";
 const WASM_SECURE_NONCE_LEN: usize = 12;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), SecureStorageError> {
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+fn validate_private_directory_metadata(
+    path: &std::path::Path,
+    metadata: &fs::Metadata,
+) -> Result<(), SecureStorageError> {
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(SecureStorageError::storage(format!(
+            "secure-storage directory is not a private directory: {}",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.mode() & 0o077 != 0 {
+            return Err(SecureStorageError::storage(format!(
+                "secure-storage directory permissions are not private: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ensure_private_directory(path: &std::path::Path) -> Result<(), SecureStorageError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        validate_private_directory_metadata(path, &metadata)?;
+    }
+    fs::create_dir_all(path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        file.set_permissions(permissions)
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    }
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    validate_private_directory_metadata(path, &metadata)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_private_file_metadata(
+    path: &std::path::Path,
+    metadata: &fs::Metadata,
+) -> Result<(), SecureStorageError> {
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(SecureStorageError::storage(format!(
+            "secure-storage file is not a private regular file: {}",
+            path.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.mode() & 0o077 != 0 {
+            return Err(SecureStorageError::storage(format!(
+                "secure-storage file permissions are not private: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open_private_file_no_follow(
+    path: &std::path::Path,
+    create_new: bool,
+) -> Result<fs::File, SecureStorageError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true);
+    if create_new {
+        options.create_new(true);
+    } else {
+        options.create(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc_o_no_follow());
+    }
+    options
+        .open(path)
+        .map_err(|e| SecureStorageError::storage(e.to_string()))
+}
+
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+fn libc_o_no_follow() -> i32 {
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    {
+        0x20000
+    }
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    ))]
+    {
+        0x0100
+    }
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    )))]
+    {
+        0
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn create_private_file_no_follow(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), SecureStorageError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        validate_private_file_metadata(path, &metadata)?;
+        return Err(SecureStorageError::storage(format!(
+            "secure-storage file already exists: {}",
+            path.display()
+        )));
+    }
+    let mut file = open_private_file_no_follow(path, true)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|e| SecureStorageError::storage(e.to_string()))?;
     }
     file.write_all(bytes)
+        .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    file.sync_all()
         .map_err(|e| SecureStorageError::storage(e.to_string()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn write_private_file_atomic_no_follow(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(), SecureStorageError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        validate_private_file_metadata(path, &metadata)?;
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| SecureStorageError::storage("secure-storage file has no parent"))?;
+    ensure_private_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| SecureStorageError::storage("secure-storage file name is invalid"))?;
+    let nonce = generate_secret_bytes(8)?;
+    let tmp_path = parent.join(format!(".{file_name}.tmp-{}", hex::encode(nonce)));
+    create_private_file_no_follow(&tmp_path, bytes)?;
+    fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        SecureStorageError::storage(e.to_string())
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    }
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    validate_private_file_metadata(path, &metadata)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_existing_private_file(
+    path: &std::path::Path,
+) -> Result<Option<Vec<u8>>, SecureStorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(SecureStorageError::storage(error.to_string())),
+    };
+    validate_private_file_metadata(path, &metadata)?;
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc_o_no_follow());
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|e| SecureStorageError::storage(e.to_string()))?;
+    Ok(Some(bytes))
 }
 
 #[allow(clippy::disallowed_methods)] // Effect implementation reads wall clock directly.
@@ -915,6 +1097,8 @@ pub struct FilesystemFallbackSecureStorageHandler {
     #[cfg(not(target_arch = "wasm32"))]
     token_key: [u8; 32],
     #[cfg(not(target_arch = "wasm32"))]
+    filesystem_error: Option<String>,
+    #[cfg(not(target_arch = "wasm32"))]
     used_tokens: Mutex<HashSet<[u8; 32]>>,
 }
 
@@ -925,7 +1109,8 @@ impl FilesystemFallbackSecureStorageHandler {
     pub fn with_base_path(base_path: PathBuf) -> Self {
         let secure_store_path = base_path.join("secure_store");
         #[cfg(not(target_arch = "wasm32"))]
-        let wrapping_key = Self::load_or_create_wrapping_key(&secure_store_path);
+        let (wrapping_key, filesystem_error) =
+            Self::load_or_create_wrapping_key(&secure_store_path);
         #[cfg(not(target_arch = "wasm32"))]
         let token_key = generate_secret_key();
         Self {
@@ -935,6 +1120,8 @@ impl FilesystemFallbackSecureStorageHandler {
             wrapping_key,
             #[cfg(not(target_arch = "wasm32"))]
             token_key,
+            #[cfg(not(target_arch = "wasm32"))]
+            filesystem_error,
             #[cfg(not(target_arch = "wasm32"))]
             used_tokens: Mutex::new(HashSet::new()),
         }
@@ -954,38 +1141,67 @@ impl FilesystemFallbackSecureStorageHandler {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn load_or_create_wrapping_key(secure_store_path: &std::path::Path) -> [u8; 32] {
+    fn load_or_create_wrapping_key(
+        secure_store_path: &std::path::Path,
+    ) -> ([u8; 32], Option<String>) {
         let key_path = Self::wrapping_key_path(secure_store_path);
-        if let Ok(bytes) = fs::read(&key_path) {
-            if bytes.len() == 32 {
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&bytes);
-                return key;
+        match read_existing_private_file(&key_path) {
+            Ok(Some(bytes)) => {
+                if bytes.len() == 32 {
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(&bytes);
+                    return (key, None);
+                }
+                let error = format!(
+                    "filesystem fallback secure-storage wrapping key had invalid length: {}",
+                    bytes.len()
+                );
+                tracing::warn!(
+                    path = %key_path.display(),
+                    len = bytes.len(),
+                    "Filesystem fallback secure-storage wrapping key had invalid length"
+                );
+                return (generate_secret_key(), Some(error));
             }
-            tracing::warn!(
-                path = %key_path.display(),
-                len = bytes.len(),
-                "Filesystem fallback secure-storage wrapping key had invalid length; regenerating"
-            );
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(
+                    path = %key_path.display(),
+                    err = %error,
+                    "Filesystem fallback secure-storage wrapping key failed validation"
+                );
+                return (generate_secret_key(), Some(error.to_string()));
+            }
         }
 
         let wrapping_key = generate_secret_key();
-        if let Err(error) = fs::create_dir_all(secure_store_path) {
+        if let Err(error) = ensure_private_directory(secure_store_path) {
             tracing::warn!(
                 path = %secure_store_path.display(),
                 err = %error,
-                "Failed to create filesystem fallback secure-storage directory; using ephemeral wrapping key"
+                "Failed to create filesystem fallback secure-storage directory"
             );
-            return wrapping_key;
+            return (wrapping_key, Some(error.to_string()));
         }
-        if let Err(error) = write_private_file(&key_path, &wrapping_key) {
+        if let Err(error) = create_private_file_no_follow(&key_path, &wrapping_key) {
             tracing::warn!(
                 path = %key_path.display(),
                 err = %error,
-                "Failed to persist filesystem fallback wrapping key; reopen may not decrypt prior records"
+                "Failed to persist filesystem fallback wrapping key"
             );
+            return (wrapping_key, Some(error.to_string()));
         }
-        wrapping_key
+        (wrapping_key, None)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn require_filesystem_available(&self) -> Result<(), SecureStorageError> {
+        match &self.filesystem_error {
+            Some(error) => Err(SecureStorageError::storage(format!(
+                "filesystem fallback secure-storage unavailable: {error}"
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn require_capability(
@@ -1518,12 +1734,13 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.require_filesystem_available()?;
             let path = self.path_for(location)?;
             let record = self.encrypt_fallback_record(location, key)?;
             if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+                ensure_private_directory(dir)?;
             }
-            write_private_file(&path, &record)?;
+            write_private_file_atomic_no_follow(&path, &record)?;
             Ok(())
         }
     }
@@ -1545,8 +1762,10 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.require_filesystem_available()?;
             let path = self.path_for(location)?;
-            let record = fs::read(&path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
+            let record = read_existing_private_file(&path)?
+                .ok_or_else(|| SecureStorageError::storage("secure key not found"))?;
             self.decrypt_fallback_record(location, &record)
         }
     }
@@ -1564,6 +1783,7 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.require_filesystem_available()?;
             let path = self.path_for(location)?;
             if path.exists() {
                 fs::remove_file(&path).map_err(|e| SecureStorageError::storage(e.to_string()))?;
@@ -1586,8 +1806,11 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.require_filesystem_available()?;
             let path = self.path_for(location)?;
-            Ok(path.exists())
+            Ok(fs::symlink_metadata(&path)
+                .map(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+                .unwrap_or(false))
         }
     }
 
@@ -1604,8 +1827,17 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.require_filesystem_available()?;
             let ns_path = self.base_path.join(Self::encode_component(namespace));
-            if !ns_path.exists() {
+            let metadata = match fs::symlink_metadata(&ns_path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Vec::new());
+                }
+                Err(error) => return Err(SecureStorageError::storage(error.to_string())),
+            };
+            validate_private_directory_metadata(&ns_path, &metadata)?;
+            if !metadata.is_dir() {
                 return Ok(Vec::new());
             }
             let mut keys = Vec::new();
@@ -1863,6 +2095,74 @@ mod tests {
             .expect("retrieve persisted secret after reopen");
 
         assert_eq!(loaded, b"persisted-secret");
+    }
+
+    #[tokio::test]
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    async fn filesystem_fallback_secure_storage_rejects_symlinked_wrapping_key() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let temp = tempdir().expect("tempdir");
+        let secure_store = temp.path().join("secure_store");
+        fs::create_dir_all(&secure_store).expect("secure-store dir");
+        fs::set_permissions(&secure_store, fs::Permissions::from_mode(0o700))
+            .expect("private secure-store dir");
+        let target = temp.path().join("target-key");
+        fs::write(&target, [9u8; 32]).expect("target key");
+        let key_path = secure_store.join(FALLBACK_WRAPPING_KEY_FILENAME);
+        symlink(&target, &key_path).expect("wrapping-key symlink");
+
+        let handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        let error = handler
+            .secure_store(
+                &SecureStorageLocation::new("wrap_symlink", "record"),
+                b"secret",
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .expect_err("symlinked wrapping key should disable filesystem fallback");
+
+        assert!(
+            error
+                .to_string()
+                .contains("filesystem fallback secure-storage unavailable"),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(fs::read(&target).expect("target preserved"), [9u8; 32]);
+    }
+
+    #[tokio::test]
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    async fn filesystem_fallback_secure_storage_rejects_symlinked_record_path() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let temp = tempdir().expect("tempdir");
+        let handler =
+            FilesystemFallbackSecureStorageHandler::with_base_path(temp.path().to_path_buf());
+        let location = SecureStorageLocation::new("records", "primary");
+        let record_path = handler.path_for(&location).expect("record path");
+        let record_dir = record_path.parent().expect("record parent");
+        fs::create_dir_all(record_dir).expect("record dir");
+        fs::set_permissions(record_dir, fs::Permissions::from_mode(0o700))
+            .expect("private record dir");
+        let target = temp.path().join("record-target");
+        fs::write(&target, b"do-not-truncate").expect("target file");
+        symlink(&target, &record_path).expect("record symlink");
+
+        let error = handler
+            .secure_store(&location, b"new-secret", &[SecureStorageCapability::Write])
+            .await
+            .expect_err("symlinked record path should be rejected");
+
+        assert!(
+            error.to_string().contains("not a private regular file"),
+            "unexpected error: {error:?}"
+        );
+        assert_eq!(
+            fs::read(&target).expect("target preserved"),
+            b"do-not-truncate"
+        );
     }
 
     #[tokio::test]

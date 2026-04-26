@@ -417,7 +417,8 @@ impl CryptoExtendedEffects for CompositeTestHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageCoreEffects for CompositeTestHandler {
     async fn store(&self, key: &str, data: Vec<u8>) -> Result<(), StorageError> {
         self.storage.store(key, data).await
@@ -436,7 +437,8 @@ impl StorageCoreEffects for CompositeTestHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageExtendedEffects for CompositeTestHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         self.storage.exists(key).await
@@ -499,7 +501,8 @@ impl ConsoleEffects for CompositeTestHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl JournalEffects for CompositeTestHandler {
     async fn merge_facts(
         &self,

@@ -18,6 +18,9 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "browser-restart-boundary" => policy::run_browser_restart_boundary(),
         "browser-toolchain" => policy::run_browser_toolchain(),
         "biscuit-verifier-boundary" => policy::run_biscuit_verifier_boundary(),
+        "authorization-resource-scope-boundary" => {
+            policy::run_authorization_resource_scope_boundary()
+        }
         "harness-action-preconditions" => policy::run_harness_action_preconditions(),
         "harness-bridge-contract" => policy::run_harness_bridge_contract(),
         "harness-authoritative-fact-boundary" => policy::run_harness_authoritative_fact_boundary(),
@@ -31,6 +34,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "harness-focus-selection-contract" => policy::run_harness_focus_selection_contract(),
         "harness-matrix-inventory" => policy::run_harness_matrix_inventory(),
         "harness-mode-allowlist" => policy::run_harness_mode_allowlist(),
+        "harness-mode-security-boundary" => policy::run_harness_mode_security_boundary(),
         "harness-observation-determinism" => policy::run_harness_observation_determinism(),
         "harness-observation-surface" => policy::run_harness_observation_surface(),
         "harness-onboarding-contract" => policy::run_harness_onboarding_contract(),
@@ -77,11 +81,18 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "protocol-device-enrollment-contract" => policy::run_protocol_device_enrollment_contract(),
         "remote-ingress-boundary" => policy::run_remote_ingress_boundary(),
         "raw-transport-send-boundary" => policy::run_raw_transport_send_boundary(),
+        "rendezvous-descriptor-validation-boundary" => {
+            policy::run_rendezvous_descriptor_validation_boundary()
+        }
         "runtime-bootstrap-guardrails" => policy::run_runtime_bootstrap_guardrails(),
         "runtime-typed-lifecycle-bridge" => runtime_typed_lifecycle_bridge::run(),
         "security-boundary-policy" => policy::run_security_boundary_policy(),
         "security-bug-class-regressions" => policy::run_security_bug_class_regressions(),
         "security-bypass-symbols" => policy::run_security_bypass_symbols(),
+        "secure-storage-filesystem-boundary" => {
+            policy::run_secure_storage_filesystem_boundary()
+        }
+        "secret-persistence-boundary" => policy::run_secret_persistence_boundary(),
         "secret-field-wrappers" => policy::run_secret_field_wrappers(),
         "runtime-boundary-allowlist" => policy::run_runtime_boundary_allowlist(args),
         "runtime-error-boundary" => policy::run_runtime_error_boundary(),
@@ -98,6 +109,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "tui-product-path" => policy::run_tui_product_path(),
         "tui-selection-contract" => policy::run_tui_selection_contract(),
         "tui-semantic-snapshot" => policy::run_tui_semantic_snapshot(),
+        "trusted-key-resolution-boundary" => policy::run_trusted_key_resolution_boundary(),
         "user-flow-coverage" => policy::run_user_flow_coverage(),
         "user-flow-guidance-sync" => policy::run_user_flow_guidance_sync(),
         "user-flow-policy-guardrails" => policy::run_user_flow_policy_guardrails(),

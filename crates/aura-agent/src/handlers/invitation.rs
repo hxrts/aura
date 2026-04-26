@@ -79,13 +79,14 @@ use aura_invitation::{
 use aura_signature::{
     threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
 };
-use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use aura_rendezvous::TransportHint;
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use aura_journal::DomainFact;
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
+use crate::runtime::services::TrustedKeyResolutionService;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
@@ -115,7 +116,7 @@ mod vm_loop;
 
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
-use shareable::StoredImportedInvitation;
+use shareable::{ImportedSenderTrust, StoredImportedInvitation};
 pub use shareable::{
     ShareableInvitation, ShareableInvitationError, ShareableInvitationSenderProof,
     ShareableInvitationTransportMetadata,
@@ -350,6 +351,7 @@ pub struct InvitationHandler {
     service: CoreInvitationService,
     /// Cache of pending invitations (for quick lookup)
     invitation_cache: Arc<InvitationManager>,
+    trusted_key_resolver: TrustedKeyResolutionService,
 }
 
 impl Clone for InvitationHandler {
@@ -362,6 +364,7 @@ impl Clone for InvitationHandler {
             context: self.context.clone(),
             service,
             invitation_cache: Arc::clone(&self.invitation_cache),
+            trusted_key_resolver: self.trusted_key_resolver.clone(),
         }
     }
 }
@@ -381,6 +384,7 @@ impl InvitationHandler {
             context: HandlerContext::new(authority),
             service,
             invitation_cache: Arc::new(InvitationManager::new()),
+            trusted_key_resolver: TrustedKeyResolutionService::new(),
         })
     }
 
@@ -581,10 +585,6 @@ impl InvitationHandler {
             }
         }
 
-        if effects.harness_mode_enabled() {
-            return Ok(());
-        }
-
         if !effects.is_testing() {
             let proof = sender_proof.ok_or_else(|| {
                 AgentError::invalid(ShareableInvitationError::MissingSenderProof.to_string())
@@ -594,12 +594,12 @@ impl InvitationHandler {
                     ShareableInvitationError::InvalidSenderProof.to_string(),
                 ));
             }
-            let trusted_key_from_sender_identity = proof.public_key.as_slice();
+            let self_certified_sender_key = proof.public_key.as_slice();
             let verified = verify_ed25519_transcript(
                 effects,
                 &shareable.signing_transcript_with_transport(transport),
                 &proof.signature,
-                trusted_key_from_sender_identity,
+                self_certified_sender_key,
             )
             .await
             .map_err(|error| {
@@ -613,6 +613,44 @@ impl InvitationHandler {
         }
 
         Ok(())
+    }
+
+    async fn classify_imported_sender_trust(
+        &self,
+        shareable: &ShareableInvitation,
+        sender_proof: Option<&ShareableInvitationSenderProof>,
+    ) -> AgentResult<ImportedSenderTrust> {
+        let local_authority = self.context.authority.authority_id();
+        if self
+            .invitation_cache
+            .contact_exists(local_authority, shareable.sender_id)
+            .await
+        {
+            let proof = sender_proof.ok_or_else(|| {
+                AgentError::invalid("known sender invitation requires trusted sender proof")
+            })?;
+            let device_id = proof.sender_device_id.ok_or_else(|| {
+                AgentError::invalid("known sender invitation requires sender device id")
+            })?;
+            let trusted_key = self
+                .trusted_key_resolver
+                .resolve_device_key(device_id)
+                .map_err(|error| {
+                    AgentError::invalid(format!(
+                        "known sender invitation requires trusted sender key resolution: {error}"
+                    ))
+                })?;
+            if trusted_key.bytes() != proof.public_key.as_slice() {
+                return Err(AgentError::invalid(
+                    "known sender invitation proof key does not match trusted device key",
+                ));
+            }
+            return Ok(ImportedSenderTrust::TrustedDevice {
+                device_id,
+                key_epoch: proof.key_epoch,
+            });
+        }
+        Ok(ImportedSenderTrust::SelfCertified)
     }
 
     async fn refresh_contact_index(
@@ -1732,6 +1770,9 @@ impl InvitationHandler {
             &transport_metadata,
         )
         .await?;
+        let sender_trust = self
+            .classify_imported_sender_trust(&shareable, sender_proof.as_ref())
+            .await?;
 
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         // Persist the imported invitation with local status so later
@@ -1739,7 +1780,7 @@ impl InvitationHandler {
         Self::persist_imported_invitation(
             effects,
             self.context.authority.authority_id(),
-            &StoredImportedInvitation::pending(shareable.clone(), now_ms),
+            &StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust),
         )
         .await?;
         if let Some(addr) = sender_hint_addr.as_deref() {
@@ -1857,81 +1898,13 @@ impl InvitationHandler {
         addr: Option<&str>,
         now_ms: u64,
     ) {
-        if !effects.harness_mode_enabled() {
-            let _ = (effects, now_ms);
-            tracing::debug!(
-                peer = %peer,
-                sender_device_id = ?device_id,
-                sender_hint = ?addr,
-                "Ignoring unauthenticated invitation sender hint for authoritative routing"
-            );
-            return;
-        }
-
-        let Some(addr) = addr.map(str::trim).filter(|addr| !addr.is_empty()) else {
-            return;
-        };
-        let Some(manager) = effects.rendezvous_manager() else {
-            return;
-        };
-        let Some(transport_hint) = Self::invitation_sender_transport_hint(addr) else {
-            tracing::debug!(
-                peer = %peer,
-                sender_device_id = ?device_id,
-                sender_hint = addr,
-                "Skipping unparseable harness invitation sender hint"
-            );
-            return;
-        };
-
-        let peer_context = default_context_id_for_authority(peer);
-        let descriptor = RendezvousDescriptor {
-            authority_id: peer,
-            device_id,
-            context_id: peer_context,
-            transport_hints: vec![transport_hint],
-            handshake_psk_commitment: [1u8; 32],
-            public_key: [2u8; 32],
-            valid_from: now_ms.saturating_sub(1),
-            valid_until: now_ms.saturating_add(86_400_000),
-            nonce: [3u8; 32],
-            nickname_suggestion: None,
-        };
-
-        if let Err(error) = manager.cache_descriptor(descriptor).await {
-            tracing::debug!(
-                peer = %peer,
-                sender_device_id = ?device_id,
-                sender_hint = addr,
-                error = %error,
-                "Failed to cache harness invitation sender hint descriptor"
-            );
-            return;
-        }
-
+        let _ = (effects, now_ms);
         tracing::debug!(
             peer = %peer,
             sender_device_id = ?device_id,
-            sender_hint = addr,
-            "Cached harness invitation sender hint for peer-context routing"
+            sender_hint = ?addr,
+            "Ignoring unauthenticated invitation sender hint for authoritative routing"
         );
-    }
-
-    fn invitation_sender_transport_hint(addr: &str) -> Option<TransportHint> {
-        let trimmed = addr.trim();
-        if let Some(addr) = trimmed.strip_prefix("tcp://") {
-            return TransportHint::tcp_direct(addr).ok();
-        }
-        if let Some(addr) = trimmed
-            .strip_prefix("ws://")
-            .or_else(|| trimmed.strip_prefix("wss://"))
-        {
-            return TransportHint::websocket_direct(addr).ok();
-        }
-
-        TransportHint::tcp_direct(trimmed)
-            .or_else(|_| TransportHint::websocket_direct(trimmed))
-            .ok()
     }
 
     /// Decline an invitation
@@ -2586,6 +2559,7 @@ async fn execute_notify_peer(
                             public_key: vec![0; ShareableInvitation::SENDER_PROOF_PUBLIC_KEY_BYTES],
                             signature: vec![0; ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES],
                             sender_device_id: transport_metadata.sender_device_id,
+                            key_epoch: None,
                         },
                         transport_metadata,
                     )
@@ -2857,13 +2831,7 @@ fn attach_invitation_test_receipt_if_needed(
     effects: &AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    let should_normalize = effects.is_testing()
-        || (effects.harness_mode_enabled()
-            && envelope
-                .receipt
-                .as_ref()
-                .map_or(true, |receipt| receipt.sig.is_empty()));
-    if should_normalize
+    if effects.is_testing()
         && envelope
             .receipt
             .as_ref()

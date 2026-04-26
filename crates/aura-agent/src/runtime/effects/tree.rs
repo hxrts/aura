@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use aura_core::AuraError;
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
     async fn get_current_state(&self) -> Result<JournalTreeState, AuraError> {
         self.tree_handler.get_current_state().await

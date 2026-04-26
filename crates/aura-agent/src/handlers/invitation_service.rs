@@ -936,6 +936,7 @@ impl InvitationServiceApi {
                 public_key,
                 signature,
                 sender_device_id: transport.sender_device_id,
+                key_epoch: Some(1),
             },
             transport.clone(),
         )

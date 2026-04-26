@@ -142,7 +142,7 @@ impl BiscuitAuthorizationBridge {
             current_time_seconds,
         )?;
         self.add_resource_facts(&mut authorizer, resource)?;
-        self.add_operation_policies(&mut authorizer, operation, operation_str)?;
+        self.add_scoped_operation_policy(&mut authorizer, operation, operation_str, resource)?;
 
         let authorized = match authorizer.authorize_with_limits(limits) {
             Ok(_) => true,
@@ -320,33 +320,147 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
-    fn add_operation_policies(
+    fn add_scoped_operation_policy(
         &self,
         authorizer: &mut biscuit_auth::Authorizer,
         operation: AuthorizationOp,
         operation_str: &str,
+        resource: &ResourceScope,
     ) -> Result<(), BiscuitError> {
+        let mut add_scoped_capability_policy =
+            |capability: &str| self.add_scoped_capability_policy(authorizer, capability, resource);
         match operation {
-            AuthorizationOp::Read | AuthorizationOp::List => {
-                Self::add_policy(authorizer, policy!("allow if capability(\"read\")"))
-            }
+            AuthorizationOp::Read | AuthorizationOp::List => add_scoped_capability_policy("read"),
             AuthorizationOp::Write | AuthorizationOp::Update | AuthorizationOp::Append => {
-                Self::add_policy(authorizer, policy!("allow if capability(\"write\")"))
+                add_scoped_capability_policy("write")
             }
-            AuthorizationOp::Execute => {
-                Self::add_policy(authorizer, policy!("allow if capability(\"execute\")"))
-            }
-            AuthorizationOp::Admin => {
-                Self::add_policy(authorizer, policy!("allow if capability(\"admin\")"))?;
-                Self::add_policy(authorizer, policy!("allow if role(\"member\")"))?;
-                Self::add_policy(authorizer, policy!("allow if role(\"moderator\")"))
-            }
-            AuthorizationOp::Delegate => {
-                Self::add_policy(authorizer, policy!("allow if capability(\"delegate\")"))
-            }
+            AuthorizationOp::Execute => add_scoped_capability_policy("execute"),
+            AuthorizationOp::Admin => self.add_scoped_admin_policy(authorizer, resource),
+            AuthorizationOp::Delegate => add_scoped_capability_policy("delegate"),
             _ => {
                 // For unknown operations, require explicit capability.
-                Self::add_policy(authorizer, policy!("allow if capability({operation_str})"))
+                add_scoped_capability_policy(operation_str)
+            }
+        }
+    }
+
+    fn add_scoped_capability_policy(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        capability: &str,
+        resource: &ResourceScope,
+    ) -> Result<(), BiscuitError> {
+        match resource {
+            ResourceScope::Authority { authority_id, .. } => {
+                let auth_id = authority_id.to_string();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability({capability}), scope_authority({auth_id}), authority_id({auth_id})"
+                    ),
+                )
+            }
+            ResourceScope::Context { context_id, .. } => {
+                let ctx_id = context_id.to_string();
+                let authority_scope_ctx_id = ctx_id.clone();
+                let authority = self.authority_id.to_string();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability({capability}), scope_context({ctx_id}), context_id({ctx_id})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability({capability}), scope_authority_contexts({authority}), authority({authority}), context_id({authority_scope_ctx_id})"
+                    ),
+                )
+            }
+            ResourceScope::Storage { authority_id, path } => {
+                let auth_id = authority_id.to_string();
+                let path_str = path.as_str();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability({capability}), scope_authority({auth_id}), authority_id({auth_id}), scope_storage_path({path_str}), storage_path({path_str})"
+                    ),
+                )
+            }
+        }
+    }
+
+    fn add_scoped_admin_policy(
+        &self,
+        authorizer: &mut biscuit_auth::Authorizer,
+        resource: &ResourceScope,
+    ) -> Result<(), BiscuitError> {
+        match resource {
+            ResourceScope::Authority { authority_id, .. } => {
+                let auth_id = authority_id.to_string();
+                let moderator_auth_id = auth_id.clone();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"member\"), scope_authority({auth_id}), authority_id({auth_id})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"moderator\"), scope_authority({moderator_auth_id}), authority_id({moderator_auth_id})"
+                    ),
+                )
+            }
+            ResourceScope::Context { context_id, .. } => {
+                let ctx_id = context_id.to_string();
+                let moderator_ctx_id = ctx_id.clone();
+                let authority_ctx_id = ctx_id.clone();
+                let moderator_authority_ctx_id = ctx_id.clone();
+                let authority = self.authority_id.to_string();
+                let moderator_authority = authority.clone();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"member\"), scope_context({ctx_id}), context_id({ctx_id})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"moderator\"), scope_context({moderator_ctx_id}), context_id({moderator_ctx_id})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"member\"), scope_authority_contexts({authority}), authority({authority}), context_id({authority_ctx_id})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"moderator\"), scope_authority_contexts({moderator_authority}), authority({moderator_authority}), context_id({moderator_authority_ctx_id})"
+                    ),
+                )
+            }
+            ResourceScope::Storage { authority_id, path } => {
+                let auth_id = authority_id.to_string();
+                let path_str = path.as_str();
+                let moderator_auth_id = auth_id.clone();
+                let moderator_path_str = path_str.to_string();
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"member\"), scope_authority({auth_id}), authority_id({auth_id}), scope_storage_path({path_str}), storage_path({path_str})"
+                    ),
+                )?;
+                Self::add_policy(
+                    authorizer,
+                    policy!(
+                        "allow if capability(\"admin\"), role(\"moderator\"), scope_authority({moderator_auth_id}), authority_id({moderator_auth_id}), scope_storage_path({moderator_path_str}), storage_path({moderator_path_str})"
+                    ),
+                )
             }
         }
     }

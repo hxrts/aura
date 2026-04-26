@@ -18,6 +18,10 @@ fn biscuit_bridge_authorizes_basic_token() {
     builder
         .add_fact(fact!("capability(\"read\")"))
         .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let scoped_authority = common::authority_id(70).to_string();
+    builder
+        .add_fact(fact!("scope_authority({scoped_authority})"))
+        .unwrap_or_else(|err| panic!("failed to add authority scope fact: {err:?}"));
     let token = builder
         .build(&keypair)
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
@@ -42,6 +46,10 @@ fn verified_biscuit_token_rejects_wrong_root() {
     builder
         .add_fact(fact!("capability(\"read\")"))
         .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let scoped_context = common::context_id(12).to_string();
+    builder
+        .add_fact(fact!("scope_context({scoped_context})"))
+        .unwrap_or_else(|err| panic!("failed to add context scope fact: {err:?}"));
     let token = builder
         .build(&issuer)
         .unwrap_or_else(|err| panic!("failed to build read-capability token: {err:?}"));
@@ -220,6 +228,10 @@ fn biscuit_bridge_rejects_expired_token_with_explicit_time() {
     builder
         .add_fact(fact!("capability(\"read\")"))
         .unwrap_or_else(|err| panic!("failed to add read capability fact: {err:?}"));
+    let scoped_context = common::context_id(12).to_string();
+    builder
+        .add_fact(fact!("scope_context({scoped_context})"))
+        .unwrap_or_else(|err| panic!("failed to add context scope fact: {err:?}"));
     builder
         .add_check(check!("check if time($time), $time < 1000"))
         .unwrap_or_else(|err| panic!("failed to add expiry check: {err:?}"));

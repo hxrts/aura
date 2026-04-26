@@ -102,7 +102,8 @@ impl<J: JournalEffects> std::fmt::Debug for IndexedJournalWrapper<J> {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<J: JournalEffects> JournalEffects for IndexedJournalWrapper<J> {
     async fn merge_facts(
         &self,

@@ -52,6 +52,8 @@ pub struct ShareableInvitationSenderProof {
     pub signature: Vec<u8>,
     #[serde(default)]
     pub sender_device_id: Option<DeviceId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -137,6 +139,19 @@ fn default_imported_invitation_status() -> InvitationStatus {
     InvitationStatus::Pending
 }
 
+fn default_imported_sender_trust() -> ImportedSenderTrust {
+    ImportedSenderTrust::SelfCertified
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum ImportedSenderTrust {
+    SelfCertified,
+    TrustedDevice {
+        device_id: DeviceId,
+        key_epoch: Option<u64>,
+    },
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct StoredImportedInvitation {
     #[serde(flatten)]
@@ -145,14 +160,21 @@ pub(super) struct StoredImportedInvitation {
     pub(super) status: InvitationStatus,
     #[serde(default)]
     pub(super) created_at: u64,
+    #[serde(default = "default_imported_sender_trust")]
+    pub(super) sender_trust: ImportedSenderTrust,
 }
 
 impl StoredImportedInvitation {
-    pub(super) fn pending(shareable: ShareableInvitation, created_at: u64) -> Self {
+    pub(super) fn pending(
+        shareable: ShareableInvitation,
+        created_at: u64,
+        sender_trust: ImportedSenderTrust,
+    ) -> Self {
         Self {
             shareable,
             status: InvitationStatus::Pending,
             created_at,
+            sender_trust,
         }
     }
 }

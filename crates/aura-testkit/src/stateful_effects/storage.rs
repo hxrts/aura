@@ -53,7 +53,8 @@ impl MemoryStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageCoreEffects for MemoryStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let mut data = self.data.write().await;
@@ -85,7 +86,8 @@ impl StorageCoreEffects for MemoryStorageHandler {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageExtendedEffects for MemoryStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let data = self.data.read().await;

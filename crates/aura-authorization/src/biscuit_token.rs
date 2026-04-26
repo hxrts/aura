@@ -4,7 +4,13 @@
 //! model where authorities are the cryptographic actors managing tokens.
 
 use crate::biscuit_evaluator::VerifiedBiscuitToken;
-use aura_core::{types::identifiers::AuthorityId, CapabilityName};
+use aura_core::{
+    types::{
+        identifiers::{AuthorityId, ContextId},
+        scope::StoragePath,
+    },
+    CapabilityName,
+};
 use biscuit_auth::{builder::BiscuitBuilder, macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
 
@@ -62,23 +68,93 @@ impl TokenAuthority {
     where
         P: TokenGrantProfile,
     {
+        self.create_token_with_scopes(
+            recipient,
+            profile,
+            vec![TokenScopeFact::AuthorityContexts(recipient.to_string())],
+        )
+    }
+
+    /// Create a token scoped to one relational context.
+    pub fn create_context_token<P>(
+        &self,
+        recipient: AuthorityId,
+        context_id: ContextId,
+        profile: P,
+    ) -> Result<Biscuit, BiscuitError>
+    where
+        P: TokenGrantProfile,
+    {
+        let context = context_id.to_string();
+        self.create_token_with_scopes(recipient, profile, vec![TokenScopeFact::Context(context)])
+    }
+
+    /// Create a token scoped to one storage path under the recipient authority.
+    pub fn create_storage_token<P>(
+        &self,
+        recipient: AuthorityId,
+        path: &StoragePath,
+        profile: P,
+    ) -> Result<Biscuit, BiscuitError>
+    where
+        P: TokenGrantProfile,
+    {
+        self.create_token_with_scopes(
+            recipient,
+            profile,
+            vec![TokenScopeFact::Storage(path.as_str().to_string())],
+        )
+    }
+
+    fn create_token_with_scopes<P>(
+        &self,
+        recipient: AuthorityId,
+        profile: P,
+        scope_facts: Vec<TokenScopeFact>,
+    ) -> Result<Biscuit, BiscuitError>
+    where
+        P: TokenGrantProfile,
+    {
         let issuer = self.authority_id.to_string();
         let recipient_str = recipient.to_string();
+        let recipient_scope = recipient_str.clone();
         let mut granted_capabilities = Vec::new();
         profile.extend_profile_grants(&mut granted_capabilities);
 
         let mut builder = BiscuitBuilder::new();
         builder.add_fact(fact!("issuer({issuer})"))?;
         builder.add_fact(fact!("authority({recipient_str})"))?;
+        builder.add_fact(fact!("scope_authority({recipient_scope})"))?;
         builder.add_fact(fact!("role(\"member\")"))?;
-        for capability in granted_capabilities {
-            let capability = capability.as_str();
-            builder.add_fact(fact!("capability({capability})"))?;
+        for scope in scope_facts {
+            match scope {
+                TokenScopeFact::AuthorityContexts(authority) => {
+                    builder.add_fact(fact!("scope_authority_contexts({authority})"))?;
+                }
+                TokenScopeFact::Context(context) => {
+                    builder.add_fact(fact!("scope_context({context})"))?;
+                }
+                TokenScopeFact::Storage(path) => {
+                    builder.add_fact(fact!("scope_storage_path({path})"))?;
+                }
+            }
         }
+        Self::add_capability_facts(&mut builder, granted_capabilities)?;
 
         builder
             .build(&self.root_keypair)
             .map_err(BiscuitError::BiscuitLib)
+    }
+
+    fn add_capability_facts(
+        builder: &mut BiscuitBuilder,
+        granted_capabilities: Vec<CapabilityName>,
+    ) -> Result<(), BiscuitError> {
+        for capability in granted_capabilities {
+            let capability = capability.as_str();
+            builder.add_fact(fact!("capability({capability})"))?;
+        }
+        Ok(())
     }
 
     /// Get the public key for token verification.
@@ -113,6 +189,12 @@ impl TokenAuthority {
     pub fn can_verify_for(&self, authority_id: &AuthorityId) -> bool {
         &self.authority_id == authority_id
     }
+}
+
+enum TokenScopeFact {
+    AuthorityContexts(String),
+    Context(String),
+    Storage(String),
 }
 
 /// Biscuit token manager for an authority.

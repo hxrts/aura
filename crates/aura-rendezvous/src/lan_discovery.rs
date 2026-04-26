@@ -81,21 +81,6 @@ pub struct LanDiscoveryPacket {
 }
 
 impl LanDiscoveryPacket {
-    /// Create a new discovery packet.
-    pub fn new(
-        authority_id: AuthorityId,
-        descriptor: RendezvousDescriptor,
-        timestamp_ms: u64,
-    ) -> Self {
-        Self {
-            version: PROTOCOL_VERSION,
-            authority_id,
-            descriptor,
-            timestamp_ms,
-            signature: Vec::new(),
-        }
-    }
-
     /// Create a signed discovery packet.
     pub fn new_signed(
         authority_id: AuthorityId,
@@ -113,7 +98,11 @@ impl LanDiscoveryPacket {
     }
 
     /// Canonical payload that must be signed by the announcing authority.
-    pub fn signing_payload(&self) -> Option<Vec<u8>> {
+    pub fn signing_payload_for(
+        authority_id: AuthorityId,
+        descriptor: &RendezvousDescriptor,
+        timestamp_ms: u64,
+    ) -> Option<Vec<u8>> {
         #[derive(Serialize)]
         struct LanDiscoverySigningPayload<'a> {
             version: u8,
@@ -123,12 +112,17 @@ impl LanDiscoveryPacket {
         }
 
         serde_json::to_vec(&LanDiscoverySigningPayload {
-            version: self.version,
-            authority_id: self.authority_id,
-            descriptor: &self.descriptor,
-            timestamp_ms: self.timestamp_ms,
+            version: PROTOCOL_VERSION,
+            authority_id,
+            descriptor,
+            timestamp_ms,
         })
         .ok()
+    }
+
+    /// Canonical payload that must be signed by the announcing authority.
+    pub fn signing_payload(&self) -> Option<Vec<u8>> {
+        Self::signing_payload_for(self.authority_id, &self.descriptor, self.timestamp_ms)
     }
 
     /// Serialize packet with magic header.

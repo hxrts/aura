@@ -555,7 +555,8 @@ impl ChoreoHandlerExt for OtaCoordinatorProtocolRuntime {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl GeneratedChoreographyRuntime for OtaCoordinatorProtocolRuntime {
     async fn provide_message<M: Send + 'static>(&mut self, _to: Self::Role) -> ChoreoResult<M> {
         match self.next_outbound {

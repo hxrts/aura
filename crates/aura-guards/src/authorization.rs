@@ -117,38 +117,97 @@ impl BiscuitAuthorizationBridge {
         &self,
         authorizer: &mut Authorizer,
         operation: &str,
+        resource: &ResourceScope,
     ) -> Result<(), BiscuitError> {
-        match operation {
-            "read" => Self::biscuit(authorizer.add_check(check!("check if capability(\"read\")")))?,
-            "write" => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"write\")")))?;
-            }
-            "execute" => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"execute\")")))?;
-            }
-            "admin" => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"admin\")")))?;
-                Self::biscuit(
-                    authorizer
-                        .add_check(check!("check if role(\"member\") or role(\"moderator\")")),
-                )?;
-            }
-            "delegate" => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"delegate\")")))?;
-            }
-            _ if operation.contains(':') => {
-                Self::biscuit(authorizer.add_check(check!("check if capability({operation})")))?;
-            }
-            _ => {
-                Self::biscuit(authorizer.add_check(check!("check if capability(\"execute\")")))?;
-            }
-        }
-
-        Ok(())
+        let capability = match operation {
+            "read" => "read".to_string(),
+            "list" => "read".to_string(),
+            "write" => "write".to_string(),
+            "update" => "write".to_string(),
+            "append" => "write".to_string(),
+            "execute" => "execute".to_string(),
+            "admin" => "admin".to_string(),
+            "delegate" => "delegate".to_string(),
+            _ => CapabilityName::parse(operation)
+                .map_err(|error| BiscuitError::InvalidCapability(error.to_string()))?
+                .to_string(),
+        };
+        self.add_scoped_operation_policy(authorizer, &capability, operation == "admin", resource)
     }
 
-    fn add_allow_policy(&self, authorizer: &mut Authorizer) -> Result<(), BiscuitError> {
-        Self::biscuit(authorizer.add_policy(policy!("allow if true")))?;
+    fn add_scoped_operation_policy(
+        &self,
+        authorizer: &mut Authorizer,
+        capability: &str,
+        admin: bool,
+        resource: &ResourceScope,
+    ) -> Result<(), BiscuitError> {
+        match resource {
+            ResourceScope::Authority { authority_id, .. } => {
+                let auth_id = authority_id.to_string();
+                if admin {
+                    let moderator_auth_id = auth_id.clone();
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"member\"), scope_authority({auth_id}), authority_id({auth_id})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"moderator\"), scope_authority({moderator_auth_id}), authority_id({moderator_auth_id})"
+                    )))?;
+                } else {
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), scope_authority({auth_id}), authority_id({auth_id})"
+                    )))?;
+                }
+            }
+            ResourceScope::Context { context_id, .. } => {
+                let ctx_id = context_id.to_string();
+                let authority_scope_ctx_id = ctx_id.clone();
+                let authority = self.authority_id.to_string();
+                if admin {
+                    let moderator_ctx_id = ctx_id.clone();
+                    let authority_ctx_id = ctx_id.clone();
+                    let moderator_authority_ctx_id = ctx_id.clone();
+                    let moderator_authority = authority.clone();
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"member\"), scope_context({ctx_id}), context_id({ctx_id})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"moderator\"), scope_context({moderator_ctx_id}), context_id({moderator_ctx_id})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"member\"), scope_authority_contexts({authority}), authority({authority}), context_id({authority_ctx_id})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"moderator\"), scope_authority_contexts({moderator_authority}), authority({moderator_authority}), context_id({moderator_authority_ctx_id})"
+                    )))?;
+                } else {
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), scope_context({ctx_id}), context_id({ctx_id})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), scope_authority_contexts({authority}), authority({authority}), context_id({authority_scope_ctx_id})"
+                    )))?;
+                }
+            }
+            ResourceScope::Storage { authority_id, path } => {
+                let auth_id = authority_id.to_string();
+                let path_str = path.as_str();
+                if admin {
+                    let moderator_auth_id = auth_id.clone();
+                    let moderator_path_str = path_str.to_string();
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"member\"), scope_authority({auth_id}), authority_id({auth_id}), scope_storage_path({path_str}), storage_path({path_str})"
+                    )))?;
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), role(\"moderator\"), scope_authority({moderator_auth_id}), authority_id({moderator_auth_id}), scope_storage_path({moderator_path_str}), storage_path({moderator_path_str})"
+                    )))?;
+                } else {
+                    Self::biscuit(authorizer.add_policy(policy!(
+                        "allow if capability({capability}), scope_authority({auth_id}), authority_id({auth_id}), scope_storage_path({path_str}), storage_path({path_str})"
+                    )))?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -196,18 +255,8 @@ impl BiscuitAuthorizationBridge {
         self.add_authorize_ambient_facts(&mut authorizer, operation, current_time_seconds)?;
         self.add_resource_facts(&mut authorizer, resource)?;
 
-        // Phase 3: Add authorization checks for specific operations
-        //
-        // Checks gate access: if any check fails, authorization is denied.
-        // The blanket allow policy (added in Phase 4) permits the request
-        // only if all checks pass.
-        self.add_operation_checks(&mut authorizer, operation)?;
-
-        // Phase 4: Allow policy + Datalog evaluation
-        //
-        // Authorization requires at least one allow policy to match.
-        // Checks (above) gate access; this policy permits if all pass.
-        self.add_allow_policy(&mut authorizer)?;
+        // Phase 3: Add scoped authorization policies for specific operations.
+        self.add_operation_checks(&mut authorizer, operation, resource)?;
         let authorization_result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
 
         let authorized = match authorization_result {
@@ -245,8 +294,7 @@ impl BiscuitAuthorizationBridge {
         // Add a check to see if the token contains the requested capability
         Self::biscuit(authorizer.add_check(check!("check if capability({capability})")))?;
 
-        // Allow policy required for authorize() to succeed
-        self.add_allow_policy(&mut authorizer)?;
+        Self::biscuit(authorizer.add_policy(policy!("allow if capability({capability})")))?;
 
         // Run Datalog evaluation
         let result = authorizer.authorize_with_limits(GUARD_BISCUIT_LIMITS);
@@ -330,6 +378,7 @@ mod tests {
                 vec![
                     capability_name!("execute"),
                     capability_name!("invitation:send"),
+                    capability_name!("request_digest"),
                 ],
             )
             .unwrap_or_else(|err| panic!("failed to create token: {err:?}"));
@@ -363,7 +412,7 @@ mod tests {
     fn authorize_namespaced_operation_checks_exact_capability() {
         let (bridge, token) = test_bridge();
         let scope = aura_authorization::ResourceScope::Authority {
-            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            authority_id: bridge.authority_id(),
             operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
         // invitation:send is in the token and should match the namespaced check
@@ -380,7 +429,7 @@ mod tests {
     fn authorize_namespaced_operation_denied_without_matching_capability() {
         let (bridge, token) = test_bridge();
         let scope = aura_authorization::ResourceScope::Authority {
-            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            authority_id: bridge.authority_id(),
             operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
         // recovery:initiate is NOT in the token
@@ -397,7 +446,7 @@ mod tests {
     fn generic_execute_still_works_for_unnamespaced_operations() {
         let (bridge, token) = test_bridge();
         let scope = aura_authorization::ResourceScope::Authority {
-            authority_id: AuthorityId::new_from_entropy([99u8; 32]),
+            authority_id: bridge.authority_id(),
             operation: aura_core::types::scope::AuthorityOp::UpdateTree,
         };
         // "execute" is in the token as a generic capability
@@ -405,6 +454,31 @@ mod tests {
             .authorize(&token, "execute", &scope, 1000)
             .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
         assert!(result.authorized);
+    }
+
+    #[test]
+    fn authorize_unnamespaced_custom_operation_checks_exact_capability() {
+        let (bridge, token) = test_bridge();
+        let scope = aura_authorization::ResourceScope::Authority {
+            authority_id: bridge.authority_id(),
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+
+        let result = bridge
+            .authorize(&token, "request_digest", &scope, 1000)
+            .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
+        assert!(
+            result.authorized,
+            "unnamespaced custom operation should match the exact capability in the token"
+        );
+
+        let result = bridge
+            .authorize(&token, "push_ops", &scope, 1000)
+            .unwrap_or_else(|err| panic!("authorize failed: {err:?}"));
+        assert!(
+            !result.authorized,
+            "unnamespaced custom operation without matching capability should be denied"
+        );
     }
 
     #[test]

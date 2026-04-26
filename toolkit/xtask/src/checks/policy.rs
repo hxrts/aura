@@ -1453,10 +1453,15 @@ pub fn run_ownership_policy() -> Result<()> {
     run_raw_transport_send_boundary()?;
     run_invitation_legacy_fallback_boundary()?;
     run_biscuit_verifier_boundary()?;
+    run_authorization_resource_scope_boundary()?;
     run_signed_transcript_boundary()?;
     run_trusted_key_resolution_boundary()?;
+    run_harness_mode_security_boundary()?;
     run_security_bypass_symbols()?;
+    run_secure_storage_filesystem_boundary()?;
+    run_secret_persistence_boundary()?;
     run_secret_field_wrappers()?;
+    run_rendezvous_descriptor_validation_boundary()?;
     run_security_bug_class_regressions()?;
     run_sync_biscuit_boundary()?;
     run_guard_operation_boundary()?;
@@ -1478,12 +1483,17 @@ pub fn run_security_boundary_policy() -> Result<()> {
     run_canonical_remote_apply_boundary()?;
     run_journal_authorization_wiring_boundary()?;
     run_biscuit_verifier_boundary()?;
+    run_authorization_resource_scope_boundary()?;
     run_signed_transcript_boundary()?;
     run_trusted_key_resolution_boundary()?;
     run_raw_transport_send_boundary()?;
     run_invitation_legacy_fallback_boundary()?;
+    run_harness_mode_security_boundary()?;
     run_security_bypass_symbols()?;
+    run_secure_storage_filesystem_boundary()?;
+    run_secret_persistence_boundary()?;
     run_secret_field_wrappers()?;
+    run_rendezvous_descriptor_validation_boundary()?;
     run_security_bug_class_regressions()?;
     run_sync_biscuit_boundary()?;
     run_guard_operation_boundary()?;
@@ -2181,6 +2191,92 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
     Ok(())
 }
 
+pub fn run_authorization_resource_scope_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let mut violations = Vec::new();
+
+    for rel_root in [
+        "crates/aura-authorization/src",
+        "crates/aura-guards/src",
+    ] {
+        let root = repo_root.join(rel_root);
+        if !root.exists() {
+            continue;
+        }
+        for path in rust_files_under(root) {
+            let rel = repo_relative(&path);
+            if rel.contains("/tests/") || rel.ends_with("/tests.rs") {
+                continue;
+            }
+            let lines = read_lines(&path)?;
+            for (idx, line) in lines.iter().enumerate() {
+                if line_is_test_scoped(&lines, idx) {
+                    continue;
+                }
+                let trimmed = line.trim_start();
+                if trimmed.is_empty()
+                    || trimmed.starts_with("//")
+                    || trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                {
+                    continue;
+                }
+                let context =
+                    lines[idx.saturating_sub(20)..lines.len().min(idx + 21)].join("\n");
+                if authorization_scope_policy_allowed(&rel, &context) {
+                    continue;
+                }
+                if authorization_scope_policy_violation(line, &context) {
+                    violations.push(format!(
+                        "{rel}:{} Biscuit authorization must bind capability checks to ResourceScope through the canonical scope policy",
+                        idx + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "authorization-resource-scope-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("authorization resource scope boundary policy: clean");
+    Ok(())
+}
+
+fn authorization_scope_policy_allowed(rel: &str, context: &str) -> bool {
+    rel.ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
+        && (context.contains("fn scoped_resource_authorization_policy(")
+            || context.contains("fn scoped_capability_policy(")
+            || context.contains("fn add_scoped_operation_policy("))
+}
+
+fn authorization_scope_policy_violation(line: &str, context: &str) -> bool {
+    let capability_only_policy = line.contains("policy!(\"allow if capability(")
+        || line.contains("policy!(\"allow if role(")
+        || line.contains("policy!(\"allow if true\")");
+    let capability_only_check = line.contains("check!(\"check if capability(");
+    if !(capability_only_policy || capability_only_check) {
+        return false;
+    }
+
+    let lowered = context.to_ascii_lowercase();
+    let has_resource_scope_context = lowered.contains("resourcescope")
+        || lowered.contains("resource_type")
+        || lowered.contains("authority_id")
+        || lowered.contains("context_id")
+        || lowered.contains("storage_path")
+        || lowered.contains("add_resource_facts");
+    let has_canonical_scope_helper = context.contains("scoped_resource_authorization_policy")
+        || context.contains("scoped_capability_policy")
+        || context.contains("add_scoped_operation_policy");
+
+    has_resource_scope_context && !has_canonical_scope_helper
+}
+
 fn starts_security_critical_biscuit_api(line: &str) -> bool {
     let trimmed = line.trim_start();
     [
@@ -2409,6 +2505,13 @@ pub fn run_trusted_key_resolution_boundary() -> Result<()> {
                 }
             }
 
+            if self_certified_invitation_key_used_as_trusted(line, &local_window) {
+                violations.push(format!(
+                    "{rel}:{} self-certified invitation proof keys must not be labeled or used as trusted sender identity keys",
+                    idx + 1
+                ));
+            }
+
             if line.contains("Deserialize") && line.contains("derive") {
                 if let Some((struct_line, block)) = deserializable_item_block(&lines, idx) {
                     if item_carries_identity_and_key_material(&block)
@@ -2451,12 +2554,146 @@ fn is_signature_verification_call(line: &str) -> bool {
 fn has_trusted_key_resolution_context(window: &str) -> bool {
     window.contains("TrustedKeyResolver")
         || window.contains("TrustedPublicKey")
+        || window.contains("self_certified_sender_key")
         || window.contains("trusted_key")
         || window.contains("key_resolver")
         || window.contains("resolve_authority_threshold_key")
         || window.contains("resolve_device_key")
         || window.contains("resolve_guardian_key")
         || window.contains("resolve_release_key")
+}
+
+fn self_certified_invitation_key_used_as_trusted(line: &str, context: &str) -> bool {
+    let uses_proof_key_as_trusted =
+        line.contains("trusted_key") && line.contains("proof.public_key");
+    let self_certified_key_drives_verification =
+        line.contains("sender_id_bound_to_public_key")
+            && (context.contains("trusted_key")
+                || context.contains("verify_ed25519_transcript")
+                || context.contains("verify_frost_transcript"));
+    let bypasses_resolver = !(context.contains("TrustedKeyResolver")
+        || context.contains("TrustedPublicKey")
+        || context.contains("key_resolver")
+        || context.contains("resolve_device_key")
+        || context.contains("resolve_authority_threshold_key"));
+
+    (uses_proof_key_as_trusted || self_certified_key_drives_verification) && bypasses_resolver
+}
+
+pub fn run_harness_mode_security_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if harness_mode_security_skip_file(&rel) || !harness_mode_security_path(&rel) {
+            continue;
+        }
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("///")
+                || trimmed.starts_with("//!")
+                || trimmed.starts_with("#[cfg(test)]")
+            {
+                continue;
+            }
+            if !(line.contains("harness_mode_enabled()") || line.contains("AURA_HARNESS_MODE")) {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(16)..lines.len().min(idx + 17)].join("\n");
+            if harness_mode_security_allowed(&rel, &context) {
+                continue;
+            }
+            if harness_mode_security_sensitive_context(&context) {
+                violations.push(format!(
+                    "{rel}:{} harness mode must not affect cryptographic, authorization, receipt, or secret-storage decisions",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("harness-mode-security-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("harness mode security boundary policy: clean");
+    Ok(())
+}
+
+fn harness_mode_security_skip_file(rel: &str) -> bool {
+    rel.contains("crates/aura-testkit/")
+        || rel.contains("crates/aura-simulator/")
+        || rel.contains("crates/aura-harness/")
+        || rel.contains("crates/aura-quint/")
+        || rel.contains("crates/aura-macros/")
+        || rel.contains("/tests/")
+        || rel.ends_with("/tests.rs")
+        || rel.ends_with("/test_support.rs")
+}
+
+fn harness_mode_security_path(rel: &str) -> bool {
+    [
+        "crates/aura-agent/src/handlers/",
+        "crates/aura-agent/src/runtime_bridge/",
+        "crates/aura-authorization/src/",
+        "crates/aura-effects/src/secure.rs",
+        "crates/aura-effects/src/encrypted_storage.rs",
+        "crates/aura-guards/src/",
+        "crates/aura-invitation/src/",
+        "crates/aura-rendezvous/src/",
+        "crates/aura-sync/src/",
+    ]
+    .iter()
+    .any(|prefix| rel.contains(prefix))
+}
+
+fn harness_mode_security_allowed(rel: &str, context: &str) -> bool {
+    if rel.ends_with("crates/aura-agent/src/runtime/effects.rs") {
+        return true;
+    }
+    if context.contains("fn invitation_timeout_profile(")
+        || context.contains("fn invitation_timeout_budget(")
+        || context.contains("async fn best_effort_current_timestamp_ms(")
+        || context.contains("fn append_sender_hint(")
+        || context.contains("const HARNESS_MODE_ENV_VAR")
+    {
+        return true;
+    }
+    false
+}
+
+fn harness_mode_security_sensitive_context(context: &str) -> bool {
+    let lowered = context.to_ascii_lowercase();
+    [
+        "authorization",
+        "authorize",
+        "biscuit",
+        "credential",
+        "cryptographic",
+        "ed25519",
+        "frost",
+        "missing sender proof",
+        "proof",
+        "receipt",
+        "secret",
+        "secure_",
+        "secure storage",
+        "signature",
+        "trusted",
+        "unauthenticated",
+        "verified",
+        "verify",
+    ]
+    .iter()
+    .any(|needle| lowered.contains(needle))
 }
 
 fn starts_signature_verification_api(line: &str) -> bool {
@@ -2874,6 +3111,184 @@ pub fn run_secret_field_wrappers() -> Result<()> {
 
     println!("secret field wrapper policy: clean");
     Ok(())
+}
+
+pub fn run_secret_persistence_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let crates_dir = repo_root.join("crates");
+    let mut violations = Vec::new();
+
+    for path in rust_files_under(&crates_dir) {
+        let rel = repo_relative(&path);
+        if security_bug_class_skip_file(&security_rel_path(&repo_root, &path)) {
+            continue;
+        }
+        let lines = read_lines(&path)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("///")
+                || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(16)..lines.len().min(idx + 17)].join("\n");
+            if secret_persistence_violation(line, &context) {
+                violations.push(format!(
+                    "{rel}:{} secret-bearing invitation/enrollment payloads must not be serialized into ordinary StorageEffects",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!("secret-persistence-boundary:\n{}", violations.join("\n"));
+    }
+
+    println!("secret persistence boundary policy: clean");
+    Ok(())
+}
+
+pub fn run_secure_storage_filesystem_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let secure_file = repo_root.join("crates/aura-effects/src/secure.rs");
+    let mut violations = Vec::new();
+
+    if secure_file.exists() {
+        let rel = repo_relative(&secure_file);
+        let lines = read_lines(&secure_file)?;
+        for (idx, line) in lines.iter().enumerate() {
+            if line_is_test_scoped(&lines, idx) {
+                continue;
+            }
+            let trimmed = line.trim_start();
+            if trimmed.is_empty()
+                || trimmed.starts_with("//")
+                || trimmed.starts_with("///")
+                || trimmed.starts_with("//!")
+            {
+                continue;
+            }
+            let context = lines[idx.saturating_sub(12)..lines.len().min(idx + 13)].join("\n");
+            if secure_storage_filesystem_violation(line, &context) {
+                violations.push(format!(
+                    "{rel}:{} filesystem secure-storage writes and wrapping-key reads must use hardened no-follow/private-file helpers",
+                    idx + 1
+                ));
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "secure-storage-filesystem-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("secure storage filesystem boundary policy: clean");
+    Ok(())
+}
+
+fn secure_storage_filesystem_violation(line: &str, context: &str) -> bool {
+    if context.contains("fn open_private_file_no_follow(")
+        || context.contains("fn read_existing_private_file(")
+        || context.contains("fn write_private_file_atomic_no_follow(")
+        || context.contains("fn validate_private_file_metadata(")
+    {
+        return false;
+    }
+
+    let writes_secret_file = context.contains("fn write_private_file(")
+        && (line.contains(".truncate(true)")
+            || line.contains(".create(true)")
+            || line.contains(".open(path)"));
+    let reads_wrapping_key_directly =
+        line.contains("fs::read(&key_path)") || line.contains("std::fs::read(&key_path)");
+
+    writes_secret_file || reads_wrapping_key_directly
+}
+
+pub fn run_rendezvous_descriptor_validation_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    let sync_dir = repo_root.join("crates/aura-sync/src");
+    let mut violations = Vec::new();
+
+    if sync_dir.exists() {
+        for path in rust_files_under(sync_dir) {
+            let rel = repo_relative(&path);
+            if rel.contains("/tests/") || rel.ends_with("/tests.rs") {
+                continue;
+            }
+            let lines = read_lines(&path)?;
+            for (idx, line) in lines.iter().enumerate() {
+                if line_is_test_scoped(&lines, idx) {
+                    continue;
+                }
+                let trimmed = line.trim_start();
+                if trimmed.is_empty()
+                    || trimmed.starts_with("//")
+                    || trimmed.starts_with("///")
+                    || trimmed.starts_with("//!")
+                {
+                    continue;
+                }
+                let context =
+                    lines[idx.saturating_sub(24)..lines.len().min(idx + 25)].join("\n");
+                if rendezvous_descriptor_validation_violation(line, &context) {
+                    violations.push(format!(
+                        "{rel}:{} sync peer materialization must require canonical RendezvousDescriptor production validation",
+                        idx + 1
+                    ));
+                }
+            }
+        }
+    }
+
+    if !violations.is_empty() {
+        bail!(
+            "rendezvous-descriptor-validation-boundary:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    println!("rendezvous descriptor validation boundary policy: clean");
+    Ok(())
+}
+
+fn rendezvous_descriptor_validation_violation(line: &str, context: &str) -> bool {
+    let materializes_peer = line.contains("DiscoveredPeer {")
+        || line.contains(".map(|descriptor| self.descriptor_peer(")
+        || line.contains("descriptor_peer(");
+    if !materializes_peer || !context.contains("RendezvousDescriptor") {
+        return false;
+    }
+    !(context.contains("validate_for_sync_peer")
+        || context.contains("valid_descriptor(")
+        || context.contains("validate_production_descriptor")
+        || context.contains("reject_placeholder_descriptor_crypto")
+        || context.contains("validated_rendezvous_descriptor"))
+}
+
+fn secret_persistence_violation(line: &str, context: &str) -> bool {
+    let serializes_invitation =
+        line.contains("serde_json::to_vec(invitation)")
+            || line.contains("serde_json::to_vec(&invitation)");
+    let ordinary_store = context.contains(".store(&") || context.contains(".store(");
+    let invitation_secret_context = context.contains("DeviceEnrollment")
+        || context.contains("Invitation")
+        || context.contains("StoredImportedInvitation")
+        || context.contains("persist_created_invitation")
+        || context.contains("persist_imported_invitation");
+    let secure_store_context =
+        context.contains("secure_store") || context.contains("SecureStorageEffects");
+
+    serializes_invitation && ordinary_store && invitation_secret_context && !secure_store_context
 }
 
 pub fn run_security_boolean_escape_hatch_boundary() -> Result<()> {

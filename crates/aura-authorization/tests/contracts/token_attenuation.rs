@@ -4,7 +4,7 @@
 
 use super::common;
 use aura_authorization::{BiscuitAuthorizationBridge, BiscuitTokenManager, TokenAuthority};
-use aura_core::types::scope::AuthorizationOp;
+use aura_core::types::scope::{AuthorizationOp, ResourceScope};
 
 /// Read-attenuated token must block write operations — the core monotonicity
 /// property. If this fails, delegation can escalate privileges.
@@ -13,8 +13,13 @@ fn attenuated_read_token_blocks_write() {
     let issuer = common::authority_id(1);
     let recipient = common::authority_id(2);
     let authority = TokenAuthority::new(issuer);
+    let scope = common::context_scope(3);
+    let context_id = match &scope {
+        ResourceScope::Context { context_id, .. } => *context_id,
+        _ => unreachable!("test scope is context scoped"),
+    };
     let token = authority
-        .create_token(recipient, common::read_write_capabilities())
+        .create_context_token(recipient, context_id, common::read_write_capabilities())
         .unwrap_or_else(|err| panic!("token creation should succeed: {err:?}"));
     let manager = BiscuitTokenManager::new(recipient, token.clone());
 
@@ -23,7 +28,6 @@ fn attenuated_read_token_blocks_write() {
         .unwrap_or_else(|err| panic!("attenuation should succeed: {err:?}"));
 
     let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), recipient);
-    let scope = common::context_scope(3);
     let token_verified = common::verified_token(&token, authority.root_public_key());
     let attenuated_verified = common::verified_token(&attenuated, authority.root_public_key());
 

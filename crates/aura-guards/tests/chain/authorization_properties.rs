@@ -99,7 +99,7 @@ fn invalid_cap_char() -> BoxedStrategy<char> {
 
 fn test_scope() -> ResourceScope {
     ResourceScope::Authority {
-        authority_id: test_authority(99),
+        authority_id: test_authority(42),
         operation: AuthorityOp::UpdateTree,
     }
 }
@@ -107,6 +107,10 @@ fn test_scope() -> ResourceScope {
 fn bridge_with_caps(capabilities: &[&str]) -> (BiscuitAuthorizationBridge, VerifiedBiscuitToken) {
     let keypair = biscuit_auth::KeyPair::new();
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+    let scope_authority = test_authority(42).to_string();
+    builder
+        .add_fact(fact!("scope_authority({scope_authority})"))
+        .unwrap_or_else(|err| panic!("failed to add authority scope fact: {err:?}"));
     for cap in capabilities {
         let cap_str: &str = cap;
         builder
@@ -131,6 +135,10 @@ fn bridge_with_caps_owned(
 ) {
     let keypair = biscuit_auth::KeyPair::new();
     let mut builder = biscuit_auth::builder::BiscuitBuilder::new();
+    let scope_authority = test_authority(42).to_string();
+    builder
+        .add_fact(fact!("scope_authority({scope_authority})"))
+        .unwrap_or_else(|err| panic!("failed to add authority scope fact: {err:?}"));
     for cap in capabilities {
         let cap_str: &str = cap.as_str();
         builder

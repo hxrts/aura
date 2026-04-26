@@ -110,6 +110,7 @@ async fn encode_signed_invite_code(invitation: &ShareableInvitation) -> TestResu
         public_key,
         signature,
         sender_device_id: None,
+        key_epoch: Some(1),
     })?)
 }
 

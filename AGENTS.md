@@ -91,6 +91,7 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Shared user-flow contributor sync**: when shared UX policy checks change (Rust in `toolkit/xtask/src/checks/policy.rs` or shell wrappers in `scripts/check/`), keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
+- **Security boundary policy sync**: when adding or changing security-sensitive toolkit checks in `toolkit/xtask/src/checks/policy.rs`, keep this guidance aligned and run `just _policy-check check security-boundary-policy` before broader CI
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
 - **Authoritative-ref discipline**: once parity-critical code has

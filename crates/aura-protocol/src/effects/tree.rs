@@ -70,7 +70,8 @@ pub struct Snapshot {
 /// 3. Apply operation → `apply_attested_op()` → Updates tree state
 ///
 /// See: [`docs/103_effect_system.md`](../../../../docs/103_effect_system.md) for architectural guidelines
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait TreeEffects: Send + Sync {
     // ===== State Queries =====
 
@@ -323,7 +324,8 @@ pub trait TreeEffects: Send + Sync {
     async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError>;
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<T: TreeEffects + ?Sized> TreeEffects for std::sync::Arc<T> {
     async fn get_current_state(&self) -> Result<TreeState, AuraError> {
         (**self).get_current_state().await

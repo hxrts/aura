@@ -136,13 +136,7 @@ fn attach_chat_fact_test_receipt_if_needed(
     effects: &crate::runtime::AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    let should_normalize = effects.is_testing()
-        || (effects.harness_mode_enabled()
-            && envelope
-                .receipt
-                .as_ref()
-                .map_or(true, |receipt| receipt.sig.is_empty()));
-    if should_normalize
+    if effects.is_testing()
         && envelope
             .receipt
             .as_ref()

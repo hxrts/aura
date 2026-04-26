@@ -2169,7 +2169,7 @@ async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
 }
 
 #[tokio::test]
-async fn cache_peer_descriptor_seeds_peer_context_routing_in_harness_mode() {
+async fn cache_peer_descriptor_ignores_unauthenticated_hints_in_harness_mode() {
     let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
     let _env_restore = EnvRestore::capture(&[harness_mode_env]);
     std::env::set_var(harness_mode_env, "1");
@@ -2201,22 +2201,18 @@ async fn cache_peer_descriptor_seeds_peer_context_routing_in_harness_mode() {
 
     let peer_descriptor = manager
         .get_descriptor(default_context_id_for_authority(peer_id), peer_id)
-        .await
-        .expect("harness sender hints should seed peer-context routing");
-    assert!(matches!(
-        peer_descriptor.transport_hints.as_slice(),
-        [TransportHint::WebSocketDirect { addr, .. }] if addr.to_string() == "127.0.0.1:43011"
-    ));
-    assert_ne!(peer_descriptor.handshake_psk_commitment, [0u8; 32]);
-    assert_ne!(peer_descriptor.public_key, [0u8; 32]);
-    assert_ne!(peer_descriptor.nonce, [0u8; 32]);
+        .await;
+    assert!(
+        peer_descriptor.is_none(),
+        "harness mode must not turn unauthenticated sender hints into routing descriptors"
+    );
 
     let local_descriptor = manager
         .get_descriptor(default_context_id_for_authority(authority_id), peer_id)
         .await;
     assert!(
         local_descriptor.is_none(),
-        "harness sender hints should still avoid seeding local-context routing"
+        "harness mode must also avoid seeding local-context routing"
     );
 }
 
@@ -3464,6 +3460,165 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
     }
 }
 
+fn test_device_enrollment_invitation(invitation_id: &str) -> Invitation {
+    let sender_id = AuthorityId::new_from_entropy([150u8; 32]);
+    Invitation {
+        invitation_id: InvitationId::new(invitation_id),
+        sender_id,
+        receiver_id: AuthorityId::new_from_entropy([151u8; 32]),
+        context_id: default_context_id_for_authority(sender_id),
+        invitation_type: InvitationType::DeviceEnrollment {
+            subject_authority: sender_id,
+            initiator_device_id: DeviceId::new_from_entropy([152u8; 32]),
+            device_id: DeviceId::new_from_entropy([153u8; 32]),
+            nickname_suggestion: Some("Tablet".to_string()),
+            ceremony_id: CeremonyId::new(format!("ceremony:{invitation_id}")),
+            pending_epoch: 7,
+            key_package: vec![17, 18, 19],
+            threshold_config: vec![27, 28, 29],
+            public_key_package: vec![37, 38, 39],
+            baseline_tree_ops: vec![vec![47, 48, 49]],
+        },
+        created_at: 1_700_000_000_000,
+        expires_at: None,
+        message: Some("enroll this device".to_string()),
+        receiver_nickname: None,
+        status: InvitationStatus::Pending,
+    }
+}
+
+fn assert_device_enrollment_payload_empty(invitation_type: &InvitationType) {
+    match invitation_type {
+        InvitationType::DeviceEnrollment {
+            key_package,
+            threshold_config,
+            public_key_package,
+            baseline_tree_ops,
+            ..
+        } => {
+            assert!(key_package.is_empty(), "regular cache leaked key package");
+            assert!(
+                threshold_config.is_empty(),
+                "regular cache leaked threshold config"
+            );
+            assert!(
+                public_key_package.is_empty(),
+                "regular cache leaked public key package"
+            );
+            assert!(
+                baseline_tree_ops.is_empty(),
+                "regular cache leaked baseline tree ops"
+            );
+        }
+        _ => panic!("expected device enrollment invitation"),
+    }
+}
+
+fn assert_device_enrollment_payload_restored(invitation_type: &InvitationType) {
+    match invitation_type {
+        InvitationType::DeviceEnrollment {
+            key_package,
+            threshold_config,
+            public_key_package,
+            baseline_tree_ops,
+            ..
+        } => {
+            assert_eq!(key_package, &vec![17, 18, 19]);
+            assert_eq!(threshold_config, &vec![27, 28, 29]);
+            assert_eq!(public_key_package, &vec![37, 38, 39]);
+            assert_eq!(baseline_tree_ops, &vec![vec![47, 48, 49]]);
+        }
+        _ => panic!("expected device enrollment invitation"),
+    }
+}
+
+#[tokio::test]
+async fn device_enrollment_created_cache_redacts_regular_storage_and_restores_secure_payload() {
+    let authority = create_test_authority(154);
+    let effects = effects_for(&authority);
+    let invitation = test_device_enrollment_invitation("created-device-secret-cache");
+
+    InvitationCacheHandler::persist_created_invitation(
+        effects.as_ref(),
+        authority.authority_id(),
+        &invitation,
+    )
+    .await
+    .expect("device invitation should persist");
+
+    let key = InvitationCacheHandler::created_invitation_key(
+        authority.authority_id(),
+        &invitation.invitation_id,
+    );
+    let regular_bytes = effects
+        .retrieve(&key)
+        .await
+        .expect("regular storage should be readable")
+        .expect("regular cache record should exist");
+    let regular_invitation: Invitation =
+        serde_json::from_slice(&regular_bytes).expect("regular cache should parse");
+    assert_device_enrollment_payload_empty(&regular_invitation.invitation_type);
+
+    let restored = InvitationCacheHandler::load_created_invitation(
+        effects.as_ref(),
+        authority.authority_id(),
+        &invitation.invitation_id,
+    )
+    .await
+    .expect("secure payload should restore created invitation");
+    assert_device_enrollment_payload_restored(&restored.invitation_type);
+}
+
+#[tokio::test]
+async fn device_enrollment_imported_cache_redacts_regular_storage_and_restores_secure_payload() {
+    let authority = create_test_authority(155);
+    let effects = effects_for(&authority);
+    let invitation = test_device_enrollment_invitation("imported-device-secret-cache");
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: invitation.invitation_id.clone(),
+        sender_id: invitation.sender_id,
+        context_id: Some(invitation.context_id),
+        invitation_type: invitation.invitation_type.clone(),
+        expires_at: invitation.expires_at,
+        message: invitation.message.clone(),
+    };
+    let imported =
+        StoredImportedInvitation::pending(shareable, invitation.created_at, ImportedSenderTrust::SelfCertified);
+
+    InvitationCacheHandler::persist_imported_invitation(
+        effects.as_ref(),
+        authority.authority_id(),
+        &imported,
+    )
+    .await
+    .expect("imported device invitation should persist");
+
+    let key = InvitationCacheHandler::imported_invitation_key(
+        authority.authority_id(),
+        &invitation.invitation_id,
+    );
+    let regular_bytes = effects
+        .retrieve(&key)
+        .await
+        .expect("regular storage should be readable")
+        .expect("regular imported cache record should exist");
+    let regular_imported =
+        InvitationCacheHandler::parse_imported_invitation_bytes(&regular_bytes, None)
+            .expect("regular imported cache should parse");
+    assert_device_enrollment_payload_empty(&regular_imported.shareable.invitation_type);
+
+    let restored = InvitationCacheHandler::load_imported_invitation(
+        effects.as_ref(),
+        authority.authority_id(),
+        &invitation.invitation_id,
+        None,
+    )
+    .await
+    .expect("secure payload should restore imported invitation");
+    assert_device_enrollment_payload_restored(&restored.shareable.invitation_type);
+}
+
 #[tokio::test]
 async fn device_enrollment_invitee_acceptance_is_fail_closed_without_signed_acceptance() {
     let authority = create_test_authority(151);
@@ -3575,6 +3730,7 @@ async fn shareable_invitation_signed_envelope_roundtrips_sender_proof() {
             public_key: public_key.clone(),
             signature,
             sender_device_id: Some(authority.device_id()),
+            key_epoch: Some(1),
         })
         .unwrap();
 
@@ -3621,6 +3777,7 @@ async fn shareable_invitation_signed_envelope_binds_transport_metadata() {
                 public_key: public_key.clone(),
                 signature,
                 sender_device_id: Some(sender_device_id),
+                key_epoch: Some(1),
             },
             transport.clone(),
         )
@@ -3687,6 +3844,121 @@ async fn production_import_rejects_unsigned_shareable_invitation() {
 }
 
 #[tokio::test]
+async fn production_harness_mode_still_rejects_invalid_sender_proof() {
+    let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_restore = EnvRestore::capture(&[harness_mode_env]);
+    std::env::set_var(harness_mode_env, "1");
+
+    let authority = create_test_authority(237);
+    let effects = production_effects_for(&authority);
+    let handler = handler_for(authority.clone());
+    assert!(effects.harness_mode_enabled());
+    let (_, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-harness-invalid-proof"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let transport = ShareableInvitationTransportMetadata::default();
+    let invalid_proof = ShareableInvitationSenderProof {
+        scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+        public_key,
+        signature: vec![0; ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES],
+        sender_device_id: Some(authority.device_id()),
+        key_epoch: Some(1),
+    };
+
+    let missing = handler
+        .validate_importable_shareable_invitation(&effects, &shareable, None, &transport)
+    .await
+    .unwrap_err();
+    assert!(
+        missing.to_string().contains("missing sender proof"),
+        "unexpected missing-proof error: {missing}"
+    );
+
+    let invalid = handler
+        .validate_importable_shareable_invitation(
+            &effects,
+            &shareable,
+            Some(&invalid_proof),
+            &transport,
+        )
+    .await
+    .unwrap_err();
+    assert!(
+        invalid.to_string().contains("sender proof is invalid"),
+        "unexpected invalid-proof error: {invalid}"
+    );
+}
+
+#[tokio::test]
+async fn production_sender_proof_validation_is_harness_mode_neutral() {
+    let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_restore = EnvRestore::capture(&[harness_mode_env]);
+    std::env::remove_var(harness_mode_env);
+
+    let authority = create_test_authority(236);
+    let handler = handler_for(authority.clone());
+    let baseline_effects = production_effects_for(&authority);
+    let (private_key, public_key) = baseline_effects.ed25519_generate_keypair().await.unwrap();
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-harness-valid-proof"),
+        sender_id: AuthorityId::new_from_entropy(hash(&public_key)),
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let transport = ShareableInvitationTransportMetadata {
+        sender_hint: Some("tcp://203.0.113.20:45555".to_string()),
+        sender_device_id: Some(authority.device_id()),
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        baseline_effects.as_ref(),
+        &shareable.signing_transcript_with_transport(&transport),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let proof = ShareableInvitationSenderProof {
+        scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+        public_key,
+        signature,
+        sender_device_id: Some(authority.device_id()),
+        key_epoch: Some(1),
+    };
+
+    handler
+        .validate_importable_shareable_invitation(
+            &baseline_effects,
+            &shareable,
+            Some(&proof),
+            &transport,
+        )
+    .await
+    .unwrap();
+
+    std::env::set_var(harness_mode_env, "1");
+    let harness_effects = production_effects_for(&authority);
+    assert!(harness_effects.harness_mode_enabled());
+    handler
+        .validate_importable_shareable_invitation(
+            &harness_effects,
+            &shareable,
+            Some(&proof),
+            &transport,
+        )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
     let authority = create_test_authority(243);
     let temp = tempfile::tempdir().unwrap();
@@ -3725,6 +3997,7 @@ async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
             public_key,
             signature,
             sender_device_id: Some(sender_device_id),
+            key_epoch: Some(1),
         })
         .unwrap();
 
@@ -3733,6 +4006,178 @@ async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
         .await
         .expect_err("sender id must be bound to signing key");
     assert!(err.to_string().contains("sender proof is invalid"));
+}
+
+#[tokio::test]
+async fn production_import_rejects_self_certified_key_for_known_sender() {
+    let receiver = create_test_authority(232);
+    let effects = production_effects_for(&receiver);
+    let handler = handler_for(receiver.clone());
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
+    handler
+        .invitation_cache
+        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+            default_context_id_for_authority(sender_id),
+            receiver.authority_id(),
+            sender_id,
+            "Known sender".to_string(),
+            1,
+        ))
+        .await;
+
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-known-sender-self-certified"),
+        sender_id,
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects.as_ref(),
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: Some(receiver.device_id()),
+            key_epoch: Some(1),
+        })
+        .unwrap();
+
+    let err = handler
+        .import_invitation_code(effects.as_ref(), &code)
+        .await
+        .expect_err("known sender must not be accepted with self-certified proof key");
+    assert!(
+        err.to_string()
+            .contains("known sender invitation requires trusted sender key resolution"),
+        "unexpected known-sender trust error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn production_import_rejects_stale_self_certified_sender_key_for_known_contact() {
+    let receiver = create_test_authority(231);
+    let effects = production_effects_for(&receiver);
+    let handler = handler_for(receiver.clone());
+    let (stale_private_key, stale_public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let (_, current_public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy(hash(&stale_public_key));
+    let sender_device_id = DeviceId::new_from_entropy([231u8; 32]);
+    handler
+        .trusted_key_resolver
+        .register_device_key(sender_device_id, current_public_key)
+        .unwrap();
+    handler
+        .invitation_cache
+        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+            default_context_id_for_authority(sender_id),
+            receiver.authority_id(),
+            sender_id,
+            "Rotated sender".to_string(),
+            1,
+        ))
+        .await;
+
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-known-sender-stale-key"),
+        sender_id,
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects.as_ref(),
+        &shareable.signing_transcript(),
+        &stale_private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key: stale_public_key,
+            signature,
+            sender_device_id: Some(sender_device_id),
+            key_epoch: Some(0),
+        })
+        .unwrap();
+
+    let err = handler
+        .import_invitation_code(effects.as_ref(), &code)
+        .await
+        .expect_err("known sender stale key must fail closed without trusted resolver");
+    assert!(
+        err.to_string()
+            .contains("known sender invitation proof key does not match trusted device key"),
+        "unexpected stale-key error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn production_import_accepts_known_sender_with_trusted_device_key() {
+    let receiver = create_test_authority(230);
+    let effects = production_effects_for(&receiver);
+    let handler = handler_for(receiver.clone());
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
+    let sender_device_id = DeviceId::new_from_entropy([230u8; 32]);
+    handler
+        .trusted_key_resolver
+        .register_device_key(sender_device_id, public_key.clone())
+        .unwrap();
+    handler
+        .invitation_cache
+        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+            default_context_id_for_authority(sender_id),
+            receiver.authority_id(),
+            sender_id,
+            "Trusted sender".to_string(),
+            1,
+        ))
+        .await;
+
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: InvitationId::new("inv-known-sender-trusted-key"),
+        sender_id,
+        context_id: None,
+        invitation_type: InvitationType::Contact { nickname: None },
+        expires_at: Some(4_102_444_800_000),
+        message: None,
+    };
+    let signature = aura_signature::sign_ed25519_transcript(
+        effects.as_ref(),
+        &shareable.signing_transcript(),
+        &private_key,
+    )
+    .await
+    .unwrap();
+    let code = shareable
+        .to_signed_code(ShareableInvitationSenderProof {
+            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+            public_key,
+            signature,
+            sender_device_id: Some(sender_device_id),
+            key_epoch: Some(7),
+        })
+        .unwrap();
+
+    let imported = handler
+        .import_invitation_code(effects.as_ref(), &code)
+        .await
+        .expect("known sender should import with matching trusted device key");
+    assert_eq!(imported.sender_id, sender_id);
 }
 
 #[tokio::test]
@@ -3772,6 +4217,7 @@ async fn production_import_rejects_expired_signed_invitation_code() {
             public_key,
             signature,
             sender_device_id: None,
+            key_epoch: Some(1),
         })
         .unwrap();
 
@@ -3821,6 +4267,7 @@ async fn production_import_rejects_tampered_signed_invitation_type() {
             public_key,
             signature,
             sender_device_id: None,
+            key_epoch: Some(1),
         })
         .unwrap();
     let mut parts: Vec<&str> = code.split(':').collect();
@@ -3888,6 +4335,7 @@ async fn production_import_rejects_signed_channel_replay_against_another_context
             public_key,
             signature,
             sender_device_id: None,
+            key_epoch: Some(1),
         })
         .unwrap();
     let mut parts: Vec<&str> = code.split(':').collect();

@@ -550,7 +550,8 @@ impl CryptoExtendedEffects for MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageCoreEffects for MockEffects {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let mut state = self.state.lock().unwrap();
@@ -582,7 +583,8 @@ impl StorageCoreEffects for MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl StorageExtendedEffects for MockEffects {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let state = self.state.lock().unwrap();
@@ -698,7 +700,8 @@ impl BiscuitAuthorizationEffects for MockEffects {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl FlowBudgetEffects for MockEffects {
     async fn charge_flow(
         &self,
@@ -727,7 +730,8 @@ impl FlowBudgetEffects for MockEffects {
 }
 
 // Simplified implementations for completeness
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl JournalEffects for MockEffects {
     async fn merge_facts(&self, mut target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         target.merge_facts(delta.facts);
@@ -878,7 +882,8 @@ impl UdpEffects for MockEffects {
 }
 
 // ThresholdSigningEffects implementation
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl aura_core::effects::ThresholdSigningEffects for MockEffects {
     async fn bootstrap_authority(&self, _authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
         // Return a mock public key package (32 bytes of zeros)
@@ -980,7 +985,8 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
 }
 
 // SecureStorageEffects implementation
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl aura_core::effects::SecureStorageEffects for MockEffects {
     async fn secure_store(
         &self,

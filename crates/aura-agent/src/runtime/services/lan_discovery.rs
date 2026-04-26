@@ -51,8 +51,9 @@ mod tests {
         timestamp_ms: u64,
     ) -> LanDiscoveryPacket {
         let descriptor = test_descriptor(authority_id, signing_key.verifying_key().to_bytes());
-        let unsigned = LanDiscoveryPacket::new(authority_id, descriptor.clone(), timestamp_ms);
-        let payload = unsigned.signing_payload().unwrap();
+        let payload =
+            LanDiscoveryPacket::signing_payload_for(authority_id, &descriptor, timestamp_ms)
+                .unwrap();
         LanDiscoveryPacket::new_signed(
             authority_id,
             descriptor,
@@ -324,12 +325,11 @@ impl LanDiscoveryService {
                     }
                 };
 
-                let unsigned = LanDiscoveryPacket::new(
+                let Some(payload) = LanDiscoveryPacket::signing_payload_for(
                     authority_id,
-                    announcement.descriptor.clone(),
+                    &announcement.descriptor,
                     timestamp_ms,
-                );
-                let Some(payload) = unsigned.signing_payload() else {
+                ) else {
                     warn!("LAN announcer: failed to serialize signing payload");
                     let mut metrics = shared.metrics.lock().await;
                     metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);

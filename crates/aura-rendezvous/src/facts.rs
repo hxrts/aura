@@ -259,6 +259,17 @@ impl RendezvousDescriptor {
         now_ms >= self.valid_from && now_ms < self.valid_until
     }
 
+    /// Validate descriptor material before peer materialization.
+    ///
+    /// This extends the time-window check with production crypto-material
+    /// requirements so placeholder descriptors cannot become sync peers.
+    pub fn validate_for_sync_peer(&self, now_ms: u64) -> bool {
+        self.is_valid(now_ms)
+            && self.public_key != [0u8; 32]
+            && self.handshake_psk_commitment != [0u8; 32]
+            && self.nonce != [0u8; 32]
+    }
+
     /// Check if descriptor needs refresh (within 10% of expiry)
     pub fn needs_refresh(&self, now_ms: u64) -> bool {
         let validity_window = self.valid_until.saturating_sub(self.valid_from);

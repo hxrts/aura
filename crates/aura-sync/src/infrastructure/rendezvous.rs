@@ -94,7 +94,7 @@ impl RendezvousAdapter {
         now_ms: u64,
     ) -> Option<&'a RendezvousDescriptor> {
         (descriptor.context_id == context_id
-            && descriptor.is_valid(now_ms)
+            && descriptor.validate_for_sync_peer(now_ms)
             && descriptor.authority_id != self.local_authority)
             .then_some(descriptor)
     }
@@ -170,7 +170,7 @@ impl RendezvousAdapter {
             .find(|descriptor| {
                 descriptor.context_id == context_id
                     && descriptor.authority_id == peer
-                    && descriptor.is_valid(now_ms)
+                    && descriptor.validate_for_sync_peer(now_ms)
             })
             .map(|descriptor| self.descriptor_peer(descriptor))
     }
@@ -338,11 +338,11 @@ mod tests {
             device_id: None,
             context_id: context,
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            handshake_psk_commitment: [0u8; 32],
-            public_key: [0u8; 32],
+            handshake_psk_commitment: [7u8; 32],
+            public_key: [8u8; 32],
             valid_from,
             valid_until,
-            nonce: [0u8; 32],
+            nonce: [9u8; 32],
             nickname_suggestion: None,
         }
     }
@@ -450,6 +450,31 @@ mod tests {
 
         let peers_after_expiry = adapter.discover_context_peers(&descriptors, context, 15_000);
         assert!(peers_after_expiry.is_empty());
+    }
+
+    #[test]
+    fn poisoned_crypto_descriptors_do_not_materialize_as_peers() {
+        let alice = test_authority(1);
+        let bob = test_authority(2);
+        let context = test_context(100);
+        let adapter = RendezvousAdapter::new(alice);
+
+        let mut zero_public_key = test_descriptor(bob, context, 0, 10_000);
+        zero_public_key.public_key = [0u8; 32];
+        let mut zero_psk = test_descriptor(bob, context, 0, 10_000);
+        zero_psk.handshake_psk_commitment = [0u8; 32];
+        let mut zero_nonce = test_descriptor(bob, context, 0, 10_000);
+        zero_nonce.nonce = [0u8; 32];
+
+        for descriptor in [zero_public_key, zero_psk, zero_nonce] {
+            let descriptors = vec![descriptor];
+            assert!(adapter
+                .discover_context_peers(&descriptors, context, 5000)
+                .is_empty());
+            assert!(adapter
+                .get_peer_info(&descriptors, context, bob, 5000)
+                .is_none());
+        }
     }
 
     #[test]

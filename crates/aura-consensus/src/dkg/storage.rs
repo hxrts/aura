@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Storage interface for DKG transcripts (blob or journal reference).
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait DkgTranscriptStore: Send + Sync {
     /// Persist a transcript and return an optional blob reference.
     async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>>;
@@ -42,7 +43,8 @@ fn ensure_transcript_integrity(transcript: DkgTranscript) -> Result<DkgTranscrip
     Ok(transcript)
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl DkgTranscriptStore for MemoryTranscriptStore {
     async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
         let reference = transcript.transcript_hash;
@@ -84,7 +86,8 @@ impl<S: StorageEffects + ?Sized> StorageTranscriptStore<S> {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl<S: StorageEffects + ?Sized> DkgTranscriptStore for StorageTranscriptStore<S> {
     async fn put(&self, transcript: &DkgTranscript) -> Result<Option<Hash32>> {
         let reference = transcript.transcript_hash;

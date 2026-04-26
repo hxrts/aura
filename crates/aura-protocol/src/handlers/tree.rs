@@ -355,7 +355,8 @@ fn verify_snapshot_signature(snapshot: &Snapshot) -> Result<(), AuraError> {
     frost_verify_aggregate(&verifying_key, &transcript, &snapshot.aggregate_signature)
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TreeEffects for PersistentTreeHandler {
     async fn get_current_state(
         &self,

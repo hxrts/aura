@@ -946,7 +946,8 @@ impl ThresholdSigningService {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl ThresholdSigningEffects for ThresholdSigningService {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
         let epoch = 0u64;

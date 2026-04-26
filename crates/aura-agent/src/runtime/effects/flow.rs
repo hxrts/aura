@@ -6,7 +6,8 @@ use aura_core::types::scope::{AuthorizationOp, ContextOp, ResourceScope};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowCost, FlowNonce, Hash32, ReceiptSig};
 
 // Implementation of FlowBudgetEffects
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl FlowBudgetEffects for AuraEffectSystem {
     async fn charge_flow(
         &self,

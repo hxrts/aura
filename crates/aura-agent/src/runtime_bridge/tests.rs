@@ -1,9 +1,10 @@
 use super::*;
 use crate::core::AgentConfig;
 use crate::AgentBuilder;
+use crate::AuraEffectSystem;
 use async_lock::Mutex;
 use aura_core::context::EffectContext;
-use aura_core::effects::ExecutionMode;
+use aura_core::effects::{CryptoCoreEffects, ExecutionMode};
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::hash::hash;
 use aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY;
@@ -51,6 +52,16 @@ fn unique_test_path(label: &str) -> PathBuf {
         "aura-agent-runtime-bridge-{label}-{}",
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+async fn generated_test_public_key(effects: &AuraEffectSystem) -> [u8; 32] {
+    let (_, verifying_key) = effects
+        .ed25519_generate_keypair()
+        .await
+        .expect("test peer keypair should generate");
+    verifying_key
+        .try_into()
+        .expect("test verifying key should be 32 bytes")
 }
 
 #[track_caller]
@@ -141,6 +152,7 @@ async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
         .runtime()
         .rendezvous()
         .expect("runtime rendezvous service");
+    let peer_public_key = generated_test_public_key(agent.runtime().effects().as_ref()).await;
     manager
         .cache_descriptor(aura_rendezvous::facts::RendezvousDescriptor {
             authority_id: peer,
@@ -151,10 +163,10 @@ async fn ensure_peer_channel_requires_sync_peers_after_established_channel() {
             )
             .expect("tcp hint")],
             handshake_psk_commitment: [7u8; 32],
-            public_key: [8u8; 32],
+            public_key: peer_public_key,
             valid_from: 0,
             valid_until: u64::MAX,
-            nonce: [0u8; 32],
+            nonce: [9u8; 32],
             nickname_suggestion: None,
         })
         .await
@@ -207,6 +219,7 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
         .rendezvous()
         .expect("runtime rendezvous service")
         .clone();
+    let peer_public_key = generated_test_public_key(agent.runtime().effects().as_ref()).await;
 
     let make_descriptor =
         move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
@@ -218,10 +231,10 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
             )
             .expect("tcp hint")],
             handshake_psk_commitment: [7u8; 32],
-            public_key: [8u8; 32],
+            public_key: peer_public_key,
             valid_from: 0,
             valid_until: u64::MAX,
-            nonce: [0u8; 32],
+            nonce: [9u8; 32],
             nickname_suggestion: None,
         };
 
@@ -231,6 +244,10 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
         .expect("cache fallback descriptor for initiation");
 
     let bridge = AgentRuntimeBridge::new(agent);
+    bridge
+        .bootstrap_signing_keys()
+        .await
+        .expect("bootstrap local identity keys");
     let error = bridge.ensure_peer_channel(context, peer).await.expect_err(
         "peer channel initiation should fail explicitly when prerequisites are unavailable",
     );
@@ -263,6 +280,7 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         .runtime()
         .rendezvous()
         .expect("runtime rendezvous service");
+    let peer_public_key = generated_test_public_key(agent.runtime().effects().as_ref()).await;
 
     let placeholder_descriptor = aura_rendezvous::facts::RendezvousDescriptor {
         authority_id: peer,
@@ -293,10 +311,10 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         )
         .expect("tcp hint")],
         handshake_psk_commitment: [7u8; 32],
-        public_key: [9u8; 32],
+        public_key: peer_public_key,
         valid_from: 0,
         valid_until: u64::MAX,
-        nonce: [0u8; 32],
+        nonce: [9u8; 32],
         nickname_suggestion: None,
     };
     manager

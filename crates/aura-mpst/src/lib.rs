@@ -88,7 +88,8 @@ pub use composition::{
 /// lifecycle and endpoint management. This trait only supplies the additional
 /// Aura-owned hooks that upstream does not model: sourcing outbound payloads,
 /// selecting local branches, and resolving parameterized role families.
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait GeneratedChoreographyRuntime: telltale_runtime::ChoreoHandlerExt + Send {
     /// Provide the next outbound message for a send.
     async fn provide_message<M: Send + 'static>(
