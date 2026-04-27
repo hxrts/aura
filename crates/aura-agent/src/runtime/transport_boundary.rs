@@ -54,7 +54,11 @@ pub(crate) async fn send_guarded_transport_envelope(
             reason: "production transport send requires guard-chain receipt evidence".to_string(),
         });
     };
-    let receipt = GuardChainSendReceipt::bind_to_envelope(receipt, &envelope)?;
+    let mut receipt = GuardChainSendReceipt::bind_to_envelope(receipt, &envelope)?;
+    if !effects.is_testing() {
+        effects.verify_transport_flow_receipt(receipt.as_transport_receipt())?;
+    }
+    effects.bind_transport_receipt_to_envelope(&mut receipt.receipt, &envelope)?;
     validate_receipt_matches_envelope(receipt.as_transport_receipt(), &envelope)?;
     envelope.receipt = Some(receipt.into_transport_receipt());
     send_raw_transport_envelope(effects, envelope).await
@@ -94,6 +98,7 @@ fn validate_receipt_matches_envelope(
 #[cfg(test)]
 mod tests {
     use super::{GuardChainSendReceipt, TransportEnvelope, TransportReceipt};
+    use crate::runtime::receipt_model::{sign_transport_flow_receipt, test_receipt_signing_key};
     use aura_core::{AuthorityId, ContextId};
     use std::collections::HashMap;
 
@@ -117,7 +122,7 @@ mod tests {
     }
 
     fn receipt_for(envelope: &TransportEnvelope) -> TransportReceipt {
-        TransportReceipt {
+        let mut receipt = TransportReceipt {
             context: envelope.context,
             src: envelope.source,
             dst: envelope.destination,
@@ -125,8 +130,10 @@ mod tests {
             cost: 1,
             nonce: 9,
             prev: [0; 32],
-            sig: vec![7],
-        }
+            sig: Vec::new(),
+        };
+        sign_transport_flow_receipt(&mut receipt, &test_receipt_signing_key()).unwrap();
+        receipt
     }
 
     #[test]

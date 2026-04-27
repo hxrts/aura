@@ -34,7 +34,10 @@ use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
 use aura_core::hash::hash as aura_hash;
 use aura_core::types::scope::AuthorizationOp;
-use aura_core::{execute_with_timeout_budget, AuraError, AuthorityId, ContextId, TimeoutBudget};
+use aura_core::{
+    execute_with_timeout_budget, AuraError, AuthorityId, ContextId, Ed25519SigningKey,
+    TimeoutBudget,
+};
 use aura_effects::{
     crypto::RealCryptoHandler,
     encrypted_storage::{EncryptedStorage, EncryptedStorageConfig},
@@ -263,6 +266,9 @@ pub struct AuraEffectSystem {
     /// Cached Biscuit token for guard chain authorization.
     biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
 
+    /// Runtime-local key used to sign flow receipts and their transport binding.
+    receipt_signing_key: Ed25519SigningKey,
+
     /// Runtime-owned in-memory ledger surface for EffectApiEffects consumers.
     effect_api_ledger: parking_lot::Mutex<EffectApiLedgerState>,
 
@@ -333,6 +339,24 @@ impl BiscuitAuthorizationEffects for JournalBiscuitAuthorizationHandler {
 }
 
 impl AuraEffectSystem {
+    fn unique_test_storage_path(label: &str) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+        let temp_root = std::env::temp_dir();
+        for _ in 0..4096 {
+            let attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let candidate = temp_root.join(format!("aura-agent-{label}-{attempt}"));
+            match std::fs::create_dir(&candidate) {
+                Ok(()) => return candidate,
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return candidate,
+            }
+        }
+
+        let attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        temp_root.join(format!("aura-agent-{label}-{attempt}-fallback"))
+    }
+
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     fn maybe_start_deadlock_detector() {
         static START: Once = Once::new();
@@ -365,32 +389,7 @@ impl AuraEffectSystem {
         // Tests that require a specific persistent directory should override
         // `config.storage.base_path` explicitly.
         if config.storage.base_path == default_storage_path() {
-            static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-            let temp_root = std::env::temp_dir();
-            let mut attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            let mut selected: Option<std::path::PathBuf> = None;
-            for _ in 0..256 {
-                let candidate = temp_root.join(format!("aura-agent-test-{attempt}"));
-                match std::fs::create_dir(&candidate) {
-                    Ok(()) => {
-                        selected = Some(candidate);
-                        break;
-                    }
-                    Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                        attempt = attempt.wrapping_add(1);
-                        continue;
-                    }
-                    Err(_) => {
-                        selected = Some(candidate);
-                        break;
-                    }
-                }
-            }
-
-            config.storage.base_path =
-                selected.unwrap_or_else(|| temp_root.join("aura-agent-test-fallback"));
+            config.storage.base_path = Self::unique_test_storage_path("test");
         }
         config
     }
@@ -398,28 +397,71 @@ impl AuraEffectSystem {
     fn secure_storage_handler_for_config(
         config: &AgentConfig,
         execution_mode: ExecutionMode,
-    ) -> ProductionSecureStorageHandler {
+        harness_mode_enabled: bool,
+        test_filesystem_secure_storage_allowed: bool,
+    ) -> Result<ProductionSecureStorageHandler, crate::core::AgentError> {
         if !execution_mode.is_production() {
-            return ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
-                config.storage.base_path.clone(),
+            return Ok(
+                ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                    config.storage.base_path.clone(),
+                ),
             );
         }
 
         match config.storage.secure_storage_backend {
-            SecureStorageBackend::FilesystemFallback => {
-                tracing::warn!(
-                    base_path = %config.storage.base_path.display(),
-                    "Production mode is using the non-interactive filesystem secure-storage fallback; \
-                     opt into platform secure storage via config.storage.secure_storage_backend"
-                );
-                ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
-                    config.storage.base_path.clone(),
+            SecureStorageBackend::FilesystemFallback
+                if harness_mode_enabled || test_filesystem_secure_storage_allowed =>
+            {
+                Ok(
+                    ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+                        config.storage.base_path.clone(),
+                    ),
                 )
             }
+            SecureStorageBackend::FilesystemFallback => Err(crate::core::AgentError::config(
+                "production runtime rejects filesystem secure-storage fallback; use platform credential storage or an explicit test/harness/simulation constructor",
+            )),
             SecureStorageBackend::PlatformCredentialStore => {
-                ProductionSecureStorageHandler::for_production(config.storage.base_path.clone())
+                if harness_mode_enabled || !Self::current_process_allows_platform_secret_store() {
+                    let base_path = if config.storage.base_path == default_storage_path() {
+                        Self::unique_test_storage_path("secure-store")
+                    } else {
+                        config.storage.base_path.clone()
+                    };
+                    return Ok(
+                        ProductionSecureStorageHandler::filesystem_fallback_for_non_production(base_path),
+                    );
+                }
+                Ok(ProductionSecureStorageHandler::for_production(
+                    config.storage.base_path.clone(),
+                ))
             }
         }
+    }
+
+    fn current_process_allows_platform_secret_store() -> bool {
+        if std::env::var_os("AURA_ALLOW_OS_SECRET_STORE_IN_TESTS").is_some()
+            || std::env::var_os("AURA_ALLOW_OS_SECRET_STORE").is_some()
+        {
+            return true;
+        }
+
+        #[cfg(test)]
+        {
+            false
+        }
+        #[cfg(not(test))]
+        {
+            Self::current_executable_is_production_binary()
+        }
+    }
+
+    #[cfg(not(test))]
+    fn current_executable_is_production_binary() -> bool {
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
+        exe.file_stem().and_then(|name| name.to_str()) == Some("aura")
     }
 
     /// Internal helper that builds the effect system with the given composite handler.
@@ -442,6 +484,7 @@ impl AuraEffectSystem {
         shared_transport: Option<SharedTransport>,
         shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
         authority_id: AuthorityId,
+        test_filesystem_secure_storage_allowed: bool,
     ) -> Result<Self, crate::core::AgentError> {
         Self::maybe_start_deadlock_detector();
         assert!(
@@ -467,12 +510,15 @@ impl AuraEffectSystem {
         let secure_storage_handler = Arc::new(Self::secure_storage_handler_for_config(
             &config,
             execution_mode,
-        ));
+            harness_mode_enabled,
+            test_filesystem_secure_storage_allowed,
+        )?);
         let crypto = CryptoSubsystem::from_parts(
             crypto_handler.clone(),
             random_rng,
             secure_storage_handler.clone(),
         );
+        let receipt_signing_key = Ed25519SigningKey::from_bytes(crypto.random_32_bytes());
 
         // === Build Storage Infrastructure ===
         let auth_time = PhysicalTimeHandler::new();
@@ -607,6 +653,7 @@ impl AuraEffectSystem {
             rendezvous_manager: parking_lot::RwLock::new(None),
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
+            receipt_signing_key,
             effect_api_ledger: parking_lot::Mutex::new(EffectApiLedgerState::default()),
             system_config: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(not(target_arch = "wasm32"))]
@@ -630,6 +677,32 @@ impl AuraEffectSystem {
     /// Check if the effect system is in test mode (bypasses authorization guards)
     pub fn is_testing(&self) -> bool {
         self.execution_mode.is_deterministic()
+    }
+
+    pub(crate) fn sign_flow_receipt(
+        &self,
+        receipt: &mut aura_core::Receipt,
+    ) -> Result<(), AuraError> {
+        crate::runtime::receipt_model::sign_flow_receipt(receipt, &self.receipt_signing_key)
+    }
+
+    pub(crate) fn verify_transport_flow_receipt(
+        &self,
+        receipt: &aura_core::effects::transport::TransportReceipt,
+    ) -> Result<(), aura_core::effects::transport::TransportError> {
+        crate::runtime::receipt_model::verify_transport_flow_receipt(receipt)
+    }
+
+    pub(crate) fn bind_transport_receipt_to_envelope(
+        &self,
+        receipt: &mut aura_core::effects::transport::TransportReceipt,
+        envelope: &aura_core::effects::transport::TransportEnvelope,
+    ) -> Result<(), aura_core::effects::transport::TransportError> {
+        crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
+            receipt,
+            envelope,
+            &self.receipt_signing_key,
+        )
     }
 
     /// Check if the effect system is in explicit test mode (not simulation).
@@ -1417,6 +1490,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
+            false,
         )
     }
 
@@ -1439,6 +1513,29 @@ impl AuraEffectSystem {
             None,
             None,
             authority_id,
+            false,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn production_for_test_for_authority(
+        config: AgentConfig,
+        authority_id: AuthorityId,
+    ) -> Result<Self, crate::core::AgentError> {
+        let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
+        composite
+            .composite_mut()
+            .register_all(RegisterAllOptions::allow_impure())
+            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
+        Self::build_internal(
+            config,
+            composite,
+            ExecutionMode::Production,
+            None,
+            None,
+            None,
+            authority_id,
+            true,
         )
     }
 
@@ -1629,6 +1726,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
+            false,
         )
     }
 
@@ -1650,6 +1748,7 @@ impl AuraEffectSystem {
             Some(shared_transport),
             None, // No shared inbox
             authority_id,
+            false,
         )
     }
 
@@ -1672,6 +1771,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             None, // No shared inbox
             authority_id,
+            false,
         )
     }
 
@@ -1699,6 +1799,7 @@ impl AuraEffectSystem {
             Some(shared_transport),
             None, // No shared inbox
             authority_id,
+            false,
         )
     }
 
@@ -1724,6 +1825,7 @@ impl AuraEffectSystem {
             None, // No shared transport
             Some(shared_inbox),
             authority_id,
+            false,
         )
     }
 
@@ -1895,12 +1997,16 @@ impl AuraEffectSystem {
             None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
         );
         if self.execution_mode.is_deterministic() {
-            handler.with_unsigned_receipt_bypass_for_simulation(
-                "deterministic runtime accepts unsigned simulation receipts explicitly",
-            )
-        } else {
-            handler
+            #[cfg(feature = "simulation")]
+            {
+                return handler.with_unsigned_receipt_bypass_for_simulation(
+                    aura_journal::effects::UnsignedReceiptBypassToken::for_simulation(
+                        "deterministic runtime accepts unsigned simulation receipts explicitly",
+                    ),
+                );
+            }
         }
+        handler
     }
 }
 
@@ -1909,12 +2015,36 @@ mod tests {
     use super::*;
     use crate::core::config::{SecureStorageBackend, StorageConfig};
     use crate::runtime::services::threshold_signing::ThresholdSigningService;
-    use aura_core::effects::ThresholdSigningEffects;
+    use aura_core::effects::{FlowBudgetEffects, ThresholdSigningEffects};
     use aura_core::types::identifiers::ContextId;
     use aura_guards::GuardContextProvider;
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
+    use std::ffi::OsString;
+
+    struct EnvRestore {
+        key: &'static str,
+        value: Option<OsString>,
+    }
+
+    impl EnvRestore {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                value: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            match self.value.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn authorization_runtime_config_rejects_missing_or_invalid_root_keys() {
@@ -1977,6 +2107,38 @@ mod tests {
         assert_eq!(simulation.mode, AuthorizationRuntimeMode::Simulation);
     }
 
+    #[tokio::test]
+    async fn charge_flow_returns_verifiable_receipt_signature() {
+        let authority_id = AuthorityId::new_from_entropy([0xC1; 32]);
+        let peer = AuthorityId::new_from_entropy([0xC2; 32]);
+        let context = ContextId::new_from_entropy([0xC3; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(
+            &AgentConfig::default(),
+            authority_id,
+        )
+        .expect("effect system should build");
+
+        let receipt =
+            FlowBudgetEffects::charge_flow(&effects, &context, &peer, aura_core::FlowCost::new(1))
+                .await
+                .expect("flow charge should produce a receipt");
+        let transport_receipt = aura_core::effects::transport::TransportReceipt {
+            context: receipt.ctx,
+            src: receipt.src,
+            dst: receipt.dst,
+            epoch: receipt.epoch.value(),
+            cost: receipt.cost.value(),
+            nonce: receipt.nonce.value(),
+            prev: receipt.prev.0,
+            sig: receipt.sig.into_bytes(),
+        };
+
+        assert!(
+            crate::runtime::receipt_model::verify_transport_flow_receipt(&transport_receipt)
+                .is_ok()
+        );
+    }
+
     #[test]
     fn verified_biscuit_frontier_rejects_mismatched_cached_issuer() {
         use base64::Engine;
@@ -2033,7 +2195,7 @@ mod tests {
     }
 
     #[test]
-    fn production_defaults_to_non_interactive_secure_storage_backend() {
+    fn production_mode_tests_avoid_platform_secure_storage_prompts() {
         let authority = AuthorityId::new_from_entropy([0xA7; 32]);
         let temp = tempfile::tempdir().expect("tempdir should build");
         let config = AgentConfig {
@@ -2054,8 +2216,11 @@ mod tests {
     }
 
     #[test]
-    fn production_can_opt_into_platform_secure_storage_backend() {
-        let authority = AuthorityId::new_from_entropy([0xA8; 32]);
+    fn harness_mode_production_uses_filesystem_secure_storage_fallback() {
+        let _restore = EnvRestore::capture("AURA_HARNESS_MODE");
+        std::env::set_var("AURA_HARNESS_MODE", "1");
+
+        let authority = AuthorityId::new_from_entropy([0xA7; 32]);
         let temp = tempfile::tempdir().expect("tempdir should build");
         let config = AgentConfig {
             storage: StorageConfig {
@@ -2069,30 +2234,54 @@ mod tests {
         let effect_system =
             AuraEffectSystem::production(config, authority).expect("production runtime builds");
 
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd"
-        ))]
         assert!(matches!(
             effect_system.crypto.secure_storage().as_ref(),
-            ProductionSecureStorageHandler::Platform(_)
+            ProductionSecureStorageHandler::FilesystemFallback(_)
         ));
+    }
 
-        #[cfg(not(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "windows",
-            target_os = "linux",
-            target_os = "freebsd",
-            target_os = "openbsd"
-        )))]
+    #[test]
+    fn production_rejects_filesystem_secure_storage_fallback() {
+        let authority = AuthorityId::new_from_entropy([0xA8; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                secure_storage_backend: SecureStorageBackend::FilesystemFallback,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = match AuraEffectSystem::production(config, authority) {
+            Ok(_) => panic!("production runtime must reject filesystem fallback"),
+            Err(error) => error,
+        };
+
+        assert!(error
+            .to_string()
+            .contains("production runtime rejects filesystem secure-storage fallback"));
+    }
+
+    #[test]
+    fn testing_can_use_filesystem_secure_storage_fallback() {
+        let authority = AuthorityId::new_from_entropy([0xA9; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                secure_storage_backend: SecureStorageBackend::FilesystemFallback,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let effect_system = AuraEffectSystem::simulation_for_test_for_authority(&config, authority)
+            .expect("simulation runtime builds");
+
         assert!(matches!(
             effect_system.crypto.secure_storage().as_ref(),
-            ProductionSecureStorageHandler::UnavailablePlatform { .. }
+            ProductionSecureStorageHandler::FilesystemFallback(_)
         ));
     }
 

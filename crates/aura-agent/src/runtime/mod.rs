@@ -53,6 +53,7 @@ pub mod contracts;
 pub mod diagnostics;
 pub mod errors;
 pub mod instrumentation;
+pub(crate) mod receipt_model;
 pub mod reliability;
 pub mod session_ingress;
 pub mod transport_boundary;

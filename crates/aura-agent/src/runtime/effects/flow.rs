@@ -40,7 +40,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         }
 
         let budget = JournalEffects::charge_flow_budget(self, context, peer, cost).await?;
-        Ok(aura_core::Receipt::new(
+        let mut receipt = aura_core::Receipt::new(
             *context,
             self.authority_id,
             *peer,
@@ -49,6 +49,8 @@ impl FlowBudgetEffects for AuraEffectSystem {
             FlowNonce::new(budget.spent),
             Hash32::default(),
             ReceiptSig::new(Vec::new())?,
-        ))
+        );
+        self.sign_flow_receipt(&mut receipt)?;
+        Ok(receipt)
     }
 }

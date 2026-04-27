@@ -115,7 +115,11 @@ pub struct GuardSnapshot {
     /// Pending guardian approval request identifiers reserved by the caller.
     pub pending_guardian_request_ids: HashSet<String>,
 
-    /// Whether this is an emergency operation (bypasses some checks)
+    /// Trusted runtime emergency state.
+    ///
+    /// This is prepared by the runtime owner. Caller-supplied
+    /// `RecoveryContext::is_emergency` values are request context only and must
+    /// not be treated as authorization.
     pub is_emergency: bool,
 }
 
@@ -258,7 +262,10 @@ pub struct RecoveryContext {
     pub operation_type: RecoveryOperationType,
     /// Recovery justification
     pub justification: String,
-    /// Emergency status (bypasses some checks)
+    /// Caller-declared emergency status.
+    ///
+    /// This field records request intent and audit context. It does not grant
+    /// authorization by itself.
     pub is_emergency: bool,
     /// Recovery timestamp (ms)
     pub timestamp: u64,
@@ -515,15 +522,17 @@ pub fn check_session_duration(
 pub fn check_recovery_operation(
     snapshot: &GuardSnapshot,
     operation_type: &RecoveryOperationType,
-    is_emergency: bool,
+    caller_declared_emergency: bool,
     require_recovery_capability: bool,
 ) -> Option<GuardOutcome> {
     if !require_recovery_capability {
         return None;
     }
 
-    // Emergency operations bypass normal checks but are logged
-    if snapshot.is_emergency || is_emergency {
+    let _ = caller_declared_emergency;
+    let trusted_emergency_freeze =
+        snapshot.is_emergency && matches!(operation_type, RecoveryOperationType::EmergencyFreeze);
+    if trusted_emergency_freeze {
         return None;
     }
 
@@ -924,6 +933,48 @@ mod tests {
 
         let outcome = evaluate_request(&snapshot, &request);
         assert!(outcome.is_denied());
+    }
+
+    #[test]
+    fn caller_declared_emergency_does_not_bypass_recovery_capability() {
+        let snapshot = standard_guard_snapshot();
+
+        let outcome = check_recovery_operation(
+            &snapshot,
+            &RecoveryOperationType::EmergencyFreeze,
+            true,
+            true,
+        );
+
+        assert!(outcome.is_some_and(|outcome| outcome.is_denied()));
+    }
+
+    #[test]
+    fn trusted_emergency_snapshot_allows_emergency_freeze_without_capability() {
+        let snapshot = standard_guard_snapshot().with_emergency(true);
+
+        let outcome = check_recovery_operation(
+            &snapshot,
+            &RecoveryOperationType::EmergencyFreeze,
+            false,
+            true,
+        );
+
+        assert!(outcome.is_none());
+    }
+
+    #[test]
+    fn trusted_emergency_snapshot_does_not_bypass_other_recovery_operations() {
+        let snapshot = standard_guard_snapshot().with_emergency(true);
+
+        let outcome = check_recovery_operation(
+            &snapshot,
+            &RecoveryOperationType::GuardianSetModification,
+            false,
+            true,
+        );
+
+        assert!(outcome.is_some_and(|outcome| outcome.is_denied()));
     }
 
     /// Expired challenges are rejected — prevents replay of stale challenges.

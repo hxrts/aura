@@ -1300,6 +1300,8 @@ enum LanTransportIngressError {
     EmptyReceiptSignature,
     #[error("receipt signature exceeds transport limit")]
     OversizedReceiptSignature,
+    #[error("invalid receipt signature")]
+    InvalidReceiptSignature,
     #[error("receipt nonce is zero")]
     EmptyReceiptNonce,
     #[error("missing content-type metadata")]
@@ -1342,6 +1344,9 @@ fn verify_lan_transport_ingress(
         return Err(LanTransportIngressError::MissingContentType);
     }
 
+    crate::runtime::receipt_model::verify_transport_receipt_for_envelope(receipt, &envelope)
+        .map_err(|_| LanTransportIngressError::InvalidReceiptSignature)?;
+
     let schema_version = envelope
         .metadata
         .get("wire-format-version")
@@ -1360,8 +1365,8 @@ fn verify_lan_transport_ingress(
             "receipt source must match envelope source",
         )?
         .envelope_authenticity(
-            !receipt.sig.is_empty() && receipt.sig.len() <= MAX_TRANSPORT_SIGNATURE_BYTES,
-            "guard-chain receipt signature must be present and bounded",
+            true,
+            "guard-chain receipt signature must verify against the envelope transcript",
         )?
         .capability_authorization(
             envelope.receipt.is_some(),
@@ -1382,10 +1387,7 @@ fn verify_lan_transport_ingress(
             receipt.src == envelope.source,
             "LAN receipt signer must match source authority",
         )?
-        .proof_evidence(
-            !receipt.sig.is_empty(),
-            "guard-chain receipt signature evidence must be present",
-        )?
+        .proof_evidence(true, "guard-chain receipt signature evidence verified")?
         .build()?;
 
     DecodedIngress::new(envelope, evidence.metadata().clone())
@@ -1560,23 +1562,32 @@ mod tests {
             "content-type".to_string(),
             "application/aura-test-envelope".to_string(),
         );
-        TransportEnvelope {
+        let mut envelope = TransportEnvelope {
             destination: AuthorityId::new_from_entropy([1u8; 32]),
             source: AuthorityId::new_from_entropy([2u8; 32]),
             context: ContextId::new_from_entropy([3u8; 32]),
             payload: b"payload".to_vec(),
             metadata,
-            receipt: Some(aura_core::effects::transport::TransportReceipt {
-                context: ContextId::new_from_entropy([3u8; 32]),
-                src: AuthorityId::new_from_entropy([2u8; 32]),
-                dst: AuthorityId::new_from_entropy([1u8; 32]),
-                epoch: 1,
-                cost: 1,
-                nonce: 7,
-                prev: [0u8; 32],
-                sig: vec![9u8],
-            }),
-        }
+            receipt: None,
+        };
+        let mut receipt = aura_core::effects::transport::TransportReceipt {
+            context: envelope.context,
+            src: envelope.source,
+            dst: envelope.destination,
+            epoch: 1,
+            cost: 1,
+            nonce: 7,
+            prev: [0u8; 32],
+            sig: Vec::new(),
+        };
+        crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
+            &mut receipt,
+            &envelope,
+            &crate::runtime::receipt_model::test_receipt_signing_key(),
+        )
+        .expect("test receipt should sign");
+        envelope.receipt = Some(receipt);
+        envelope
     }
 
     #[test]

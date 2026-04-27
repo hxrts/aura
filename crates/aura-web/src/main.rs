@@ -87,6 +87,27 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_broker_credentials_do_not_use_query_parameters() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let storage_path = repo_root.join("crates/aura-web/src/shell/storage.rs");
+        let source = std::fs::read_to_string(&storage_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", storage_path.display()));
+        let auth_start = source
+            .find("pub(crate) fn bootstrap_broker_auth_token")
+            .expect("auth token accessor exists");
+        let invitation_end = source
+            .find("fn session_value")
+            .expect("session credential helper follows accessors");
+        let accessors = &source[auth_start..invitation_end];
+
+        assert!(accessors.contains("session_value(BOOTSTRAP_BROKER_AUTH_SESSION_KEY)"));
+        assert!(accessors.contains("session_value(BOOTSTRAP_BROKER_INVITATION_SESSION_KEY)"));
+        assert!(!accessors.contains("query_value"));
+        assert!(!source.contains("__aura_bootstrap_broker_auth"));
+        assert!(!source.contains("__aura_bootstrap_broker_invitation"));
+    }
+
+    #[test]
     fn web_ui_publication_keeps_console_json_fallback_even_with_driver_push() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let publication_path = repo_root.join("crates/aura-web/src/harness/publication.rs");

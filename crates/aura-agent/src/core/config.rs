@@ -71,10 +71,9 @@ pub struct StorageConfig {
 
     /// Secure storage backend for key material.
     ///
-    /// Defaults to a non-interactive filesystem fallback so local development
-    /// and automated runs do not trigger platform credential-store prompts.
-    /// Opt into the platform credential store explicitly when that UX is
-    /// acceptable and required for the deployment target.
+    /// Defaults to the platform credential store. Tests and simulations may
+    /// explicitly use the filesystem fallback, but production rejects that
+    /// fallback because it is not a secure key boundary.
     #[serde(default)]
     pub secure_storage_backend: SecureStorageBackend,
 
@@ -123,14 +122,14 @@ pub enum StorageEncryptionPolicy {
 pub enum SecureStorageBackend {
     /// Use the explicit filesystem-backed secure-storage fallback.
     ///
-    /// This backend is non-interactive and is therefore the default for local
-    /// development, tests, and automation.
-    #[default]
+    /// This backend is non-interactive and is allowed only for tests,
+    /// simulations, harness runs, and other explicit non-production modes.
     FilesystemFallback,
     /// Use the platform credential store (Keychain, Keystore, libsecret, etc.).
     ///
     /// This may trigger interactive OS prompts depending on the platform and
     /// deployment environment.
+    #[default]
     PlatformCredentialStore,
 }
 

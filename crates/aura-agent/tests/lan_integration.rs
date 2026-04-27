@@ -21,6 +21,7 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
+use aura_core::{Ed25519SigningKey, Hash32};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use aura_rendezvous::LanDiscoveryConfig;
@@ -72,8 +73,11 @@ async fn send_test_raw_bytes_for_lan(
 
 fn lan_test_receipt(
     envelope: &aura_core::effects::transport::TransportEnvelope,
-) -> aura_core::effects::transport::TransportReceipt {
-    aura_core::effects::transport::TransportReceipt {
+) -> TestResult<aura_core::effects::transport::TransportReceipt> {
+    const RECEIPT_SIGNATURE_MAGIC: &[u8] = b"AURA-RECEIPT-V1\0";
+    const TRANSPORT_SCOPE: u8 = 2;
+
+    let mut receipt = aura_core::effects::transport::TransportReceipt {
         context: envelope.context,
         src: envelope.source,
         dst: envelope.destination,
@@ -81,8 +85,41 @@ fn lan_test_receipt(
         cost: 1,
         nonce: 1,
         prev: [0u8; 32],
-        sig: vec![7u8],
+        sig: Vec::new(),
+    };
+    let mut transcript = Vec::new();
+    transcript.extend_from_slice(b"aura:flow-receipt:v1");
+    transcript.extend_from_slice(&receipt.context.to_bytes());
+    transcript.extend_from_slice(&receipt.src.to_bytes());
+    transcript.extend_from_slice(&receipt.dst.to_bytes());
+    transcript.extend_from_slice(&receipt.epoch.to_be_bytes());
+    transcript.extend_from_slice(&receipt.cost.to_be_bytes());
+    transcript.extend_from_slice(&receipt.nonce.to_be_bytes());
+    transcript.extend_from_slice(&receipt.prev);
+    transcript.extend_from_slice(b":scope:");
+    transcript.push(TRANSPORT_SCOPE);
+    transcript.extend_from_slice(b":payload:");
+    transcript.extend_from_slice(Hash32::from_bytes(&envelope.payload).as_bytes());
+    for key in ["content-type", "wire-format-version"] {
+        transcript.extend_from_slice(key.as_bytes());
+        match envelope.metadata.get(key) {
+            Some(value) => {
+                transcript.extend_from_slice(&(value.len() as u32).to_be_bytes());
+                transcript.extend_from_slice(value.as_bytes());
+            }
+            None => transcript.extend_from_slice(&0u32.to_be_bytes()),
+        }
     }
+
+    let signing_key = Ed25519SigningKey::from_bytes([91u8; 32]);
+    let verifying_key = signing_key.verifying_key()?;
+    let signature = signing_key.sign(&transcript)?;
+    receipt.sig = Vec::new();
+    receipt.sig.extend_from_slice(RECEIPT_SIGNATURE_MAGIC);
+    receipt.sig.push(TRANSPORT_SCOPE);
+    receipt.sig.extend_from_slice(verifying_key.as_bytes());
+    receipt.sig.extend_from_slice(signature.as_bytes());
+    Ok(receipt)
 }
 
 fn next_lan_port() -> u16 {
@@ -694,7 +731,7 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
         metadata,
         receipt: None,
     };
-    envelope.receipt = Some(lan_test_receipt(&envelope));
+    envelope.receipt = Some(lan_test_receipt(&envelope)?);
 
     send_test_raw_envelope_for_lan(&effects_b, envelope).await?;
     let received = wait_for_envelope(&effects_b).await?;
@@ -746,7 +783,7 @@ async fn test_lan_chat_fact_requires_normal_runtime_processing_path() -> TestRes
         metadata,
         receipt: None,
     };
-    envelope.receipt = Some(lan_test_receipt(&envelope));
+    envelope.receipt = Some(lan_test_receipt(&envelope)?);
 
     send_test_raw_envelope_for_lan(&effects_b, envelope).await?;
     let received = wait_for_envelope(&effects_b).await?;

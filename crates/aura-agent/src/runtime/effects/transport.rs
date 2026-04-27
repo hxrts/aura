@@ -2,7 +2,8 @@ use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{
-    TransportEnvelope, TransportError, TransportStats, MAX_TRANSPORT_SIGNATURE_BYTES,
+    TransportEnvelope, TransportError, TransportStats, MAX_TRANSPORT_PAYLOAD_BYTES,
+    MAX_TRANSPORT_SIGNATURE_BYTES,
 };
 use aura_core::effects::TransportEffects;
 use aura_core::service::{LinkEndpoint, LinkProtocol, Route};
@@ -40,6 +41,13 @@ const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
 const HARNESS_TOKEN_QUERY_KEY: &str = "__aura_harness_token";
 #[cfg(target_arch = "wasm32")]
 const MIN_HARNESS_TOKEN_LEN: usize = 16;
+const PAYLOAD_ENCRYPTION_METADATA_KEY: &str = "aura-payload-encryption";
+const PAYLOAD_ENCRYPTION_PLAINTEXT: &str = "plaintext";
+const ENCRYPTED_AURA_CONTENT_TYPES: &[&str] = &[
+    "application/aura-amp",
+    "application/aura-opaque-object",
+    "application/aura-encrypted-envelope",
+];
 #[cfg(not(target_arch = "wasm32"))]
 async fn execute_transport_timeout<F, Fut, T>(
     timeout: std::time::Duration,
@@ -352,6 +360,7 @@ async fn send_planned_envelope(
     envelope: TransportEnvelope,
     _route: &Route,
 ) -> Result<(), TransportError> {
+    enforce_transport_payload_size(&envelope)?;
     if let Some(shared) = effects.transport.shared_transport() {
         shared.route_envelope(envelope);
         return Ok(());
@@ -377,6 +386,7 @@ async fn send_planned_envelope(
         .ok_or(TransportError::DestinationUnreachable {
             destination: envelope.destination,
         })?;
+    enforce_production_payload_encryption(effects, &envelope)?;
     if envelope
         .metadata
         .get("content-type")
@@ -390,6 +400,51 @@ async fn send_planned_envelope(
         );
     }
     send_envelope_tcp(&addr, &envelope).await
+}
+
+fn enforce_transport_payload_size(envelope: &TransportEnvelope) -> Result<(), TransportError> {
+    if envelope.payload.len() > MAX_TRANSPORT_PAYLOAD_BYTES {
+        return Err(TransportError::InvalidEnvelope {
+            reason: format!(
+                "transport payload exceeds limit: {} bytes (max {})",
+                envelope.payload.len(),
+                MAX_TRANSPORT_PAYLOAD_BYTES
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn enforce_production_payload_encryption(
+    effects: &AuraEffectSystem,
+    envelope: &TransportEnvelope,
+) -> Result<(), TransportError> {
+    if effects.is_testing() || effects.harness_mode_enabled() {
+        return Ok(());
+    }
+    if envelope_declares_encrypted_payload(envelope) {
+        return Ok(());
+    }
+    Err(TransportError::InvalidEnvelope {
+        reason: "production direct transport requires encrypted payload metadata".to_string(),
+    })
+}
+
+fn envelope_declares_encrypted_payload(envelope: &TransportEnvelope) -> bool {
+    if envelope
+        .metadata
+        .get(PAYLOAD_ENCRYPTION_METADATA_KEY)
+        .is_some_and(|value| {
+            let value = value.trim();
+            !value.is_empty() && !value.eq_ignore_ascii_case(PAYLOAD_ENCRYPTION_PLAINTEXT)
+        })
+    {
+        return true;
+    }
+    envelope
+        .metadata
+        .get("content-type")
+        .is_some_and(|value| ENCRYPTED_AURA_CONTENT_TYPES.contains(&value.as_str()))
 }
 
 fn fallback_direct_route(envelope: &TransportEnvelope) -> Route {
@@ -429,6 +484,7 @@ fn validate_inbound_transport_receipt(envelope: &TransportEnvelope) -> Result<()
             reason: "receipt signature exceeds transport bound".to_string(),
         });
     }
+    crate::runtime::receipt_model::verify_transport_receipt_for_envelope(receipt, envelope)?;
 
     Ok(())
 }
@@ -1029,6 +1085,60 @@ mod tests {
         ));
 
         assert!(direct_route_allowed(&effects, &route));
+    }
+
+    #[test]
+    fn production_payload_encryption_policy_requires_marker_or_encrypted_content_type() {
+        let sender = AuthorityId::new_from_entropy([240u8; 32]);
+        let receiver = AuthorityId::new_from_entropy([241u8; 32]);
+        let context = ContextId::new_from_entropy([242u8; 32]);
+        let base = TransportEnvelope {
+            destination: receiver,
+            source: sender,
+            context,
+            payload: vec![1, 2, 3],
+            metadata: HashMap::new(),
+            receipt: None,
+        };
+
+        assert!(!envelope_declares_encrypted_payload(&base));
+
+        let mut explicit = base.clone();
+        explicit.metadata.insert(
+            PAYLOAD_ENCRYPTION_METADATA_KEY.to_string(),
+            "noise-xk".to_string(),
+        );
+        assert!(envelope_declares_encrypted_payload(&explicit));
+
+        let mut plaintext = base.clone();
+        plaintext.metadata.insert(
+            PAYLOAD_ENCRYPTION_METADATA_KEY.to_string(),
+            PAYLOAD_ENCRYPTION_PLAINTEXT.to_string(),
+        );
+        assert!(!envelope_declares_encrypted_payload(&plaintext));
+
+        let mut aura_encrypted = base;
+        aura_encrypted.metadata.insert(
+            "content-type".to_string(),
+            "application/aura-opaque-object".to_string(),
+        );
+        assert!(envelope_declares_encrypted_payload(&aura_encrypted));
+    }
+
+    #[test]
+    fn transport_send_rejects_oversized_payload_before_emit() {
+        let envelope = TransportEnvelope {
+            destination: AuthorityId::new_from_entropy([243u8; 32]),
+            source: AuthorityId::new_from_entropy([244u8; 32]),
+            context: ContextId::new_from_entropy([245u8; 32]),
+            payload: vec![0u8; MAX_TRANSPORT_PAYLOAD_BYTES + 1],
+            metadata: HashMap::new(),
+            receipt: None,
+        };
+
+        let error = enforce_transport_payload_size(&envelope)
+            .expect_err("oversized transport payload must fail before send");
+        assert!(matches!(error, TransportError::InvalidEnvelope { .. }));
     }
 
     #[tokio::test]

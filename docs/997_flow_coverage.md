@@ -166,6 +166,13 @@ and continue to map to the same canonical coverage anchors:
   through the semantic command plane and assert
   `RuntimeEventKind::AmpChannelTransitionUpdated` without frontend-specific
   compatibility steps.
+- Browser bootstrap broker credential handling remains frontend-conformance
+  coverage. Bearer and invitation retrieval tokens must come from
+  session-scoped browser storage rather than URL query parameters, while the
+  broker endpoint may still be staged through controlled bootstrap metadata.
+  The native storage boundary test and browser observation smoke coverage
+  protect the bridge/storage contract without creating a new shared semantic
+  user flow.
 
 Scenario 13 remains the canonical anchor for the shared contacts lifecycle
 because it exercises the parity-critical semantic controls for `send friend
@@ -259,7 +266,11 @@ Frontend-specific flows may still have scenario coverage, but they are not part 
    scenarios rather than DOM-driving fallback mechanics.
 7. Changes to renderer-specific control wiring should add or update
    frontend-conformance coverage rather than weakening the shared semantic lane.
-8. Changes to OTA or module release/update architecture should update the
+8. Browser bootstrap broker credential changes must preserve the rule that
+   bearer and invitation retrieval tokens are not URL parameters, and should
+   update frontend-conformance tests or documentation when the storage boundary
+   changes.
+9. Changes to OTA or module release/update architecture should update the
    planned release/update matrix above when they add, remove, or reorder
    mechanism-validation or release-rehearsal coverage.
 

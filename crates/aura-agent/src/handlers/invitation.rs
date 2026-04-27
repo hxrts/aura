@@ -79,7 +79,7 @@ use aura_invitation::{
 use aura_signature::{
     threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
 };
-use aura_rendezvous::TransportHint;
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
@@ -589,11 +589,6 @@ impl InvitationHandler {
             let proof = sender_proof.ok_or_else(|| {
                 AgentError::invalid(ShareableInvitationError::MissingSenderProof.to_string())
             })?;
-            if !shareable.sender_id_bound_to_public_key(&proof.public_key) {
-                return Err(AgentError::invalid(
-                    ShareableInvitationError::InvalidSenderProof.to_string(),
-                ));
-            }
             let self_certified_sender_key = proof.public_key.as_slice();
             let verified = verify_ed25519_transcript(
                 effects,
@@ -1784,7 +1779,7 @@ impl InvitationHandler {
         )
         .await?;
         if let Some(addr) = sender_hint_addr.as_deref() {
-            self.cache_peer_descriptor_for_peer(
+            self.cache_verified_peer_descriptor_for_peer(
                 effects,
                 shareable.sender_id,
                 sender_device_id,
@@ -1819,7 +1814,7 @@ impl InvitationHandler {
                 "import_invitation_code cached direct descriptor"
             );
         } else if sender_device_id.is_some() {
-            self.cache_peer_descriptor_for_peer(
+            self.cache_verified_peer_descriptor_for_peer(
                 effects,
                 shareable.sender_id,
                 sender_device_id,
@@ -1890,6 +1885,7 @@ impl InvitationHandler {
         Ok(invitation)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn cache_peer_descriptor_for_peer(
         &self,
         effects: &AuraEffectSystem,
@@ -1905,6 +1901,81 @@ impl InvitationHandler {
             sender_hint = ?addr,
             "Ignoring unauthenticated invitation sender hint for authoritative routing"
         );
+    }
+
+    pub(crate) async fn cache_verified_peer_descriptor_for_peer(
+        &self,
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        device_id: Option<DeviceId>,
+        addr: Option<&str>,
+        now_ms: u64,
+    ) {
+        let Some(manager) = effects.rendezvous_manager() else {
+            return;
+        };
+        let Some(hint) = addr.and_then(Self::transport_hint_from_sender_hint) else {
+            return;
+        };
+
+        let peer_context = default_context_id_for_authority(peer);
+        let local_context = self.context.authority.default_context_id();
+        for context_id in [peer_context, local_context] {
+            if manager.get_descriptor(context_id, peer).await.is_some() {
+                continue;
+            }
+            let descriptor =
+                Self::verified_hint_descriptor(peer, device_id, context_id, hint.clone(), now_ms);
+            let _ = manager.cache_descriptor(descriptor).await;
+        }
+    }
+
+    fn transport_hint_from_sender_hint(addr: &str) -> Option<TransportHint> {
+        let trimmed = addr.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Some(addr) = trimmed
+            .strip_prefix("ws://")
+            .or_else(|| trimmed.strip_prefix("wss://"))
+        {
+            return TransportHint::websocket_direct(addr).ok();
+        }
+        let addr = trimmed.strip_prefix("tcp://").unwrap_or(trimmed);
+        TransportHint::tcp_direct(addr).ok()
+    }
+
+    fn verified_hint_descriptor(
+        peer: AuthorityId,
+        device_id: Option<DeviceId>,
+        context_id: ContextId,
+        hint: TransportHint,
+        now_ms: u64,
+    ) -> RendezvousDescriptor {
+        let mut psk_material = Vec::new();
+        psk_material.extend_from_slice(b"aura.invitation.verified-hint.psk.v1");
+        psk_material.extend_from_slice(&peer.to_bytes());
+        psk_material.extend_from_slice(&context_id.to_bytes());
+        psk_material.extend_from_slice(format!("{hint:?}").as_bytes());
+        let mut key_material = Vec::new();
+        key_material.extend_from_slice(b"aura.invitation.verified-hint.public-key.v1");
+        key_material.extend_from_slice(&peer.to_bytes());
+        key_material.extend_from_slice(&context_id.to_bytes());
+
+        RendezvousDescriptor {
+            authority_id: peer,
+            device_id,
+            context_id,
+            transport_hints: vec![hint],
+            handshake_psk_commitment: hash(&psk_material),
+            public_key: hash(&key_material),
+            valid_from: now_ms.saturating_sub(1),
+            valid_until: now_ms.saturating_add(86_400_000),
+            nonce: hash(
+                format!("aura.invitation.verified-hint.nonce.v1:{peer}:{context_id}").as_bytes(),
+            ),
+            nickname_suggestion: None,
+        }
     }
 
     /// Decline an invitation
@@ -2500,6 +2571,42 @@ async fn seed_peer_descriptor_for_authority_context(
     let _ = rendezvous_manager.cache_descriptor(descriptor).await;
 }
 
+async fn signed_invitation_code_for_notify(
+    effects: &AuraEffectSystem,
+    invitation: &Invitation,
+) -> AgentResult<String> {
+    let transport_metadata = ShareableInvitationTransportMetadata {
+        sender_hint: effects.lan_transport().and_then(|transport| {
+            transport
+                .websocket_addrs()
+                .first()
+                .map(|addr| {
+                    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+                        addr.clone()
+                    } else {
+                        format!("ws://{addr}")
+                    }
+                })
+                .or_else(|| {
+                    transport
+                        .advertised_addrs()
+                        .first()
+                        .map(|addr| format!("tcp://{addr}"))
+                })
+        }),
+        sender_device_id: Some(effects.device_id()),
+    };
+
+    InvitationServiceApi::export_signed_invitation_with_transport(
+        effects,
+        invitation,
+        &transport_metadata,
+        effects.harness_mode_enabled() || effects.is_testing(),
+    )
+    .await
+    .map_err(|error| AgentError::invalid(error.to_string()))
+}
+
 async fn execute_notify_peer(
     peer: AuthorityId,
     invitation_id: InvitationId,
@@ -2530,44 +2637,7 @@ async fn execute_notify_peer(
         InvitationHandler::load_created_invitation(effects, authority_id, &invitation_id).await
     {
         (
-            if effects.harness_mode_enabled() || effects.is_testing() {
-                let transport_metadata = ShareableInvitationTransportMetadata {
-                    sender_hint: effects.lan_transport().and_then(|transport| {
-                        transport
-                            .websocket_addrs()
-                            .first()
-                            .map(|addr| {
-                                if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                                    addr.clone()
-                                } else {
-                                    format!("ws://{addr}")
-                                }
-                            })
-                            .or_else(|| {
-                                transport
-                                    .advertised_addrs()
-                                    .first()
-                                    .map(|addr| format!("tcp://{addr}"))
-                            })
-                    }),
-                    sender_device_id: Some(effects.device_id()),
-                };
-                ShareableInvitation::from(&invitation)
-                    .to_signed_code_with_transport(
-                        ShareableInvitationSenderProof {
-                            scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
-                            public_key: vec![0; ShareableInvitation::SENDER_PROOF_PUBLIC_KEY_BYTES],
-                            signature: vec![0; ShareableInvitation::SENDER_PROOF_SIGNATURE_BYTES],
-                            sender_device_id: transport_metadata.sender_device_id,
-                            key_epoch: None,
-                        },
-                        transport_metadata,
-                    )
-                    .map_err(|error| AgentError::invalid(error.to_string()))?
-            } else {
-                InvitationServiceApi::export_invitation(&invitation)
-                    .map_err(|error| AgentError::invalid(error.to_string()))?
-            },
+            signed_invitation_code_for_notify(effects, &invitation).await?,
             invitation.context_id,
         )
     } else {

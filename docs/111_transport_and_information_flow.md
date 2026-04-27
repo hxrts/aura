@@ -4,7 +4,9 @@ This document describes the architecture of transport, guard chains, flow budget
 
 ## 1. Transport Abstraction
 
-Aura provides a transport layer that delivers encrypted messages between authorities. Each transport connection is represented as a `SecureChannel`. A secure channel binds a pair of authorities and a context identifier. A secure channel maintains isolation across contexts.
+Aura provides a transport layer that delivers payload-encrypted messages between authorities. Each transport connection is represented as a `SecureChannel`. A secure channel binds a pair of authorities and a context identifier. A secure channel maintains isolation across contexts.
+
+The direct TCP/WebSocket emitters are byte-delivery mechanisms, not a substitute for payload encryption. Production direct transport rejects outbound envelopes unless the envelope either carries explicit `aura-payload-encryption` metadata with a non-plaintext value or uses an Aura content type that is already defined as encrypted. Test, simulation, and harness transports may bypass this send-time policy so deterministic fixtures can exercise routing without provisioning channel keys.
 
 A secure channel exposes a send operation and a receive operation. The channel manages replay protection and handles connection teardown on epoch changes.
 

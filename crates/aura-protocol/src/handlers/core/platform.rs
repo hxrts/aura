@@ -5,6 +5,7 @@
 
 use aura_core::effects::StorageEffects;
 use aura_effects::storage::FilesystemStorageHandler;
+use std::path::{Path, PathBuf};
 
 use super::FactoryError;
 
@@ -39,11 +40,12 @@ impl PlatformDetector {
             "macos" => {
                 // Check for Apple Secure Enclave on macOS
                 std::env::consts::ARCH == "aarch64"
-                    || std::process::Command::new("system_profiler")
-                        .args(["SPHardwareDataType"])
-                        .output()
-                        .map(|output| String::from_utf8_lossy(&output.stdout).contains("Apple"))
-                        .unwrap_or(false)
+                    || command_output(
+                        &PathBuf::from("/usr/sbin/system_profiler"),
+                        &["SPHardwareDataType"],
+                    )
+                    .map(|output| String::from_utf8_lossy(&output.stdout).contains("Apple"))
+                    .unwrap_or(false)
             }
             "linux" => {
                 // Check for Intel SGX or AMD SEV on Linux
@@ -92,7 +94,15 @@ impl PlatformDetector {
         match std::env::consts::OS {
             "linux" | "macos" => {
                 // Check for common network interfaces on Unix-like systems
-                if let Ok(output) = std::process::Command::new("ifconfig").output() {
+                if let Some(tool) = first_existing_tool(&[
+                    PathBuf::from("/sbin/ifconfig"),
+                    PathBuf::from("/usr/sbin/ifconfig"),
+                    PathBuf::from("/bin/ifconfig"),
+                    PathBuf::from("/usr/bin/ifconfig"),
+                ]) {
+                    let Some(output) = command_output(&tool, &[]) else {
+                        return interfaces;
+                    };
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines() {
                         if !line.starts_with(' ') && !line.starts_with('\t') && line.contains(':') {
@@ -108,10 +118,12 @@ impl PlatformDetector {
             }
             "windows" => {
                 // Check network adapters on Windows
-                if let Ok(output) = std::process::Command::new("ipconfig")
-                    .args(["/all"])
-                    .output()
+                if let Some(tool) =
+                    first_existing_tool(&[PathBuf::from(r"C:\Windows\System32\ipconfig.exe")])
                 {
+                    let Some(output) = command_output(&tool, &["/all"]) else {
+                        return interfaces;
+                    };
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines() {
                         if line.contains("adapter") && line.contains(':') {
@@ -134,6 +146,17 @@ impl PlatformDetector {
 
         interfaces
     }
+}
+
+fn first_existing_tool(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|path| path.is_file()).cloned()
+}
+
+fn command_output(path: &Path, args: &[&str]) -> Option<std::process::Output> {
+    if !path.is_file() {
+        return None;
+    }
+    std::process::Command::new(path).args(args).output().ok()
 }
 
 /// Platform information
@@ -174,5 +197,29 @@ impl PlatformInfo {
 
         // Fallback to first available
         self.available_storage_backends.first().cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_detection_does_not_execute_path_resolved_tools() {
+        let source = include_str!("platform.rs");
+        assert!(!source.contains("Command::new(\"ifconfig\")"));
+        assert!(!source.contains("Command::new(\"ipconfig\")"));
+        assert!(!source.contains("Command::new(\"system_profiler\")"));
+        assert!(source.contains("/usr/sbin/system_profiler"));
+        assert!(source.contains("/sbin/ifconfig"));
+        assert!(source.contains(r"C:\Windows\System32\ipconfig.exe"));
+    }
+
+    #[test]
+    fn first_existing_tool_fails_softly_when_no_candidate_exists() {
+        assert!(
+            first_existing_tool(&[PathBuf::from("/definitely/not/an/aura/platform/tool")])
+                .is_none()
+        );
     }
 }

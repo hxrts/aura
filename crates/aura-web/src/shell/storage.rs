@@ -13,8 +13,8 @@ const HARNESS_INSTANCE_QUERY_KEY: &str = "__aura_harness_instance";
 const HARNESS_TOKEN_QUERY_KEY: &str = "__aura_harness_token";
 const DEMO_SURFACE_QUERY_KEY: &str = "__aura_demo_surface";
 const BOOTSTRAP_BROKER_QUERY_KEY: &str = "__aura_bootstrap_broker";
-const BOOTSTRAP_BROKER_AUTH_QUERY_KEY: &str = "__aura_bootstrap_broker_auth";
-const BOOTSTRAP_BROKER_INVITATION_QUERY_KEY: &str = "__aura_bootstrap_broker_invitation";
+const BOOTSTRAP_BROKER_AUTH_SESSION_KEY: &str = "aura_bootstrap_broker_auth";
+const BOOTSTRAP_BROKER_INVITATION_SESSION_KEY: &str = "aura_bootstrap_broker_invitation";
 const PENDING_ACCOUNT_BOOTSTRAP_TTL_MS: u64 = 30 * 60 * 1000;
 const PENDING_DEVICE_ENROLLMENT_CODE_TTL_MS: u64 = 10 * 60 * 1000;
 const MIN_HARNESS_TOKEN_LEN: usize = 16;
@@ -441,11 +441,26 @@ pub(crate) fn bootstrap_broker_url() -> Option<String> {
 }
 
 pub(crate) fn bootstrap_broker_auth_token() -> Option<String> {
-    query_value(BOOTSTRAP_BROKER_AUTH_QUERY_KEY)
+    session_value(BOOTSTRAP_BROKER_AUTH_SESSION_KEY)
 }
 
 pub(crate) fn bootstrap_broker_invitation_token() -> Option<String> {
-    query_value(BOOTSTRAP_BROKER_INVITATION_QUERY_KEY)
+    session_value(BOOTSTRAP_BROKER_INVITATION_SESSION_KEY)
+}
+
+fn session_value(key: &str) -> Option<String> {
+    WebSessionStorage::optional_lookup(WebUiOperation::BootstrapController)
+        .ok()
+        .flatten()?
+        .load_string(
+            key,
+            WebUiOperation::BootstrapController,
+            "WEB_BOOTSTRAP_SESSION_READ_FAILED",
+            "bootstrap broker session credential",
+        )
+        .ok()
+        .flatten()
+        .filter(|value| !value.is_empty())
 }
 
 fn query_value(target_key: &str) -> Option<String> {

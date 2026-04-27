@@ -518,7 +518,7 @@ impl<'a> InvitationContactHandler<'a> {
                             InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
                                 .await;
                         self.handler
-                            .cache_peer_descriptor_for_peer(
+                            .cache_verified_peer_descriptor_for_peer(
                                 effects.as_ref(),
                                 acceptance.acceptor_id,
                                 acceptor_device_id,
@@ -738,7 +738,7 @@ impl<'a> InvitationContactHandler<'a> {
                         .and_then(|value| value.parse().ok());
                     if acceptor_addr.is_some() || acceptor_device_id.is_some() {
                         self.handler
-                            .cache_peer_descriptor_for_peer(
+                            .cache_verified_peer_descriptor_for_peer(
                                 effects.as_ref(),
                                 acceptance.acceptor_id,
                                 acceptor_device_id,

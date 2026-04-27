@@ -14,6 +14,9 @@
 //! settings/device flows anchored to `shared-settings-parity.toml` plus
 //! Scenario 12, and keep browser harness compatibility plus harness-mode
 //! timing allowances synchronized through this facade and the testing docs.
+//! Browser bootstrap broker credential hardening is a bridge/storage boundary
+//! change, not a shared-flow behavior change, so existing shared-flow scenario
+//! coverage remains authoritative while this facade records the metadata sync.
 
 #![allow(missing_docs)] // Shared contract surface - refined incrementally during migration.
 

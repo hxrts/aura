@@ -61,6 +61,11 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   native UDP LAN discovery. Broker results are surfaced as bootstrap
   candidates for enrollment and must not be counted or rendered as ordinary
   peers before invitation/device-enrollment succeeds.
+- Browser bootstrap broker bearer credentials are not URL parameters. The
+  broker URL may be staged from controlled bootstrap metadata, but bearer and
+  invitation-retrieval tokens must come from session-scoped browser storage or
+  header-bearing native/runtime configuration so logs, history, and referrers
+  do not expose credential material.
 - Browser bootstrap/rebootstrap bridge promises resolve on completion of the
   owned bootstrap transition, not merely on enqueue, so harness/browser callers
   do not mistake acceptance for success.

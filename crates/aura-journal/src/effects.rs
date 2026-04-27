@@ -52,6 +52,37 @@ enum ReceiptSignatureMode {
     TestSimulationUnsignedBypass { reason: &'static str },
 }
 
+/// Capability token required to enable unsigned receipt bypasses.
+///
+/// The token has no public production constructor. Tests and crates built with
+/// the `simulation` feature may construct it explicitly, which keeps unsigned
+/// receipt acceptance out of ordinary production call paths.
+#[derive(Debug, Clone, Copy)]
+pub struct UnsignedReceiptBypassToken {
+    reason: &'static str,
+    _private: (),
+}
+
+impl UnsignedReceiptBypassToken {
+    /// Construct an unsigned receipt bypass token for unit tests.
+    #[cfg(test)]
+    pub fn for_test(reason: &'static str) -> Self {
+        Self {
+            reason,
+            _private: (),
+        }
+    }
+
+    /// Construct an unsigned receipt bypass token for explicit simulation builds.
+    #[cfg(feature = "simulation")]
+    pub fn for_simulation(reason: &'static str) -> Self {
+        Self {
+            reason,
+            _private: (),
+        }
+    }
+}
+
 impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> JournalHandler<C, S, A> {
     fn with_authorization_mode(
         authority_id: AuthorityId,
@@ -111,8 +142,13 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
 
     /// Explicitly allow unsigned rendezvous receipts for deterministic
     /// simulation/test runtimes that do not model receipt signing yet.
-    pub fn with_unsigned_receipt_bypass_for_simulation(mut self, reason: &'static str) -> Self {
-        self.receipt_signature_mode = ReceiptSignatureMode::TestSimulationUnsignedBypass { reason };
+    pub fn with_unsigned_receipt_bypass_for_simulation(
+        mut self,
+        token: UnsignedReceiptBypassToken,
+    ) -> Self {
+        self.receipt_signature_mode = ReceiptSignatureMode::TestSimulationUnsignedBypass {
+            reason: token.reason,
+        };
         self
     }
 
@@ -862,5 +898,20 @@ mod tests {
             .await
             .expect("explicit test bypass permits unsigned receipt");
         assert!(!merged.read_facts().is_empty());
+    }
+
+    #[test]
+    fn unsigned_receipt_bypass_requires_capability_token() {
+        let source = include_str!("effects.rs");
+        assert!(source.contains("pub struct UnsignedReceiptBypassToken"));
+        assert!(source.contains("_private: ()"));
+        assert!(source.contains("#[cfg(feature = \"simulation\")]"));
+        assert!(source.contains("#[cfg(test)]"));
+        assert!(source.contains("token: UnsignedReceiptBypassToken"));
+        let old_signature = concat!(
+            "with_unsigned_receipt_bypass_for_simulation",
+            "(mut self, reason"
+        );
+        assert!(!source.contains(old_signature));
     }
 }

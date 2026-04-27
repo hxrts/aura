@@ -120,13 +120,15 @@ fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem>
                 .expect("production invitation root should build")
                 .keep()
                 .join("aura"),
+            secure_storage_backend: crate::core::config::SecureStorageBackend::FilesystemFallback,
             ..Default::default()
         },
         device_id: authority.device_id(),
         ..Default::default()
     };
     let effects = Arc::new(
-        AuraEffectSystem::production_for_authority(config, authority.authority_id()).unwrap(),
+        AuraEffectSystem::production_for_test_for_authority(config, authority.authority_id())
+            .unwrap(),
     );
     install_full_invitation_biscuit_cache(&effects, authority.authority_id());
     effects
@@ -1807,7 +1809,7 @@ large_stack_async_test!(channel_acceptance_processing_marks_created_invitation_a
 
     let now_ms = 1_700_000_000_000;
     sender_handler
-        .cache_peer_descriptor_for_peer(
+        .cache_verified_peer_descriptor_for_peer(
             sender_effects.as_ref(),
             receiver_id,
             None,
@@ -1816,7 +1818,7 @@ large_stack_async_test!(channel_acceptance_processing_marks_created_invitation_a
         )
         .await;
     receiver_handler
-        .cache_peer_descriptor_for_peer(
+        .cache_verified_peer_descriptor_for_peer(
             receiver_effects.as_ref(),
             sender_id,
             None,
@@ -1987,7 +1989,7 @@ large_stack_async_test!(channel_acceptance_notification_transports_and_updates_s
 
     let now_ms = 1_700_000_000_000;
     sender_handler
-        .cache_peer_descriptor_for_peer(
+        .cache_verified_peer_descriptor_for_peer(
             sender_effects.as_ref(),
             receiver_id,
             None,
@@ -1996,7 +1998,7 @@ large_stack_async_test!(channel_acceptance_notification_transports_and_updates_s
         )
         .await;
     receiver_handler
-        .cache_peer_descriptor_for_peer(
+        .cache_verified_peer_descriptor_for_peer(
             receiver_effects.as_ref(),
             sender_id,
             None,
@@ -3959,7 +3961,9 @@ async fn production_sender_proof_validation_is_harness_mode_neutral() {
 }
 
 #[tokio::test]
-async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
+async fn production_import_accepts_signed_self_certified_opaque_sender() {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
     let authority = create_test_authority(243);
     let temp = tempfile::tempdir().unwrap();
     let config = AgentConfig {
@@ -3974,10 +3978,11 @@ async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
     let sender_device_id = authority.device_id();
     let handler = handler_for(authority);
     let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy([244u8; 32]);
     let shareable = ShareableInvitation {
         version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-forged-sender-prod"),
-        sender_id: AuthorityId::new_from_entropy([244u8; 32]),
+        invitation_id: InvitationId::new("inv-opaque-sender-prod"),
+        sender_id,
         context_id: None,
         invitation_type: InvitationType::Contact { nickname: None },
         expires_at: None,
@@ -4001,11 +4006,30 @@ async fn production_import_rejects_sender_id_not_bound_to_signing_key() {
         })
         .unwrap();
 
+    let mut parts: Vec<&str> = code.split(':').collect();
+    let mut envelope: serde_json::Value =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
+    envelope["payload"]["sender_id"] =
+        serde_json::to_value(AuthorityId::new_from_entropy([245u8; 32])).unwrap();
+    let tampered_json = serde_json::to_vec(&envelope).unwrap();
+    let tampered_payload = URL_SAFE_NO_PAD.encode(tampered_json);
+    parts[2] = &tampered_payload;
+    let tampered_code = parts.join(":");
+
     let err = handler
+        .import_invitation_code(&effects, &tampered_code)
+        .await
+        .expect_err("tampered sender id must invalidate the signed proof");
+    assert!(
+        err.to_string().contains("sender proof is invalid"),
+        "unexpected tampered sender error: {err}"
+    );
+
+    let imported = handler
         .import_invitation_code(&effects, &code)
         .await
-        .expect_err("sender id must be bound to signing key");
-    assert!(err.to_string().contains("sender proof is invalid"));
+        .expect("signed self-certified opaque sender should import");
+    assert_eq!(imported.sender_id, sender_id);
 }
 
 #[tokio::test]
@@ -4384,7 +4408,7 @@ async fn sender_hint_suffix_does_not_overwrite_trusted_descriptor_route() {
 
     let handler = handler_for(authority);
     handler
-        .cache_peer_descriptor_for_peer(
+        .cache_verified_peer_descriptor_for_peer(
             effects.as_ref(),
             peer,
             Some(DeviceId::new_from_entropy([254u8; 32])),

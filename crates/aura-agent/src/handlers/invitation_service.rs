@@ -881,7 +881,10 @@ impl InvitationServiceApi {
         code
     }
 
-    async fn retrieve_identity_keys(&self, authority: &AuthorityId) -> Option<(Vec<u8>, Vec<u8>)> {
+    async fn retrieve_identity_keys_from_effects(
+        effects: &AuraEffectSystem,
+        authority: &AuthorityId,
+    ) -> Option<(Vec<u8>, Vec<u8>)> {
         let caps = vec![SecureStorageCapability::Read];
         for epoch in [1_u64, 0_u64] {
             let location = SecureStorageLocation::with_sub_key(
@@ -889,7 +892,7 @@ impl InvitationServiceApi {
                 format!("{authority}:{epoch}"),
                 "1",
             );
-            let Ok(bytes) = self.effects.secure_retrieve(&location, &caps).await else {
+            let Ok(bytes) = effects.secure_retrieve(&location, &caps).await else {
                 continue;
             };
             let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
@@ -905,26 +908,24 @@ impl InvitationServiceApi {
         None
     }
 
-    async fn export_signed_invitation(
-        &self,
+    pub(crate) async fn export_signed_invitation_with_transport(
+        effects: &AuraEffectSystem,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
         allow_ephemeral_fallback: bool,
     ) -> Result<String, ShareableInvitationError> {
         let shareable = ShareableInvitation::from(invitation);
         let (private_key, public_key) =
-            match self.retrieve_identity_keys(&shareable.sender_id).await {
+            match Self::retrieve_identity_keys_from_effects(effects, &shareable.sender_id).await {
                 Some(identity_keys) => identity_keys,
-                None if allow_ephemeral_fallback => {
-                    self.effects
-                        .ed25519_generate_keypair()
-                        .await
-                        .map_err(|_| ShareableInvitationError::SerializationFailed)?
-                }
+                None if allow_ephemeral_fallback => effects
+                    .ed25519_generate_keypair()
+                    .await
+                    .map_err(|_| ShareableInvitationError::SerializationFailed)?,
                 None => return Err(ShareableInvitationError::MissingSenderProof),
             };
         let signature = sign_ed25519_transcript(
-            self.effects.as_ref(),
+            effects,
             &shareable.signing_transcript_with_transport(transport),
             &private_key,
         )
@@ -940,6 +941,21 @@ impl InvitationServiceApi {
             },
             transport.clone(),
         )
+    }
+
+    async fn export_signed_invitation(
+        &self,
+        invitation: &Invitation,
+        transport: &ShareableInvitationTransportMetadata,
+        allow_ephemeral_fallback: bool,
+    ) -> Result<String, ShareableInvitationError> {
+        Self::export_signed_invitation_with_transport(
+            self.effects.as_ref(),
+            invitation,
+            transport,
+            allow_ephemeral_fallback,
+        )
+        .await
     }
 
     /// Export an invitation as a shareable code string (compile-time safe)

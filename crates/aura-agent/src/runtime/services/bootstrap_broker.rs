@@ -866,9 +866,19 @@ pub fn endpoint_is_loopback(raw: &str) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_http_endpoint(url: &str) -> Result<(String, String), String> {
-    let without_scheme = url
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("unsupported bootstrap broker url (expected http://): {url}"))?;
+    if url.starts_with("https://") {
+        return Err(format!(
+            "unsupported native bootstrap broker url (HTTPS client not available in this build): {url}"
+        ));
+    }
+    let without_scheme = url.strip_prefix("http://").ok_or_else(|| {
+        format!("unsupported bootstrap broker url (expected http:// loopback): {url}")
+    })?;
+    if !endpoint_is_loopback(url) {
+        return Err(format!(
+            "plain HTTP bootstrap broker URLs are restricted to loopback endpoints: {url}"
+        ));
+    }
     let (host_port, path) = match without_scheme.split_once('/') {
         Some((host_port, path)) => (host_port.to_string(), format!("/{}", path)),
         None => (without_scheme.to_string(), "/".to_string()),
@@ -1376,6 +1386,25 @@ mod tests {
             .expect("response should read");
         let response = String::from_utf8_lossy(&response);
         assert!(response.starts_with("HTTP/1.1 400"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_bootstrap_broker_plain_http_is_loopback_only() {
+        assert!(parse_http_endpoint("http://127.0.0.1:3000/v1/bootstrap").is_ok());
+        assert!(parse_http_endpoint("http://localhost:3000/v1/bootstrap").is_ok());
+
+        let error = parse_http_endpoint("http://192.0.2.10:3000/v1/bootstrap")
+            .expect_err("non-loopback HTTP must fail closed");
+        assert!(error.contains("plain HTTP bootstrap broker URLs are restricted to loopback"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_bootstrap_broker_https_is_not_downgraded_to_http() {
+        let error = parse_http_endpoint("https://broker.example.test/v1/bootstrap")
+            .expect_err("native HTTPS must not be parsed as plain HTTP");
+        assert!(error.contains("HTTPS client not available"));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

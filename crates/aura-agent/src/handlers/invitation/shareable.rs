@@ -47,7 +47,8 @@ pub struct ShareableInvitation {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ShareableInvitationSenderProof {
     pub scheme: String,
-    /// Untrusted key material; accepted only after binding it to `sender_id`.
+    /// Self-certified key material for unknown senders. For known senders,
+    /// import validation must resolve this key through trusted device state.
     pub public_key: Vec<u8>,
     pub signature: Vec<u8>,
     #[serde(default)]

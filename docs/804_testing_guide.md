@@ -169,6 +169,13 @@ The bootstrap staging and handoff promise is completion-based. Callers may treat
 
 Browser bootstrap storage is explicit. Preserved-profile recovery correctness depends on the typed selected runtime identity, pending bootstrap metadata, and browser-local `AccountConfig` metadata remaining distinct. The next generation must recover the canonical runtime bootstrap path without falling back to browser-local semantic repair. Channel-returning bridge responses now distinguish weak selected-channel ids from authoritative channel bindings. A payload that lacks context is not a binding.
 
+Browser bootstrap broker credentials are intentionally not query-string
+parameters. Tests may stage the broker URL through controlled bootstrap setup,
+but bearer and invitation-retrieval tokens must use session-scoped browser
+storage or header-bearing runtime configuration. Harnesses should assert this
+through the browser storage/bridge contract rather than by inspecting URL
+parameters.
+
 Browser harness failures surface explicit publication-state diagnostics through `window.__AURA_UI_PUBLICATION_STATE__`, `window.__AURA_RENDER_HEARTBEAT_PUBLICATION_STATE__`, and the page-owned semantic submit publication surface. Those globals are diagnostic-only and do not replace the authoritative `UiSnapshot` and `RenderHeartbeat` payloads. They are the canonical observed source for browser bootstrap and rebinding state. Driver-owned `restart_page_session` is infrastructure recovery only. Semantic command submission and runtime-identity staging must wait on or fail from the page-owned publication contract rather than replaying work through a restarted browser session.
 
 `submitSemanticCommand` follows that rule directly. After bounded same-page recovery it must fail closed instead of replaying the semantic request through a fresh browser session. The browser publication owner classifies diagnostics by typed publication status, binding mode, and reliability before serializing them to page globals. Compatibility-sensitive waits keep one canonical publication path instead of ad hoc string assembly.

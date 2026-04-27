@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::transport::TransportEnvelope;
+use aura_core::effects::transport::{TransportEnvelope, MAX_TRANSPORT_PAYLOAD_BYTES};
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
     TransportEffects, TransportError,
@@ -316,6 +316,16 @@ impl NetworkExtendedEffects for AuraEffectSystem {
     }
 
     async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        if _data.len() > MAX_TRANSPORT_PAYLOAD_BYTES {
+            return Err(NetworkError::SendFailed {
+                peer_id: None,
+                reason: format!(
+                    "network payload exceeds transport limit: {} bytes (max {})",
+                    _data.len(),
+                    MAX_TRANSPORT_PAYLOAD_BYTES
+                ),
+            });
+        }
         if self.execution_mode.is_deterministic() {
             self.ensure_mock_network()?;
             return Err(NetworkError::NotImplemented);
@@ -497,6 +507,21 @@ mod tests {
             .await
             .expect_err("invalid connection handle should fail");
         assert!(matches!(err, NetworkError::ConnectionFailed(_)));
+    }
+
+    #[tokio::test]
+    async fn send_rejects_oversized_payload_before_connection_lookup() {
+        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
+        let effects = AuraEffectSystem::production(production_config_for_tests(), authority_id)
+            .expect("create production effects");
+        let err = effects
+            .send(
+                "not-a-connection-id",
+                vec![0u8; aura_core::effects::transport::MAX_TRANSPORT_PAYLOAD_BYTES + 1],
+            )
+            .await
+            .expect_err("oversized network payload should fail before lookup");
+        assert!(matches!(err, NetworkError::SendFailed { .. }));
     }
 
     #[tokio::test]
