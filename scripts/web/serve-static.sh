@@ -57,9 +57,18 @@ web_sources_stale() {
 
 web_build_has_harness_support() {
     local public_dir="$1"
-    local js_bundle="$public_dir/wasm/aura-web.js"
-    [[ -f "$js_bundle" ]] || return 1
-    grep -q "__AURA_HARNESS__" "$js_bundle"
+    local asset
+
+    # Dioxus fingerprints current JS/WASM bundle names under assets/. Older
+    # releases used wasm/aura-web.js, so inspect emitted bundles rather than
+    # coupling cache validation to either layout.
+    while IFS= read -r -d '' asset; do
+        if grep -a -q "__AURA_HARNESS__" "$asset"; then
+            return 0
+        fi
+    done < <(find "$public_dir" -type f \( -name '*.js' -o -name '*.wasm' \) -print0)
+
+    return 1
 }
 
 for profile in debug release; do

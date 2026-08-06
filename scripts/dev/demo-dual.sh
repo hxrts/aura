@@ -113,6 +113,8 @@ active_bootstrap_broker_url=""
 if [[ "$mode" == "dual" || "$mode" == "tui" ]]; then
   active_bootstrap_broker_url="$bootstrap_broker_url"
 fi
+bootstrap_broker_auth_token="${AURA_BOOTSTRAP_BROKER_AUTH_TOKEN:-}"
+bootstrap_broker_invitation_token="${AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN:-}"
 web_app_url="${web_url}?__aura_demo_surface=web"
 tui_device_id="demo:tui"
 manual_browser_cmd=""
@@ -125,6 +127,24 @@ require_command() {
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "[demo] required command not found: $cmd" >&2
     exit 1
+  fi
+}
+
+prepare_bootstrap_broker_credentials() {
+  if [[ -z "$active_bootstrap_broker_url" ]]; then
+    return 0
+  fi
+
+  if [[ -n "$bootstrap_broker_auth_token" && -n "$bootstrap_broker_invitation_token" ]]; then
+    return 0
+  fi
+
+  require_command openssl
+  if [[ -z "$bootstrap_broker_auth_token" ]]; then
+    bootstrap_broker_auth_token="$(openssl rand -hex 32)"
+  fi
+  if [[ -z "$bootstrap_broker_invitation_token" ]]; then
+    bootstrap_broker_invitation_token="$(openssl rand -hex 32)"
   fi
 }
 
@@ -473,8 +493,14 @@ check_tui_prereqs() {
 
 run_tui() {
   check_tui_prereqs
+  if [[ -z "$bootstrap_broker_auth_token" || -z "$bootstrap_broker_invitation_token" ]]; then
+    echo "[demo] bootstrap broker credentials were not prepared" >&2
+    exit 1
+  fi
   export AURA_BOOTSTRAP_BROKER_BIND="127.0.0.1:${bootstrap_broker_port}"
   export AURA_BOOTSTRAP_BROKER_URL="$bootstrap_broker_url"
+  export AURA_BOOTSTRAP_BROKER_AUTH_TOKEN="$bootstrap_broker_auth_token"
+  export AURA_BOOTSTRAP_BROKER_INVITATION_TOKEN="$bootstrap_broker_invitation_token"
   "$repo_root/bin/aura" tui \
     --data-dir "$tui_data_dir" \
     --device-id "$tui_device_id" \
@@ -494,6 +520,7 @@ run_web_wait_loop() {
 }
 
 prepare_dirs
+prepare_bootstrap_broker_credentials
 write_metadata
 
 case "$mode" in

@@ -465,7 +465,7 @@ impl SimulatedAgent {
 
                                 // Send through transport effects
                                 if let Err(e) = send_demo_raw_envelope_for_simulation(
-                                    effects,
+                                    effects.as_ref(),
                                     response_envelope,
                                 )
                                 .await

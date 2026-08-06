@@ -612,7 +612,7 @@ async fn process_peer_transport_messages(
                         };
 
                         if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects, response).await
+                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
                         {
                             tracing::warn!("{name} failed to send guardian acceptance: {e}");
                         }
@@ -843,6 +843,7 @@ async fn process_peer_transport_messages(
                             ceremony_id: proposal.ceremony_id,
                             guardian_id: agent.authority_id(),
                             response: CeremonyResponse::Accept,
+                            encrypted_key_package_hash: proposal.encrypted_key_package_hash,
                             signature: Vec::new(), // Signature would be added in production
                         };
 
@@ -875,7 +876,7 @@ async fn process_peer_transport_messages(
                         };
 
                         if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects, response).await
+                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
                         {
                             tracing::warn!(
                                 "{name} failed to send choreography ceremony response: {e}"
@@ -933,7 +934,7 @@ async fn process_peer_transport_messages(
                         };
 
                         if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects, response).await
+                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
                         {
                             tracing::warn!(
                                 "{name} failed to send device enrollment acceptance: {e}"
