@@ -19,8 +19,8 @@ use aura_journal::{DomainFact, RelationalFact};
 
 use crate::signal_defs::{
     CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, HOMES_SIGNAL,
-    HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL,
-    RECOVERY_SIGNAL_NAME,
+    HOMES_SIGNAL_NAME, INVITATIONS_SIGNAL, INVITATIONS_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL,
+    NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
 };
 use crate::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
@@ -52,6 +52,22 @@ where
     }
 
     emit_signal(app_core, signal, state, signal_name).await
+}
+
+/// Mirror the runtime-owned invitations signal into the ViewState cell.
+///
+/// The runtime emits `INVITATIONS_SIGNAL` directly, so the ViewState copy
+/// (read by snapshots and harness exports) would otherwise stay empty. This
+/// does not re-emit the signal.
+///
+/// OWNERSHIP: observed-display-update
+pub async fn mirror_invitations_signal_into_view(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let state = read_signal(app_core, &*INVITATIONS_SIGNAL, INVITATIONS_SIGNAL_NAME).await?;
+    let mut core = app_core.write().await;
+    core.views_mut().set_invitations(state);
+    Ok(())
 }
 
 pub async fn homes_signal_snapshot(

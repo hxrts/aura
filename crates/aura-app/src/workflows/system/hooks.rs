@@ -68,6 +68,11 @@ async fn refresh_authoritative_invitation_and_channel_readiness_hook(
 ) -> Result<(), AuraError> {
     let mut best_effort = workflow_best_effort();
     let _ = best_effort
+        .capture(
+            crate::workflows::observed_projection::mirror_invitations_signal_into_view(app_core),
+        )
+        .await;
+    let _ = best_effort
         .capture(crate::workflows::invitation::refresh_authoritative_invitation_readiness(app_core))
         .await;
     let _ = best_effort
