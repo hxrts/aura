@@ -131,6 +131,7 @@ pub enum SemanticOperationKind {
     InviteActorToChannel,
     AcceptPendingChannelInvitation,
     JoinChannel,
+    LeaveChannel,
     SendChatMessage,
     RetryChatMessage,
     SetChannelTopic,
@@ -672,6 +673,11 @@ impl OperationId {
     #[must_use]
     pub fn join_channel() -> Self {
         Self("join_channel".to_string())
+    }
+
+    #[must_use]
+    pub fn leave_channel() -> Self {
+        Self("leave_channel".to_string())
     }
 
     #[must_use]

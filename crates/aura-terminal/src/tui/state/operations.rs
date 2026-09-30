@@ -131,6 +131,19 @@ impl OperationTracker {
         self.set_state(operation_id, state);
     }
 
+    /// Whether this operation instance is already recorded as failed, so a
+    /// re-published terminal status is not surfaced to the user again.
+    pub(super) fn already_failed(
+        &self,
+        operation_id: &OperationId,
+        instance_id: Option<&OperationInstanceId>,
+    ) -> bool {
+        self.entries.get(operation_id).is_some_and(|entry| {
+            entry.state == OperationState::Failed
+                && instance_id.is_none_or(|instance| *instance == entry.instance_id)
+        })
+    }
+
     pub(super) fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
         self.entries.get(operation_id).map(|entry| entry.state)
     }
@@ -152,5 +165,31 @@ impl OperationTracker {
             "tui-op-{}-{}",
             operation_id.0, self.next_instance_nonce
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression (work/8.md task 13): a re-published terminal failure for the
+    /// same instance must be recognisable so it is not toasted again.
+    #[test]
+    fn already_failed_tracks_instance_failures() {
+        let mut tracker = OperationTracker::default();
+        let op = OperationId::send_message();
+        let first = OperationInstanceId("tui-op-send_message-1".to_string());
+        let second = OperationInstanceId("tui-op-send_message-2".to_string());
+
+        assert!(!tracker.already_failed(&op, Some(&first)));
+        tracker.set_authoritative_state(
+            op.clone(),
+            Some(first.clone()),
+            None,
+            OperationState::Failed,
+        );
+        assert!(tracker.already_failed(&op, Some(&first)));
+        // A new attempt is a new instance and must still be reported.
+        assert!(!tracker.already_failed(&op, Some(&second)));
     }
 }

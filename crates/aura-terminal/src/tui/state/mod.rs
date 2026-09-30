@@ -263,6 +263,16 @@ impl TuiState {
     }
 
     #[must_use]
+    pub fn operation_already_failed(
+        &self,
+        operation_id: &OperationId,
+        instance_id: Option<&OperationInstanceId>,
+    ) -> bool {
+        self.operation_states
+            .already_failed(operation_id, instance_id)
+    }
+
+    #[must_use]
     pub fn operation_state(&self, operation_id: &OperationId) -> Option<OperationState> {
         self.operation_states.state(operation_id)
     }

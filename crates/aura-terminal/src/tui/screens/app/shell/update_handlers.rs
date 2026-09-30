@@ -810,6 +810,11 @@ pub(super) async fn process_ui_update_match(
             } else {
                 None
             };
+            // Terminal failures are re-published by readiness refreshes; toast
+            // only the first time this instance is seen as failed.
+            let failure_already_reported = tui
+                .read_clone()
+                .operation_already_failed(&operation_id, instance_id.as_ref());
             let next_state = match status.phase {
                 aura_app::ui_contract::SemanticOperationPhase::Failed => OperationState::Failed,
                 aura_app::ui_contract::SemanticOperationPhase::Cancelled => OperationState::Failed,
@@ -827,7 +832,7 @@ pub(super) async fn process_ui_update_match(
                     next_state,
                 );
             });
-            if let Some(message) = failure_message {
+            if let Some(message) = failure_message.filter(|_| !failure_already_reported) {
                 tui.with_mut(|state| {
                     state.toast_queue.clear();
                 });

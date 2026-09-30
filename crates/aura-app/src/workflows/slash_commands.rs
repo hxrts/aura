@@ -531,8 +531,8 @@ fn slash_command_semantic_operation(
             kind: SemanticOperationKind::UpdateNicknameSuggestion,
         },
         SlashCommandKind::Leave => SlashCommandSemanticOperation {
-            operation_id: OperationId::close_channel(),
-            kind: SemanticOperationKind::CloseChannel,
+            operation_id: OperationId::leave_channel(),
+            kind: SemanticOperationKind::LeaveChannel,
         },
         SlashCommandKind::Join => SlashCommandSemanticOperation {
             operation_id: OperationId::join_channel(),
