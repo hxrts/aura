@@ -210,9 +210,33 @@ pub(super) async fn execute_general(
             .await
             .map(|_| Some("home one_hop_link linked".to_string())),
         ResolvedCommand::HomeInvite { target } => {
-            let home_id = current_home_id_string(app_core).await?;
+            let home_id = context::current_home_id(app_core).await?;
+            // Home invitations need the home's authoritative context and the
+            // epoch-0 key material so the invitee can join and read it.
+            let home_context = context::current_home_context(app_core).await?;
+            let home_name = crate::workflows::observed_projection::homes_signal_snapshot(app_core)
+                .await
+                .ok()
+                .and_then(|homes| homes.home_state(&home_id).map(|home| home.name.clone()));
+            let bootstrap = match crate::workflows::runtime::require_runtime(app_core).await {
+                Ok(runtime) => runtime
+                    .amp_create_channel_bootstrap(home_context, home_id, vec![target.0])
+                    .await
+                    .ok(),
+                Err(_) => None,
+            };
             invitation::create_channel_invitation(
-                app_core, target.0, home_id, None, None, None, None, None, None, None, None,
+                app_core,
+                target.0,
+                home_id.to_string(),
+                Some(home_context),
+                home_name,
+                bootstrap,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await?;
             Ok(Some("home invitation sent".to_string()))
