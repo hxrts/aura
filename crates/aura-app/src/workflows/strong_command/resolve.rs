@@ -71,7 +71,30 @@ impl CommandResolver {
         let token = SnapshotToken(self.next_token.fetch_add(1, Ordering::Relaxed));
         self.latest_token.store(token.0, Ordering::Release);
         // OWNERSHIP: observed
-        let state = app_core.read().await.snapshot();
+        #[allow(unused_mut)]
+        let mut state = app_core.read().await.snapshot();
+        // Contacts and channels arrive through reactive signals; the view cells
+        // are only refreshed on projection replacement, so resolve targets
+        // against the live signals when they carry data.
+        #[cfg(feature = "signals")]
+        {
+            let contacts = crate::workflows::signals::read_signal_or_default(
+                app_core,
+                &*crate::signal_defs::CONTACTS_SIGNAL,
+            )
+            .await;
+            if contacts.all_contacts().next().is_some() {
+                state.contacts = contacts;
+            }
+            let chat = crate::workflows::signals::read_signal_or_default(
+                app_core,
+                &*crate::signal_defs::CHAT_SIGNAL,
+            )
+            .await;
+            if chat.all_channels().next().is_some() {
+                state.chat = chat;
+            }
+        }
         ResolverSnapshot { token, state }
     }
 
