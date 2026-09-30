@@ -279,9 +279,3 @@ fn optional_scope_channel_id(scope: &CommandScope) -> Option<ChannelId> {
         _ => None,
     }
 }
-
-#[cfg(feature = "signals")]
-async fn current_home_id_string(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
-    let home_id = context::current_home_id(app_core).await?;
-    Ok(home_id.to_string())
-}
