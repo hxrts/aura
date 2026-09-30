@@ -1397,6 +1397,16 @@ fn verify_lan_transport_ingress(
         })
 }
 
+/// Best-effort read of the persisted account nickname for LAN announcements.
+async fn load_account_nickname_suggestion(effects: &AuraEffectSystem) -> Option<String> {
+    use aura_core::effects::StorageCoreEffects;
+    let bytes = effects.retrieve("account.json").await.ok().flatten()?;
+    serde_json::from_slice::<aura_app::views::account::AccountConfig>(&bytes)
+        .ok()?
+        .nickname_suggestion
+        .filter(|name| !name.trim().is_empty())
+}
+
 pub(crate) async fn publish_lan_descriptor_with(
     effects: Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
@@ -1489,7 +1499,9 @@ pub(crate) async fn publish_lan_descriptor_with(
         .publish_descriptor(&effects, context_id, hints.clone(), [0u8; 32], 0)
         .await
         .map_err(|error| ServiceError::startup_failed("rendezvous_publish", error.to_string()))?;
-    let descriptor = require_published_lan_descriptor(result, device_id)?;
+    let mut descriptor = require_published_lan_descriptor(result, device_id)?;
+    // Label the announcement so peers can show a name for this candidate.
+    descriptor.nickname_suggestion = load_account_nickname_suggestion(&effects).await;
     let signing_key = retrieve_lan_identity_signing_key(&effects, authority_id).await?;
     install_lan_descriptor(rendezvous_manager, descriptor, signing_key).await?;
 

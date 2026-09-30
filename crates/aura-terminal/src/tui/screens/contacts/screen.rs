@@ -441,13 +441,17 @@ pub fn ContactsScreen(
                     .filter(|p| p.method == DiscoveredPeerMethod::BootstrapCandidate)
                     .map(|p| {
                         let authority_id = p.authority_id.to_string();
-                        DiscoveredPeerInfo::new(&authority_id, &p.address)
+                        let info = DiscoveredPeerInfo::new(&authority_id, &p.address)
                             .with_method(p.method.to_string())
                             .with_status(if p.invited {
                                 crate::tui::components::PeerInvitationStatus::Pending
                             } else {
                                 crate::tui::components::PeerInvitationStatus::None
-                            })
+                            });
+                        match &p.nickname_suggestion {
+                            Some(name) => info.with_nickname_suggestion(name.clone()),
+                            None => info,
+                        }
                     })
                     .collect();
 

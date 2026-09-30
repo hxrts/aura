@@ -664,7 +664,7 @@ impl RuntimeMaintenanceService {
             return Ok(());
         };
 
-        publish_lan_descriptor_with(
+        match publish_lan_descriptor_with(
             self.effects.clone(),
             self.authority_id,
             self.device_id,
@@ -672,6 +672,19 @@ impl RuntimeMaintenanceService {
             lan_transport.as_ref(),
         )
         .await
+        {
+            // Before first-run account bootstrap the authority has no identity
+            // key yet; the descriptor refresh loop publishes once it exists.
+            Err(error) if error.to_string().contains("missing local identity key") => {
+                tracing::debug!(
+                    event = "runtime.service.maintenance.lan_descriptor_deferred",
+                    error = %error,
+                    "Deferring initial LAN descriptor until the identity key exists"
+                );
+                Ok(())
+            }
+            other => other,
+        }
     }
 }
 

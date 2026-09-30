@@ -281,6 +281,48 @@ pub async fn refresh_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Result
 /// # Arguments
 /// * `app_core` - The application core
 /// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
+/// Merge rendezvous peers and bootstrap candidates into one peer list.
+///
+/// Bootstrap candidates win over a rendezvous entry for the same authority:
+/// LAN discovery also caches the peer descriptor for rendezvous, and the
+/// candidate entry is the one that carries the address frontends need to
+/// invite the peer.
+fn merge_discovered_peers(
+    rendezvous_peers: Vec<AuthorityId>,
+    bootstrap_candidates: Vec<crate::runtime_bridge::BootstrapCandidateInfo>,
+    invited_ids: &HashSet<AuthorityId>,
+) -> Vec<DiscoveredPeer> {
+    let mut peers: Vec<DiscoveredPeer> = Vec::new();
+    for candidate in bootstrap_candidates {
+        if peers
+            .iter()
+            .any(|p| p.authority_id == candidate.authority_id)
+        {
+            continue;
+        }
+        peers.push(DiscoveredPeer {
+            authority_id: candidate.authority_id,
+            address: candidate.address,
+            method: DiscoveredPeerMethod::BootstrapCandidate,
+            invited: invited_ids.contains(&candidate.authority_id),
+            nickname_suggestion: candidate.nickname_suggestion,
+        });
+    }
+    for peer in rendezvous_peers {
+        if peers.iter().any(|p| p.authority_id == peer) {
+            continue;
+        }
+        peers.push(DiscoveredPeer {
+            authority_id: peer,
+            address: String::new(),
+            method: DiscoveredPeerMethod::Rendezvous,
+            invited: invited_ids.contains(&peer),
+            nickname_suggestion: None,
+        });
+    }
+    peers
+}
+
 async fn emit_discovered_peers_signal(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
@@ -329,31 +371,7 @@ async fn emit_discovered_peers_signal(
     .into_iter()
     .collect();
 
-    // Combine into discovered peers state
-    let mut peers = Vec::new();
-
-    // Add rendezvous peers
-    for peer in rendezvous_peers {
-        peers.push(DiscoveredPeer {
-            authority_id: peer,
-            address: String::new(),
-            method: DiscoveredPeerMethod::Rendezvous,
-            invited: invited_ids.contains(&peer),
-        });
-    }
-
-    // Add bootstrap candidates discovered through local startup paths
-    // (avoiding duplicates with rendezvous peers).
-    for peer in bootstrap_candidates {
-        if !peers.iter().any(|p| p.authority_id == peer.authority_id) {
-            peers.push(DiscoveredPeer {
-                authority_id: peer.authority_id,
-                address: peer.address,
-                method: DiscoveredPeerMethod::BootstrapCandidate,
-                invited: invited_ids.contains(&peer.authority_id),
-            });
-        }
-    }
+    let peers = merge_discovered_peers(rendezvous_peers, bootstrap_candidates, &invited_ids);
 
     let state = DiscoveredPeersState {
         peers,
@@ -376,6 +394,28 @@ async fn emit_discovered_peers_signal(
 mod tests {
     use super::*;
     use crate::AppConfig;
+
+    /// Regression (work/8.md task 6): a LAN-discovered peer is also a cached
+    /// rendezvous peer; it must still surface as a bootstrap candidate.
+    #[test]
+    fn lan_candidate_wins_over_duplicate_rendezvous_peer() {
+        let barbara = AuthorityId::new_from_entropy([0x42; 32]);
+        let other = AuthorityId::new_from_entropy([0x43; 32]);
+        let candidates = vec![crate::runtime_bridge::BootstrapCandidateInfo {
+            authority_id: barbara,
+            origin: crate::runtime_bridge::BootstrapCandidateOrigin::Lan,
+            address: "192.168.0.32:31789".to_string(),
+            discovered_at_ms: 1,
+            nickname_suggestion: Some("Barbara".to_string()),
+        }];
+        let peers = merge_discovered_peers(vec![barbara, other], candidates, &HashSet::new());
+        assert_eq!(peers.len(), 2);
+        let lan = peers.iter().find(|p| p.authority_id == barbara).unwrap();
+        assert_eq!(lan.method, DiscoveredPeerMethod::BootstrapCandidate);
+        assert_eq!(lan.address, "192.168.0.32:31789");
+        let rv = peers.iter().find(|p| p.authority_id == other).unwrap();
+        assert_eq!(rv.method, DiscoveredPeerMethod::Rendezvous);
+    }
 
     #[tokio::test]
     async fn test_get_discovered_peers_default() {

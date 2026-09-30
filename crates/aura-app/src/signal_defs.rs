@@ -258,6 +258,8 @@ pub struct DiscoveredPeer {
     pub method: DiscoveredPeerMethod,
     /// Whether this peer has been invited already
     pub invited: bool,
+    /// Nickname the peer announced, when known (LAN/broker candidates).
+    pub nickname_suggestion: Option<String>,
 }
 
 /// Discovery method for peers.
