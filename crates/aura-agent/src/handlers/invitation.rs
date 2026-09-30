@@ -1157,17 +1157,9 @@ impl InvitationHandler {
                 );
             }
             InvitationType::Guardian { .. } => {
-                if let Err(error) = self
-                    .execute_guardian_invitation_principal(effects.clone(), &invitation)
-                    .await
-                {
-                    tracing::warn!(
-                        invitation_id = %invitation.invitation_id,
-                        receiver = %invitation.receiver_id,
-                        error = %error,
-                        "Guardian principal choreography did not complete during invitation preparation; continuing with deferred delivery"
-                    );
-                }
+                // The principal choreography waits for the guardian's signed
+                // acceptance, which requires the invitation to be delivered
+                // first; the invitation service runs it after delivery.
             }
             InvitationType::DeviceEnrollment { .. } => {}
             InvitationType::Channel { .. } => {}

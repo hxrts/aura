@@ -70,31 +70,7 @@ impl CommandResolver {
     pub async fn capture_snapshot(&self, app_core: &Arc<RwLock<AppCore>>) -> ResolverSnapshot {
         let token = SnapshotToken(self.next_token.fetch_add(1, Ordering::Relaxed));
         self.latest_token.store(token.0, Ordering::Release);
-        // OWNERSHIP: observed
-        #[allow(unused_mut)]
-        let mut state = app_core.read().await.snapshot();
-        // Contacts and channels arrive through reactive signals; the view cells
-        // are only refreshed on projection replacement, so resolve targets
-        // against the live signals when they carry data.
-        #[cfg(feature = "signals")]
-        {
-            let contacts = crate::workflows::signals::read_signal_or_default(
-                app_core,
-                &*crate::signal_defs::CONTACTS_SIGNAL,
-            )
-            .await;
-            if contacts.all_contacts().next().is_some() {
-                state.contacts = contacts;
-            }
-            let chat = crate::workflows::signals::read_signal_or_default(
-                app_core,
-                &*crate::signal_defs::CHAT_SIGNAL,
-            )
-            .await;
-            if chat.all_channels().next().is_some() {
-                state.chat = chat;
-            }
-        }
+        let state = live_state_snapshot(app_core).await;
         ResolverSnapshot { token, state }
     }
 
@@ -703,4 +679,35 @@ pub(super) fn command_name(command: &ResolvedCommand) -> &'static str {
         ResolvedCommand::Deop { .. } => "deop",
         ResolvedCommand::Mode { .. } => "mode",
     }
+}
+
+/// State snapshot for command resolution and precondition checks.
+///
+/// Contacts and channels arrive through reactive signals; the app-core view
+/// cells are only refreshed on projection replacement, so prefer the live
+/// signals whenever they carry data.
+// OWNERSHIP: observed
+pub(super) async fn live_state_snapshot(app_core: &Arc<RwLock<AppCore>>) -> StateSnapshot {
+    #[allow(unused_mut)]
+    let mut state = app_core.read().await.snapshot();
+    #[cfg(feature = "signals")]
+    {
+        let contacts = crate::workflows::signals::read_signal_or_default(
+            app_core,
+            &*crate::signal_defs::CONTACTS_SIGNAL,
+        )
+        .await;
+        if contacts.all_contacts().next().is_some() {
+            state.contacts = contacts;
+        }
+        let chat = crate::workflows::signals::read_signal_or_default(
+            app_core,
+            &*crate::signal_defs::CHAT_SIGNAL,
+        )
+        .await;
+        if chat.all_channels().next().is_some() {
+            state.chat = chat;
+        }
+    }
+    state
 }

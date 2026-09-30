@@ -106,6 +106,36 @@ impl InvitationServiceApi {
         }
     }
 
+    fn spawn_guardian_invitation_principal(&self, invitation: &Invitation) {
+        let invitation = invitation.clone();
+        let handler = self.handler.clone();
+        let effects = self.effects.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.guardian_principal.{}",
+            invitation.invitation_id
+        ));
+        let fut = async move {
+            if let Err(error) = handler
+                .execute_guardian_invitation_principal(effects, &invitation)
+                .await
+            {
+                tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    receiver = %invitation.receiver_id,
+                    error = %error,
+                    "guardian principal choreography did not complete"
+                );
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = tasks.spawn_local_named("guardian_principal", fut);
+            } else {
+                let _task_handle = tasks.spawn_named("guardian_principal", fut);
+            }
+        }
+    }
+
     fn spawn_device_enrollment_initiator(&self, invitation: &Invitation) {
         if invitation.receiver_id == invitation.sender_id {
             return;
@@ -535,6 +565,7 @@ impl InvitationServiceApi {
         let invitation = prepared.invitation;
         self.spawn_invitation_ceremony_registration(&invitation);
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
+        self.spawn_guardian_invitation_principal(&invitation);
         Ok(invitation)
     }
 

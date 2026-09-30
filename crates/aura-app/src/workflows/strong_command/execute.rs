@@ -18,7 +18,7 @@ pub async fn execute_planned(
     plan: PlannedCommand,
 ) -> Result<CommandExecutionResult, AuraError> {
     {
-        let snapshot = app_core.read().await.snapshot();
+        let snapshot = super::resolve::live_state_snapshot(app_core).await;
         let check = match &plan {
             PlannedCommand::Membership(p) => validate_preconditions(p, &snapshot),
             PlannedCommand::Moderation(p) => validate_preconditions(p, &snapshot),

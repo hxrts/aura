@@ -427,7 +427,7 @@ impl InvitationHandler {
             .await
     }
 
-    pub(super) async fn execute_guardian_invitation_principal(
+    pub(crate) async fn execute_guardian_invitation_principal(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
