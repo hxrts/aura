@@ -161,25 +161,39 @@ impl RecoveryServiceApi {
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(self.effects.time_effects().clone());
         let cleanup_tasks = self.tasks.group("recovery_service.cleanup");
-        let _cleanup_task_handle = cleanup_tasks.spawn_local_interval_until_named(
-            "expired_recoveries",
-            time_effects,
-            RECOVERY_CLEANUP_INTERVAL,
-            move || {
-                let service = service.clone();
-                async move {
-                    let removed = service.cleanup_expired_recoveries_once().await;
-                    if removed > 0 {
-                        tracing::warn!(
-                            event = "recovery_service.cleanup.expired",
-                            removed,
-                            "Cancelled expired recovery ceremonies"
-                        );
-                    }
-                    true
+        let cleanup = move || {
+            let service = service.clone();
+            async move {
+                let removed = service.cleanup_expired_recoveries_once().await;
+                if removed > 0 {
+                    tracing::warn!(
+                        event = "recovery_service.cleanup.expired",
+                        removed,
+                        "Cancelled expired recovery ceremonies"
+                    );
                 }
-            },
-        );
+                true
+            }
+        };
+        // Native runtimes run on the multi-thread executor, where `spawn_local`
+        // panics outside a `LocalSet`; only wasm needs the local spawner.
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _cleanup_task_handle = cleanup_tasks.spawn_local_interval_until_named(
+                    "expired_recoveries",
+                    time_effects,
+                    RECOVERY_CLEANUP_INTERVAL,
+                    cleanup,
+                );
+            } else {
+                let _cleanup_task_handle = cleanup_tasks.spawn_interval_until_named(
+                    "expired_recoveries",
+                    time_effects,
+                    RECOVERY_CLEANUP_INTERVAL,
+                    cleanup,
+                );
+            }
+        }
     }
 
     async fn cleanup_expired_recoveries_once(&self) -> usize {
@@ -2946,6 +2960,25 @@ mod tests {
         let effects = crate::testing::simulation_effect_system_arc(&config);
 
         let service = RecoveryServiceApi::new_for_test(effects, authority_context);
+        assert!(service.is_ok());
+    }
+
+    /// Regression: constructing the service on the native multi-thread
+    /// runtime (as `AuraAgent::recovery()` does) must not use `spawn_local`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_recovery_service_creation_on_multi_thread_runtime() {
+        let authority_context = create_test_authority(149);
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let service = RecoveryServiceApi::new_with_runner(
+            effects,
+            authority_context,
+            CeremonyRunner::new(CeremonyTracker::new(time_effects)),
+            ReconfigurationManager::new(),
+            Arc::new(TaskSupervisor::new()),
+        );
         assert!(service.is_ok());
     }
 
