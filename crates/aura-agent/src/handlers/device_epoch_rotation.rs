@@ -45,6 +45,9 @@ const PROTOCOL_ID: &str = "aura.sync.device_epoch_rotation";
 const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
+/// Upper bound for the invitee to import the code and accept (matches the
+/// enrollment ceremony timeout).
+const SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS: u64 = 45_000;
 const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
 const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
 
@@ -609,6 +612,66 @@ impl DeviceEpochRotationService {
             .map_err(map_internal_error)?;
 
         Ok(commit)
+    }
+
+    /// Finalize an enrollment into an account whose only device is this one.
+    ///
+    /// With no other devices there is no device-epoch rotation session to run
+    /// `coordinate_commit`, so the initiator waits for the new device's verified
+    /// acceptance and then adds its leaf and commits the rotation itself.
+    pub async fn finalize_sole_device_enrollment(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> AgentResult<()> {
+        let start = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(map_internal_error)?
+            .ts_ms;
+        loop {
+            let ceremony = self
+                .ceremony_tracker
+                .get(ceremony_id)
+                .await
+                .map_err(map_internal_error)?;
+            if ceremony.is_committed {
+                return Ok(());
+            }
+            if ceremony.has_failed {
+                return Err(AgentError::invalid(format!(
+                    "enrollment ceremony {ceremony_id} failed before acceptance"
+                )));
+            }
+            if ceremony.threshold_k > 0
+                && ceremony.accepted_participants.len() >= usize::from(ceremony.threshold_k)
+            {
+                break;
+            }
+            let now = self
+                .effects
+                .physical_time()
+                .await
+                .map_err(map_internal_error)?
+                .ts_ms;
+            if now.saturating_sub(start) >= SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS {
+                return Err(AgentError::timeout(format!(
+                    "timed out waiting for enrollment acceptance on {ceremony_id}"
+                )));
+            }
+            self.effects
+                .sleep_ms(COMMIT_STATUS_POLL_MS)
+                .await
+                .map_err(map_internal_error)?;
+        }
+
+        self.finalize_enrollment(ceremony_id).await?;
+        self.commit_local_rotation(ceremony_id).await?;
+        self.ceremony_runner
+            .commit(ceremony_id, CeremonyCommitMetadata::default())
+            .await
+            .map_err(map_internal_error)?;
+        Ok(())
     }
 
     async fn wait_for_commit(&self, ceremony_id: &CeremonyId) -> AgentResult<DeviceEpochCommit> {

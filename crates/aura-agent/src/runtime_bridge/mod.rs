@@ -2653,6 +2653,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to register ceremony: {e}"))
             })?;
 
+        // With no other devices, no rotation session will commit the enrollment;
+        // finalize it here once the new device's signed acceptance is verified.
+        if other_device_ids.is_empty() {
+            self.spawn_sole_device_enrollment_finalizer(ceremony_id.clone());
+        }
+
         // Launch device-scoped rotation sessions for existing devices so they can
         // stage and commit the new epoch through one protocol path.
         if !other_device_ids.is_empty() {
@@ -3573,6 +3579,37 @@ impl RuntimeBridge for AgentRuntimeBridge {
 // ============================================================================
 
 impl AgentRuntimeBridge {
+    fn spawn_sole_device_enrollment_finalizer(
+        &self,
+        ceremony_id: aura_core::types::identifiers::CeremonyId,
+    ) {
+        let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+            self.agent.authority_id(),
+            self.agent.runtime().effects(),
+            self.agent.runtime().ceremony_tracker().clone(),
+            self.agent.runtime().ceremony_runner().clone(),
+            self.agent.runtime().threshold_signing(),
+            self.agent.runtime().reconfiguration().clone(),
+        );
+        let task_name = format!("device_enrollment_finalize.{ceremony_id}");
+        let fut = async move {
+            if let Err(error) = service.finalize_sole_device_enrollment(&ceremony_id).await {
+                tracing::warn!(
+                    error = %error,
+                    ceremony_id = %ceremony_id,
+                    "sole-device enrollment finalization failed"
+                );
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, fut);
+            } else {
+                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, fut);
+            }
+        }
+    }
+
     fn spawn_device_epoch_rotation(
         &self,
         request: crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest,

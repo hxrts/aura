@@ -901,6 +901,14 @@ async fn process_peer_transport_messages(
                             invitation_id: enrollment_request.invitation_id,
                             ceremony_id: enrollment_request.ceremony_id,
                             device_id: enrollment_request.device_id,
+                            acceptor_id: agent.authority_id(),
+                            // Demo simulator only: production initiators reject
+                            // unsigned device-enrollment acceptances.
+                            signature: aura_core::threshold::ThresholdSignature::single_signer(
+                                Vec::new(),
+                                Vec::new(),
+                                0,
+                            ),
                         };
 
                         // Serialize response

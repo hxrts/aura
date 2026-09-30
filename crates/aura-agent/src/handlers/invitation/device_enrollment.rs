@@ -90,6 +90,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
+        ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     ) -> AgentResult<()> {
         let authority_id = self.handler.context.authority.authority_id();
         let (subject_authority, ceremony_id, pending_epoch, device_id) =
@@ -175,6 +176,30 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                         .map_err(|error| AgentError::internal(error.to_string()))?;
 
                     if let Some(blocked) = round.blocked_receive {
+                        // The only message the initiator receives is the invitee's
+                        // acceptance: verify it before counting the new device.
+                        let accept: DeviceEnrollmentAcceptWrapper = from_slice(&blocked.payload)
+                            .map_err(|error| {
+                                AgentError::invalid(format!(
+                                    "malformed device enrollment acceptance: {error}"
+                                ))
+                            })?;
+                        verify_device_enrollment_acceptance(
+                            effects.as_ref(),
+                            invitation,
+                            subject_authority,
+                            &ceremony_id,
+                            device_id,
+                            &accept.0,
+                        )
+                        .await?;
+                        ceremony_runner
+                            .record_local_response(
+                                &ceremony_id,
+                                aura_core::threshold::ParticipantIdentity::device(device_id),
+                            )
+                            .await
+                            .map_err(|error| AgentError::internal(error.to_string()))?;
                         session
                             .inject_blocked_receive(&blocked)
                             .map_err(|error| AgentError::internal(error.to_string()))?;
@@ -214,21 +239,154 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
 
     pub(super) async fn execute_device_enrollment_invitee(
         &self,
-        _effects: Arc<AuraEffectSystem>,
+        effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        if !matches!(
-            invitation.invitation_type,
-            InvitationType::DeviceEnrollment { .. }
-        ) {
-            return Err(AgentError::internal(
-                "Expected DeviceEnrollment invitation type".to_string(),
-            ));
-        }
+        let authority_id = self.handler.context.authority.authority_id();
+        let (subject_authority, ceremony_id, device_id) = match &invitation.invitation_type {
+            InvitationType::DeviceEnrollment {
+                subject_authority,
+                ceremony_id,
+                device_id,
+                ..
+            } => (*subject_authority, ceremony_id.clone(), *device_id),
+            _ => {
+                return Err(AgentError::internal(
+                    "Expected DeviceEnrollment invitation type".to_string(),
+                ));
+            }
+        };
 
-        Err(AgentError::invalid(
-            "device enrollment invitation acceptance is disabled until signed invitee acceptances are implemented"
-                .to_string(),
-        ))
+        // Sign the acceptance transcript so the initiator can verify that the
+        // invited authority (not an on-path party) accepted this enrollment.
+        let transcript = DeviceEnrollmentAcceptanceTranscript {
+            invitation,
+            acceptor_id: authority_id,
+            subject_authority,
+            ceremony_id: ceremony_id.clone(),
+            device_id,
+        };
+        let signature =
+            sign_invitation_acceptance_transcript(effects.as_ref(), authority_id, &transcript)
+                .await?;
+        let accept = DeviceEnrollmentAcceptWrapper(DeviceEnrollmentAccept {
+            invitation_id: invitation.invitation_id.clone(),
+            ceremony_id,
+            device_id,
+            acceptor_id: authority_id,
+            signature,
+        });
+        let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
+        let roles = vec![Self::role(invitation.sender_id), Self::role(authority_id)];
+        let peer_roles =
+            BTreeMap::from([("Initiator".to_string(), Self::role(invitation.sender_id))]);
+        let manifest = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::composition_manifest();
+        let global_type = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
+        let local_types = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
+
+        let mut session = open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            "Invitee",
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(|error| AgentError::internal(error.to_string()))?;
+        session.queue_send_bytes(
+            to_vec(&accept).map_err(|error| AgentError::internal(error.to_string()))?,
+        );
+
+        let budget = invitation_timeout_budget(
+            effects.as_ref(),
+            "device_enrollment_invitee_vm",
+            INVITATION_VM_LOOP_TIMEOUT_MS,
+        )
+        .await?;
+
+        let loop_result = execute_with_timeout_budget(effects.as_ref(), &budget, || async {
+            loop {
+                let round = session
+                    .advance_round("Invitee", &peer_roles)
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
+
+                if let Some(blocked) = round.blocked_receive {
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
+                    continue;
+                }
+
+                if handle_invitation_vm_wait_status(
+                    round.host_wait_status,
+                    false,
+                    "device enrollment invitee VM timed out while waiting for receive",
+                    "device enrollment invitee VM cancelled while waiting for receive",
+                )?
+                .is_some()
+                {
+                    break Ok(());
+                }
+
+                if handle_invitation_vm_step(
+                    round.step,
+                    "device enrollment invitee VM became stuck without a pending receive",
+                )? {
+                    break Ok(());
+                }
+            }
+        })
+        .await
+        .map_err(|error| map_invitation_vm_timeout("device enrollment invitee VM", &budget, error));
+
+        let _ = session.close().await;
+        loop_result
     }
+}
+
+/// Verify an invitee's device-enrollment acceptance before it is counted.
+///
+/// The acceptance must come from the invited authority, match this
+/// invitation, ceremony, and device, and carry a valid signature over the
+/// acceptance transcript.
+pub(super) async fn verify_device_enrollment_acceptance(
+    effects: &AuraEffectSystem,
+    invitation: &Invitation,
+    subject_authority: AuthorityId,
+    ceremony_id: &CeremonyId,
+    device_id: DeviceId,
+    accept: &DeviceEnrollmentAccept,
+) -> AgentResult<()> {
+    if accept.acceptor_id != invitation.receiver_id {
+        return Err(AgentError::invalid(format!(
+            "device enrollment acceptance from {} does not match invited authority {}",
+            accept.acceptor_id, invitation.receiver_id
+        )));
+    }
+    if accept.invitation_id != invitation.invitation_id
+        || &accept.ceremony_id != ceremony_id
+        || accept.device_id != device_id
+    {
+        return Err(AgentError::invalid(
+            "device enrollment acceptance does not match this invitation".to_string(),
+        ));
+    }
+    let transcript = DeviceEnrollmentAcceptanceTranscript {
+        invitation,
+        acceptor_id: accept.acceptor_id,
+        subject_authority,
+        ceremony_id: ceremony_id.clone(),
+        device_id,
+    };
+    verify_invitation_acceptance_signature(
+        effects,
+        accept.acceptor_id,
+        &transcript,
+        &accept.signature,
+    )
+    .await
 }

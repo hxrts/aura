@@ -451,9 +451,10 @@ impl InvitationHandler {
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
+        ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     ) -> AgentResult<()> {
         InvitationDeviceEnrollmentHandler::new(self)
-            .execute_device_enrollment_initiator(effects, invitation)
+            .execute_device_enrollment_initiator(effects, invitation, ceremony_runner)
             .await
     }
 

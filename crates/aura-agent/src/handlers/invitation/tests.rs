@@ -3621,24 +3621,23 @@ async fn device_enrollment_imported_cache_redacts_regular_storage_and_restores_s
     assert_device_enrollment_payload_restored(&restored.shareable.invitation_type);
 }
 
-#[tokio::test]
-async fn device_enrollment_invitee_acceptance_is_fail_closed_without_signed_acceptance() {
-    let authority = create_test_authority(151);
-    let effects = effects_for(&authority);
-    let handler = handler_for(authority.clone());
-    let sender_id = AuthorityId::new_from_entropy([152u8; 32]);
-
-    let invitation = Invitation {
-        invitation_id: InvitationId::new("inv-device-enrollment-disabled"),
+fn device_enrollment_test_invitation(
+    invitation_id: &str,
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+    device_id: DeviceId,
+) -> Invitation {
+    Invitation {
+        invitation_id: InvitationId::new(invitation_id),
         sender_id,
-        receiver_id: authority.authority_id(),
+        receiver_id,
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
             initiator_device_id: DeviceId::new_from_entropy([153u8; 32]),
-            device_id: authority.device_id(),
+            device_id,
             nickname_suggestion: Some("Tablet".to_string()),
-            ceremony_id: CeremonyId::new("ceremony:device-enrollment-disabled"),
+            ceremony_id: CeremonyId::new("ceremony:device-enrollment-signed"),
             pending_epoch: 1,
             key_package: vec![1, 2, 3],
             threshold_config: vec![4, 5, 6],
@@ -3646,23 +3645,140 @@ async fn device_enrollment_invitee_acceptance_is_fail_closed_without_signed_acce
             baseline_tree_ops: vec![vec![10, 11, 12]],
         },
         created_at: 1_700_000_000_000,
-        expires_at: None,
+        expires_at: Some(1_700_000_600_000),
         message: None,
         receiver_nickname: None,
         status: InvitationStatus::Pending,
+    }
+}
+
+async fn signed_device_enrollment_accept(
+    invitee_effects: &Arc<AuraEffectSystem>,
+    invitation: &Invitation,
+    acceptor_id: AuthorityId,
+    device_id: DeviceId,
+) -> DeviceEnrollmentAccept {
+    bootstrap_test_signing_authority(invitee_effects, acceptor_id).await;
+    let ceremony_id = CeremonyId::new("ceremony:device-enrollment-signed");
+    let transcript = DeviceEnrollmentAcceptanceTranscript {
+        invitation,
+        acceptor_id,
+        subject_authority: invitation.sender_id,
+        ceremony_id: ceremony_id.clone(),
+        device_id,
     };
+    let signature =
+        sign_invitation_acceptance_transcript(invitee_effects.as_ref(), acceptor_id, &transcript)
+            .await
+            .expect("device enrollment acceptance should sign");
+    DeviceEnrollmentAccept {
+        invitation_id: invitation.invitation_id.clone(),
+        ceremony_id,
+        device_id,
+        acceptor_id,
+        signature,
+    }
+}
 
-    let error = handler
-        .execute_device_enrollment_invitee(effects, &invitation)
-        .await
-        .expect_err("unsigned device enrollment acceptance should fail closed");
-
-    assert!(
-        error
-            .to_string()
-            .contains("disabled until signed invitee acceptances are implemented"),
-        "unexpected error: {error}"
+/// Regression (work/8.md task 7): device enrollment is accepted only with a
+/// valid signature from the invited authority over this exact enrollment.
+#[tokio::test]
+async fn device_enrollment_acceptance_requires_signed_transcript_from_invitee() {
+    let initiator = create_test_authority(151);
+    let invitee = create_test_authority(154);
+    let initiator_effects = effects_for(&initiator);
+    let invitee_effects = effects_for(&invitee);
+    let device_id = invitee.device_id();
+    let ceremony_id = CeremonyId::new("ceremony:device-enrollment-signed");
+    let invitation = device_enrollment_test_invitation(
+        "inv-device-enrollment-signed",
+        initiator.authority_id(),
+        invitee.authority_id(),
+        device_id,
     );
+    let accept = signed_device_enrollment_accept(
+        &invitee_effects,
+        &invitation,
+        invitee.authority_id(),
+        device_id,
+    )
+    .await;
+
+    // Valid signed acceptance verifies.
+    super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator_effects.as_ref(),
+        &invitation,
+        initiator.authority_id(),
+        &ceremony_id,
+        device_id,
+        &accept,
+    )
+    .await
+    .expect("valid signed acceptance should verify");
+
+    // Forged: a different authority claims the acceptance.
+    let mut forged = accept.clone();
+    forged.acceptor_id = AuthorityId::new_from_entropy([200u8; 32]);
+    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator_effects.as_ref(),
+        &invitation,
+        initiator.authority_id(),
+        &ceremony_id,
+        device_id,
+        &forged,
+    )
+    .await
+    .is_err());
+
+    // Tampered: acceptance names a different device.
+    let mut tampered = accept.clone();
+    tampered.device_id = DeviceId::new_from_entropy([201u8; 32]);
+    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator_effects.as_ref(),
+        &invitation,
+        initiator.authority_id(),
+        &ceremony_id,
+        device_id,
+        &tampered,
+    )
+    .await
+    .is_err());
+
+    // Replay: the same acceptance presented for a different invitation.
+    let other_invitation = device_enrollment_test_invitation(
+        "inv-device-enrollment-other",
+        initiator.authority_id(),
+        invitee.authority_id(),
+        device_id,
+    );
+    let mut replayed = accept.clone();
+    replayed.invitation_id = other_invitation.invitation_id.clone();
+    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator_effects.as_ref(),
+        &other_invitation,
+        initiator.authority_id(),
+        &ceremony_id,
+        device_id,
+        &replayed,
+    )
+    .await
+    .is_err());
+
+    // Tampered signature bytes.
+    let mut bad_sig = accept;
+    if let Some(byte) = bad_sig.signature.signature.first_mut() {
+        *byte ^= 0x01;
+    }
+    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator_effects.as_ref(),
+        &invitation,
+        initiator.authority_id(),
+        &ceremony_id,
+        device_id,
+        &bad_sig,
+    )
+    .await
+    .is_err());
 }
 
 #[test]

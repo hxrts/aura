@@ -178,6 +178,10 @@ pub struct DeviceEnrollmentAccept {
     pub ceremony_id: CeremonyId,
     /// Device id that accepted and installed the share
     pub device_id: DeviceId,
+    /// Authority that accepted (the invitation receiver).
+    pub acceptor_id: AuthorityId,
+    /// Acceptor signature over the device-enrollment acceptance transcript.
+    pub signature: aura_core::threshold::ThresholdSignature,
 }
 
 /// Device enrollment confirmation (finalizes the enrollment).

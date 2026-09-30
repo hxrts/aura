@@ -43,7 +43,9 @@ use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureSt
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext, ThresholdSignature};
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId, InvitationId};
+use aura_core::types::identifiers::{
+    AuthorityId, CeremonyId, ChannelId, ContextId, DeviceId, InvitationId,
+};
 use aura_core::time::PhysicalTime;
 use aura_core::Hash32;
 use aura_core::FlowCost;
@@ -69,11 +71,12 @@ use aura_invitation::protocol::guardian::telltale_session_types_invitation_guard
     GuardianConfirm as GuardianInvitationConfirm, GuardianRequest as GuardianInvitationRequest,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
+    DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
     DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
 };
 use aura_invitation::{
-    DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm, GuardianRequest,
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm, GuardianRequest,
     InvitationAck, InvitationOffer, InvitationOperation,
 };
 use aura_signature::{
@@ -220,6 +223,47 @@ impl SecurityTranscript for ChannelInvitationAcceptanceTranscript<'_> {
             context_id: self.context_id,
             channel_id: self.channel_id,
             channel_name: self.channel_name.clone(),
+            expires_at: self.invitation.expires_at,
+            decision: "accepted",
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct DeviceEnrollmentAcceptanceTranscriptPayload {
+    invitation_id: InvitationId,
+    subject_authority: AuthorityId,
+    acceptor_id: AuthorityId,
+    ceremony_id: CeremonyId,
+    device_id: DeviceId,
+    expires_at: Option<u64>,
+    decision: &'static str,
+}
+
+/// Transcript the invitee signs when accepting a device-enrollment invitation.
+///
+/// Binds the acceptance to the invitation, the account being joined, the
+/// ceremony, and the enrolled device so it cannot be replayed elsewhere.
+struct DeviceEnrollmentAcceptanceTranscript<'a> {
+    invitation: &'a Invitation,
+    acceptor_id: AuthorityId,
+    subject_authority: AuthorityId,
+    ceremony_id: CeremonyId,
+    device_id: DeviceId,
+}
+
+impl SecurityTranscript for DeviceEnrollmentAcceptanceTranscript<'_> {
+    type Payload = DeviceEnrollmentAcceptanceTranscriptPayload;
+
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.device-enrollment-acceptance";
+
+    fn transcript_payload(&self) -> Self::Payload {
+        DeviceEnrollmentAcceptanceTranscriptPayload {
+            invitation_id: self.invitation.invitation_id.clone(),
+            subject_authority: self.subject_authority,
+            acceptor_id: self.acceptor_id,
+            ceremony_id: self.ceremony_id.clone(),
+            device_id: self.device_id,
             expires_at: self.invitation.expires_at,
             decision: "accepted",
         }
