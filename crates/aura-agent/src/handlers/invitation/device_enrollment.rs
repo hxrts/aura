@@ -14,8 +14,37 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         Self { handler }
     }
 
-    fn role(authority_id: AuthorityId) -> ChoreographicRole {
-        ChoreographicRole::for_authority(authority_id, RoleIndex::new(0).expect("role index"))
+    /// Device-scoped roles for the enrollment choreography.
+    ///
+    /// The invitee runtime switches to the subject authority before accepting,
+    /// so authority-scoped roles would route the initiator's request to the
+    /// invitee's former (prepared) authority. Both devices belong to the
+    /// subject authority and are named in the invitation.
+    fn enrollment_roles(
+        invitation: &Invitation,
+    ) -> AgentResult<(ChoreographicRole, ChoreographicRole)> {
+        let InvitationType::DeviceEnrollment {
+            subject_authority,
+            initiator_device_id,
+            device_id,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err(AgentError::internal(
+                "Expected DeviceEnrollment invitation type".to_string(),
+            ));
+        };
+        let initiator = ChoreographicRole::new(
+            *initiator_device_id,
+            *subject_authority,
+            RoleIndex::new(0).expect("role index"),
+        );
+        let invitee = ChoreographicRole::new(
+            *device_id,
+            *subject_authority,
+            RoleIndex::new(1).expect("role index"),
+        );
+        Ok((initiator, invitee))
     }
 
     pub(super) async fn resolve_device_enrollment_invitation(
@@ -92,7 +121,6 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         invitation: &Invitation,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.context.authority.authority_id();
         let (subject_authority, ceremony_id, pending_epoch, device_id) =
             match &invitation.invitation_type {
                 InvitationType::DeviceEnrollment {
@@ -124,9 +152,9 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         let invitation_id = invitation.invitation_id.clone();
         let ceremony_id_for_confirm = ceremony_id.clone();
         let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
-        let roles = vec![Self::role(authority_id), Self::role(invitation.receiver_id)];
-        let peer_roles =
-            BTreeMap::from([("Invitee".to_string(), Self::role(invitation.receiver_id))]);
+        let (initiator_role, invitee_role) = Self::enrollment_roles(invitation)?;
+        let roles = vec![initiator_role, invitee_role];
+        let peer_roles = BTreeMap::from([("Invitee".to_string(), invitee_role)]);
         let manifest = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::composition_manifest();
         let global_type = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
         let local_types = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
@@ -242,7 +270,10 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
     ) -> AgentResult<()> {
-        let authority_id = self.handler.context.authority.authority_id();
+        // Sign as the invited authority: by the time the invitee accepts, its
+        // runtime may already have switched to the subject authority, but the
+        // initiator only trusts the authority it invited.
+        let authority_id = invitation.receiver_id;
         let (subject_authority, ceremony_id, device_id) = match &invitation.invitation_type {
             InvitationType::DeviceEnrollment {
                 subject_authority,
@@ -277,9 +308,9 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             signature,
         });
         let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
-        let roles = vec![Self::role(invitation.sender_id), Self::role(authority_id)];
-        let peer_roles =
-            BTreeMap::from([("Initiator".to_string(), Self::role(invitation.sender_id))]);
+        let (initiator_role, invitee_role) = Self::enrollment_roles(invitation)?;
+        let roles = vec![initiator_role, invitee_role];
+        let peer_roles = BTreeMap::from([("Initiator".to_string(), initiator_role)]);
         let manifest = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::composition_manifest();
         let global_type = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
         let local_types = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
