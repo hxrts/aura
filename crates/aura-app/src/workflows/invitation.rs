@@ -126,6 +126,9 @@ pub use utils::{
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
 const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
 const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
+/// Guardian and device-enrollment accepts run a full signed choreography with
+/// the inviter (request, signed acceptance, confirm).
+const CHOREOGRAPHY_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 60_000;
 const CHANNEL_INVITATION_ACCEPT_RECONCILE_TIMEOUT_MS: u64 = 120_000;
 const INVITATION_ACCEPT_CONVERGENCE_ATTEMPTS: usize = 4;
 const INVITATION_ACCEPT_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 500;
@@ -277,6 +280,16 @@ fn invitation_accept_runtime_stage_timeout_ms(
     pending_runtime_invitation: Option<&InvitationInfo>,
     accepted_invitation: Option<&crate::views::invitations::Invitation>,
 ) -> u64 {
+    if pending_runtime_invitation.is_some_and(|invitation| {
+        matches!(
+            invitation.invitation_type,
+            InvitationBridgeType::Guardian { .. } | InvitationBridgeType::DeviceEnrollment { .. }
+        )
+    }) || accepted_invitation.is_some_and(|invitation| {
+        invitation.invitation_type == crate::views::invitations::InvitationType::Guardian
+    }) {
+        return CHOREOGRAPHY_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS;
+    }
     if pending_runtime_invitation.is_some_and(|invitation| {
         matches!(
             invitation.invitation_type,

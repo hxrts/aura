@@ -255,11 +255,12 @@ pub(super) fn semantic_accept_kind_for_invitation(
         .map_or(
             SemanticOperationKind::AcceptContactInvitation,
             |invitation| match invitation.invitation_type {
-                crate::tui::types::InvitationType::Contact => {
+                // Guardian invitations use the generic invitation accept path.
+                crate::tui::types::InvitationType::Contact
+                | crate::tui::types::InvitationType::Guardian => {
                     SemanticOperationKind::AcceptContactInvitation
                 }
-                crate::tui::types::InvitationType::Guardian
-                | crate::tui::types::InvitationType::Channel => {
+                crate::tui::types::InvitationType::Channel => {
                     SemanticOperationKind::AcceptPendingChannelInvitation
                 }
             },
