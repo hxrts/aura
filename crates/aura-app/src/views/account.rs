@@ -21,14 +21,31 @@ pub const BACKUP_PREFIX: &str = "aura:backup:v1:";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountConfig {
     /// The authority ID for this account.
+    #[serde(deserialize_with = "deserialize_lenient_id")]
     pub authority_id: AuthorityId,
     /// The primary context ID for this account.
+    #[serde(deserialize_with = "deserialize_lenient_id")]
     pub context_id: ContextId,
     /// Nickname suggestion (what the user wants to be called)
     #[serde(default)]
     pub nickname_suggestion: Option<String>,
     /// Account creation timestamp (ms since epoch)
     pub created_at: u64,
+}
+
+/// Deserialize a UUID-backed identifier from either its serde form (bare UUID)
+/// or its display form (`authority-<uuid>`, `context-<uuid>`).
+///
+/// Earlier runtime-bridge writers persisted the display form, so account
+/// configs written by those builds must still load.
+fn deserialize_lenient_id<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    let raw = String::deserialize(deserializer)?;
+    T::from_str(&raw).map_err(serde::de::Error::custom)
 }
 
 impl AccountConfig {
@@ -284,6 +301,34 @@ impl AccountBackup {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_config_loads_display_form_ids_written_by_runtime_bridge() {
+        let authority = AuthorityId::from_uuid(uuid::Uuid::from_u128(7));
+        let context = ContextId::from_uuid(uuid::Uuid::from_u128(9));
+        let legacy = format!(
+            r#"{{"authority_id":"{authority}","context_id":"{context}","nickname_suggestion":"Alex","mfa_policy":null,"created_at":5}}"#
+        );
+        let config: AccountConfig = serde_json::from_str(&legacy).expect("display-form ids load");
+        assert_eq!(config.authority_id, authority);
+        assert_eq!(config.context_id, context);
+        assert_eq!(config.nickname_suggestion.as_deref(), Some("Alex"));
+    }
+
+    #[test]
+    fn account_config_round_trips_bare_uuid_form() {
+        let config = AccountConfig::new(
+            AuthorityId::from_uuid(uuid::Uuid::from_u128(11)),
+            ContextId::from_uuid(uuid::Uuid::from_u128(13)),
+            Some("Barbara".to_string()),
+            42,
+        );
+        let bytes = serde_json::to_vec(&config).expect("serialize");
+        let text = String::from_utf8(bytes.clone()).expect("utf8");
+        assert!(!text.contains("authority-"), "serde form stays bare: {text}");
+        let parsed: AccountConfig = serde_json::from_slice(&bytes).expect("round trip");
+        assert_eq!(parsed, config);
+    }
 
     fn create_test_config() -> AccountConfig {
         AccountConfig::new(

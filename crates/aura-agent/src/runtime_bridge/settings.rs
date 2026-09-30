@@ -46,8 +46,10 @@ impl AgentRuntimeBridge {
             .try_load_account_config()
             .await?
             .unwrap_or_else(|| ("account.json".to_string(), StoredAccountConfig::default()));
-        config.authority_id = Some(authority_id.to_string());
-        config.context_id = Some(context_id.to_string());
+        // Persist the serde (bare UUID) form so `aura_app::views::account::AccountConfig`
+        // can load this file; the display form carries a type prefix.
+        config.authority_id = Some(authority_id.uuid().to_string());
+        config.context_id = Some(context_id.uuid().to_string());
         config.nickname_suggestion = Some(nickname_suggestion.to_string());
         config.created_at = Some(config.created_at.unwrap_or(created_at));
         self.store_account_config(&key, &config).await?;
