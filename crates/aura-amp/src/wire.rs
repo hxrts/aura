@@ -4,7 +4,8 @@ use aura_core::effects::amp::AmpHeader;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 
-pub const AMP_WIRE_SCHEMA_VERSION: u16 = 1;
+/// v2: AEAD additional data no longer includes receiver-local recipient lists.
+pub const AMP_WIRE_SCHEMA_VERSION: u16 = 2;
 
 /// Simple wire format for AMP messages (header + opaque payload).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1102,6 +1102,39 @@ pub async fn start_direct_chat_with_authority(
 
         reduce_chat_fact_observed(app_core, &chat_fact).await?;
         send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
+        // Direct chats need epoch-0 key material on both sides; deliver it to the
+        // contact as a channel invitation, which the receiving runtime installs
+        // without a manual accept (it recognises the pair DM channel).
+        let bootstrap = timeout_runtime_call(
+            &runtime,
+            "start_direct_chat_with_authority",
+            "amp_create_channel_bootstrap",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || {
+                runtime.amp_create_channel_bootstrap(
+                    context_id,
+                    channel_id,
+                    vec![contact_authority],
+                )
+            },
+        )
+        .await
+        .map_err(|error| super::super::error::runtime_call("bootstrap direct channel", error))?
+        .map_err(|error| super::super::error::runtime_call("bootstrap direct channel", error))?;
+        crate::workflows::invitation::create_channel_invitation(
+            app_core,
+            contact_authority,
+            channel_id.to_string(),
+            Some(context_id),
+            Some(channel_name.clone()),
+            Some(bootstrap),
+            None,
+            None,
+            None,
+            Some("Direct message".to_string()),
+            None,
+        )
+        .await?;
         wait_for_runtime_channel_state(
             app_core,
             &runtime,

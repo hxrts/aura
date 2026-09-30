@@ -241,7 +241,11 @@ fn dm_channel_id(target: &str) -> ChannelId {
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
-fn pair_dm_channel_id(left: AuthorityId, right: AuthorityId) -> ChannelId {
+/// Deterministic direct-message channel id for a pair of authorities.
+///
+/// Both participants (and the runtime, when auto-installing a DM bootstrap)
+/// must derive the same id.
+pub fn pair_dm_channel_id(left: AuthorityId, right: AuthorityId) -> ChannelId {
     let mut participants = [left.to_string(), right.to_string()];
     participants.sort();
     let descriptor = format!("dm:{}:{}", participants[0], participants[1]);

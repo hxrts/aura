@@ -139,7 +139,7 @@ fn test_schema_version_is_embedded() {
     let msg = AmpMessage::new(header, payload);
 
     assert_eq!(msg.schema_version, AMP_WIRE_SCHEMA_VERSION);
-    assert_eq!(msg.schema_version, 1, "current schema version should be 1");
+    assert_eq!(msg.schema_version, 2, "current schema version should be 2");
 }
 
 #[test]

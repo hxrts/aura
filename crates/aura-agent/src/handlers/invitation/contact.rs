@@ -930,6 +930,11 @@ impl<'a> InvitationContactHandler<'a> {
                                 invitation_id = %_invitation.invitation_id,
                                 "Imported inbound invitation envelope"
                             );
+                            self.install_direct_message_bootstrap_if_applicable(
+                                effects.as_ref(),
+                                &_invitation,
+                            )
+                            .await;
                             processed = processed.saturating_add(1);
                         }
                         Err(error) => {
@@ -971,6 +976,44 @@ impl<'a> InvitationContactHandler<'a> {
                 Ok(processed)
             }
             Err(TimeoutRunError::Operation(error)) => Err(error),
+        }
+    }
+
+    /// Install the bootstrap key for an inbound direct-message channel invitation.
+    ///
+    /// Direct chats have no accept step on the receiver, so without this the
+    /// receiver never holds the DM epoch-0 key and cannot open messages. Only
+    /// invitations for the deterministic pair channel between the sender and
+    /// this authority qualify.
+    async fn install_direct_message_bootstrap_if_applicable(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation: &Invitation,
+    ) {
+        let InvitationType::Channel {
+            home_id,
+            bootstrap: Some(_),
+            ..
+        } = &invitation.invitation_type
+        else {
+            return;
+        };
+        let own_id = self.handler.context.authority.authority_id();
+        let dm_channel =
+            aura_app::ui::workflows::messaging::pair_dm_channel_id(invitation.sender_id, own_id);
+        if *home_id != dm_channel {
+            return;
+        }
+        if let Err(error) = self
+            .handler
+            .materialize_channel_acceptance_if_needed(effects, &invitation.invitation_id)
+            .await
+        {
+            tracing::warn!(
+                error = %error,
+                invitation_id = %invitation.invitation_id,
+                "Failed to install direct-message bootstrap from inbound invitation"
+            );
         }
     }
 

@@ -7,8 +7,8 @@ use super::telemetry::{create_window_validation_result, WindowValidationResult, 
 use crate::config::AmpRuntimeConfig;
 use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::core::{nonce_from_header, ratchet_from_epoch_state, send_ratchet_from_epoch_state};
+use crate::get_channel_state;
 use crate::wire::{deserialize_message, serialize_message, AmpMessage, AMP_WIRE_SCHEMA_VERSION};
-use crate::{get_channel_state, list_channel_participants};
 use crate::{AmpEvidenceEffects, AmpJournalEffects};
 use aura_core::effects::amp::{AmpCiphertext, AmpHeader};
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -73,31 +73,20 @@ fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {err}"))
 }
 
-fn amp_recipients(participants: &[AuthorityId], sender: AuthorityId) -> Vec<AuthorityId> {
-    let mut recipients: Vec<AuthorityId> = participants
-        .iter()
-        .copied()
-        .filter(|participant| *participant != sender)
-        .collect();
-    recipients.sort_unstable_by_key(|participant| participant.to_bytes());
-    recipients
-}
-
-fn amp_additional_data(
-    header: &AmpHeader,
-    sender: AuthorityId,
-    recipients: &[AuthorityId],
-) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(2 + 32 + 32 + 8 + 8 + 32 + (recipients.len() * 32));
+/// AEAD additional data: wire schema, header, and sender.
+///
+/// Recipients are deliberately excluded: each side derived them from its local
+/// channel-membership view, so any membership skew between sender and receiver
+/// made messages undecryptable. Audience is enforced by channel membership and
+/// bootstrap key distribution.
+fn amp_additional_data(header: &AmpHeader, sender: AuthorityId) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(2 + 32 + 32 + 8 + 8 + 32);
     aad.extend_from_slice(&AMP_WIRE_SCHEMA_VERSION.to_le_bytes());
     aad.extend_from_slice(header.context.as_bytes());
     aad.extend_from_slice(header.channel.as_bytes());
     aad.extend_from_slice(&header.chan_epoch.to_le_bytes());
     aad.extend_from_slice(&header.ratchet_gen.to_le_bytes());
     aad.extend_from_slice(&sender.to_bytes());
-    for recipient in recipients {
-        aad.extend_from_slice(&recipient.to_bytes());
-    }
     aad
 }
 
@@ -487,11 +476,7 @@ where
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
-    let participants = list_channel_participants(effects, context, channel)
-        .await
-        .map_err(|e| return_send_failure(context, channel, e))?;
-    let recipients = amp_recipients(&participants, sender);
-    let aad = amp_additional_data(&header, sender, &recipients);
+    let aad = amp_additional_data(&header, sender);
     let message_key =
         derive_channel_message_key(effects, context, channel, &state, &header, sender)
             .await
@@ -610,10 +595,7 @@ where
         })?;
 
     // Phase 4: AEAD decryption
-    let participants =
-        list_channel_participants(effects, context, transport_header.channel).await?;
-    let recipients = amp_recipients(&participants, sender);
-    let aad = amp_additional_data(&transport_header, sender, &recipients);
+    let aad = amp_additional_data(&transport_header, sender);
     let message_key = derive_channel_message_key(
         effects,
         context,
@@ -836,8 +818,7 @@ mod tests {
             .await
             .unwrap();
 
-        let recipients = amp_recipients(&[sender, recipient], sender);
-        let aad = amp_additional_data(&header, sender, &recipients);
+        let aad = amp_additional_data(&header, sender);
         let key = derive_channel_message_key(&storage, context, channel, &state, &header, sender)
             .await
             .unwrap();
@@ -875,7 +856,7 @@ mod tests {
             .await
             .is_err());
 
-        let wrong_aad = amp_additional_data(&header, recipient, &recipients);
+        let wrong_aad = amp_additional_data(&header, recipient);
         assert!(crypto
             .aes_gcm_decrypt_with_aad(&ciphertext, &key.0, &nonce, &wrong_aad)
             .await
