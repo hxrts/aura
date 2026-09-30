@@ -275,16 +275,22 @@ impl<'a> InvitationContactHandler<'a> {
             );
         }
 
+        let nickname_suggestion = local_account_nickname_suggestion(effects).await;
         let signature = sign_invitation_acceptance_transcript(
             effects,
             acceptor_id,
-            &contact_invitation_acceptance_transcript(&invitation, acceptor_id),
+            &contact_invitation_acceptance_transcript(
+                &invitation,
+                acceptor_id,
+                nickname_suggestion.clone(),
+            ),
         )
         .await?;
         let acceptance = ContactInvitationAcceptance {
             invitation_id: invitation.invitation_id.clone(),
             acceptor_id,
             signature,
+            nickname_suggestion,
         };
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
@@ -490,6 +496,7 @@ impl<'a> InvitationContactHandler<'a> {
                         &contact_invitation_acceptance_transcript(
                             &invitation,
                             acceptance.acceptor_id,
+                            acceptance.nickname_suggestion.clone(),
                         ),
                         &acceptance.signature,
                     )
@@ -547,7 +554,10 @@ impl<'a> InvitationContactHandler<'a> {
                         context_id,
                         owner_id: self.handler.context.authority.authority_id(),
                         contact_id: acceptance.acceptor_id,
-                        nickname: acceptance.acceptor_id.to_string(),
+                        nickname: acceptance
+                            .nickname_suggestion
+                            .clone()
+                            .unwrap_or_else(|| acceptance.acceptor_id.to_string()),
                         added_at: PhysicalTime {
                             ts_ms: now_ms,
                             uncertainty: None,

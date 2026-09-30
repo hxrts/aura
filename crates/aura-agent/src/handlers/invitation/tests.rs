@@ -177,7 +177,7 @@ async fn sign_test_contact_acceptance(
     sign_invitation_acceptance_transcript(
         effects.as_ref(),
         acceptor_id,
-        &contact_invitation_acceptance_transcript(invitation, acceptor_id),
+        &contact_invitation_acceptance_transcript(invitation, acceptor_id, None),
     )
     .await
     .expect("contact acceptance transcript should sign")
@@ -1476,6 +1476,7 @@ large_stack_async_test!(contact_acceptance_processing_seeds_peer_default_descrip
         invitation_id: invitation.invitation_id.clone(),
         acceptor_id: receiver_id,
         signature: sign_test_contact_acceptance(&receiver_effects, &invitation, receiver_id).await,
+        nickname_suggestion: None,
     };
     let payload = serde_json::to_vec(&acceptance).unwrap();
     let mut metadata = HashMap::new();
@@ -4847,3 +4848,57 @@ large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
         contact_ids
     );
 });
+
+/// Regression (work/8.md task 15): the accepter's nickname travels with the
+/// signed acceptance, and relabelling it invalidates the signature.
+#[tokio::test]
+async fn contact_acceptance_signature_binds_accepter_nickname() {
+    let sender = create_test_authority(171);
+    let receiver = create_test_authority(172);
+    let receiver_effects = effects_for(&receiver);
+    let invitation = device_enrollment_test_invitation(
+        "inv-contact-nickname-binding",
+        sender.authority_id(),
+        receiver.authority_id(),
+        receiver.device_id(),
+    );
+    bootstrap_test_signing_authority(&receiver_effects, receiver.authority_id()).await;
+    let signed = contact_invitation_acceptance_transcript(
+        &invitation,
+        receiver.authority_id(),
+        Some("Barbara".to_string()),
+    );
+    let signature = sign_invitation_acceptance_transcript(
+        receiver_effects.as_ref(),
+        receiver.authority_id(),
+        &signed,
+    )
+    .await
+    .expect("acceptance should sign");
+
+    verify_invitation_acceptance_signature(
+        receiver_effects.as_ref(),
+        receiver.authority_id(),
+        &contact_invitation_acceptance_transcript(
+            &invitation,
+            receiver.authority_id(),
+            Some("Barbara".to_string()),
+        ),
+        &signature,
+    )
+    .await
+    .expect("matching nickname should verify");
+
+    assert!(verify_invitation_acceptance_signature(
+        receiver_effects.as_ref(),
+        receiver.authority_id(),
+        &contact_invitation_acceptance_transcript(
+            &invitation,
+            receiver.authority_id(),
+            Some("Mallory".to_string()),
+        ),
+        &signature,
+    )
+    .await
+    .is_err());
+}

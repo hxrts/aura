@@ -148,6 +148,9 @@ struct ContactInvitationAcceptance {
     invitation_id: InvitationId,
     acceptor_id: AuthorityId,
     signature: ThresholdSignature,
+    /// Accepter's own nickname, so the inviter can label the new contact.
+    #[serde(default)]
+    nickname_suggestion: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -165,6 +168,7 @@ struct ContactInvitationAcceptanceTranscriptPayload {
     invitation_id: InvitationId,
     sender_id: AuthorityId,
     acceptor_id: AuthorityId,
+    nickname_suggestion: Option<String>,
     expires_at: Option<u64>,
     decision: &'static str,
 }
@@ -172,6 +176,7 @@ struct ContactInvitationAcceptanceTranscriptPayload {
 struct ContactInvitationAcceptanceTranscript<'a> {
     invitation: &'a Invitation,
     acceptor_id: AuthorityId,
+    nickname_suggestion: Option<String>,
 }
 
 impl SecurityTranscript for ContactInvitationAcceptanceTranscript<'_> {
@@ -184,6 +189,7 @@ impl SecurityTranscript for ContactInvitationAcceptanceTranscript<'_> {
             invitation_id: self.invitation.invitation_id.clone(),
             sender_id: self.invitation.sender_id,
             acceptor_id: self.acceptor_id,
+            nickname_suggestion: self.nickname_suggestion.clone(),
             expires_at: self.invitation.expires_at,
             decision: "accepted",
         }
@@ -2811,11 +2817,23 @@ async fn execute_notify_peer(
 fn contact_invitation_acceptance_transcript(
     invitation: &Invitation,
     acceptor_id: AuthorityId,
+    nickname_suggestion: Option<String>,
 ) -> ContactInvitationAcceptanceTranscript<'_> {
     ContactInvitationAcceptanceTranscript {
         invitation,
         acceptor_id,
+        nickname_suggestion,
     }
+}
+
+/// Best-effort read of this account's nickname for invitation acceptances.
+async fn local_account_nickname_suggestion(effects: &AuraEffectSystem) -> Option<String> {
+    use aura_core::effects::StorageCoreEffects;
+    let bytes = effects.retrieve("account.json").await.ok().flatten()?;
+    serde_json::from_slice::<aura_app::views::account::AccountConfig>(&bytes)
+        .ok()?
+        .nickname_suggestion
+        .filter(|name| !name.trim().is_empty())
 }
 
 fn channel_invitation_acceptance_transcript(
