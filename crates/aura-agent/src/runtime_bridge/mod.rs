@@ -572,6 +572,7 @@ impl AgentRuntimeBridge {
             ));
         }
         let effects = self.agent.runtime().effects();
+        let _ = sync.ensure_biscuit_authorization(&effects).await;
         sync.sync_with_peers(&effects, peers)
             .await
             .map_err(|e| bridge_internal("Sync failed", e))

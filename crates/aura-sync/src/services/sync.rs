@@ -182,6 +182,25 @@ impl SyncService {
         })
     }
 
+    /// Install Biscuit authorization for journal anti-entropy.
+    ///
+    /// Without it every anti-entropy round is denied. Runtimes call this once
+    /// their authority Biscuit frontier is available.
+    pub fn install_biscuit_authorization(
+        &self,
+        token_manager: aura_authorization::BiscuitTokenManager,
+        guard_evaluator: aura_guards::BiscuitGuardEvaluator,
+    ) {
+        self.journal_sync
+            .write()
+            .install_biscuit_authorization(token_manager, guard_evaluator);
+    }
+
+    /// Whether journal anti-entropy has Biscuit authorization installed.
+    pub fn has_biscuit_authorization(&self) -> bool {
+        self.journal_sync.read().has_biscuit_authorization()
+    }
+
     /// Create a new sync service with builder
     pub fn builder() -> SyncServiceBuilder {
         SyncServiceBuilder::default()

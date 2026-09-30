@@ -536,6 +536,11 @@ impl AntiEntropyProtocol {
         }
     }
 
+    /// Whether Biscuit authorization is configured for this protocol.
+    pub fn has_biscuit_authorization(&self) -> bool {
+        self.token_manager.is_some() && self.guard_evaluator.is_some()
+    }
+
     /// Check if the current token authorizes sync operations with a peer
     async fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
     where

@@ -255,6 +255,27 @@ impl JournalSyncProtocol {
         }
     }
 
+    /// Install Biscuit authorization on an existing protocol.
+    ///
+    /// Runtimes obtain their Biscuit frontier only after account bootstrap,
+    /// which can happen after the sync service is constructed.
+    pub fn install_biscuit_authorization(
+        &mut self,
+        token_manager: BiscuitTokenManager,
+        guard_evaluator: BiscuitGuardEvaluator,
+    ) {
+        self.anti_entropy = AntiEntropyProtocol::with_biscuit_authorization(
+            self.config.anti_entropy.clone(),
+            token_manager,
+            guard_evaluator,
+        );
+    }
+
+    /// Whether Biscuit authorization is configured for anti-entropy.
+    pub fn has_biscuit_authorization(&self) -> bool {
+        self.anti_entropy.has_biscuit_authorization()
+    }
+
     /// Synchronize with multiple peers
     ///
     /// # Integration Points

@@ -167,9 +167,18 @@ struct SyncState {
     peers: Vec<DeviceId>,
 }
 
+/// Next number of sync attempts to skip after a consecutive authorization denial.
+fn next_denial_backoff(previous: u32) -> u32 {
+    previous.saturating_mul(2).clamp(1, 64)
+}
+
 struct SyncManagerShared {
     owner: ActorOwnedServiceRoot<SyncServiceManager, SyncCommand, SyncManagerState>,
     configured_peers: Mutex<Vec<DeviceId>>,
+    /// Remaining sync attempts to skip after an authorization denial.
+    denial_skip_remaining: std::sync::atomic::AtomicU32,
+    /// Current backoff window (attempts), doubled on each consecutive denial.
+    denial_backoff: std::sync::atomic::AtomicU32,
 }
 
 #[derive(Clone)]
@@ -309,6 +318,8 @@ impl SyncServiceManager {
         Arc::new(SyncManagerShared {
             owner: ActorOwnedServiceRoot::new(SyncManagerState::Stopped),
             configured_peers: Mutex::new(config.initial_peers.clone()),
+            denial_skip_remaining: std::sync::atomic::AtomicU32::new(0),
+            denial_backoff: std::sync::atomic::AtomicU32::new(0),
         })
     }
 
@@ -579,6 +590,45 @@ impl SyncServiceManager {
     /// # Arguments
     /// - `effects`: Effect system providing journal, network, and time capabilities
     /// - `peers`: List of peers to sync with
+    /// Install the authority Biscuit authorization on the running sync service
+    /// if it is not yet configured.
+    ///
+    /// Anti-entropy denies every peer without it, so callers invoke this before
+    /// each sync; it is a no-op once installed or before bootstrap.
+    pub async fn ensure_biscuit_authorization(
+        &self,
+        effects: &crate::runtime::AuraEffectSystem,
+    ) -> Result<(), SyncManagerError> {
+        let service = self
+            .state_snapshot()
+            .await
+            .map_err(SyncManagerError::from)?
+            .service
+            .clone()
+            .ok_or(SyncManagerError::NotStarted)?;
+        if service.has_biscuit_authorization() {
+            return Ok(());
+        }
+        match effects.sync_biscuit_authorization() {
+            Ok(Some((token_manager, guard_evaluator))) => {
+                service.install_biscuit_authorization(token_manager, guard_evaluator);
+                tracing::info!(
+                    event = "runtime.service.sync.authorization_installed",
+                    "Installed Biscuit authorization for journal sync"
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(
+                    event = "runtime.service.sync.authorization_unavailable",
+                    error = %error,
+                    "Biscuit frontier unavailable for journal sync"
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub async fn sync_with_peers<E>(
         &self,
         effects: &E,
@@ -601,11 +651,39 @@ impl SyncServiceManager {
             .clone()
             .ok_or(SyncManagerError::NotStarted)?;
 
+        use std::sync::atomic::Ordering;
+        // Back off after authorization denials instead of retrying every tick.
+        if self
+            .shared
+            .denial_skip_remaining
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Err(SyncManagerError::Sync(
+                "journal sync backing off after authorization denial".to_string(),
+            ));
+        }
+
         let now_instant = SyncService::monotonic_now();
-        service
+        let result = service
             .sync_with_peers(effects, peers, now_instant)
             .await
-            .map_err(|error| SyncManagerError::Sync(error.to_string()))
+            .map_err(|error| SyncManagerError::Sync(error.to_string()));
+        match &result {
+            Err(SyncManagerError::Sync(message))
+                if message.contains("Permission denied")
+                    || message.contains("Authorization required") =>
+            {
+                let next = next_denial_backoff(self.shared.denial_backoff.load(Ordering::Acquire));
+                self.shared.denial_backoff.store(next, Ordering::Release);
+                self.shared
+                    .denial_skip_remaining
+                    .store(next, Ordering::Release);
+            }
+            Ok(()) => self.shared.denial_backoff.store(0, Ordering::Release),
+            Err(_) => {}
+        }
+        result
     }
 
     /// Add a peer to the known peers list
@@ -1045,6 +1123,17 @@ fn epoch_rotation_session_id(rotation_id: &str) -> Uuid {
 #[allow(clippy::disallowed_types)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn denial_backoff_grows_exponentially_and_caps() {
+        let mut window = 0;
+        let mut seen = Vec::new();
+        for _ in 0..9 {
+            window = next_denial_backoff(window);
+            seen.push(window);
+        }
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 32, 64, 64, 64]);
+    }
     use async_trait::async_trait;
     use aura_core::domain::journal::FactValue;
     use aura_core::effects::indexed::{FactId, FactStreamReceiver, IndexStats};

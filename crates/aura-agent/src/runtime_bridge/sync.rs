@@ -140,6 +140,7 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
         let sync_result = if peers.is_empty() {
             Ok(())
         } else {
+            let _ = sync.ensure_biscuit_authorization(&effects).await;
             sync.sync_with_peers(&effects, peers)
                 .await
                 .map_err(|e| bridge_internal("Sync failed", e))
@@ -255,6 +256,7 @@ pub(super) async fn sync_with_peer(
         .parse()
         .map_err(|e| bridge_validation("Invalid peer ID", e))?;
     let effects = bridge.agent.runtime().effects();
+    let _ = sync.ensure_biscuit_authorization(&effects).await;
     sync.sync_with_peers(&effects, vec![device_id])
         .await
         .map_err(|e| bridge_internal("Sync failed", e))

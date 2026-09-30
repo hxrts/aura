@@ -1153,6 +1153,35 @@ impl AuraEffectSystem {
         self.biscuit_cache.read().clone()
     }
 
+    /// Build journal-sync Biscuit authorization from the verified frontier.
+    ///
+    /// Returns `None` until the authority has a Biscuit frontier (before
+    /// account bootstrap).
+    pub fn sync_biscuit_authorization(
+        &self,
+    ) -> Result<
+        Option<(
+            aura_authorization::BiscuitTokenManager,
+            aura_guards::BiscuitGuardEvaluator,
+        )>,
+        AuraError,
+    > {
+        Ok(self.verified_biscuit_frontier()?.map(|(token, bridge)| {
+            (
+                aura_authorization::BiscuitTokenManager::new(
+                    self.authorization_handler.authority_id(),
+                    token.token().clone(),
+                ),
+                aura_guards::BiscuitGuardEvaluator::new(
+                    aura_guards::BiscuitAuthorizationBridge::new(
+                        bridge.root_public_key(),
+                        bridge.authority_id(),
+                    ),
+                ),
+            )
+        }))
+    }
+
     /// Verify the cached Biscuit frontier against the runtime's trusted root key.
     pub fn verified_biscuit_frontier(
         &self,
@@ -2137,6 +2166,44 @@ mod tests {
             crate::runtime::receipt_model::verify_transport_flow_receipt(&transport_receipt)
                 .is_ok()
         );
+    }
+
+    /// Regression (work/8.md task 3): journal anti-entropy must be authorizable
+    /// from the runtime Biscuit frontier; without it every sync was denied.
+    #[test]
+    fn sync_biscuit_authorization_grants_request_digest() {
+        let authority_id = AuthorityId::new_from_entropy([0xB5; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(
+            &AgentConfig::default(),
+            authority_id,
+        )
+        .expect("effect system should build");
+
+        let (token_manager, evaluator) = effects
+            .sync_biscuit_authorization()
+            .expect("frontier should verify")
+            .expect("test runtime has a Biscuit frontier");
+        let token = aura_authorization::VerifiedBiscuitToken::from_token(
+            token_manager.current_token(),
+            evaluator.root_public_key(),
+        )
+        .expect("token should verify");
+        let resource = aura_core::types::scope::ResourceScope::Authority {
+            authority_id,
+            operation: aura_core::types::scope::AuthorityOp::UpdateTree,
+        };
+        let mut budget = aura_core::FlowBudget::new(1000, aura_core::Epoch::new(0));
+        let result = evaluator
+            .evaluate_guard(
+                &token,
+                &aura_sync::capabilities::SyncCapability::RequestDigest.as_name(),
+                &resource,
+                aura_core::FlowCost::new(100),
+                &mut budget,
+                1,
+            )
+            .expect("guard evaluation should run");
+        assert!(result.authorized, "sync:request_digest must be granted");
     }
 
     #[test]
