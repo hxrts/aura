@@ -325,7 +325,10 @@ mod tests {
         );
         let bytes = serde_json::to_vec(&config).expect("serialize");
         let text = String::from_utf8(bytes.clone()).expect("utf8");
-        assert!(!text.contains("authority-"), "serde form stays bare: {text}");
+        assert!(
+            !text.contains("authority-"),
+            "serde form stays bare: {text}"
+        );
         let parsed: AccountConfig = serde_json::from_slice(&bytes).expect("round trip");
         assert_eq!(parsed, config);
     }
