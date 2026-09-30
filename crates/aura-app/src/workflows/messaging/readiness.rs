@@ -377,7 +377,7 @@ pub(crate) fn bootstrap_required_for_recipients(recipient_count: usize) -> bool 
 }
 
 pub(crate) async fn ensure_runtime_note_to_self_channel(
-    _app_core: &Arc<RwLock<AppCore>>,
+    app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     authority_id: AuthorityId,
     timestamp_ms: u64,
@@ -436,7 +436,7 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
     }
 
     if created_now {
-        let fact = ChatFact::channel_created_ms(
+        let chat_fact = ChatFact::channel_created_ms(
             context_id,
             channel_id,
             NOTE_TO_SELF_CHANNEL_NAME.to_string(),
@@ -444,8 +444,8 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
             false,
             timestamp_ms,
             authority_id,
-        )
-        .to_generic();
+        );
+        let fact = chat_fact.to_generic();
 
         timeout_runtime_call(
             runtime,
@@ -457,6 +457,10 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
         .await
         .map_err(|e| super::super::error::runtime_call("persist note-to-self channel", e))?
         .map_err(|e| super::super::error::runtime_call("persist note-to-self channel", e))?;
+        // Surface the channel immediately; otherwise new accounts show no
+        // channels until some later event refreshes the chat projection.
+        crate::workflows::observed_projection::reduce_chat_fact_observed(app_core, &chat_fact)
+            .await?;
     }
 
     Ok(channel_id)

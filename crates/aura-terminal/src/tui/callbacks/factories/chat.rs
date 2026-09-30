@@ -110,7 +110,7 @@ impl ChatCallbacks {
                         strong_resolver.as_ref(),
                         ctx.app_core_raw(),
                         trimmed,
-                        Some(&channel_id_clone),
+                        (!channel_id_clone.is_empty()).then_some(channel_id_clone.as_str()),
                         actor,
                     )
                     .await

@@ -122,7 +122,15 @@ mod tests {
         assert!(!send_branch.contains("tokio::time::sleep"));
         assert!(!send_branch.contains("selected_channel_id_for_dispatch.read()"));
         assert!(!send_branch.contains("visible_message_channel_id"));
-        assert!(send_branch.contains("No committed channel selected"));
+        assert!(send_branch.contains("Select a channel before sending a message"));
+        // Owners are allocated only after the channel resolves (work/8.md task 14).
+        let owner_alloc = send_branch
+            .find("submit_workflow_handoff_operation")
+            .expect("send branch allocates an owner");
+        let channel_resolve = send_branch
+            .find("resolve_committed_selected_channel_id")
+            .expect("send branch resolves the channel");
+        assert!(channel_resolve < owner_alloc);
     }
 
     #[test]

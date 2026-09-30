@@ -549,21 +549,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Chat callbacks are unavailable".to_string());
             };
-            let trimmed = content.trim_start();
-            let operation = if trimmed.starts_with('/') {
-                None
-            } else {
-                let Some(update_tx) = update_tx.clone() else {
-                    return Err("UI update sender is unavailable".to_string());
-                };
-                Some(submit_workflow_handoff_operation(
-                    app_ctx.app_core.raw().clone(),
-                    app_ctx.tasks(),
-                    update_tx,
-                    OperationId::send_message(),
-                    SemanticOperationKind::SendChatMessage,
-                ))
-            };
+            let is_slash_command = content.trim_start().starts_with('/');
             let channels = shared_channels.read().clone();
             let committed_channel_id = selected_channel
                 .read()
@@ -574,27 +560,37 @@ pub(super) fn execute_harness_followup_command(
                             .iter()
                             .any(|channel| channel.id == selection.channel_id())
                 })
-                .map(|selection| selection.channel_id().to_string());
-            if let Some(channel_id) = committed_channel_id.or_else(|| {
-                resolve_committed_selected_channel_id(state, &channels)
-                    .map(|selection| selection.channel_id().to_string())
-            }) {
-                let handle = operation
-                    .as_ref()
-                    .map(WorkflowHandoffOperationOwner::harness_handle);
-                if let Some(operation) = operation {
-                    (cb.chat.on_send_owned)(channel_id, content, operation);
-                } else {
-                    (cb.chat.on_run_slash_command)(channel_id, content);
-                }
-                Ok(handle)
-            } else {
-                Err(format!(
-                    "No committed channel selected (channels={} selected_index={})",
-                    channels.len(),
-                    state.chat.selected_channel,
-                ))
+                .map(|selection| selection.channel_id().to_string())
+                .or_else(|| {
+                    resolve_committed_selected_channel_id(state, &channels)
+                        .map(|selection| selection.channel_id().to_string())
+                });
+            // Resolve the channel before allocating a send owner so a missing
+            // channel never drops an unpublished owner.
+            if is_slash_command {
+                // Slash commands resolve their own scope; global commands
+                // (/help, /whois, /homeinvite, ...) run without a channel.
+                (cb.chat.on_run_slash_command)(committed_channel_id.unwrap_or_default(), content);
+                return Ok(None);
             }
+            let Some(channel_id) = committed_channel_id else {
+                return Err(
+                    "Select a channel before sending a message (Chat: ↑/↓ to choose)".to_string(),
+                );
+            };
+            let Some(update_tx) = update_tx.clone() else {
+                return Err("UI update sender is unavailable".to_string());
+            };
+            let operation = submit_workflow_handoff_operation(
+                app_ctx.app_core.raw().clone(),
+                app_ctx.tasks(),
+                update_tx,
+                OperationId::send_message(),
+                SemanticOperationKind::SendChatMessage,
+            );
+            let handle = operation.harness_handle();
+            (cb.chat.on_send_owned)(channel_id, content, operation);
+            Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::InviteSelectedContactToChannel) => {
             let Some(cb) = callbacks.as_ref() else {
