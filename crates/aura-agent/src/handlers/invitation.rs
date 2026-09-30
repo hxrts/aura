@@ -68,7 +68,8 @@ use aura_invitation::protocol::exchange::telltale_session_types_invitation::mess
     InvitationResponse as ExchangeInvitationResponse,
 };
 use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
-    GuardianConfirm as GuardianInvitationConfirm, GuardianRequest as GuardianInvitationRequest,
+    GuardianAccept as GuardianInvitationAccept, GuardianConfirm as GuardianInvitationConfirm,
+    GuardianRequest as GuardianInvitationRequest,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
     DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
@@ -76,7 +77,7 @@ use aura_invitation::protocol::device_enrollment::telltale_session_types_invitat
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
 };
 use aura_invitation::{
-    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianConfirm, GuardianRequest,
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianAccept, GuardianConfirm, GuardianRequest,
     InvitationAck, InvitationOffer, InvitationOperation,
 };
 use aura_signature::{

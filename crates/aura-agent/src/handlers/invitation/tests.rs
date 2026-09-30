@@ -844,9 +844,12 @@ async fn accepting_guardian_invitation_surfaces_choreography_failure() {
     .await
     .expect("guardian accept should terminate")
     .expect_err("guardian choreography failure should surface");
-    assert!(error
-        .to_string()
-        .contains("guardian invitation accept follow-up failed"));
+    // With no principal online the signed acceptance cannot be delivered;
+    // the failure must still surface to the caller.
+    assert!(
+        error.to_string().contains("accept_invitation_choreography"),
+        "unexpected error: {error}"
+    );
 }
 
 #[tokio::test]
@@ -4901,4 +4904,68 @@ async fn contact_acceptance_signature_binds_accepter_nickname() {
     )
     .await
     .is_err());
+}
+
+/// Regression (work/8.md task 2 / M1): a guardian accepts with a signed
+/// recovery key, and the principal stores it only if the signature verifies.
+#[tokio::test]
+async fn guardian_acceptance_records_verified_recovery_key() {
+    use aura_core::effects::{CryptoCoreEffects, StorageCoreEffects};
+
+    let principal = create_test_authority(181);
+    let guardian = create_test_authority(182);
+    let principal_effects = effects_for(&principal);
+    let guardian_effects = effects_for(&guardian);
+    let mut invitation = device_enrollment_test_invitation(
+        "inv-guardian-signed",
+        principal.authority_id(),
+        guardian.authority_id(),
+        guardian.device_id(),
+    );
+    invitation.invitation_type = InvitationType::Guardian {
+        subject_authority: principal.authority_id(),
+    };
+
+    let (private_key, public_key) = guardian_effects.ed25519_generate_keypair().await.unwrap();
+    let transcript = super::guardian::GuardianInvitationAcceptanceTranscript {
+        invitation: &invitation,
+        guardian: guardian.authority_id(),
+        recovery_public_key: &public_key,
+    };
+    let signature =
+        aura_signature::sign_ed25519_transcript(guardian_effects.as_ref(), &transcript, &private_key)
+            .await
+            .unwrap();
+    let accept = GuardianAccept {
+        invitation_id: invitation.invitation_id.clone(),
+        signature,
+        recovery_public_key: public_key.clone(),
+    };
+
+    // A substituted key is rejected and nothing is stored.
+    let (_, other_key) = guardian_effects.ed25519_generate_keypair().await.unwrap();
+    let mut swapped = accept.clone();
+    swapped.recovery_public_key = other_key;
+    assert!(super::guardian::verify_and_record_guardian_acceptance(
+        principal_effects.as_ref(),
+        &invitation,
+        &swapped,
+    )
+    .await
+    .is_err());
+    let key_path = crate::handlers::recovery_guardian_public_key_storage_key(guardian.authority_id());
+    assert!(principal_effects.retrieve(&key_path).await.unwrap().is_none());
+
+    // The genuine acceptance is recorded for guardian setup.
+    super::guardian::verify_and_record_guardian_acceptance(
+        principal_effects.as_ref(),
+        &invitation,
+        &accept,
+    )
+    .await
+    .expect("valid guardian acceptance should verify");
+    assert_eq!(
+        principal_effects.retrieve(&key_path).await.unwrap(),
+        Some(public_key)
+    );
 }
