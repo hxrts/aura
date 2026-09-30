@@ -344,6 +344,17 @@ pub struct RuntimeSystem {
 }
 
 impl RuntimeSystem {
+    /// Publish (or republish) this authority's LAN rendezvous descriptor.
+    ///
+    /// Called once first-run account bootstrap has created the identity key,
+    /// so a new account is discoverable immediately instead of after the next
+    /// periodic descriptor refresh.
+    pub(crate) async fn publish_lan_descriptor(&self) -> Result<(), ServiceError> {
+        self.maintenance_service
+            .publish_initial_lan_descriptor()
+            .await
+    }
+
     /// Create a new runtime system
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)] // Factory retained for future runtime wiring

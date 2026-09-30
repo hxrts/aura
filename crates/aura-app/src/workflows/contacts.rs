@@ -220,6 +220,31 @@ pub async fn remove_contact(
     Ok(())
 }
 
+/// Push committed friendship facts to the other party.
+///
+/// Journal anti-entropy only exchanges each authority's own journal, so the
+/// relational friendship facts must be delivered to the peer directly (the
+/// same verified relational-fact envelope used for direct-chat facts).
+async fn deliver_friendship_facts(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    peer: AuthorityId,
+    context: ContextId,
+    facts: &[aura_journal::fact::RelationalFact],
+) -> Result<(), AuraError> {
+    for fact in facts {
+        timeout_runtime_call(
+            runtime,
+            "deliver_friendship_facts",
+            "send_chat_fact",
+            CONTACTS_RUNTIME_TIMEOUT,
+            || runtime.send_chat_fact(peer, context, fact),
+        )
+        .await?
+        .map_err(|e| runtime_call("deliver friendship fact", e))?;
+    }
+    Ok(())
+}
+
 /// Send a bilateral friend request for an existing unilateral contact.
 pub async fn send_friend_request(
     app_core: &Arc<RwLock<AppCore>>,
@@ -247,6 +272,13 @@ pub async fn send_friend_request(
     )
     .await?
     .map_err(|e| runtime_call("send friend request", e))?;
+    deliver_friendship_facts(
+        &runtime,
+        target,
+        friendship_context(owner_id, target),
+        &facts,
+    )
+    .await?;
 
     Ok(())
 }
@@ -278,6 +310,13 @@ pub async fn accept_friend_request(
     )
     .await?
     .map_err(|e| runtime_call("accept friend request", e))?;
+    deliver_friendship_facts(
+        &runtime,
+        target,
+        friendship_context(owner_id, target),
+        &facts,
+    )
+    .await?;
 
     Ok(())
 }
@@ -309,6 +348,13 @@ pub async fn decline_friend_request(
     )
     .await?
     .map_err(|e| runtime_call("decline friend request", e))?;
+    deliver_friendship_facts(
+        &runtime,
+        target,
+        friendship_context(owner_id, target),
+        &facts,
+    )
+    .await?;
 
     Ok(())
 }
@@ -340,6 +386,13 @@ pub async fn revoke_friendship(
     )
     .await?
     .map_err(|e| runtime_call("revoke friendship", e))?;
+    deliver_friendship_facts(
+        &runtime,
+        target,
+        friendship_context(owner_id, target),
+        &facts,
+    )
+    .await?;
 
     Ok(())
 }

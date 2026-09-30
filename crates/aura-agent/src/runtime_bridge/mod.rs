@@ -1743,6 +1743,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to bootstrap signing keys: {}", e))
             })?;
 
+        // The LAN identity key now exists; announce this account right away.
+        if let Err(error) = self.agent.runtime().publish_lan_descriptor().await {
+            tracing::debug!(
+                error = %error,
+                "LAN descriptor publish after signing-key bootstrap failed; periodic refresh will retry"
+            );
+        }
+
         Ok(public_key_package)
     }
 
