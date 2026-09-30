@@ -208,6 +208,8 @@ pub enum DispatchCommand {
     /// from reactive subscriptions.
     OpenCreateInvitationModal,
     SendSelectedFriendRequest,
+    /// Send a guardian invitation to the selected contact.
+    AddSelectedContactAsGuardian,
     AcceptSelectedFriendRequest,
     DeclineSelectedFriendRequest,
     RevokeSelectedFriendship,

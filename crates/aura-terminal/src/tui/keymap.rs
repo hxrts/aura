@@ -130,6 +130,38 @@ const CHAT_BINDINGS: &[KeyBinding] = &[
 ];
 
 const CONTACTS_BINDINGS: &[KeyBinding] = &[
+    KeyBinding::new(
+        "f",
+        "f",
+        "Friend",
+        "Send a friend request to the selected contact",
+        "Contacts",
+        false,
+    ),
+    KeyBinding::new(
+        "y",
+        "y",
+        "Accept",
+        "Accept the selected friend request",
+        "Contacts",
+        false,
+    ),
+    KeyBinding::new(
+        "x",
+        "x",
+        "Decline",
+        "Decline the selected friend request",
+        "Contacts",
+        false,
+    ),
+    KeyBinding::new(
+        "G",
+        "G",
+        "Guardian",
+        "Invite the selected contact as a guardian",
+        "Contacts",
+        false,
+    ),
     KeyBinding::new("e", "e", "Edit", "Edit contact nickname", "Contacts", true),
     KeyBinding::new(
         "g",
@@ -290,6 +322,38 @@ const SETTINGS_BINDINGS: &[KeyBinding] = &[
 ];
 
 const NOTIFICATIONS_BINDINGS: &[KeyBinding] = &[
+    KeyBinding::new(
+        "a",
+        "a",
+        "Accept",
+        "Accept the selected invitation",
+        "Notifications",
+        true,
+    ),
+    KeyBinding::new(
+        "x",
+        "x",
+        "Decline",
+        "Decline the selected invitation",
+        "Notifications",
+        true,
+    ),
+    KeyBinding::new(
+        "r",
+        "r",
+        "Approve",
+        "Approve the selected recovery request",
+        "Notifications",
+        true,
+    ),
+    KeyBinding::new(
+        "d",
+        "d",
+        "Dismiss",
+        "Dismiss the selected notification",
+        "Notifications",
+        true,
+    ),
     KeyBinding::new(
         "j/k",
         "j, k",

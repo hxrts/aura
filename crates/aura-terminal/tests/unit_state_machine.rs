@@ -1095,3 +1095,21 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
         )
     }));
 }
+
+/// Regression (work/8.md task 19): Notifications must offer accept/decline
+/// and recovery approval from the keyboard.
+#[test]
+fn test_notifications_accept_decline_and_approve_keys() {
+    let mut tui = TestTui::new();
+    tui.send_char('4');
+    tui.assert_screen(Screen::Notifications);
+
+    tui.send_char('a');
+    tui.assert_dispatch(|cmd| matches!(cmd, DispatchCommand::AcceptInvitation));
+
+    tui.send_char('x');
+    tui.assert_dispatch(|cmd| matches!(cmd, DispatchCommand::DeclineInvitation));
+
+    tui.send_char('r');
+    tui.assert_dispatch(|cmd| matches!(cmd, DispatchCommand::ApproveRecovery));
+}

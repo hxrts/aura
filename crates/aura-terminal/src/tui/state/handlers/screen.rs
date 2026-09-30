@@ -205,6 +205,11 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::SendSelectedFriendRequest,
             ));
         }
+        KeyCode::Char('G') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::AddSelectedContactAsGuardian,
+            ));
+        }
         KeyCode::Char('y') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::AcceptSelectedFriendRequest,
@@ -544,10 +549,21 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
 /// Handle notifications screen key events
 pub fn handle_notifications_key(
     state: &mut TuiState,
-    _commands: &mut Vec<TuiCommand>,
+    commands: &mut Vec<TuiCommand>,
     key: KeyEvent,
 ) {
     match key.code {
+        // Act on the selected notification (the dispatcher resolves whether it
+        // is a received invitation or a recovery request).
+        KeyCode::Char('a') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::AcceptInvitation));
+        }
+        KeyCode::Char('x') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::DeclineInvitation));
+        }
+        KeyCode::Char('r') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::ApproveRecovery));
+        }
         KeyCode::Left | KeyCode::Char('h') => {
             state.notifications.focus = state.notifications.focus.toggle();
         }

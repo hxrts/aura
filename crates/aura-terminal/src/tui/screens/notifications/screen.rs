@@ -80,6 +80,8 @@ struct NotificationItem {
     subtitle: String,
     kind: NotificationKind,
     timestamp: u64,
+    /// Sender authority when known, used to show the sender's contact name.
+    from_id: Option<String>,
 }
 
 fn display_contact_name(contact: &aura_app::ui::types::Contact) -> String {
@@ -134,6 +136,7 @@ fn runtime_notification_item(
                 subtitle: "Contact link ready".to_string(),
                 kind: NotificationKind::ContactInviteAccepted,
                 timestamp,
+                from_id: None,
             })
         }
         RuntimeFact::GuardianInvitationAccepted {
@@ -158,6 +161,7 @@ fn runtime_notification_item(
                 subtitle: "Guardian link ready".to_string(),
                 kind: NotificationKind::GuardianInviteAccepted,
                 timestamp,
+                from_id: None,
             })
         }
         RuntimeFact::DeviceEnrollmentAccepted {
@@ -182,6 +186,7 @@ fn runtime_notification_item(
                     .unwrap_or_else(|| "Device enrollment completed".to_string()),
                 kind: NotificationKind::DeviceInviteAccepted,
                 timestamp,
+                from_id: None,
             })
         }
         RuntimeFact::AmpChannelTransitionUpdated { transition } => {
@@ -217,6 +222,7 @@ fn runtime_notification_item(
                 subtitle,
                 kind: NotificationKind::AmpTransition,
                 timestamp,
+                from_id: None,
             })
         }
         _ => None,
@@ -277,7 +283,7 @@ pub fn NotificationsScreen(
                         ),
                         InvitationType::Chat => (
                             NotificationKind::ContactInvite,
-                            format!("Contact request from {}", inv.from_name),
+                            format!("Channel invite from {}", inv.from_name),
                         ),
                         InvitationType::Home => (
                             NotificationKind::HomeInvite,
@@ -296,6 +302,7 @@ pub fn NotificationsScreen(
                         subtitle,
                         kind,
                         timestamp: inv.created_at,
+                        from_id: Some(inv.from_id.to_string()),
                     });
                 }
 
@@ -332,6 +339,7 @@ pub fn NotificationsScreen(
                         subtitle: progress,
                         kind: NotificationKind::RecoveryApproval,
                         timestamp: pending.initiated_at,
+                        from_id: None,
                     });
                 }
 
@@ -344,6 +352,12 @@ pub fn NotificationsScreen(
     let mut notifications = reactive_invites.read().clone();
     notifications.extend(reactive_recovery.read().clone());
     let contact_names = reactive_contact_names.read().clone();
+    // The invitation projection has no contact names; label senders here.
+    for item in &mut notifications {
+        if let Some(name) = item.from_id.as_ref().and_then(|id| contact_names.get(id)) {
+            item.title = item.title.replace("Unknown", name);
+        }
+    }
     notifications.extend(
         props
             .view

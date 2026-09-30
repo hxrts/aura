@@ -1028,6 +1028,29 @@ pub(super) fn handle_dispatch_command_match(
                 }
             }
         }
+        DispatchCommand::AddSelectedContactAsGuardian => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let Some(update_tx) = update_tx_for_events else {
+                new_state.toast_error("UI update sender is unavailable");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let operation = submit_workflow_handoff_operation(
+                app_core_for_events,
+                tasks_for_events,
+                update_tx,
+                OperationId::invitation_create(),
+                SemanticOperationKind::CreateGuardianInvitation,
+            );
+            (cb.recovery.on_select_guardian)(contact.id.to_string(), operation);
+        }
         DispatchCommand::SendSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;
             let contact = {
