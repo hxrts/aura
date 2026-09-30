@@ -139,6 +139,73 @@ async fn record_amp_replay_marker<E: SecureStorageEffects>(
     Ok(())
 }
 
+/// Secure-storage location of a sender's next unused ratchet generation for
+/// one channel epoch.
+fn amp_send_cursor_location(
+    context: ContextId,
+    channel: ChannelId,
+    sender: AuthorityId,
+    chan_epoch: u64,
+) -> SecureStorageLocation {
+    let mut scope = Vec::with_capacity(32 + 32 + 16 + 8);
+    scope.extend_from_slice(context.as_bytes());
+    scope.extend_from_slice(channel.as_bytes());
+    scope.extend_from_slice(&sender.to_bytes());
+    scope.extend_from_slice(&chan_epoch.to_le_bytes());
+    let scope_hash = aura_core::Hash32::from_bytes(&scope).to_hex();
+    SecureStorageLocation::with_sub_key("amp_send_cursor", scope_hash, "next")
+}
+
+/// Next unused send generation for `sender`: the persisted cursor, never below
+/// the reduced checkpoint generation.
+async fn next_send_generation<E: SecureStorageEffects>(
+    effects: &E,
+    state: &ChannelEpochState,
+    ratchet_state: &aura_transport::amp::AmpRatchetState,
+    context: ContextId,
+    channel: ChannelId,
+    sender: AuthorityId,
+) -> Result<u64> {
+    let location = amp_send_cursor_location(context, channel, sender, ratchet_state.chan_epoch);
+    let floor = state.current_gen.max(ratchet_state.last_checkpoint_gen);
+    let exists = effects
+        .secure_exists(&location)
+        .await
+        .map_err(|e| AuraError::internal(format!("AMP send cursor lookup failed: {e}")))?;
+    if !exists {
+        return Ok(floor);
+    }
+    let bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(|e| AuraError::internal(format!("AMP send cursor read failed: {e}")))?;
+    let stored = <[u8; 8]>::try_from(bytes.as_slice())
+        .map(u64::from_le_bytes)
+        .map_err(|_| AuraError::invalid("AMP send cursor has invalid length"))?;
+    Ok(stored.max(floor))
+}
+
+/// Persist the sender's next generation before sealing so a generation is
+/// never reused, even if the send later fails.
+async fn advance_send_generation<E: SecureStorageEffects>(
+    effects: &E,
+    ratchet_state: &aura_transport::amp::AmpRatchetState,
+    context: ContextId,
+    channel: ChannelId,
+    sender: AuthorityId,
+    next_gen: u64,
+) -> Result<()> {
+    let location = amp_send_cursor_location(context, channel, sender, ratchet_state.chan_epoch);
+    effects
+        .secure_store(
+            &location,
+            &next_gen.to_le_bytes(),
+            &[SecureStorageCapability::Write],
+        )
+        .await
+        .map_err(|e| AuraError::internal(format!("AMP send cursor store failed: {e}")))
+}
+
 fn return_send_failure(context: ContextId, channel: ChannelId, error: AuraError) -> AuraError {
     AMP_TELEMETRY.log_send_failure(context, channel, &error);
     error
@@ -199,6 +266,7 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
     channel: ChannelId,
     bootstrap_id: aura_core::Hash32,
     header: &AmpHeader,
+    sender: AuthorityId,
 ) -> Result<aura_core::Hash32> {
     let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
     let key_bytes = effects
@@ -217,9 +285,16 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
     key.copy_from_slice(&key_bytes);
     let master_key = aura_core::Hash32::new(key);
 
+    // Bind the key to the sender: generations are per-sender, and the AEAD nonce
+    // is derived from the header, so two senders sharing a generation must never
+    // share a key.
+    let mut key_context = Vec::with_capacity(32 + 16);
+    key_context.extend_from_slice(context.as_bytes());
+    key_context.extend_from_slice(&sender.to_bytes());
+
     aura_core::crypto::amp::derive_message_key(
         &master_key,
-        context.as_bytes(),
+        &key_context,
         channel.as_bytes(),
         header.chan_epoch,
         header.ratchet_gen,
@@ -233,6 +308,7 @@ async fn derive_channel_message_key<E: SecureStorageEffects>(
     channel: ChannelId,
     state: &ChannelEpochState,
     header: &AmpHeader,
+    sender: AuthorityId,
 ) -> Result<aura_core::Hash32> {
     let bootstrap = state.bootstrap.as_ref().ok_or_else(|| {
         AuraError::invalid(format!(
@@ -240,7 +316,15 @@ async fn derive_channel_message_key<E: SecureStorageEffects>(
             channel, header.chan_epoch
         ))
     })?;
-    derive_bootstrap_message_key(effects, context, channel, bootstrap.bootstrap_id, header).await
+    derive_bootstrap_message_key(
+        effects,
+        context,
+        channel,
+        bootstrap.bootstrap_id,
+        header,
+        sender,
+    )
+    .await
 }
 
 // ============================================================================
@@ -380,9 +464,26 @@ where
     let payload_size = payload.len();
 
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
-    let (state, deriv) = prepare_send(effects, context, channel)
+    let (state, _) = prepare_send(effects, context, channel)
         .await
         .map_err(|e| return_send_failure(context, channel, e))?;
+    let ratchet_state = send_ratchet_from_epoch_state(&state);
+    let ratchet_gen =
+        next_send_generation(effects, &state, &ratchet_state, context, channel, sender)
+            .await
+            .map_err(|e| return_send_failure(context, channel, e))?;
+    let deriv = derive_for_send(context, channel, &ratchet_state, ratchet_gen)
+        .map_err(|e| return_send_failure(context, channel, map_amp_error(e)))?;
+    advance_send_generation(
+        effects,
+        &ratchet_state,
+        context,
+        channel,
+        sender,
+        deriv.next_gen,
+    )
+    .await
+    .map_err(|e| return_send_failure(context, channel, e))?;
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
@@ -391,9 +492,10 @@ where
         .map_err(|e| return_send_failure(context, channel, e))?;
     let recipients = amp_recipients(&participants, sender);
     let aad = amp_additional_data(&header, sender, &recipients);
-    let message_key = derive_channel_message_key(effects, context, channel, &state, &header)
-        .await
-        .map_err(|e| return_send_failure(context, channel, e))?;
+    let message_key =
+        derive_channel_message_key(effects, context, channel, &state, &header, sender)
+            .await
+            .map_err(|e| return_send_failure(context, channel, e))?;
     record_amp_replay_marker(effects, "amp_send_replay_markers", &header, sender)
         .await
         .map_err(|e| return_send_failure(context, channel, e))?;
@@ -518,6 +620,7 @@ where
         transport_header.channel,
         &state,
         &transport_header,
+        sender,
     )
     .await
     .map_err(|e| {
@@ -667,6 +770,47 @@ mod tests {
         }
     }
 
+    /// Regression (work/8.md task 4): consecutive sends must use fresh
+    /// generations; reusing the reduced checkpoint generation made every
+    /// second message fail as a replay.
+    #[tokio::test]
+    async fn send_cursor_advances_per_sender() {
+        let storage = ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+            test_paths("cursor"),
+        );
+        let context = ContextId::new_from_entropy([5; 32]);
+        let channel = ChannelId::from_bytes([6; 32]);
+        let alice = AuthorityId::new_from_entropy([7; 32]);
+        let bob = AuthorityId::new_from_entropy([8; 32]);
+        let state = bootstrap_state(
+            context,
+            channel,
+            alice,
+            vec![bob],
+            aura_core::Hash32::from_bytes(&[1; 32]),
+        );
+        let ratchet = send_ratchet_from_epoch_state(&state);
+
+        let mut alice_gens = Vec::new();
+        for _ in 0..3 {
+            let gen = next_send_generation(&storage, &state, &ratchet, context, channel, alice)
+                .await
+                .unwrap();
+            let deriv = derive_for_send(context, channel, &ratchet, gen).unwrap();
+            advance_send_generation(&storage, &ratchet, context, channel, alice, deriv.next_gen)
+                .await
+                .unwrap();
+            alice_gens.push(gen);
+        }
+        assert_eq!(alice_gens, vec![1, 2, 3]);
+
+        // Bob has an independent cursor starting at the reduced generation.
+        let bob_gen = next_send_generation(&storage, &state, &ratchet, context, channel, bob)
+            .await
+            .unwrap();
+        assert_eq!(bob_gen, 1);
+    }
+
     #[tokio::test]
     async fn amp_ciphertext_requires_channel_key_and_aad_integrity() {
         let storage_dir = test_paths("aead");
@@ -694,9 +838,17 @@ mod tests {
 
         let recipients = amp_recipients(&[sender, recipient], sender);
         let aad = amp_additional_data(&header, sender, &recipients);
-        let key = derive_channel_message_key(&storage, context, channel, &state, &header)
+        let key = derive_channel_message_key(&storage, context, channel, &state, &header, sender)
             .await
             .unwrap();
+        let other_sender_key =
+            derive_channel_message_key(&storage, context, channel, &state, &header, recipient)
+                .await
+                .unwrap();
+        assert_ne!(
+            key, other_sender_key,
+            "senders sharing a generation must not share a message key"
+        );
         let nonce = nonce_from_header(&header);
         let plaintext = b"amp-secret-payload";
         let ciphertext = crypto
