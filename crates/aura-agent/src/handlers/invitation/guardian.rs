@@ -6,6 +6,10 @@ use crate::runtime::open_owned_manifest_vm_session_admitted;
 use aura_core::effects::CryptoCoreEffects;
 use std::collections::BTreeMap;
 
+/// How long the principal waits for the guardian to accept. Acceptance is a
+/// human decision on another device, so this is far longer than a VM round.
+const GUARDIAN_PRINCIPAL_ACCEPT_WINDOW_MS: u64 = 600_000;
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub(super) struct GuardianInvitationAcceptancePayload {
     invitation_id: InvitationId,
@@ -189,7 +193,7 @@ impl<'a> InvitationGuardianHandler<'a> {
             let budget = invitation_timeout_budget(
                 effects.as_ref(),
                 "guardian_invitation_principal_vm",
-                INVITATION_VM_LOOP_TIMEOUT_MS,
+                GUARDIAN_PRINCIPAL_ACCEPT_WINDOW_MS,
             )
             .await?;
 

@@ -304,9 +304,9 @@ impl CeremonyTracker {
             }
             CeremonyKind::DeviceEnrollment | CeremonyKind::DeviceRemoval => Duration::from_secs(45),
             CeremonyKind::Recovery | CeremonyKind::OtaActivation => Duration::from_secs(90),
-            CeremonyKind::Invitation | CeremonyKind::RendezvousSecureChannel => {
-                Duration::from_secs(20)
-            }
+            // Invitations wait on a human accepting on another device.
+            CeremonyKind::Invitation => Duration::from_secs(600),
+            CeremonyKind::RendezvousSecureChannel => Duration::from_secs(20),
         }
     }
 
