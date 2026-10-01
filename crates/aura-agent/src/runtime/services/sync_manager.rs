@@ -30,7 +30,7 @@ use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::MerkleVerifier;
 #[cfg(test)]
 use aura_sync::verification::VerificationResult;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use telltale_machine::StepResult;
@@ -167,6 +167,30 @@ struct SyncState {
     peers: Vec<DeviceId>,
 }
 
+/// Minimum spacing between syncs with one peer. Many workflows trigger sync;
+/// repeated triggers inside this window are coalesced into the last attempt.
+const MIN_PEER_RESYNC_INTERVAL_MS: u64 = 3_000;
+
+/// Peers not attempted within the resync window, recording `now_ms` for each.
+fn take_due_peers(
+    recent: &mut HashMap<DeviceId, u64>,
+    peers: Vec<DeviceId>,
+    now_ms: u64,
+) -> Vec<DeviceId> {
+    peers
+        .into_iter()
+        .filter(|peer| {
+            let due = recent.get(peer).map_or(true, |last| {
+                now_ms.saturating_sub(*last) >= MIN_PEER_RESYNC_INTERVAL_MS
+            });
+            if due {
+                recent.insert(*peer, now_ms);
+            }
+            due
+        })
+        .collect()
+}
+
 /// Next number of sync attempts to skip after a consecutive authorization denial.
 fn next_denial_backoff(previous: u32) -> u32 {
     previous.saturating_mul(2).clamp(1, 64)
@@ -179,6 +203,8 @@ struct SyncManagerShared {
     denial_skip_remaining: std::sync::atomic::AtomicU32,
     /// Current backoff window (attempts), doubled on each consecutive denial.
     denial_backoff: std::sync::atomic::AtomicU32,
+    /// Wall-clock ms of the last sync attempt per peer, for coalescing triggers.
+    recent_peer_syncs: Mutex<HashMap<DeviceId, u64>>,
 }
 
 #[derive(Clone)]
@@ -320,6 +346,7 @@ impl SyncServiceManager {
             configured_peers: Mutex::new(config.initial_peers.clone()),
             denial_skip_remaining: std::sync::atomic::AtomicU32::new(0),
             denial_backoff: std::sync::atomic::AtomicU32::new(0),
+            recent_peer_syncs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -662,6 +689,20 @@ impl SyncServiceManager {
             return Err(SyncManagerError::Sync(
                 "journal sync backing off after authorization denial".to_string(),
             ));
+        }
+
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .unwrap_or_default();
+        let peers = take_due_peers(
+            &mut *self.shared.recent_peer_syncs.lock().await,
+            peers,
+            now_ms,
+        );
+        if peers.is_empty() {
+            return Ok(());
         }
 
         let now_instant = SyncService::monotonic_now();
@@ -1123,6 +1164,25 @@ fn epoch_rotation_session_id(rotation_id: &str) -> Uuid {
 #[allow(clippy::disallowed_types)]
 mod tests {
     use super::*;
+
+    // Regression (work/8.md task 3): workflows trigger sync constantly; a
+    // trigger inside the resync window must not start another exchange.
+    #[test]
+    fn sync_triggers_within_resync_window_are_coalesced() {
+        let peer = DeviceId::new_from_entropy([0x31; 32]);
+        let other = DeviceId::new_from_entropy([0x32; 32]);
+        let mut recent = HashMap::new();
+
+        assert_eq!(take_due_peers(&mut recent, vec![peer], 1_000), vec![peer]);
+        assert_eq!(
+            take_due_peers(&mut recent, vec![peer, other], 2_000),
+            vec![other]
+        );
+        assert_eq!(
+            take_due_peers(&mut recent, vec![peer], 1_000 + MIN_PEER_RESYNC_INTERVAL_MS),
+            vec![peer]
+        );
+    }
 
     #[test]
     fn denial_backoff_grows_exponentially_and_caps() {
