@@ -52,8 +52,12 @@ pub fn effective_home_scope_id(
         return Some(channel.id.to_string());
     }
 
-    if let Some(selected_id) = selected_channel_id {
-        return Some(selected_id.to_owned());
+    // A selection not yet in the chat state still scopes the view; a pinned
+    // selection (Note to Self, DMs) never does.
+    if selected_channel.is_none() {
+        if let Some(selected_id) = selected_channel_id {
+            return Some(selected_id.to_owned());
+        }
     }
 
     active_home_scope
@@ -142,6 +146,34 @@ mod tests {
 
     fn test_channel_id(seed: &str) -> ChannelId {
         ChannelId::from_bytes(hash(seed.as_bytes()))
+    }
+
+    #[test]
+    fn pinned_selection_does_not_scope_the_channel_list() {
+        let note_id = test_channel_id("note");
+        let group_id = test_channel_id("group");
+        let mut chat = ChatState::default();
+        chat.add_channel(AppChannel {
+            id: note_id,
+            name: "Note to Self".to_string(),
+            context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                [1u8; 32],
+            )),
+            ..AppChannel::default()
+        });
+        chat.add_channel(AppChannel {
+            id: group_id,
+            name: "alpha".to_string(),
+            channel_type: ChannelType::Home,
+            context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                [2u8; 32],
+            )),
+            ..AppChannel::default()
+        });
+        let scope = effective_home_scope_id(&chat, None, Some(&note_id.to_string()));
+        assert_eq!(scope, None);
+        let visible = scoped_channels(&chat, scope.as_deref());
+        assert!(visible.iter().any(|channel| channel.id == group_id));
     }
 
     #[test]
