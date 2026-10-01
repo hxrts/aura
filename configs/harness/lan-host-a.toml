@@ -1,0 +1,54 @@
+schema_version = 1
+
+# Cross-machine LAN e2e (work/7.md). One harness per host; see Phase 2.
+[run]
+name = "lan-host-a"
+pty_rows = 40
+pty_cols = 140
+artifact_dir = ".tmp/e2e/run/host-a/artifacts"
+
+[[instances]]
+id = "alex-tui"
+mode = "local"
+data_dir = ".tmp/e2e/run/host-a/state/alex-tui"
+device_id = "alex-tui-01"
+bind_address = "192.168.0.199:43101"
+demo_mode = false
+env = [
+  "AURA_CLIPBOARD_MODE=file_only",
+]
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433
+
+[[instances]]
+id = "alex-web"
+mode = "browser"
+data_dir = ".tmp/e2e/run/host-a/state/alex-web"
+device_id = "alex-web-01"
+bind_address = "127.0.0.1:53101"
+demo_mode = false
+env = [
+  "AURA_HARNESS_BROWSER_HEADLESS=true",
+]
+
+# Second TUI device for Alex (device enrollment validation, work/8.md task 7).
+[[instances]]
+id = "alex-tui2"
+mode = "local"
+data_dir = ".tmp/e2e/run/host-a/state/alex-tui2"
+device_id = "alex-tui2-01"
+bind_address = "192.168.0.199:43102"
+demo_mode = false
+env = [
+  "AURA_CLIPBOARD_MODE=file_only",
+]
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433

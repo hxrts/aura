@@ -4627,6 +4627,27 @@ pub fn run_browser_toolchain() -> Result<()> {
     Ok(())
 }
 
+/// Node probe for the browsers the driver launches at the pinned Playwright
+/// revision. `executablePath()` alone returns a path whether or not the binary
+/// exists, and headless launches use `chromium-headless-shell`, so both
+/// executables must be present on disk.
+const BROWSER_INSTALL_PROBE: &str = r#"
+const fs = require('fs');
+const { registry } = require('playwright-core/lib/server/registry/index');
+let missing = false;
+for (const name of ['chromium', 'chromium-headless-shell']) {
+  const executable = registry.findExecutable(name);
+  const path = executable && executable.executablePath();
+  if (!path || !fs.existsSync(path)) {
+    console.error(`missing ${name}: ${path || '(no executable path)'}`);
+    missing = true;
+  } else {
+    console.log(`${name}: ${path}`);
+  }
+}
+process.exit(missing ? 2 : 0);
+"#;
+
 pub fn run_browser_install() -> Result<()> {
     let driver_dir = browser_driver_dir()?;
     let driver_script = driver_dir.join("playwright_driver.mjs");
@@ -4642,12 +4663,12 @@ pub fn run_browser_install() -> Result<()> {
         "node",
         &[
             "-e".into(),
-            "const { chromium } = require('playwright'); const p = chromium.executablePath(); if (!p) process.exit(2); process.stdout.write(p);".into(),
+            BROWSER_INSTALL_PROBE.into(),
         ],
         &driver_dir,
     )
     .context(format!(
-        "harness-browser-install: Playwright chromium is unavailable; run npm ci and npm run install-browsers in {}",
+        "harness-browser-install: the pinned Playwright browsers are not installed; run npm ci and npm run install-browsers in {}",
         repo_relative(&driver_dir)
     ))?;
 
