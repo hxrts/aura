@@ -189,7 +189,14 @@ impl ChatState {
         }
 
         let channel_msgs = self.channel_messages.entry(channel_id).or_default();
-        if !channel_msgs.iter().any(|m| m.id == message.id) {
+        if let Some(existing) = channel_msgs.iter_mut().find(|m| m.id == message.id) {
+            // A message seen before its channel key arrived (e.g. on a newly
+            // enrolled device) is replaced once it can be opened.
+            if is_sealed_placeholder(&existing.content) && !is_sealed_placeholder(&message.content)
+            {
+                existing.content = message.content;
+            }
+        } else {
             // Messages can arrive out of order; keep them ordered by send time
             // (stable for equal timestamps).
             let position = channel_msgs.partition_point(|m| m.timestamp <= message.timestamp);
@@ -358,6 +365,11 @@ fn merge_channel_projection(canonical: &mut Channel, previous: Channel) {
         .max(previous.last_finalized_epoch);
 }
 
+/// Placeholder content the runtime renders for a message it could not open.
+fn is_sealed_placeholder(content: &str) -> bool {
+    content.starts_with("[sealed: ") && content.ends_with(" bytes]")
+}
+
 #[cfg(test)]
 mod ordering_tests {
     use super::*;
@@ -392,5 +404,32 @@ mod ordering_tests {
             .map(|m| m.id.as_str())
             .collect();
         assert_eq!(ids, vec!["m1", "m2", "m3", "m4"]);
+    }
+
+    // Regression (work/8.md task 32): a message replicated to a new device
+    // before its channel key arrives is opened once the key is there.
+    #[test]
+    fn sealed_placeholder_is_replaced_once_the_message_opens() {
+        let channel_id = ChannelId::from_bytes([8u8; 32]);
+        let mut state = ChatState::default();
+        let mut sealed = message(channel_id, "m1", 10);
+        sealed.content = "[sealed: 217 bytes]".to_string();
+        state.apply_message(channel_id, sealed.clone());
+
+        let mut opened = message(channel_id, "m1", 10);
+        opened.content = "before enrollment".to_string();
+        state.apply_message(channel_id, opened);
+        assert_eq!(
+            state.messages_for_channel(&channel_id)[0].content,
+            "before enrollment"
+        );
+
+        // A readable message is never replaced by a sealed copy.
+        state.apply_message(channel_id, sealed);
+        assert_eq!(
+            state.messages_for_channel(&channel_id)[0].content,
+            "before enrollment"
+        );
+        assert_eq!(state.messages_for_channel(&channel_id).len(), 1);
     }
 }

@@ -1473,6 +1473,29 @@ impl AuraEffectSystem {
         Ok(count)
     }
 
+    /// Re-publish committed facts in `contexts` so views re-derive them, e.g.
+    /// after a channel key arrives for messages that were rendered sealed.
+    /// Views apply facts idempotently. Returns how many were re-published.
+    pub async fn republish_committed_facts_for_contexts(
+        &self,
+        contexts: &std::collections::BTreeSet<ContextId>,
+    ) -> Result<usize, AuraError> {
+        let facts: Vec<TypedFact> = self
+            .load_committed_facts(self.authority_id)
+            .await?
+            .into_iter()
+            .filter(|fact| match &fact.content {
+                FactContent::Relational(relational) => contexts.contains(&relational.context_id()),
+                _ => false,
+            })
+            .collect();
+        let count = facts.len();
+        if count > 0 {
+            self.publish_typed_facts(facts).await?;
+        }
+        Ok(count)
+    }
+
     /// Load all committed typed facts for the given authority from storage.
     pub async fn load_committed_facts(
         &self,

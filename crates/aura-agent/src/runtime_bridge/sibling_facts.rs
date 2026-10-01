@@ -279,7 +279,14 @@ async fn seal_bootstrap_keys(
     held: &[SiblingBootstrapKey],
 ) -> Result<Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>, AuraError> {
     // A sibling not yet in the tree has no verified key to seal to.
-    let Some(peer_public_key) = device_leaf_public_key(effects, peer).await? else {
+    let peer_public_key = device_leaf_public_key(effects, peer).await?;
+    tracing::debug!(
+        sibling = %peer,
+        held = held.len(),
+        sibling_in_tree = peer_public_key.is_some(),
+        "sealing bootstrap keys for sibling"
+    );
+    let Some(peer_public_key) = peer_public_key else {
         return Ok(None);
     };
     if held.is_empty() {
@@ -322,6 +329,8 @@ async fn store_bootstrap_keys(
     .await?;
     let keys: Vec<SiblingBootstrapKey> = aura_core::util::serialization::from_slice(&bundle)
         .map_err(|error| AuraError::internal(format!("decode bootstrap keys: {error}")))?;
+    let mut newly_keyed = std::collections::BTreeSet::new();
+    tracing::debug!(received = keys.len(), "opened bootstrap keys from sibling");
     for key in keys {
         let location = bootstrap_key_location(&key);
         if effects.secure_exists(&location).await.unwrap_or(false) {
@@ -338,6 +347,14 @@ async fn store_bootstrap_keys(
             )
             .await
             .map_err(|error| AuraError::storage(format!("store bootstrap key: {error}")))?;
+        newly_keyed.insert(key.context);
+    }
+    // Messages in these contexts may have been rendered sealed before the key
+    // arrived; re-publishing lets the chat view open them.
+    if !newly_keyed.is_empty() {
+        effects
+            .republish_committed_facts_for_contexts(&newly_keyed)
+            .await?;
     }
     Ok(())
 }
