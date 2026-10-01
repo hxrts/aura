@@ -269,18 +269,6 @@ pub async fn refresh_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Result
     emit_discovered_peers_signal(app_core, timestamp_ms).await
 }
 
-/// Emit discovered peers signal with current state
-///
-/// **What it does**: Queries peers and emits DISCOVERED_PEERS_SIGNAL
-/// **Returns**: Unit result
-/// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL
-///
-/// This is a helper function that combines rendezvous peers and bootstrap
-/// candidates into a single signal.
-///
-/// # Arguments
-/// * `app_core` - The application core
-/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 /// Merge rendezvous peers and bootstrap candidates into one peer list.
 ///
 /// Bootstrap candidates win over a rendezvous entry for the same authority:
@@ -323,6 +311,18 @@ fn merge_discovered_peers(
     peers
 }
 
+/// Emit discovered peers signal with current state
+///
+/// **What it does**: Queries peers and emits DISCOVERED_PEERS_SIGNAL
+/// **Returns**: Unit result
+/// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL
+///
+/// This is a helper function that combines rendezvous peers and bootstrap
+/// candidates into a single signal.
+///
+/// # Arguments
+/// * `app_core` - The application core
+/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 async fn emit_discovered_peers_signal(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,

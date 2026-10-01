@@ -585,11 +585,6 @@ impl SyncServiceManager {
         );
     }
 
-    /// Perform a manual sync with specific peers
-    ///
-    /// # Arguments
-    /// - `effects`: Effect system providing journal, network, and time capabilities
-    /// - `peers`: List of peers to sync with
     /// Install the authority Biscuit authorization on the running sync service
     /// if it is not yet configured.
     ///
@@ -629,6 +624,11 @@ impl SyncServiceManager {
         Ok(())
     }
 
+    /// Perform a manual sync with specific peers
+    ///
+    /// # Arguments
+    /// - `effects`: Effect system providing journal, network, and time capabilities
+    /// - `peers`: List of peers to sync with
     pub async fn sync_with_peers<E>(
         &self,
         effects: &E,
