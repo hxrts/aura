@@ -51,7 +51,7 @@ impl NotificationKind {
             Self::ContactInvite => "Contact request",
             Self::GuardianInvite => "Guardian request",
             Self::HomeInvite => "Home invite",
-            Self::RecoveryApproval => "Recovery approval",
+            Self::RecoveryApproval => "Approval request",
             Self::ContactInviteAccepted => "Contact invite accepted",
             Self::GuardianInviteAccepted => "Guardian invite accepted",
             Self::DeviceInviteAccepted => "Device invite accepted",
@@ -325,21 +325,18 @@ pub fn NotificationsScreen(
                         "{}/{} approvals",
                         pending.approvals_received, pending.approvals_required
                     );
-                    let account = if pending.account_name.is_empty() {
-                        "Unknown account".to_string()
-                    } else if pending.account_name.len() > 16 {
-                        format!("{}…", &pending.account_name[..8])
-                    } else {
-                        pending.account_name.clone()
-                    };
+                    // `account_name` carries the requesting authority id; the
+                    // contact-name pass below replaces "Unknown" with its name.
+                    let from_id =
+                        (!pending.account_name.is_empty()).then(|| pending.account_name.clone());
 
                     items.push(NotificationItem {
                         id: pending.id.clone(),
-                        title: format!("Recovery approval for {account}"),
+                        title: "Approval request from Unknown".to_string(),
                         subtitle: progress,
                         kind: NotificationKind::RecoveryApproval,
                         timestamp: pending.initiated_at,
-                        from_id: None,
+                        from_id,
                     });
                 }
 

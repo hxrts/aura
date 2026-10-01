@@ -1838,6 +1838,34 @@ impl RecoveryServiceApi {
                 .map_err(|error| {
                     AgentError::internal(format!("guardian ceremony registration failed: {error}"))
                 })?;
+            // Record the request so the recovery projection surfaces it for
+            // approval; the trace id is the tracker's ceremony id.
+            let initiated_at = self
+                .effects
+                .physical_time()
+                .await
+                .map_err(|error| AgentError::effects(error.to_string()))?;
+            use aura_journal::DomainFact as _;
+            let request_fact = aura_recovery::RecoveryFact::GuardianSetupInitiated {
+                context_id: crate::core::default_context_id_for_authority(proposal.initiator_id),
+                initiator_id: proposal.initiator_id,
+                trace_id: Some(ceremony_id.to_string()),
+                guardian_ids: guardians.iter().copied().collect(),
+                threshold: proposal.operation.threshold_k,
+                initiated_at,
+            }
+            .to_generic();
+            if let Err(error) = self
+                .effects
+                .commit_relational_facts(vec![request_fact])
+                .await
+            {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    error = %error,
+                    "Failed to record guardian ceremony request for the recovery view"
+                );
+            }
             tracing::info!(
                 ceremony_id = %ceremony_id,
                 initiator = %proposal.initiator_id,

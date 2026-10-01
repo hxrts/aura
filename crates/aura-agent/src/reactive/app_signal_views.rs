@@ -22,7 +22,7 @@ use aura_app::views::{
         PinnedMessageMeta,
     },
     invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationsState},
-    recovery::{Guardian, GuardianStatus, RecoveryState},
+    recovery::{Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState},
 };
 use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
@@ -793,13 +793,15 @@ impl ReactiveView for ContactsSignalView {
 // =============================================================================
 
 pub struct RecoverySignalView {
+    own_authority: AuthorityId,
     reactive: ReactiveHandler,
     state: Mutex<RecoveryState>,
 }
 
 impl RecoverySignalView {
-    pub fn new(reactive: ReactiveHandler) -> Self {
+    pub fn new(own_authority: AuthorityId, reactive: ReactiveHandler) -> Self {
         Self {
+            own_authority,
             reactive,
             state: Mutex::new(RecoveryState::default()),
         }
@@ -852,6 +854,39 @@ impl ReactiveView for RecoverySignalView {
 
                         match recovery_fact {
                             RecoveryFact::GuardianSetupInitiated {
+                                initiator_id,
+                                trace_id,
+                                guardian_ids,
+                                threshold,
+                                initiated_at,
+                                ..
+                            } if initiator_id != self.own_authority => {
+                                // Another authority asks us to be one of its
+                                // guardians: surface it as a pending approval.
+                                if let Some(ceremony_id) =
+                                    trace_id.filter(|_| guardian_ids.contains(&self.own_authority))
+                                {
+                                    let id =
+                                        aura_core::types::identifiers::CeremonyId::new(ceremony_id);
+                                    let requests = state.pending_requests_mut();
+                                    if !requests.iter().any(|request| request.id == id) {
+                                        requests.push(RecoveryProcess {
+                                            id,
+                                            account_id: initiator_id,
+                                            status: RecoveryProcessStatus::WaitingForApprovals,
+                                            approvals_received: 0,
+                                            approvals_required: u32::from(threshold),
+                                            approved_by: Vec::new(),
+                                            approvals: Vec::new(),
+                                            initiated_at: initiated_at.ts_ms,
+                                            expires_at: None,
+                                            progress: 0,
+                                        });
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            RecoveryFact::GuardianSetupInitiated {
                                 guardian_ids,
                                 threshold,
                                 ..
@@ -861,6 +896,22 @@ impl ReactiveView for RecoverySignalView {
                                 }
                                 state.set_threshold(threshold as u32);
                                 changed = true;
+                            }
+                            RecoveryFact::GuardianAccepted {
+                                guardian_id,
+                                trace_id: Some(ceremony_id),
+                                ..
+                            }
+                            | RecoveryFact::GuardianDeclined {
+                                guardian_id,
+                                trace_id: Some(ceremony_id),
+                                ..
+                            } if guardian_id == self.own_authority => {
+                                // Our response resolves the pending request.
+                                let requests = state.pending_requests_mut();
+                                let before = requests.len();
+                                requests.retain(|request| request.id.as_str() != ceremony_id);
+                                changed |= requests.len() != before;
                             }
                             RecoveryFact::GuardianSetupCompleted {
                                 guardian_ids,
@@ -1881,6 +1932,52 @@ mod tests {
 
         assert_eq!(home_id, Some(channel_id));
         assert_eq!(home_name.as_deref(), Some("shared-parity-lab"));
+    }
+
+    #[tokio::test]
+    async fn guardian_setup_request_from_another_authority_is_pending_until_answered() {
+        use aura_journal::DomainFact as _;
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([91u8; 32]);
+        let initiator = AuthorityId::new_from_entropy([92u8; 32]);
+        let other_guardian = AuthorityId::new_from_entropy([93u8; 32]);
+        let context_id = ContextId::new_from_entropy([94u8; 32]);
+        let view = RecoverySignalView::new(own_authority, reactive.clone());
+        let at = PhysicalTime {
+            ts_ms: 10,
+            uncertainty: None,
+        };
+
+        let request = RecoveryFact::GuardianSetupInitiated {
+            context_id,
+            initiator_id: initiator,
+            trace_id: Some("ceremony-1".to_string()),
+            guardian_ids: vec![own_authority, other_guardian],
+            threshold: 2,
+            initiated_at: at.clone(),
+        };
+        view.update(&[fact_from_relational(request.to_generic())])
+            .await;
+        let state = reactive.read(&*RECOVERY_SIGNAL).await.unwrap();
+        assert_eq!(state.pending_requests().len(), 1);
+        assert_eq!(state.pending_requests()[0].account_id, initiator);
+        assert_eq!(state.pending_requests()[0].approvals_required, 2);
+        assert!(
+            state.all_guardians().next().is_none(),
+            "another authority's setup must not change our own guardians"
+        );
+
+        let accepted = RecoveryFact::GuardianAccepted {
+            context_id,
+            guardian_id: own_authority,
+            trace_id: Some("ceremony-1".to_string()),
+            accepted_at: at,
+        };
+        view.update(&[fact_from_relational(accepted.to_generic())])
+            .await;
+        let state = reactive.read(&*RECOVERY_SIGNAL).await.unwrap();
+        assert!(state.pending_requests().is_empty());
     }
 
     #[tokio::test]

@@ -92,6 +92,42 @@ pub(super) async fn respond_to_guardian_ceremony(
         CeremonyResponse::Decline
     };
 
+    // Record the response so the recovery view drops the pending request.
+    {
+        use aura_core::effects::PhysicalTimeEffects;
+        use aura_journal::DomainFact;
+        let effects = bridge.agent.runtime().effects();
+        let responded_at = effects
+            .physical_time()
+            .await
+            .map_err(|e| bridge_internal("Read time for guardian response failed", e))?;
+        let context_id = crate::core::default_context_id_for_authority(ceremony_state.initiator_id);
+        let trace_id = Some(ceremony_id.to_string());
+        let response_fact = if accept {
+            aura_recovery::RecoveryFact::GuardianAccepted {
+                context_id,
+                guardian_id: my_authority_id,
+                trace_id,
+                accepted_at: responded_at,
+            }
+        } else {
+            aura_recovery::RecoveryFact::GuardianDeclined {
+                context_id,
+                guardian_id: my_authority_id,
+                trace_id,
+                declined_at: responded_at,
+            }
+        }
+        .to_generic();
+        if let Err(error) = effects.commit_relational_facts(vec![response_fact]).await {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                error = %error,
+                "failed to record guardian ceremony response for the recovery view"
+            );
+        }
+    }
+
     // The guardian session finishes only once the initiator commits or aborts,
     // which also waits on the other guardian. Run it as an owned background
     // task so the UI operation returns once the response is underway.
