@@ -408,14 +408,16 @@ pub fn NeighborhoodScreen(
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let home_id = &n.home_home_id;
                 let mut homes: Vec<HomeSummary> = Vec::with_capacity(n.neighbor_count() + 1);
-                homes.push(HomeSummary {
-                    id: n.home_home_id.to_string(),
-                    name: Some(n.home_name.clone()),
-                    member_count: 0,
-                    max_members: 8,
-                    is_home: true,
-                    can_enter: true,
-                });
+                if n.has_home() {
+                    homes.push(HomeSummary {
+                        id: n.home_home_id.to_string(),
+                        name: Some(n.home_name.clone()),
+                        member_count: 0,
+                        max_members: 8,
+                        is_home: true,
+                        can_enter: true,
+                    });
+                }
                 homes.extend(
                     n.all_neighbors()
                         .filter(|b| b.id != n.home_home_id)

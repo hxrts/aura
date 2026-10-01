@@ -891,8 +891,23 @@ pub(super) async fn process_ui_update_match(
         // =========================================================================
         // Navigation
         // =========================================================================
-        UiUpdate::HomeEntered { home_id: _ } => {
-            // Navigation/state machine owns the current home selection.
+        UiUpdate::HomeEntered {
+            home_id,
+            access_depth,
+        } => {
+            // Navigation/state machine owns the current home selection; this
+            // only publishes the runtime event.
+            tui.with_mut(|state| {
+                state.upsert_runtime_fact(RuntimeFact::HomeEntered {
+                    name: home_id.clone(),
+                    access_depth: Some(access_depth.clone()),
+                });
+            });
+        }
+        UiUpdate::HomeCreated { name } => {
+            tui.with_mut(|state| {
+                state.upsert_runtime_fact(RuntimeFact::HomeCreated { name: name.clone() });
+            });
         }
         UiUpdate::NavigatedHome => {
             // Navigation/state machine handles this.

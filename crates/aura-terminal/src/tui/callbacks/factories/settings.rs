@@ -505,6 +505,7 @@ impl NeighborhoodCallbacks {
                 AccessLevel::Full => "Full",
             }
             .to_string();
+            let depth_label = depth_str.clone();
             spawn_observed_adaptation_dispatch_callback(
                 ctx.clone(),
                 tx.clone(),
@@ -518,6 +519,7 @@ impl NeighborhoodCallbacks {
                         &tx,
                         UiUpdate::HomeEntered {
                             home_id: home_id_clone,
+                            access_depth: depth_label,
                         },
                     )
                     .await;
@@ -656,6 +658,8 @@ impl NeighborhoodCallbacks {
                             )),
                         )
                         .await;
+                        send_ui_update_required(&tx, UiUpdate::HomeCreated { name: success_name })
+                            .await;
                     },
                     |tx, error| async move {
                         emit_error_toast(&tx, "home", format!("Failed to create home: {error}"))

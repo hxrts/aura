@@ -430,6 +430,13 @@ pub enum UiUpdate {
     HomeEntered {
         /// The home ID
         home_id: String,
+        /// Access depth used to enter the home
+        access_depth: String,
+    },
+    /// Created a home
+    HomeCreated {
+        /// The home display name
+        name: String,
     },
 
     /// Navigated to home/default view

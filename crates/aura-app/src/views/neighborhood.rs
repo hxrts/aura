@@ -106,6 +106,13 @@ impl NeighborhoodState {
         }
     }
 
+    /// Whether a real home has been materialized. The default (all-zero) home
+    /// id is a placeholder and must not be presented as a home.
+    #[must_use]
+    pub fn has_home(&self) -> bool {
+        self.home_home_id != ChannelId::default()
+    }
+
     // =========================================================================
     // Neighbor Accessors
     // =========================================================================
@@ -264,5 +271,24 @@ impl NeighborhoodState {
     #[must_use]
     pub fn can_go_back(&self) -> bool {
         self.position.as_ref().map(|p| p.depth > 0).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_neighborhood_has_no_home() {
+        assert!(!NeighborhoodState::default().has_home());
+    }
+
+    #[test]
+    fn materialized_home_is_reported() {
+        let state = NeighborhoodState {
+            home_home_id: ChannelId::from_bytes([7u8; 32]),
+            ..Default::default()
+        };
+        assert!(state.has_home());
     }
 }
