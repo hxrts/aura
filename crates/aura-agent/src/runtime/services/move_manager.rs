@@ -406,6 +406,9 @@ fn forget_replay_marker(state: &mut MoveState, marker: [u8; 32]) {
     }
 }
 
+/// Per-send identifier that distinguishes repeated content from a replay.
+pub(crate) const MESSAGE_ID_METADATA_KEY: &str = "aura-message-id";
+
 fn replay_marker(
     envelope: &TransportEnvelope,
     route: &Route,
@@ -417,6 +420,11 @@ fn replay_marker(
     material.extend_from_slice(&envelope.destination.to_bytes());
     material.extend_from_slice(envelope.context.as_bytes());
     material.extend_from_slice(&envelope.payload);
+    // Distinct sends with identical content (e.g. repeated sync digests) carry
+    // distinct message ids; only a retransmission of one send is a replay.
+    if let Some(message_id) = envelope.metadata.get(MESSAGE_ID_METADATA_KEY) {
+        material.extend_from_slice(message_id.as_bytes());
+    }
     material.extend_from_slice(&route_bytes);
     Ok(hash(&material))
 }
@@ -468,6 +476,36 @@ mod tests {
             metadata: HashMap::new(),
             receipt: None,
         }
+    }
+
+    // Regression (work/8.md task 3): repeated sync digests have identical
+    // payloads; distinct sends must not be suppressed as replays.
+    #[tokio::test]
+    async fn distinct_message_ids_with_identical_payloads_are_not_replays() {
+        let manager = MoveManager::new(
+            MoveManagerConfig::default(),
+            Arc::new(ServiceRegistry::new()),
+        );
+        let with_id = |id: &str| {
+            let mut env = envelope(7);
+            env.metadata
+                .insert(MESSAGE_ID_METADATA_KEY.to_string(), id.to_string());
+            env
+        };
+
+        for (at, id) in [(10, "send-1"), (11, "send-2")] {
+            manager
+                .enqueue_for_delivery(with_id(id), route(), at, &TestRandom(1))
+                .await
+                .unwrap_or_else(|error| panic!("{id} should enqueue: {error}"));
+        }
+        let retransmission = manager
+            .enqueue_for_delivery(with_id("send-2"), route(), 12, &TestRandom(1))
+            .await;
+        assert!(matches!(
+            retransmission,
+            Err(MoveManagerError::DuplicateSuppressed)
+        ));
     }
 
     #[tokio::test]

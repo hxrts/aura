@@ -1327,7 +1327,11 @@ impl AntiEntropyProtocol {
 
     /// Compare two digests and classify their relationship
     pub fn compare(local: &JournalDigest, remote: &JournalDigest) -> DigestStatus {
-        if local.matches(remote) {
+        // Only operations are exchanged; differing fact or capability hashes
+        // (e.g. two authorities' journals) are not reconcilable here.
+        if local.operation_count == remote.operation_count
+            && local.operation_hash == remote.operation_hash
+        {
             return DigestStatus::Equal;
         }
 
@@ -1743,6 +1747,25 @@ mod tests {
 
         assert_eq!(
             AntiEntropyProtocol::compare(&digest1, &digest2),
+            DigestStatus::Equal
+        );
+    }
+
+    // Regression (work/8.md task 3): contacts' journals differ in facts but
+    // anti-entropy only moves operations, so equal op logs must be Equal.
+    #[test]
+    fn test_digest_comparison_ignores_unreconcilable_fact_hash() {
+        let protocol = AntiEntropyProtocol::default();
+        let journal = sample_journal();
+        let ops = vec![sample_op(1)];
+
+        let local = protocol.compute_digest(&journal, &ops).unwrap();
+        let mut remote = local.clone();
+        remote.fact_hash = [0xAB; 32];
+        remote.caps_hash = [0xCD; 32];
+
+        assert_eq!(
+            AntiEntropyProtocol::compare(&local, &remote),
             DigestStatus::Equal
         );
     }

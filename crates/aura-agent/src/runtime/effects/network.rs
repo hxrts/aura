@@ -120,6 +120,12 @@ impl NetworkCoreEffects for AuraEffectSystem {
         let mut metadata = HashMap::new();
         metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
         metadata.insert(
+            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
+            aura_core::effects::RandomExtendedEffects::random_uuid(self)
+                .await
+                .to_string(),
+        );
+        metadata.insert(
             SOURCE_DEVICE_METADATA_KEY.to_string(),
             self.device_id().to_string(),
         );
