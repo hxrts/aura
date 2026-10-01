@@ -4613,9 +4613,10 @@ async function clickButton(params) {
         `[driver] click_button done instance=${instanceId} selector=${selector} via=css`,
       );
       return { status: "clicked" };
-    } catch (selectorError) {
+    } catch (error) {
+      selectorError = error;
       console.error(
-        `[driver] click_button selector_failed instance=${instanceId} selector=${selector} error=${selectorError?.message ?? String(selectorError)}`,
+        `[driver] click_button selector_failed instance=${instanceId} selector=${selector} error=${error?.message ?? String(error)}`,
       );
     }
 

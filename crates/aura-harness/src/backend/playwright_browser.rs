@@ -989,6 +989,13 @@ impl RawUiBackend for PlaywrightBrowserBackend {
         let click_error = click_result
             .err()
             .unwrap_or_else(|| anyhow::anyhow!("control click failed"));
+        // A disabled control is a definite refusal; a fallback key would mask it
+        // and report a successful activation that never happened.
+        if click_error_is_disabled_control(&click_error) {
+            return Err(anyhow::anyhow!(
+                "control {control_id:?} is disabled: {click_error}"
+            ));
+        }
         if let Some(fallback_key) = control_id.activation_key() {
             self.with_session(|session| {
                 session.rpc_call(
@@ -1265,6 +1272,12 @@ fn terminate_owned_child(child: &mut Child) {
     let _ = child.wait();
 }
 
+/// Whether a driver click failed because the target control is disabled.
+fn click_error_is_disabled_control(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}");
+    message.contains("precheck_failed") && message.contains("\"disabled\"")
+}
+
 fn control_selector(control_id: ControlId) -> Result<String> {
     control_id
         .web_selector()
@@ -1327,11 +1340,21 @@ fn require_existing_path(path: &Path, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        browser_app_url, control_selector, decode_rpc_payload, field_selector,
-        navigation_control_id, navigation_target_screen, parse_bool_setting, parse_u64_setting,
-        tool_key_name, BrowserDiagnosticScreenPayload, DEFAULT_PAGE_GOTO_TIMEOUT_MS,
-        PLAYWRIGHT_DRIVER_OWNED_MARKER,
+        browser_app_url, click_error_is_disabled_control, control_selector, decode_rpc_payload,
+        field_selector, navigation_control_id, navigation_target_screen, parse_bool_setting,
+        parse_u64_setting, tool_key_name, BrowserDiagnosticScreenPayload,
+        DEFAULT_PAGE_GOTO_TIMEOUT_MS, PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
+
+    #[test]
+    fn disabled_click_errors_are_recognized() {
+        let disabled = anyhow::anyhow!(
+            "click_button failed selector=#x label=- dom_error=css_click_retries_exhausted selector=#x css:#x:attempt1 precheck_failed {{\"ok\":false,\"reason\":\"disabled\"}}"
+        );
+        assert!(click_error_is_disabled_control(&disabled));
+        let absent = anyhow::anyhow!("css_click_retries_exhausted selector=#x timeout");
+        assert!(!click_error_is_disabled_control(&absent));
+    }
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId, ScreenId};
 
