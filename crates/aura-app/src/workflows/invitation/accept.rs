@@ -1021,6 +1021,8 @@ struct AcceptedChannelInvitationTarget {
     channel_id: ChannelId,
     context_hint: Option<ContextId>,
     channel_name_hint: Option<String>,
+    /// Authority that sent the invitation (the channel's creator side).
+    inviter: Option<AuthorityId>,
 }
 
 pub(in crate::workflows) async fn reconcile_channel_invitation_acceptance(
@@ -1036,6 +1038,9 @@ pub(in crate::workflows) async fn reconcile_channel_invitation_acceptance(
         channel_id,
         context_hint,
         channel_name_hint: channel_name_hint.map(ToOwned::to_owned),
+        inviter: pending_runtime_invitation
+            .map(|invitation| invitation.sender_id)
+            .or_else(|| accepted_invitation.map(|invitation| invitation.from_id)),
     };
     let stage_tracker = new_workflow_stage_tracker("reconcile_channel_invitation:start");
     let reconcile_budget = match workflow_timeout_budget(
@@ -1255,6 +1260,7 @@ async fn reconcile_accepted_channel_invitation(
         runtime,
         authoritative_channel,
         accepted_channel.channel_name_hint.as_deref(),
+        accepted_channel.inviter,
         stage_tracker,
     )
     .await
@@ -1266,6 +1272,7 @@ async fn reconcile_accepted_channel_invitation_authoritative(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     authoritative_channel: crate::workflows::messaging::AuthoritativeChannelRef,
     channel_name_hint: Option<&str>,
+    inviter: Option<AuthorityId>,
     stage_tracker: &WorkflowStageTracker,
 ) -> Result<(), AuraError> {
     update_accept_reconcile_stage(
@@ -1401,6 +1408,18 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             .unwrap_or_else(|_| Ok(None))?;
         }
     }
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:materialize_channel",
+    );
+    materialize_accepted_channel(
+        app_core,
+        runtime,
+        authoritative_channel,
+        channel_name_hint,
+        inviter,
+    )
+    .await?;
     crate::workflows::messaging::publish_authoritative_channel_membership_ready(
         app_core,
         local_channel_id,
@@ -1464,4 +1483,69 @@ pub(in crate::workflows) async fn wait_for_contact_link(
         },
         RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
     })
+}
+
+/// Commit the accepted channel into the local journal when it is not already
+/// known, so the chat projection lists it without waiting for the creator's
+/// channel fact to arrive. The fact is attributed to the inviter, who created
+/// the channel; it carries only metadata from the signed invitation.
+#[cfg(feature = "signals")]
+async fn materialize_accepted_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    authoritative_channel: crate::workflows::messaging::AuthoritativeChannelRef,
+    channel_name_hint: Option<&str>,
+    inviter: Option<AuthorityId>,
+) -> Result<(), AuraError> {
+    let Some(inviter) = inviter else {
+        return Ok(());
+    };
+    let channel_id = authoritative_channel.channel_id();
+    let already_listed = crate::workflows::signals::read_signal(
+        app_core,
+        &*crate::signal_defs::CHAT_SIGNAL,
+        crate::signal_defs::CHAT_SIGNAL_NAME,
+    )
+    .await
+    .map(|chat| chat.channel(&channel_id).is_some())
+    .unwrap_or(false);
+    if already_listed {
+        return Ok(());
+    }
+    let created_at_ms = crate::workflows::time::current_time_ms(app_core).await?;
+    let fact = aura_chat::ChatFact::channel_created_ms(
+        authoritative_channel.context_id(),
+        channel_id,
+        channel_name_hint
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("channel")
+            .to_string(),
+        None,
+        false,
+        created_at_ms,
+        inviter,
+    );
+    let generic = fact.to_generic();
+    timeout_runtime_call(
+        runtime,
+        "materialize_accepted_channel",
+        "commit_relational_facts",
+        INVITATION_RUNTIME_QUERY_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&generic)),
+    )
+    .await
+    .map_err(|error| {
+        AuraError::from(super::super::error::runtime_call(
+            "materialize channel",
+            error,
+        ))
+    })?
+    .map_err(|error| {
+        AuraError::from(super::super::error::runtime_call(
+            "materialize channel",
+            error,
+        ))
+    })?;
+    crate::workflows::observed_projection::reduce_chat_fact_observed(app_core, &fact).await
 }
