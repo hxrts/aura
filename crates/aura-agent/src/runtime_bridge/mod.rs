@@ -2050,6 +2050,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("recovery_service", e))?;
         let task_name = format!("guardian_ceremony_initiator.{ceremony_id}");
         let task_ceremony_id = ceremony_id.clone();
+        let task_signing_service = signing_service.clone();
+        let rotation_epoch = new_epoch.value();
         let fut = async move {
             let result = run_guardian_ceremony_initiator(
                 recovery_service,
@@ -2063,6 +2065,27 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 key_packages,
             )
             .await;
+            // The prepared key rotation becomes active only once the ceremony
+            // commits; a failed ceremony restores the previous epoch.
+            let result = match result {
+                Ok(()) => task_signing_service
+                    .commit_key_rotation(&authority_id, rotation_epoch)
+                    .await
+                    .map_err(|e| format!("Failed to commit guardian key rotation: {e}")),
+                Err(error) => {
+                    if let Err(rollback) = task_signing_service
+                        .rollback_key_rotation(&authority_id, rotation_epoch)
+                        .await
+                    {
+                        tracing::warn!(
+                            ceremony_id = %task_ceremony_id,
+                            error = %rollback,
+                            "Failed to roll back guardian key rotation"
+                        );
+                    }
+                    Err(error)
+                }
+            };
             if let Err(error) = result {
                 tracing::warn!(
                     ceremony_id = %task_ceremony_id,
