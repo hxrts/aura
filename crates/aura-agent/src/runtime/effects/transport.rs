@@ -1,4 +1,5 @@
 use super::AuraEffectSystem;
+use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::transport::{
@@ -381,11 +382,25 @@ async fn send_planned_envelope(
         return Ok(());
     }
 
-    let addr = resolve_peer_addr(effects, envelope.context, envelope.destination)
-        .await
-        .ok_or(TransportError::DestinationUnreachable {
-            destination: envelope.destination,
-        })?;
+    let addr = match resolve_peer_addr(effects, envelope.context, envelope.destination).await {
+        Some(addr) => Some(addr),
+        // Choreography sessions run in a fresh per-session context that never
+        // has a peer descriptor. Like invitation delivery, they ride the
+        // receiver's authority-scoped peer path; the envelope keeps its session
+        // context so the receiver can still match it.
+        None if is_choreography_envelope(&envelope) => {
+            resolve_peer_addr(
+                effects,
+                default_context_id_for_authority(envelope.destination),
+                envelope.destination,
+            )
+            .await
+        }
+        None => None,
+    }
+    .ok_or(TransportError::DestinationUnreachable {
+        destination: envelope.destination,
+    })?;
     enforce_production_payload_encryption(effects, &envelope)?;
     if envelope
         .metadata
@@ -400,6 +415,13 @@ async fn send_planned_envelope(
         );
     }
     send_envelope_tcp(&addr, &envelope).await
+}
+
+fn is_choreography_envelope(envelope: &TransportEnvelope) -> bool {
+    envelope
+        .metadata
+        .get("content-type")
+        .is_some_and(|value| value == "application/aura-choreography")
 }
 
 fn enforce_transport_payload_size(envelope: &TransportEnvelope) -> Result<(), TransportError> {
