@@ -151,6 +151,12 @@ pub(crate) async fn exchange_facts_with_sibling(
     else {
         return Err(protocol_error("amp keys"));
     };
+    tracing::debug!(
+        sibling = %peer,
+        received_sealed = peer_sealed.is_some(),
+        have_secret = key_agreement_secret.is_some(),
+        "sibling bootstrap key step"
+    );
     if let (Some(peer_sealed), Some(secret)) = (peer_sealed, key_agreement_secret) {
         store_bootstrap_keys(effects, authority, &peer_sealed, &secret).await?;
     }
@@ -315,6 +321,7 @@ async fn store_bootstrap_keys(
     use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
     let own_device = effects.device_id();
     let Some(own_public_key) = device_leaf_public_key(effects, own_device).await? else {
+        tracing::debug!(device = %own_device, "this device has no leaf; cannot open sibling keys");
         return Ok(());
     };
     let bundle = aura_sync::protocols::device_sealed::open_for_device(

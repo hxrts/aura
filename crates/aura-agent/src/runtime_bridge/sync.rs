@@ -395,6 +395,9 @@ async fn exchange_facts_with_siblings(
         .threshold_signing()
         .current_local_key_agreement_secret(&bridge.agent.authority_id())
         .await
+        .map_err(|error| {
+            tracing::debug!(error = %error, "no local key-agreement secret for sibling keys");
+        })
         .ok();
     // The exchange spans several lockstep waits, longer than the timeouts
     // callers put around trigger_sync, so it runs as its own owned task.
