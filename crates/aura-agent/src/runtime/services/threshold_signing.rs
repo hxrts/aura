@@ -1814,10 +1814,10 @@ mod tests {
         // Before importing, the joining device ran as its prepared invitee
         // authority, which bootstraps a tree with its own provisional leaf.
         ThresholdSigningService::new(joiner.clone())
-            .bootstrap_authority(&AuthorityId::new_from_entropy([0x4B; 32]))
+            .bootstrap_authority(&test_authority())
             .await
             .unwrap();
-        joiner.import_tree_ops(&ops).await.unwrap();
+        joiner.replace_tree_ops(&ops).await.unwrap();
 
         let devices: Vec<_> = joiner
             .get_current_state()

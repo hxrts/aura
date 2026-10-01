@@ -789,6 +789,18 @@ impl AuraEffectSystem {
             .map_err(|error| crate::core::AgentError::effects(error.to_string()))
     }
 
+    /// Adopt `ops` as this device's whole tree OpLog (a device joining an
+    /// existing account drops any provisional history; see `replace_ops`).
+    pub async fn replace_tree_ops(
+        &self,
+        ops: &[aura_core::AttestedOp],
+    ) -> Result<(), crate::core::AgentError> {
+        self.tree_handler
+            .replace_ops(ops)
+            .await
+            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
+    }
+
     /// Attach a fact sink for reactive scheduling (facts → scheduler ingestion).
     ///
     /// This is called during runtime startup when the ReactivePipeline is started.

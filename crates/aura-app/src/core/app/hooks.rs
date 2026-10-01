@@ -47,13 +47,6 @@ impl AppCore {
         }
     }
 
-    /// Defer the implicit signing-key bootstrap. A device joining an existing
-    /// account must not create its own tree and keys for that authority; it
-    /// receives them through the device enrollment.
-    pub fn defer_signing_bootstrap(&mut self) {
-        self.defer_signing_bootstrap = true;
-    }
-
     /// Initialize signals and install runtime-backed hooks.
     pub async fn init_signals_with_hooks(
         app_core: &Arc<RwLock<AppCore>>,

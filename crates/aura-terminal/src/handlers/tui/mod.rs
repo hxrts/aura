@@ -359,13 +359,9 @@ fn reexec_current_tui_process(reason: &str) -> Result<(), AuraError> {
 async fn initialized_runtime_app_core(
     app_config: AppConfig,
     agent: Arc<AuraAgent>,
-    defer_signing_bootstrap: bool,
 ) -> Result<InitializedAppCore, AuraError> {
-    let mut app_core = AppCore::with_runtime(app_config, agent.as_runtime_bridge())
+    let app_core = AppCore::with_runtime(app_config, agent.as_runtime_bridge())
         .map_err(|error| AuraError::internal(format!("Failed to create AppCore: {error}")))?;
-    if defer_signing_bootstrap {
-        app_core.defer_signing_bootstrap();
-    }
     let app_core = Arc::new(RwLock::new(app_core));
     InitializedAppCore::new(app_core).await
 }
@@ -561,16 +557,10 @@ async fn handle_tui_launch(
             };
 
             let agent = Arc::new(agent);
-            // A joining device must not bootstrap its own tree and keys for the
-            // account before the enrollment provides them.
-            let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
-            let joining_device = pending_bootstrap
-                .as_ref()
-                .is_some_and(|pending| pending.has_pending_device_enrollment());
-            let app_core =
-                initialized_runtime_app_core(app_config, agent.clone(), joining_device).await?;
+            let app_core = initialized_runtime_app_core(app_config, agent.clone()).await?;
             let mut pending_device_enrollment_code = None;
 
+            let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
             if let Some(pending_bootstrap) = pending_bootstrap {
                 pending_device_enrollment_code = pending_bootstrap.device_enrollment_code.clone();
                 pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
@@ -820,8 +810,7 @@ async fn handle_tui_launch(
                 };
 
                 let agent = Arc::new(agent);
-                let app_core =
-                    initialized_runtime_app_core(app_config, agent.clone(), false).await?;
+                let app_core = initialized_runtime_app_core(app_config, agent.clone()).await?;
 
                 if let Err(error) =
                     aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())

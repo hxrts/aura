@@ -1495,7 +1495,9 @@ impl InvitationHandler {
                         })
                     })
                     .collect::<Result<Vec<aura_core::AttestedOp>, _>>()?;
-                effects.import_tree_ops(&baseline_ops).await?;
+                // The joining device adopts the account's tree; ops it holds are
+                // from its provisional identity and must not be merged in.
+                effects.replace_tree_ops(&baseline_ops).await?;
             }
 
             let participant =

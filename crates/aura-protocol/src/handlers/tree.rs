@@ -239,6 +239,36 @@ impl PersistentTreeHandler {
         Ok(())
     }
 
+    /// Replace the local OpLog with `ops`.
+    ///
+    /// Tree ops are stored by hash, not per authority, so a device that ran under
+    /// a provisional authority before joining an account still holds that
+    /// authority's ops. Joining adopts the account's tree outright rather than
+    /// merging into it.
+    pub async fn replace_ops(&self, ops: &[AttestedOp]) -> Result<(), AuraError> {
+        self.ensure_initialized().await?;
+        let keys = self
+            .storage
+            .list_keys(Some(tree_storage::TREE_OPS_PREFIX))
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to list tree ops: {e}")))?;
+        for key in keys {
+            self.storage
+                .remove(&key)
+                .await
+                .map_err(|e| AuraError::storage(format!("Failed to remove tree op {key}: {e}")))?;
+        }
+        self.storage
+            .remove(tree_storage::TREE_OPS_INDEX_KEY)
+            .await
+            .map_err(|e| AuraError::storage(format!("Failed to remove ops index: {e}")))?;
+        self.ops_cache
+            .write()
+            .expect("PersistentTreeHandler lock poisoned")
+            .clear();
+        self.import_ops(ops).await
+    }
+
     /// Reduce the current operations to tree state.
     async fn reduce_state(
         &self,
@@ -515,7 +545,7 @@ mod tests {
     use super::*;
     use aura_core::effects::crypto::{CryptoExtendedEffects, KeyGenerationMethod};
     use aura_core::effects::storage::{StorageCoreEffects, StorageError, StorageExtendedEffects};
-    use aura_core::tree::{BranchNode, BranchSigningKey};
+    use aura_core::tree::{BranchNode, BranchSigningKey, LeafId, TreeOp, TreeOpKind};
     use aura_effects::crypto::RealCryptoHandler;
     use std::collections::HashMap;
     use tokio::sync::RwLock;
@@ -683,6 +713,41 @@ mod tests {
             .await
             .expect_err("proposal-id bytes are not a valid snapshot signature");
         assert!(error.to_string().contains("Invalid signature length"));
+    }
+
+    fn remove_leaf_op(leaf: u32) -> AttestedOp {
+        AttestedOp {
+            op: TreeOp {
+                parent_epoch: Epoch::initial(),
+                parent_commitment: [0u8; 32],
+                op: TreeOpKind::RemoveLeaf {
+                    leaf: LeafId(leaf),
+                    reason: 0,
+                },
+                version: 1,
+            },
+            agg_sig: vec![],
+            signer_count: 1,
+        }
+    }
+
+    // Regression (work/8.md task 32): a joining device's provisional ops are
+    // dropped, not merged, when it adopts the account's tree, including after
+    // a reload from storage.
+    #[tokio::test]
+    async fn replace_ops_drops_provisional_history() {
+        let storage = Arc::new(TestStorage::default());
+        let handler = PersistentTreeHandler::new(storage.clone());
+        handler.import_ops(&[remove_leaf_op(1)]).await.unwrap();
+
+        handler.replace_ops(&[remove_leaf_op(2)]).await.unwrap();
+
+        assert_eq!(handler.export_ops().await.unwrap(), vec![remove_leaf_op(2)]);
+        let reloaded = PersistentTreeHandler::new(storage);
+        assert_eq!(
+            reloaded.export_ops().await.unwrap(),
+            vec![remove_leaf_op(2)]
+        );
     }
 
     #[tokio::test]
