@@ -564,31 +564,14 @@ async fn handle_tui_launch(
             if let Some(pending_bootstrap) = pending_bootstrap {
                 pending_device_enrollment_code = pending_bootstrap.device_enrollment_code.clone();
                 pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
-                let account_ready =
-                    aura_app::ui::workflows::account::has_runtime_bootstrapped_account(
+                // The shared reconciler also provisions Note to Self when the runtime
+                // already holds the account, which a fresh account hits on reload.
+                let resolution =
+                    aura_app::ui::workflows::account::reconcile_pending_runtime_account_bootstrap(
                         app_core.raw(),
+                        Some(pending_bootstrap.clone()),
                     )
                     .await?;
-                let resolution = if !account_ready {
-                    if let Err(error) =
-                        aura_app::ui::workflows::account::initialize_runtime_account(
-                            app_core.raw(),
-                            pending_bootstrap.nickname_suggestion.clone(),
-                        )
-                        .await
-                    {
-                        return Err(error.into());
-                    }
-                    aura_app::ui::workflows::account::PendingRuntimeBootstrapResolution {
-                            account_ready: true,
-                            action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::InitializedFromPending,
-                        }
-                } else {
-                    aura_app::ui::workflows::account::PendingRuntimeBootstrapResolution {
-                            account_ready: true,
-                            action: aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending,
-                        }
-                };
 
                 let clear_pending_bootstrap = matches!(
                         resolution.action,
