@@ -1,5 +1,6 @@
 use super::vm_loop::{
-    handle_invitation_vm_step, handle_invitation_vm_wait_status, map_invitation_vm_timeout,
+    handle_invitation_vm_step, handle_invitation_vm_wait_status, invitation_invalid_error,
+    map_invitation_vm_timeout,
 };
 use super::*;
 use crate::runtime::open_owned_manifest_vm_session_admitted;
@@ -208,9 +209,10 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
                         // acceptance: verify it before counting the new device.
                         let accept: DeviceEnrollmentAcceptWrapper = from_slice(&blocked.payload)
                             .map_err(|error| {
-                                AgentError::invalid(format!(
-                                    "malformed device enrollment acceptance: {error}"
-                                ))
+                                invitation_invalid_error(
+                                    "malformed device enrollment acceptance",
+                                    error,
+                                )
                             })?;
                         verify_device_enrollment_acceptance(
                             effects.as_ref(),
@@ -393,10 +395,10 @@ pub(super) async fn verify_device_enrollment_acceptance(
     accept: &DeviceEnrollmentAccept,
 ) -> AgentResult<()> {
     if accept.acceptor_id != invitation.receiver_id {
-        return Err(AgentError::invalid(format!(
-            "device enrollment acceptance from {} does not match invited authority {}",
-            accept.acceptor_id, invitation.receiver_id
-        )));
+        return Err(invitation_invalid_error(
+            "device enrollment acceptance does not match invited authority",
+            format_args!("{} != {}", accept.acceptor_id, invitation.receiver_id),
+        ));
     }
     if accept.invitation_id != invitation.invitation_id
         || &accept.ceremony_id != ceremony_id

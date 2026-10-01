@@ -40,3 +40,14 @@ pub(super) fn map_invitation_vm_timeout(
         TimeoutRunError::Operation(error) => error,
     }
 }
+
+/// Reject a malformed or mismatched peer message with a static reason prefix.
+pub(super) fn invitation_invalid_error(
+    prefix: &'static str,
+    detail: impl std::fmt::Display,
+) -> AgentError {
+    let mut message = String::from(prefix);
+    message.push_str(": ");
+    message.push_str(&detail.to_string());
+    AgentError::invalid(message)
+}

@@ -1,5 +1,6 @@
 use super::vm_loop::{
-    handle_invitation_vm_step, handle_invitation_vm_wait_status, map_invitation_vm_timeout,
+    handle_invitation_vm_step, handle_invitation_vm_wait_status, invitation_invalid_error,
+    map_invitation_vm_timeout,
 };
 use super::*;
 use crate::runtime::open_owned_manifest_vm_session_admitted;
@@ -97,16 +98,20 @@ pub(super) async fn verify_and_record_guardian_acceptance(
             "guardian acceptance is missing recovery key material".to_string(),
         ));
     }
+    // First binding: there is no prior trusted key for this guardian. The
+    // signature proves possession and binds the key to this invitation; the key
+    // is trusted only after it is recorded for the guardian below.
+    let self_certified_sender_key = &accept.recovery_public_key;
     let transcript = GuardianInvitationAcceptanceTranscript {
         invitation,
         guardian: invitation.receiver_id,
-        recovery_public_key: &accept.recovery_public_key,
+        recovery_public_key: self_certified_sender_key,
     };
     let verified = aura_signature::verify_ed25519_transcript(
         effects,
         &transcript,
         &accept.signature,
-        &accept.recovery_public_key,
+        self_certified_sender_key,
     )
     .await
     .map_err(|error| AgentError::invalid(error.to_string()))?;
@@ -212,9 +217,7 @@ impl<'a> InvitationGuardianHandler<'a> {
                         // The guardian's reply carries its signed recovery key.
                         let accept: GuardianInvitationAccept = from_slice(&blocked.payload)
                             .map_err(|error| {
-                                AgentError::invalid(format!(
-                                    "malformed guardian acceptance: {error}"
-                                ))
+                                invitation_invalid_error("malformed guardian acceptance", error)
                             })?;
                         verify_and_record_guardian_acceptance(
                             effects.as_ref(),

@@ -2644,7 +2644,7 @@ async fn signed_invitation_code_for_notify(
         effects,
         invitation,
         &transport_metadata,
-        effects.harness_mode_enabled() || effects.is_testing(),
+        effects.is_testing(),
     )
     .await
     .map_err(|error| AgentError::invalid(error.to_string()))

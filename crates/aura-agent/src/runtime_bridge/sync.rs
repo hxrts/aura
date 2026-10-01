@@ -355,3 +355,13 @@ pub(super) async fn ensure_peer_channel(
         "peer channel for {peer} in {context} did not establish after bounded convergence"
     )))
 }
+
+/// Install the sync Biscuit authorization if needed, then sync with `peers`.
+pub(super) async fn sync_with_peer_list(
+    sync: &crate::runtime::services::sync_manager::SyncServiceManager,
+    effects: &crate::AuraEffectSystem,
+    peers: Vec<aura_core::DeviceId>,
+) -> Result<(), crate::runtime::services::sync_manager::SyncManagerError> {
+    let _ = sync.ensure_biscuit_authorization(effects).await;
+    sync.sync_with_peers(effects, peers).await
+}

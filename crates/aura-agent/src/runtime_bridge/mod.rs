@@ -520,6 +520,16 @@ pub(crate) fn harness_mode_env_key_for_tests() -> &'static str {
     HARNESS_MODE_ENV_VAR
 }
 
+/// Sync rounds after ceremony processing: harness runs retry to settle
+/// reachability quickly; normal runs make one pass.
+fn reachability_refresh_rounds() -> usize {
+    if harness_mode_enabled() {
+        harness_sync_rounds()
+    } else {
+        1
+    }
+}
+
 fn harness_sync_rounds() -> usize {
     std::env::var(HARNESS_SYNC_ROUNDS_ENV_VAR)
         .ok()
@@ -572,8 +582,7 @@ impl AgentRuntimeBridge {
             ));
         }
         let effects = self.agent.runtime().effects();
-        let _ = sync.ensure_biscuit_authorization(&effects).await;
-        sync.sync_with_peers(&effects, peers)
+        sync::sync_with_peer_list(sync, &effects, peers)
             .await
             .map_err(|e| bridge_internal("Sync failed", e))
     }
@@ -581,11 +590,7 @@ impl AgentRuntimeBridge {
     pub(super) async fn refresh_reachability_after_ceremony_processing(
         &self,
     ) -> Result<(), IntentError> {
-        let rounds = if harness_mode_enabled() {
-            harness_sync_rounds()
-        } else {
-            1
-        };
+        let rounds = reachability_refresh_rounds();
         let backoff_ms = harness_sync_backoff_ms();
         let mut last_error = None;
 
