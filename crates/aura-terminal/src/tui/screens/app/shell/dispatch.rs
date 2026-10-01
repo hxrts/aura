@@ -184,6 +184,7 @@ fn is_passive_notification_runtime_fact(fact: &RuntimeFact) -> bool {
 
 pub(super) fn read_selected_notification(
     selected_index: usize,
+    visible_ids: &[String],
     invitations: &std::sync::Arc<parking_lot::RwLock<Vec<Invitation>>>,
     pending_requests: &std::sync::Arc<parking_lot::RwLock<Vec<crate::tui::types::PendingRequest>>>,
     runtime_facts: &[RuntimeFact],
@@ -239,9 +240,28 @@ pub(super) fn read_selected_notification(
     notifications.extend(runtime_items);
     notifications.sort_by(|left, right| right.0.cmp(&left.0));
 
+    // Resolve through the row the screen rendered at this index; the screen
+    // omits some items (e.g. sent invitations), so positions can differ.
+    if let Some(rendered_id) = visible_ids.get(selected_index) {
+        if let Some((_, selection)) = notifications.iter().find(|(_, selection)| {
+            notification_selection_id(selection) == Some(rendered_id.as_str())
+        }) {
+            return Some(selection.clone());
+        }
+    }
+
     notifications
         .get(selected_index)
         .map(|(_, selection)| selection.clone())
+}
+
+fn notification_selection_id(selection: &NotificationSelection) -> Option<&str> {
+    match selection {
+        NotificationSelection::ReceivedInvitation(id)
+        | NotificationSelection::SentInvitation(id)
+        | NotificationSelection::RecoveryRequest(id) => Some(id.as_str()),
+        NotificationSelection::PassiveRuntimeEvent(_) => None,
+    }
 }
 
 pub(super) fn semantic_accept_kind_for_invitation(
@@ -480,6 +500,12 @@ pub(super) fn execute_harness_followup_command(
             };
             let selected = read_selected_notification(
                 state.notifications.selected_index,
+                &state
+                    .notifications
+                    .visible_ids
+                    .lock()
+                    .map(|ids| ids.clone())
+                    .unwrap_or_default(),
                 shared_invitations,
                 shared_pending_requests,
                 &state.runtime_facts,

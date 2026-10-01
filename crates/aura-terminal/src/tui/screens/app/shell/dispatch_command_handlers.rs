@@ -76,6 +76,12 @@ fn handle_recovery_and_ceremonies_dispatch(
         DispatchCommand::ApproveRecovery => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
+                &new_state
+                    .notifications
+                    .visible_ids
+                    .lock()
+                    .map(|ids| ids.clone())
+                    .unwrap_or_default(),
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
@@ -1348,6 +1354,12 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::AcceptInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
+                &new_state
+                    .notifications
+                    .visible_ids
+                    .lock()
+                    .map(|ids| ids.clone())
+                    .unwrap_or_default(),
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
@@ -1383,6 +1395,12 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::DeclineInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
+                &new_state
+                    .notifications
+                    .visible_ids
+                    .lock()
+                    .map(|ids| ids.clone())
+                    .unwrap_or_default(),
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
@@ -1457,6 +1475,12 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::ExportInvitation => {
             let selected = read_selected_notification(
                 new_state.notifications.selected_index,
+                &new_state
+                    .notifications
+                    .visible_ids
+                    .lock()
+                    .map(|ids| ids.clone())
+                    .unwrap_or_default(),
                 shared_invitations_for_dispatch,
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
