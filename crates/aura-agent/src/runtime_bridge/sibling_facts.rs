@@ -56,6 +56,28 @@ async fn receive_frame(
         .map_err(|error| AuraError::internal(format!("decode sibling frame: {error}")))
 }
 
+/// Upper bound on stale frames dropped while waiting for one step.
+const MAX_STALE_FRAMES: usize = 8;
+
+/// Receive the next frame of the expected step. Each device starts exchanges on
+/// its own schedule, so frames left over from an exchange the other side
+/// abandoned are dropped rather than read out of step.
+async fn receive_expected(
+    effects: &AuraEffectSystem,
+    peer: DeviceId,
+    is_expected: impl Fn(&SiblingFactsFrame) -> bool,
+    step: &str,
+) -> Result<SiblingFactsFrame, AuraError> {
+    for _ in 0..MAX_STALE_FRAMES {
+        let frame = receive_frame(effects, peer).await?;
+        if is_expected(&frame) {
+            return Ok(frame);
+        }
+        tracing::debug!(sibling = %peer, step, "dropping stale sibling fact frame");
+    }
+    Err(protocol_error(step))
+}
+
 fn protocol_error(expected: &str) -> AuraError {
     AuraError::internal(format!(
         "sibling fact exchange out of step: expected {expected}"
@@ -86,7 +108,14 @@ pub(crate) async fn exchange_facts_with_sibling(
     let digest = hash(&digest_input);
 
     send_frame(effects, peer, &SiblingFactsFrame::Digest(digest)).await?;
-    let SiblingFactsFrame::Digest(peer_digest) = receive_frame(effects, peer).await? else {
+    let SiblingFactsFrame::Digest(peer_digest) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::Digest(_)),
+        "digest",
+    )
+    .await?
+    else {
         return Err(protocol_error("digest"));
     };
     if peer_digest == digest {
@@ -99,7 +128,14 @@ pub(crate) async fn exchange_facts_with_sibling(
         &SiblingFactsFrame::Index(by_key.keys().cloned().collect()),
     )
     .await?;
-    let SiblingFactsFrame::Index(peer_keys) = receive_frame(effects, peer).await? else {
+    let SiblingFactsFrame::Index(peer_keys) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::Index(_)),
+        "index",
+    )
+    .await?
+    else {
         return Err(protocol_error("index"));
     };
     let peer_keys: BTreeSet<Vec<u8>> = peer_keys.into_iter().collect();
@@ -110,7 +146,14 @@ pub(crate) async fn exchange_facts_with_sibling(
         .collect();
 
     send_frame(effects, peer, &SiblingFactsFrame::Facts(missing)).await?;
-    let SiblingFactsFrame::Facts(received) = receive_frame(effects, peer).await? else {
+    let SiblingFactsFrame::Facts(received) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::Facts(_)),
+        "facts",
+    )
+    .await?
+    else {
         return Err(protocol_error("facts"));
     };
     let imported = effects.import_committed_facts(received).await?;
@@ -121,7 +164,14 @@ pub(crate) async fn exchange_facts_with_sibling(
         &SiblingFactsFrame::JournalFacts(journal.facts.clone()),
     )
     .await?;
-    let SiblingFactsFrame::JournalFacts(peer_facts) = receive_frame(effects, peer).await? else {
+    let SiblingFactsFrame::JournalFacts(peer_facts) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::JournalFacts(_)),
+        "journal_facts",
+    )
+    .await?
+    else {
         return Err(protocol_error("journal facts"));
     };
     let before = journal.facts.clone();
@@ -195,6 +245,15 @@ mod tests {
         aura_core::effects::JournalEffects::persist_journal(&existing, &journal)
             .await
             .expect("persist journal");
+
+        // A frame left over from an exchange the other side abandoned.
+        send_frame(
+            &existing,
+            joined.device_id(),
+            &SiblingFactsFrame::Index(vec![vec![0xAA]]),
+        )
+        .await
+        .expect("stale frame");
 
         let (from_existing, from_joined) = tokio::join!(
             exchange_facts_with_sibling(&existing, joined.device_id()),
