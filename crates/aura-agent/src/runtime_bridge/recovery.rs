@@ -1,5 +1,7 @@
 use super::error_boundary::{bridge_internal, bridge_validation, bridge_validation_message};
 use super::AgentRuntimeBridge;
+use crate::handlers::recovery_service::GuardianCeremonyGuardianOutcome;
+use crate::runtime::services::ceremony_runner::CeremonyCommitMetadata;
 use aura_app::IntentError;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::CeremonyId;
@@ -59,11 +61,10 @@ pub(super) async fn respond_to_guardian_ceremony(
         aura_recovery::CeremonyId(Hash32(bytes))
     };
 
-    // Determine role index by sorting guardians and finding our position.
-    // The initiator assigns Guardian1 to guardians[0] and Guardian2 to guardians[1],
-    // so we must use the same deterministic ordering on both sides.
+    // The initiator assigns Guardian1/Guardian2 by sorted guardian id; the
+    // service derives our role from the full guardian set the same way.
     let my_authority_id = bridge.agent.authority_id();
-    let mut guardian_ids: Vec<_> = ceremony_state
+    let guardian_ids: Vec<_> = ceremony_state
         .participants
         .iter()
         .filter_map(|p| {
@@ -74,16 +75,12 @@ pub(super) async fn respond_to_guardian_ceremony(
             }
         })
         .collect();
-    guardian_ids.sort();
-    let role_index = guardian_ids
-        .iter()
-        .position(|id| *id == my_authority_id)
-        .ok_or_else(|| {
-            bridge_validation_message(format!(
-                "Current authority {} not found in ceremony guardians",
-                my_authority_id
-            ))
-        })?;
+    if !guardian_ids.contains(&my_authority_id) {
+        return Err(bridge_validation_message(format!(
+            "Current authority {} not found in ceremony guardians",
+            my_authority_id
+        )));
+    }
 
     let recovery_service = bridge
         .agent
@@ -94,15 +91,59 @@ pub(super) async fn respond_to_guardian_ceremony(
     } else {
         CeremonyResponse::Decline
     };
-    recovery_service
-        .execute_guardian_ceremony_guardian(
-            ceremony_state.initiator_id,
-            protocol_ceremony_id,
-            response,
-            role_index,
-        )
-        .await
-        .map_err(|e| bridge_internal("Guardian ceremony choreography failed", e))?;
+
+    // The guardian session finishes only once the initiator commits or aborts,
+    // which also waits on the other guardian. Run it as an owned background
+    // task so the UI operation returns once the response is underway.
+    let initiator_id = ceremony_state.initiator_id;
+    let tracker_ceremony_id = ceremony_id.clone();
+    let task_name = format!("guardian_ceremony_guardian.{ceremony_id}");
+    let fut = async move {
+        let result = recovery_service
+            .execute_guardian_ceremony_guardian(
+                initiator_id,
+                protocol_ceremony_id,
+                response,
+                &guardian_ids,
+            )
+            .await;
+        match result {
+            Ok(GuardianCeremonyGuardianOutcome::Committed { .. }) => {
+                if accept {
+                    if let Err(error) = runner
+                        .commit(&tracker_ceremony_id, CeremonyCommitMetadata::default())
+                        .await
+                    {
+                        tracing::warn!(
+                            ceremony_id = %tracker_ceremony_id,
+                            error = %error,
+                            "failed to mark guardian ceremony committed"
+                        );
+                    }
+                }
+            }
+            Ok(GuardianCeremonyGuardianOutcome::Aborted { reason }) => {
+                let _ = runner.abort(&tracker_ceremony_id, Some(reason)).await;
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ceremony_id = %tracker_ceremony_id,
+                    error = %error,
+                    "guardian ceremony choreography failed"
+                );
+                let _ = runner
+                    .abort(&tracker_ceremony_id, Some(error.to_string()))
+                    .await;
+            }
+        }
+    };
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let _task_handle = bridge.agent.runtime().tasks().spawn_local_named(task_name, fut);
+        } else {
+            let _task_handle = bridge.agent.runtime().tasks().spawn_named(task_name, fut);
+        }
+    }
 
     Ok(())
 }

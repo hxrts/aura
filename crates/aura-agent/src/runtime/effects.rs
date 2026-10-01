@@ -1058,6 +1058,29 @@ impl AuraEffectSystem {
         self.transport.queue_envelope(envelope)
     }
 
+    /// Clone queued choreography envelopes addressed to this runtime without consuming them.
+    ///
+    /// Covers both session-local inboxes (network ingress) and the transport inbox
+    /// (shared in-memory transport), so callers can discover sessions they have not opened.
+    pub(crate) fn peek_queued_choreography_envelopes(&self) -> Vec<TransportEnvelope> {
+        let mut envelopes = self
+            .choreography_state
+            .read()
+            .queued_session_envelopes_snapshot();
+        let inbox = self.transport.inbox();
+        envelopes.extend(
+            inbox
+                .read()
+                .iter()
+                .filter(|envelope| {
+                    envelope.destination == self.authority_id
+                        && Self::choreography_session_id_from_envelope(envelope).is_some()
+                })
+                .cloned(),
+        );
+        envelopes
+    }
+
     fn choreography_session_id_from_envelope(
         envelope: &TransportEnvelope,
     ) -> Option<RuntimeChoreographySessionId> {

@@ -18,7 +18,10 @@ use crate::runtime::services::{
     CeremonyTracker, ReconfigurationManager, SessionDelegationTransfer, TrustedKeyResolutionService,
 };
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
-use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
+use crate::runtime::vm_host_bridge::{
+    decode_choice_label_wire, encode_choice_label_wire, AuraVmHostWaitStatus,
+    AuraVmRoundDisposition,
+};
 use crate::runtime::{AuraEffectSystem, RuntimeChoreographySessionId, TaskSupervisor};
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{
@@ -40,8 +43,12 @@ use aura_protocol::{
 use aura_recovery::ceremony_runners::{AbortCeremony, ProposeRotation};
 // Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
 // to construct it - we only match on the type name suffix when processing received messages.
+use aura_core::{
+    execute_with_timeout_budget, TimeoutBudget, TimeoutExecutionProfile, TimeoutRunError,
+};
 use aura_recovery::guardian_ceremony::{
-    build_guardian_ceremony_commit_certificate, encrypt_ceremony_key_package,
+    build_guardian_ceremony_commit_certificate, decrypt_ceremony_key_package,
+    encrypt_ceremony_key_package, sign_guardian_ceremony_response,
     verify_guardian_ceremony_response_signature, CeremonyAbort, CeremonyCommit,
     CeremonyCommitCertificate, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
     GuardianRotationOp,
@@ -73,6 +80,9 @@ const CHOREO_START_RETRY_LIMIT: usize = 40;
 const RECOVERY_CLEANUP_INTERVAL: StdDuration = StdDuration::from_secs(5);
 const RECOVERY_TIMEOUT_REASON: &str = "Recovery timed out";
 const GUARDIAN_SETUP_ACCEPTANCE_MAX_SKEW_MS: u64 = 5 * 60 * 1000;
+/// How long either side of a guardian ceremony waits for the other. Guardian
+/// approval is a human decision on another device, so this is human-scale.
+const GUARDIAN_CEREMONY_RESPONSE_WINDOW_MS: u64 = 600_000;
 
 /// Recovery service API
 ///
@@ -1280,13 +1290,21 @@ impl RecoveryServiceApi {
                 ("Guardian1".to_string(), Self::role(sorted_guardians[0], 0)),
                 ("Guardian2".to_string(), Self::role(sorted_guardians[1], 0)),
             ]);
+            let budget = self
+                .guardian_ceremony_timeout_budget(GUARDIAN_CEREMONY_RESPONSE_WINDOW_MS)
+                .await?;
             let mut responses = Vec::new();
             let mut seen_guardians = BTreeSet::new();
             let mut branch_queued = false;
+            let mut abort_reason: Option<&'static str> = None;
 
-            let loop_result = loop {
+            let loop_result = execute_with_timeout_budget(self.effects.as_ref(), &budget, || async { loop {
                 let round = session
-                    .advance_round("Initiator", &peer_roles)
+                    .advance_round_until_receive(
+                        "Initiator",
+                        &peer_roles,
+                        is_transport_no_message,
+                    )
                     .await
                     .map_err(|error| AgentError::internal(error.to_string()))?;
 
@@ -1376,7 +1394,7 @@ impl RecoveryServiceApi {
                             })?;
                             self.store_guardian_ceremony_commit_certificate(&commit_certificate)
                                 .await?;
-                            session.queue_choice_label("commit");
+                            session.queue_choice_label("finalize");
                             let commit = CeremonyCommit {
                                 ceremony_id,
                                 new_epoch: operation.new_epoch,
@@ -1397,6 +1415,7 @@ impl RecoveryServiceApi {
                             } else {
                                 "threshold_not_met"
                             };
+                            abort_reason = Some(reason);
                             let abort = AbortCeremony(CeremonyAbort {
                                 ceremony_id,
                                 reason: reason.to_string(),
@@ -1418,6 +1437,12 @@ impl RecoveryServiceApi {
                     continue;
                 }
 
+                // No message yet means a guardian has not answered. Guardians are
+                // people approving on another device, so keep waiting within the
+                // response window instead of judging the (stuck-on-receive) step.
+                if matches!(round.host_wait_status, AuraVmHostWaitStatus::Deferred) {
+                    continue;
+                }
                 match round.host_wait_status {
                     AuraVmHostWaitStatus::Idle => {}
                     AuraVmHostWaitStatus::TimedOut => {
@@ -1437,7 +1462,12 @@ impl RecoveryServiceApi {
 
                 match round.step {
                     StepResult::AllDone => {
-                        let accepted = responses
+                        if let Some(reason) = abort_reason {
+                            break Err(AgentError::invalid(format!(
+                                "guardian ceremony aborted: {reason}"
+                            )));
+                        }
+                        let accepted = std::mem::take(&mut responses)
                             .into_iter()
                             .filter(|response| {
                                 response.payload().response == CeremonyResponse::Accept
@@ -1453,7 +1483,9 @@ impl RecoveryServiceApi {
                         ));
                     }
                 }
-            };
+            }})
+            .await
+            .map_err(|error| map_guardian_ceremony_timeout("guardian ceremony initiator", &budget, error));
 
             let _ = session.close().await;
             break loop_result;
@@ -1463,26 +1495,380 @@ impl RecoveryServiceApi {
 
     /// Execute guardian ceremony as a guardian (accept/decline).
     ///
-    /// The `role_index` parameter specifies which guardian role this peer plays:
-    /// - 0 = Guardian1
-    /// - 1 = Guardian2
+    /// `guardians` is the full guardian set of the ceremony. Roles are assigned the
+    /// same way the initiator assigns them: sorted ascending, the first guardian
+    /// plays `Guardian1` and the second `Guardian2`.
+    ///
+    /// The guardian receives the proposal, decrypts and stores its key package
+    /// (on accept), answers with a response signed by its recovery key, and then
+    /// waits for the initiator's commit or abort.
     pub async fn execute_guardian_ceremony_guardian(
         &self,
         initiator_id: AuthorityId,
         ceremony_id: aura_recovery::CeremonyId,
         response: CeremonyResponse,
-        role_index: usize,
-    ) -> AgentResult<()> {
-        if role_index > 1 {
+        guardians: &[AuthorityId],
+    ) -> AgentResult<GuardianCeremonyGuardianOutcome> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let mut sorted_guardians = guardians.to_vec();
+        sorted_guardians.sort();
+        sorted_guardians.dedup();
+        if sorted_guardians.len() != 2 {
             return Err(AgentError::invalid(format!(
-                "Invalid guardian role index: {} (must be 0 or 1)",
-                role_index
+                "Guardian ceremony requires exactly 2 guardians, got {}",
+                sorted_guardians.len()
             )));
         }
-        let _ = (initiator_id, ceremony_id, response);
-        Err(AgentError::internal(
-            "guardian ceremony response requires a guardian signature; unsigned responses are disabled",
-        ))
+        let active_role_name = match sorted_guardians.iter().position(|id| *id == authority_id) {
+            Some(0) => "Guardian1",
+            Some(1) => "Guardian2",
+            _ => {
+                return Err(AgentError::invalid(format!(
+                    "authority {authority_id} is not a guardian of this ceremony"
+                )));
+            }
+        };
+        let signing_private_key = self
+            .effects
+            .retrieve(&recovery_guardian_private_key_storage_key(authority_id))
+            .await
+            .map_err(|error| {
+                AgentError::effects(format!(
+                    "guardian ceremony signing key retrieval failed: {error}"
+                ))
+            })?
+            .ok_or_else(|| {
+                AgentError::invalid(
+                    "guardian ceremony response requires a registered guardian recovery key"
+                        .to_string(),
+                )
+            })?;
+
+        let session_id = Self::ceremony_session_id(ceremony_id);
+        let roles = vec![
+            Self::role(initiator_id, 0),
+            Self::role(sorted_guardians[0], 0),
+            Self::role(sorted_guardians[1], 0),
+        ];
+        let peer_roles = BTreeMap::from([("Initiator".to_string(), Self::role(initiator_id, 0))]);
+        let manifest = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::composition_manifest();
+        let global_type = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::global_type();
+        let local_types = aura_recovery::guardian_ceremony::telltale_session_types_guardian_ceremony::vm_artifacts::local_types();
+
+        let mut session = open_owned_manifest_vm_session_admitted(
+            self.effects.clone(),
+            session_id,
+            roles,
+            &manifest,
+            active_role_name,
+            &global_type,
+            &local_types,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .map_err(|error| {
+            AgentError::internal(format!("guardian ceremony start failed: {error}"))
+        })?;
+
+        // The other guardian may approve much later; the commit/abort only
+        // arrives once both have answered.
+        let budget = self
+            .guardian_ceremony_timeout_budget(GUARDIAN_CEREMONY_RESPONSE_WINDOW_MS)
+            .await?;
+        let mut proposal_handled = false;
+        let mut branch_label_seen = false;
+        let mut outcome: Option<GuardianCeremonyGuardianOutcome> = None;
+
+        let loop_result = execute_with_timeout_budget(self.effects.as_ref(), &budget, || async {
+            loop {
+                let round = session
+                    .advance_round_until_receive(
+                        active_role_name,
+                        &peer_roles,
+                        is_transport_no_message,
+                    )
+                    .await
+                    .map_err(|error| AgentError::internal(error.to_string()))?;
+
+                if let Some(blocked) = round.blocked_receive {
+                    if !proposal_handled {
+                        let proposal = decode_guardian_ceremony_proposal(&blocked.payload)
+                            .ok_or_else(|| {
+                                AgentError::invalid(
+                                    "malformed guardian ceremony proposal".to_string(),
+                                )
+                            })?;
+                        if proposal.ceremony_id != ceremony_id
+                            || proposal.initiator_id != initiator_id
+                        {
+                            return Err(AgentError::invalid(
+                                "guardian ceremony proposal does not match this ceremony"
+                                    .to_string(),
+                            ));
+                        }
+                        let message = self
+                            .guardian_ceremony_response(&proposal, response, &signing_private_key)
+                            .await?;
+                        session.queue_send_bytes(to_vec(&message).map_err(|error| {
+                            AgentError::internal(format!(
+                                "guardian ceremony response encode failed: {error}"
+                            ))
+                        })?);
+                        proposal_handled = true;
+                    } else if decode_choice_label_wire(&blocked.payload).is_some() {
+                        branch_label_seen = true;
+                    } else {
+                        let branch = if let Ok(commit) =
+                            from_slice::<CeremonyCommit>(&blocked.payload)
+                        {
+                            outcome = Some(GuardianCeremonyGuardianOutcome::Committed {
+                                new_epoch: commit.new_epoch,
+                            });
+                            Some("finalize")
+                        } else if let Some(abort) = decode_guardian_ceremony_abort(&blocked.payload)
+                        {
+                            outcome = Some(GuardianCeremonyGuardianOutcome::Aborted {
+                                reason: abort.reason,
+                            });
+                            Some("cancel")
+                        } else {
+                            None
+                        };
+                        // The projection for the guardian that is not offered the
+                        // choice directly selects its branch with the commit/abort
+                        // message itself, so hand the VM the branch label for it.
+                        if let (false, Some(label)) = (branch_label_seen, branch) {
+                            let mut selector = blocked.clone();
+                            selector.payload = encode_choice_label_wire(label);
+                            session
+                                .inject_blocked_receive(&selector)
+                                .map_err(|error| AgentError::internal(error.to_string()))?;
+                            continue;
+                        }
+                    }
+                    session
+                        .inject_blocked_receive(&blocked)
+                        .map_err(|error| AgentError::internal(error.to_string()))?;
+                    continue;
+                }
+
+                if matches!(round.host_wait_status, AuraVmHostWaitStatus::Deferred) {
+                    continue;
+                }
+                match round.host_wait_status {
+                    AuraVmHostWaitStatus::TimedOut => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony guardian VM timed out while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    AuraVmHostWaitStatus::Cancelled => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony guardian VM cancelled while waiting for receive"
+                                .to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+
+                match round.step {
+                    StepResult::AllDone => {
+                        break outcome.take().ok_or_else(|| {
+                            AgentError::internal(
+                                "guardian ceremony finished without a commit or abort".to_string(),
+                            )
+                        });
+                    }
+                    StepResult::Continue => {}
+                    StepResult::Stuck => {
+                        break Err(AgentError::internal(
+                            "guardian ceremony guardian VM became stuck without a pending receive"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|error| {
+            map_guardian_ceremony_timeout("guardian ceremony guardian", &budget, error)
+        });
+
+        let _ = session.close().await;
+        loop_result
+    }
+
+    /// Verify a proposal addressed to this guardian, store its key package on
+    /// acceptance, and build the signed response.
+    async fn guardian_ceremony_response(
+        &self,
+        proposal: &CeremonyProposal,
+        response: CeremonyResponse,
+        signing_private_key: &[u8],
+    ) -> AgentResult<CeremonyResponseMsg> {
+        let authority_id = self.handler.authority_context().authority_id();
+        if !proposal.operation.guardian_ids.contains(&authority_id) {
+            return Err(AgentError::invalid(
+                "guardian ceremony proposal does not list this guardian".to_string(),
+            ));
+        }
+        if response == CeremonyResponse::Accept {
+            // Decryption also checks the recipient key and proposal binding hash.
+            let key_package =
+                decrypt_ceremony_key_package(self.effects.as_ref(), proposal, signing_private_key)
+                    .await
+                    .map_err(|error| {
+                        AgentError::invalid(format!(
+                            "guardian ceremony key package rejected: {error}"
+                        ))
+                    })?;
+            let location = guardian_ceremony_key_package_location(
+                proposal.initiator_id,
+                proposal.operation.new_epoch,
+                authority_id,
+            );
+            self.effects
+                .secure_store(
+                    &location,
+                    &key_package,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|error| {
+                    AgentError::effects(format!(
+                        "guardian ceremony key package storage failed: {error}"
+                    ))
+                })?;
+        }
+        let signature = sign_guardian_ceremony_response(
+            self.effects.as_ref(),
+            proposal,
+            authority_id,
+            response,
+            signing_private_key,
+        )
+        .await
+        .map_err(|error| {
+            AgentError::effects(format!(
+                "guardian ceremony response signing failed: {error}"
+            ))
+        })?;
+        Ok(CeremonyResponseMsg {
+            ceremony_id: proposal.ceremony_id,
+            guardian_id: authority_id,
+            response,
+            encrypted_key_package_hash: proposal.encrypted_key_package_hash,
+            signature,
+        })
+    }
+
+    /// Register guardian ceremonies proposed to this authority that are still
+    /// waiting in the inbound queue, so they surface as pending guardian requests.
+    ///
+    /// The queued proposal is only peeked; the guardian session consumes it once
+    /// the user responds. Returns the ids of newly registered ceremonies.
+    pub async fn discover_guardian_ceremony_proposals(
+        &self,
+    ) -> AgentResult<Vec<aura_core::types::identifiers::CeremonyId>> {
+        let authority_id = self.handler.authority_context().authority_id();
+        let envelopes = self.effects.peek_queued_choreography_envelopes();
+        if envelopes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let own_public_key = self
+            .effects
+            .retrieve(&recovery_guardian_public_key_storage_key(authority_id))
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        let Some(own_public_key) = own_public_key else {
+            // Not a guardian for anyone yet.
+            return Ok(Vec::new());
+        };
+
+        let mut registered = Vec::new();
+        for envelope in envelopes {
+            let Some(proposal) = decode_guardian_ceremony_proposal(&envelope.payload) else {
+                continue;
+            };
+            let session_matches = envelope
+                .metadata
+                .get("session-id")
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some_and(|session| session == Self::ceremony_session_id(proposal.ceremony_id));
+            let guardians: BTreeSet<AuthorityId> =
+                proposal.operation.guardian_ids.iter().copied().collect();
+            if !session_matches
+                || envelope.source != proposal.initiator_id
+                || envelope.destination != authority_id
+                || proposal.recipient_public_key != own_public_key
+                || !guardians.contains(&authority_id)
+                || guardians.len() != 2
+                || proposal.operation.threshold_k == 0
+                || usize::from(proposal.operation.threshold_k) > guardians.len()
+            {
+                continue;
+            }
+            let ceremony_id = aura_core::types::identifiers::CeremonyId::new(hex::encode(
+                proposal.ceremony_id.0 .0,
+            ));
+            if self.ceremony_runner.status(&ceremony_id).await.is_ok() {
+                continue;
+            }
+            self.ceremony_runner
+                .start(CeremonyInitRequest {
+                    ceremony_id: ceremony_id.clone(),
+                    kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
+                    initiator_id: proposal.initiator_id,
+                    threshold_k: proposal.operation.threshold_k,
+                    total_n: guardians.len() as u16,
+                    participants: guardians
+                        .iter()
+                        .copied()
+                        .map(aura_core::threshold::ParticipantIdentity::guardian)
+                        .collect(),
+                    new_epoch: proposal.operation.new_epoch,
+                    enrollment_device_id: None,
+                    enrollment_nickname_suggestion: None,
+                    prestate_hash: proposal.prestate_hash,
+                })
+                .await
+                .map_err(|error| {
+                    AgentError::internal(format!("guardian ceremony registration failed: {error}"))
+                })?;
+            tracing::info!(
+                ceremony_id = %ceremony_id,
+                initiator = %proposal.initiator_id,
+                "Discovered pending guardian ceremony proposal"
+            );
+            registered.push(ceremony_id);
+        }
+        Ok(registered)
+    }
+
+    async fn guardian_ceremony_timeout_budget(
+        &self,
+        timeout_ms: u64,
+    ) -> AgentResult<TimeoutBudget> {
+        let started_at = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|error| AgentError::runtime(error.to_string()))?;
+        let profile = if self.effects.is_testing() {
+            TimeoutExecutionProfile::simulation_test()
+        } else if self.effects.harness_mode_enabled() {
+            TimeoutExecutionProfile::harness()
+        } else {
+            TimeoutExecutionProfile::production()
+        };
+        let scaled = profile
+            .scale_duration(StdDuration::from_millis(timeout_ms))
+            .map_err(|error| AgentError::runtime(error.to_string()))?;
+        TimeoutBudget::from_start_and_timeout(&started_at, scaled)
+            .map_err(|error| AgentError::runtime(error.to_string()))
     }
 
     async fn build_guardian_ceremony_proposal(
@@ -2824,6 +3210,74 @@ fn guardian_ceremony_commit_certificate_storage_key(
     )
 }
 
+/// How a guardian's side of a guardian ceremony ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardianCeremonyGuardianOutcome {
+    /// The initiator committed the rotation at `new_epoch`.
+    Committed { new_epoch: u64 },
+    /// The initiator aborted the ceremony.
+    Aborted { reason: String },
+}
+
+/// Secure-storage location of the key package a guardian holds for an
+/// initiator's guardian-rotation epoch (same layout as other participant shares).
+pub(crate) fn guardian_ceremony_key_package_location(
+    initiator_id: AuthorityId,
+    new_epoch: u64,
+    guardian_id: AuthorityId,
+) -> SecureStorageLocation {
+    SecureStorageLocation::with_sub_key(
+        "participant_shares",
+        format!("{initiator_id}:{new_epoch}"),
+        aura_core::threshold::ParticipantIdentity::guardian(guardian_id).storage_key(),
+    )
+}
+
+/// Decode a guardian ceremony proposal as the initiator queues it.
+fn decode_guardian_ceremony_proposal(payload: &[u8]) -> Option<CeremonyProposal> {
+    from_slice::<ProposeRotation>(payload)
+        .map(|message| message.0)
+        .or_else(|_| from_slice::<CeremonyProposal>(payload))
+        .ok()
+}
+
+fn decode_guardian_ceremony_abort(payload: &[u8]) -> Option<CeremonyAbort> {
+    from_slice::<AbortCeremony>(payload)
+        .map(|message| message.0)
+        .or_else(|_| from_slice::<CeremonyAbort>(payload))
+        .ok()
+}
+
+/// Receive errors meaning "nothing has arrived yet" rather than a failure.
+fn is_transport_no_message(error: &aura_protocol::effects::ChoreographyError) -> bool {
+    match error {
+        aura_protocol::effects::ChoreographyError::Transport { source } => source
+            .downcast_ref::<aura_core::effects::TransportError>()
+            .is_some_and(|inner| {
+                matches!(
+                    inner,
+                    aura_core::effects::TransportError::NoMessage
+                        | aura_core::effects::TransportError::DestinationUnreachable { .. }
+                )
+            }),
+        _ => false,
+    }
+}
+
+fn map_guardian_ceremony_timeout(
+    label: &'static str,
+    budget: &TimeoutBudget,
+    error: TimeoutRunError<AgentError>,
+) -> AgentError {
+    match error {
+        TimeoutRunError::Timeout(_) => AgentError::timeout(format!(
+            "{label} exceeded {}ms response window",
+            budget.timeout_ms()
+        )),
+        TimeoutRunError::Operation(error) => error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::recovery::{
@@ -3835,5 +4289,469 @@ mod tests {
         )
         .await
         .unwrap());
+    }
+
+    // ---------------------------------------------------------------------
+    // Cross-runtime guardian ceremony
+    // ---------------------------------------------------------------------
+
+    fn run_on_large_stack<F>(future: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        std::thread::Builder::new()
+            .name("guardian-ceremony-test".to_string())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime should build")
+                    .block_on(future);
+            })
+            .expect("test thread should spawn")
+            .join()
+            .expect("test thread should complete");
+    }
+
+    fn install_test_biscuit_cache(effects: &Arc<AuraEffectSystem>, authority: AuthorityId) {
+        use base64::Engine;
+        let issuer = aura_authorization::TokenAuthority::new(authority);
+        let token = issuer
+            .create_token(
+                authority,
+                crate::token_profiles::TokenCapabilityProfile::StandardDevice,
+            )
+            .expect("biscuit should build");
+        let engine = base64::engine::general_purpose::STANDARD;
+        effects.set_biscuit_cache(crate::runtime::effects::BiscuitCache {
+            token_b64: engine.encode(token.to_vec().expect("token should serialize")),
+            issuer_authority: authority,
+            root_pk_b64: engine.encode(issuer.root_public_key().to_bytes()),
+        });
+    }
+
+    struct GuardianPeer {
+        id: AuthorityId,
+        effects: Arc<AuraEffectSystem>,
+        service: RecoveryServiceApi,
+        tracker: CeremonyTracker,
+    }
+
+    struct GuardianCeremonyFixture {
+        initiator_id: AuthorityId,
+        initiator: RecoveryServiceApi,
+        guardians: [GuardianPeer; 2],
+    }
+
+    impl GuardianCeremonyFixture {
+        fn guardian_ids(&self) -> Vec<AuthorityId> {
+            self.guardians.iter().map(|guardian| guardian.id).collect()
+        }
+    }
+
+    fn guardian_peer(
+        id: AuthorityId,
+        device: aura_core::DeviceId,
+        effects: Arc<AuraEffectSystem>,
+    ) -> GuardianPeer {
+        install_test_biscuit_cache(&effects, id);
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let tracker = CeremonyTracker::new(time_effects);
+        let service = RecoveryServiceApi {
+            handler: RecoveryHandler::new(AuthorityContext::new_with_device(id, device)).unwrap(),
+            effects: effects.clone(),
+            ceremony_runner: CeremonyRunner::new(tracker.clone()),
+            reconfiguration: ReconfigurationManager::new(),
+            tasks: Arc::new(TaskSupervisor::new()),
+        };
+        GuardianPeer {
+            id,
+            effects,
+            service,
+            tracker,
+        }
+    }
+
+    /// Identities for three runtimes over one shared transport, with distinct
+    /// devices: index 0 is the initiator, 1 and 2 are the guardians.
+    struct CeremonyIdentities {
+        seed: u8,
+        shared: crate::runtime::SharedTransport,
+        authorities: [AuthorityId; 3],
+        devices: [aura_core::DeviceId; 3],
+    }
+
+    impl CeremonyIdentities {
+        fn new(seed: u8) -> Self {
+            Self {
+                seed,
+                shared: crate::runtime::SharedTransport::new(),
+                authorities: [0, 1, 2].map(|i| AuthorityId::new_from_entropy([seed + i; 32])),
+                devices: [3, 4, 5].map(|i| aura_core::DeviceId::new_from_entropy([seed + i; 32])),
+            }
+        }
+
+        fn config(&self, index: usize) -> AgentConfig {
+            AgentConfig {
+                device_id: self.devices[index],
+                ..Default::default()
+            }
+        }
+    }
+
+    /// Each guardian holds its recovery keypair; the initiator holds the public
+    /// keys it recorded when the guardians accepted their invitations.
+    ///
+    /// Test seeds derive from the call site, so each test builds its own
+    /// runtimes (one call site per runtime) and hands them in.
+    async fn guardian_ceremony_fixture(
+        ids: &CeremonyIdentities,
+        runtimes: [Arc<AuraEffectSystem>; 3],
+    ) -> GuardianCeremonyFixture {
+        let [initiator_effects, effects_a, effects_b] = runtimes;
+        let [initiator_id, guardian_a, guardian_b] = ids.authorities;
+        let [initiator_device, device_a, device_b] = ids.devices;
+        install_test_biscuit_cache(&initiator_effects, initiator_id);
+
+        let guardians = [
+            guardian_peer(guardian_a, device_a, effects_a),
+            guardian_peer(guardian_b, device_b, effects_b),
+        ];
+        for guardian in &guardians {
+            let (_, public_key) =
+                store_guardian_setup_signing_keypair(&guardian.effects, guardian.id).await;
+            initiator_effects
+                .store(
+                    &recovery_guardian_public_key_storage_key(guardian.id),
+                    public_key,
+                )
+                .await
+                .unwrap();
+        }
+        let initiator = RecoveryServiceApi::new_for_test(
+            initiator_effects,
+            AuthorityContext::new_with_device(initiator_id, initiator_device),
+        )
+        .unwrap();
+        GuardianCeremonyFixture {
+            initiator_id,
+            initiator,
+            guardians,
+        }
+    }
+
+    fn rotation_op(guardians: Vec<AuthorityId>) -> GuardianRotationOp {
+        GuardianRotationOp {
+            threshold_k: 2,
+            total_n: 2,
+            guardian_ids: guardians,
+            new_epoch: 7,
+        }
+    }
+
+    fn tracker_ceremony_id(
+        ceremony_id: aura_recovery::CeremonyId,
+    ) -> aura_core::types::identifiers::CeremonyId {
+        aura_core::types::identifiers::CeremonyId::new(hex::encode(ceremony_id.0 .0))
+    }
+
+    /// Poll discovery the way the periodic ceremony processing does.
+    async fn discover_until_registered(
+        guardian: &GuardianPeer,
+    ) -> Vec<aura_core::types::identifiers::CeremonyId> {
+        for _ in 0..100 {
+            let found = guardian
+                .service
+                .discover_guardian_ceremony_proposals()
+                .await
+                .unwrap();
+            if !found.is_empty() {
+                return found;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("guardian never discovered the ceremony proposal");
+    }
+
+    async fn run_cross_runtime_guardian_ceremony(
+        ids: CeremonyIdentities,
+        runtimes: [Arc<AuraEffectSystem>; 3],
+        responses: [CeremonyResponse; 2],
+    ) -> (
+        GuardianCeremonyFixture,
+        Vec<AgentResult<GuardianCeremonyGuardianOutcome>>,
+        AgentResult<Vec<VerifiedIngress<CeremonyResponseMsg>>>,
+        Vec<Vec<u8>>,
+    ) {
+        let seed = ids.seed;
+        let fixture = guardian_ceremony_fixture(&ids, runtimes).await;
+        let guardian_ids = fixture.guardian_ids();
+        let ceremony_id = aura_recovery::CeremonyId(Hash32([seed; 32]));
+        let prestate_hash = Hash32([seed.wrapping_add(9); 32]);
+        let key_packages = vec![vec![0xA1; 48], vec![0xB2; 48]];
+
+        let initiator = fixture.initiator.clone();
+        let operation = rotation_op(guardian_ids.clone());
+        let initiator_guardians = guardian_ids.clone();
+        let initiator_packages = key_packages.clone();
+        let initiator_task = tokio::spawn(async move {
+            initiator
+                .execute_guardian_ceremony_initiator(
+                    ceremony_id,
+                    prestate_hash,
+                    operation,
+                    initiator_guardians,
+                    initiator_packages,
+                )
+                .await
+        });
+
+        // Both guardians learn about the ceremony from the queued proposal.
+        for guardian in &fixture.guardians {
+            let found = discover_until_registered(guardian).await;
+            assert_eq!(found, vec![tracker_ceremony_id(ceremony_id)]);
+        }
+
+        // People approve later: longer than a single VM receive window.
+        tokio::time::sleep(Duration::from_millis(6_000)).await;
+        let initiator_id = fixture.initiator_id;
+        let (first, second) = tokio::join!(
+            fixture.guardians[0]
+                .service
+                .execute_guardian_ceremony_guardian(
+                    initiator_id,
+                    ceremony_id,
+                    responses[0],
+                    &guardian_ids,
+                ),
+            fixture.guardians[1]
+                .service
+                .execute_guardian_ceremony_guardian(
+                    initiator_id,
+                    ceremony_id,
+                    responses[1],
+                    &guardian_ids,
+                ),
+        );
+        let initiator_result = initiator_task.await.expect("initiator task joins");
+        (fixture, vec![first, second], initiator_result, key_packages)
+    }
+
+    #[test]
+    fn guardian_ceremony_completes_across_runtimes_when_guardians_respond_late() {
+        run_on_large_stack(async {
+            let ids = CeremonyIdentities::new(40);
+            let runtimes = [
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(0),
+                    ids.authorities[0],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(1),
+                    ids.authorities[1],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(2),
+                    ids.authorities[2],
+                    ids.shared.clone(),
+                ),
+            ];
+            let (fixture, guardian_results, initiator_result, key_packages) =
+                run_cross_runtime_guardian_ceremony(
+                    ids,
+                    runtimes,
+                    [CeremonyResponse::Accept, CeremonyResponse::Accept],
+                )
+                .await;
+
+            for result in guardian_results {
+                assert_eq!(
+                    result.expect("guardian side completes"),
+                    GuardianCeremonyGuardianOutcome::Committed { new_epoch: 7 }
+                );
+            }
+            let accepted = initiator_result.expect("initiator commits");
+            let accepted_guardians: BTreeSet<_> = accepted
+                .iter()
+                .map(|response| response.payload().guardian_id)
+                .collect();
+            assert_eq!(
+                accepted_guardians,
+                fixture.guardian_ids().into_iter().collect::<BTreeSet<_>>()
+            );
+
+            for (guardian, key_package) in fixture.guardians.iter().zip(&key_packages) {
+                let stored = guardian
+                    .effects
+                    .secure_retrieve(
+                        &guardian_ceremony_key_package_location(
+                            fixture.initiator_id,
+                            7,
+                            guardian.id,
+                        ),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await
+                    .expect("guardian stores its key package");
+                assert_eq!(&stored, key_package);
+            }
+        });
+    }
+
+    #[test]
+    fn guardian_ceremony_aborts_across_runtimes_when_a_guardian_declines() {
+        run_on_large_stack(async {
+            let ids = CeremonyIdentities::new(60);
+            let runtimes = [
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(0),
+                    ids.authorities[0],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(1),
+                    ids.authorities[1],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(2),
+                    ids.authorities[2],
+                    ids.shared.clone(),
+                ),
+            ];
+            let (fixture, guardian_results, initiator_result, _) =
+                run_cross_runtime_guardian_ceremony(
+                    ids,
+                    runtimes,
+                    [CeremonyResponse::Accept, CeremonyResponse::Decline],
+                )
+                .await;
+
+            for result in guardian_results {
+                assert_eq!(
+                    result.expect("guardian side finishes cleanly"),
+                    GuardianCeremonyGuardianOutcome::Aborted {
+                        reason: "guardian_declined".to_string()
+                    }
+                );
+            }
+            let error = initiator_result.expect_err("initiator aborts");
+            assert!(
+                error.to_string().contains("guardian_declined"),
+                "unexpected abort error: {error}"
+            );
+            let declined = &fixture.guardians[1];
+            assert!(declined
+                .effects
+                .secure_retrieve(
+                    &guardian_ceremony_key_package_location(fixture.initiator_id, 7, declined.id),
+                    &[SecureStorageCapability::Read],
+                )
+                .await
+                .is_err());
+        });
+    }
+
+    #[test]
+    fn guardian_discovers_queued_ceremony_proposal_and_registers_it() {
+        run_on_large_stack(async {
+            let ids = CeremonyIdentities::new(80);
+            let runtimes = [
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(0),
+                    ids.authorities[0],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(1),
+                    ids.authorities[1],
+                    ids.shared.clone(),
+                ),
+                crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                    &ids.config(2),
+                    ids.authorities[2],
+                    ids.shared.clone(),
+                ),
+            ];
+            let fixture = guardian_ceremony_fixture(&ids, runtimes).await;
+            let guardian_ids = fixture.guardian_ids();
+            let guardian = &fixture.guardians[0];
+            let ceremony_id = aura_recovery::CeremonyId(Hash32([0x5A; 32]));
+            let prestate_hash = Hash32([0x5B; 32]);
+            let proposal = fixture
+                .initiator
+                .build_guardian_ceremony_proposal(
+                    guardian.id,
+                    ceremony_id,
+                    prestate_hash,
+                    &rotation_op(guardian_ids.clone()),
+                    &[0xC3; 32],
+                )
+                .await
+                .unwrap();
+            let session_id = RecoveryServiceApi::ceremony_session_id(ceremony_id);
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-choreography".to_string(),
+            );
+            metadata.insert("session-id".to_string(), session_id.to_string());
+            // Network ingress lands in the session inbox of a session not yet opened.
+            guardian
+                .effects
+                .requeue_envelope(aura_core::effects::TransportEnvelope {
+                    destination: guardian.id,
+                    source: fixture.initiator_id,
+                    context: ContextId::new_from_entropy([0x5C; 32]),
+                    payload: to_vec(&ProposeRotation(proposal)).unwrap(),
+                    metadata,
+                    receipt: None,
+                });
+
+            let found = guardian
+                .service
+                .discover_guardian_ceremony_proposals()
+                .await
+                .unwrap();
+            let expected_id = tracker_ceremony_id(ceremony_id);
+            assert_eq!(found, vec![expected_id.clone()]);
+
+            let tracked = guardian.tracker.get(&expected_id).await.unwrap();
+            assert_eq!(
+                tracked.kind,
+                aura_app::runtime_bridge::CeremonyKind::GuardianRotation
+            );
+            assert_eq!(tracked.initiator_id, fixture.initiator_id);
+            assert_eq!(tracked.threshold_k, 2);
+            assert_eq!(tracked.new_epoch, 7);
+            let participants: std::collections::HashSet<_> = guardian_ids
+                .iter()
+                .copied()
+                .map(aura_core::threshold::ParticipantIdentity::guardian)
+                .collect();
+            assert_eq!(tracked.participants, participants);
+
+            // Discovery peeks: the proposal stays queued and is not re-registered.
+            assert_eq!(
+                guardian.effects.peek_queued_choreography_envelopes().len(),
+                1
+            );
+            assert!(guardian
+                .service
+                .discover_guardian_ceremony_proposals()
+                .await
+                .unwrap()
+                .is_empty());
+            // The other guardian has nothing queued.
+            assert!(fixture.guardians[1]
+                .service
+                .discover_guardian_ceremony_proposals()
+                .await
+                .unwrap()
+                .is_empty());
+        });
     }
 }

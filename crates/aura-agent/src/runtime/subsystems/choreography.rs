@@ -502,6 +502,14 @@ impl ChoreographyState {
             .unwrap_or_default()
     }
 
+    /// Clone every queued envelope across all session-local inboxes without consuming them.
+    ///
+    /// Used to discover inbound sessions (for example a guardian ceremony proposal) that
+    /// this runtime has not opened yet.
+    pub fn queued_session_envelopes_snapshot(&self) -> Vec<TransportEnvelope> {
+        self.session_inboxes.values().flatten().cloned().collect()
+    }
+
     /// Claim authoritative ownership for one active session.
     pub fn claim_session_owner(
         &mut self,

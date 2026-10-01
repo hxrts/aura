@@ -245,6 +245,21 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
     // decision skips `handle_send`. Every send must go through it so the queued
     // payload is recorded for the host bridge to put on the transport.
     fn send_decision(&self, input: SendDecisionInput<'_>) -> EffectResult<SendDecision> {
+        // An `Offer` (the chooser announcing a branch) carries its label as the
+        // precomputed payload. It must not consume a queued application payload;
+        // it crosses the wire as a tagged label so the peer's `Choose` can branch.
+        if let Some(Value::Str(label)) = input.payload.as_ref() {
+            if label == input.label {
+                self.bridge_effects
+                    .record_pending_send(VmBridgePendingSend {
+                        from_role: input.role.to_string(),
+                        to_role: input.partner.to_string(),
+                        label: label.clone(),
+                        payload: encode_choice_label_wire(label),
+                    });
+                return EffectResult::success(SendDecision::Deliver(Value::Str(label.clone())));
+            }
+        }
         self.handle_send(input.role, input.partner, input.label, input.state)
             .map_success(SendDecision::Deliver)
     }
@@ -827,19 +842,35 @@ pub async fn receive_blocked_vm_message(
     }))
 }
 
+/// Wire prefix marking a VM branch label (sent by an `Offer`) rather than an
+/// application payload.
+const VM_CHOICE_LABEL_WIRE_PREFIX: &[u8] = b"\0aura-vm-choice-label:";
+
+pub(crate) fn encode_choice_label_wire(label: &str) -> Vec<u8> {
+    let mut wire = VM_CHOICE_LABEL_WIRE_PREFIX.to_vec();
+    wire.extend_from_slice(label.as_bytes());
+    wire
+}
+
+/// Decode a branch label sent by a remote `Offer`, if this payload is one.
+pub(crate) fn decode_choice_label_wire(payload: &[u8]) -> Option<&str> {
+    payload
+        .strip_prefix(VM_CHOICE_LABEL_WIRE_PREFIX)
+        .and_then(|label| std::str::from_utf8(label).ok())
+}
+
 pub fn inject_vm_receive(
     engine: &mut AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     sid: SessionId,
     receive: &BlockedVmReceive,
 ) -> Result<(), String> {
+    let value = match decode_choice_label_wire(&receive.payload) {
+        Some(label) => Value::Str(label.to_string()),
+        None => AuraQueuedVmBridgeHandler::bytes_to_value(&receive.payload),
+    };
     engine
         .vm_mut()
-        .inject_message(
-            sid,
-            &receive.from_role,
-            &receive.to_role,
-            AuraQueuedVmBridgeHandler::bytes_to_value(&receive.payload),
-        )
+        .inject_message(sid, &receive.from_role, &receive.to_role, value)
         .map(|_| ())
         .map_err(|error| format!("failed to inject VM message: {error}"))
 }

@@ -1877,9 +1877,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         guardian_ids: &[AuthorityId],
     ) -> Result<aura_core::types::identifiers::CeremonyId, IntentError> {
         use aura_core::hash::hash;
-        use aura_core::threshold::{
-            policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
-        };
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_recovery::guardian_ceremony::GuardianState;
         use aura_recovery::{CeremonyId as GuardianCeremonyId, GuardianRotationOp};
 
@@ -2043,80 +2041,42 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 IntentError::internal_error(format!("Failed to register ceremony: {}", e))
             })?;
 
-        // Step 4: Execute guardian ceremony choreography (send proposals + collect responses)
+        // Steps 4-7 wait on guardians, who approve on their own devices and may
+        // take minutes. Run them as an owned background task and return the
+        // ceremony id now; failures mark the ceremony failed in the tracker.
         let recovery_service = self
             .agent
             .recovery()
             .map_err(|e| service_unavailable_with_detail("recovery_service", e))?;
-
-        let accepted_guardian_responses = recovery_service
-            .execute_guardian_ceremony_initiator(
+        let task_name = format!("guardian_ceremony_initiator.{ceremony_id}");
+        let task_ceremony_id = ceremony_id.clone();
+        let fut = async move {
+            let result = run_guardian_ceremony_initiator(
+                recovery_service,
+                runner.clone(),
+                effects,
+                authority_id,
+                task_ceremony_id.clone(),
                 ceremony_id_hash,
                 prestate_hash,
-                operation.clone(),
-                guardian_ids.to_vec(),
-                key_packages.clone(),
+                operation,
+                key_packages,
             )
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to execute guardian ceremony choreography: {e}"
-                ))
-            })?;
-
-        // Step 5: Record accepted participants before committing
-        for response in &accepted_guardian_responses {
-            runner
-                .record_verified_response(
-                    &ceremony_id,
-                    ParticipantIdentity::guardian(response.payload().guardian_id),
-                    response,
-                )
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to record guardian acceptance: {e}"
-                    ))
-                })?;
-        }
-
-        // Step 6: Mark ceremony as committed after successful choreography completion
-        runner
-            .commit(
-                &ceremony_id,
-                CeremonyCommitMetadata {
-                    committed_at: None,
-                    consensus_id: None,
-                },
-            )
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to commit ceremony: {e}")))?;
-
-        tracing::info!(
-            ceremony_id = %ceremony_id,
-            "Guardian ceremony completed successfully"
-        );
-
-        // Step 7: Commit GuardianBinding facts for each accepted guardian.
-        // This enables the ContactsSignalView to reflect guardian status in the UI.
-        for response in &accepted_guardian_responses {
-            let guardian_id = response.payload().guardian_id;
-            let binding_fact = RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
-                account_id: authority_id,
-                guardian_id,
-                binding_hash: Hash32::default(),
-            });
-            if let Err(e) = effects.commit_relational_facts(vec![binding_fact]).await {
+            .await;
+            if let Err(error) = result {
                 tracing::warn!(
-                    guardian_id = %guardian_id,
-                    error = %e,
-                    "Failed to commit GuardianBinding fact (UI may not reflect guardian status)"
+                    ceremony_id = %task_ceremony_id,
+                    error = %error,
+                    "Guardian ceremony failed"
                 );
+                let _ = runner.abort(&task_ceremony_id, Some(error)).await;
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, fut);
             } else {
-                tracing::info!(
-                    guardian_id = %guardian_id,
-                    "Committed GuardianBinding fact"
-                );
+                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, fut);
             }
         }
 
@@ -3585,6 +3545,90 @@ impl RuntimeBridge for AgentRuntimeBridge {
 // ============================================================================
 // AgentRuntimeBridge helpers
 // ============================================================================
+
+/// Guardian ceremony steps 4-7 for the initiator: run the choreography, record
+/// verified acceptances, commit the ceremony, and publish GuardianBinding facts.
+#[allow(clippy::too_many_arguments)]
+async fn run_guardian_ceremony_initiator(
+    recovery_service: crate::handlers::RecoveryServiceApi,
+    runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+    effects: Arc<crate::AuraEffectSystem>,
+    authority_id: AuthorityId,
+    ceremony_id: aura_core::types::identifiers::CeremonyId,
+    ceremony_id_hash: aura_recovery::CeremonyId,
+    prestate_hash: Hash32,
+    operation: aura_recovery::GuardianRotationOp,
+    key_packages: Vec<Vec<u8>>,
+) -> Result<(), String> {
+    use aura_core::threshold::ParticipantIdentity;
+
+    // Step 4: Execute guardian ceremony choreography (send proposals + collect responses)
+    let guardian_ids = operation.guardian_ids.clone();
+    let accepted_guardian_responses = recovery_service
+        .execute_guardian_ceremony_initiator(
+            ceremony_id_hash,
+            prestate_hash,
+            operation,
+            guardian_ids,
+            key_packages,
+        )
+        .await
+        .map_err(|e| format!("Failed to execute guardian ceremony choreography: {e}"))?;
+
+    // Step 5: Record accepted participants before committing
+    for response in &accepted_guardian_responses {
+        runner
+            .record_verified_response(
+                &ceremony_id,
+                ParticipantIdentity::guardian(response.payload().guardian_id),
+                response,
+            )
+            .await
+            .map_err(|e| format!("Failed to record guardian acceptance: {e}"))?;
+    }
+
+    // Step 6: Mark ceremony as committed after successful choreography completion
+    runner
+        .commit(
+            &ceremony_id,
+            CeremonyCommitMetadata {
+                committed_at: None,
+                consensus_id: None,
+            },
+        )
+        .await
+        .map_err(|e| format!("Failed to commit ceremony: {e}"))?;
+
+    tracing::info!(
+        ceremony_id = %ceremony_id,
+        "Guardian ceremony completed successfully"
+    );
+
+    // Step 7: Commit GuardianBinding facts for each accepted guardian.
+    // This enables the ContactsSignalView to reflect guardian status in the UI.
+    for response in &accepted_guardian_responses {
+        let guardian_id = response.payload().guardian_id;
+        let binding_fact = RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
+            account_id: authority_id,
+            guardian_id,
+            binding_hash: Hash32::default(),
+        });
+        if let Err(e) = effects.commit_relational_facts(vec![binding_fact]).await {
+            tracing::warn!(
+                guardian_id = %guardian_id,
+                error = %e,
+                "Failed to commit GuardianBinding fact (UI may not reflect guardian status)"
+            );
+        } else {
+            tracing::info!(
+                guardian_id = %guardian_id,
+                "Committed GuardianBinding fact"
+            );
+        }
+    }
+
+    Ok(())
+}
 
 impl AgentRuntimeBridge {
     fn spawn_sole_device_enrollment_finalizer(

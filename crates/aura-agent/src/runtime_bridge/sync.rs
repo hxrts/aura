@@ -213,6 +213,17 @@ pub(super) async fn process_ceremony_messages(
         0
     };
 
+    // Register guardian ceremony proposals addressed to us so the guardian can
+    // approve them; the queued proposal stays for the guardian session.
+    if let Ok(recovery_service) = bridge.agent.recovery() {
+        if let Err(error) = recovery_service
+            .discover_guardian_ceremony_proposals()
+            .await
+        {
+            tracing::warn!(error = %error, "guardian ceremony proposal discovery failed");
+        }
+    }
+
     let counts = CeremonyProcessingCounts {
         acceptances: 0,
         completions: 0,
