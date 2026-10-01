@@ -327,6 +327,23 @@ pub(super) async fn invite_authority_to_channel_with_context(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
+    // The invitee requires the channel name; callers like `/invite` only
+    // carry the channel id, so take it from the chat projection.
+    let channel_name_hint = match channel_name_hint {
+        Some(name) => Some(name),
+        None => crate::workflows::signals::read_signal(
+            app_core,
+            &*crate::signal_defs::CHAT_SIGNAL,
+            crate::signal_defs::CHAT_SIGNAL_NAME,
+        )
+        .await
+        .ok()
+        .and_then(|chat| {
+            chat.channel(&channel_id)
+                .map(|channel| channel.name.clone())
+        })
+        .filter(|name| !name.trim().is_empty()),
+    };
     let emit_stage = |_stage: &'static str| {};
     emit_stage("require_runtime");
     update_workflow_stage(&stage_tracker, "require_runtime");
