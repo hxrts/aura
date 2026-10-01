@@ -1281,20 +1281,6 @@ async fn reconcile_accepted_channel_invitation_authoritative(
     );
     let local_channel_id = authoritative_channel.channel_id();
     let authoritative_context = authoritative_channel.context_id();
-    // Commit the channel before the observed membership projection, which
-    // would otherwise make it look already known.
-    update_accept_reconcile_stage(
-        stage_tracker,
-        "reconcile_channel_invitation:materialize_channel",
-    );
-    materialize_accepted_channel(
-        app_core,
-        runtime,
-        authoritative_channel,
-        channel_name_hint,
-        inviter,
-    )
-    .await?;
     update_accept_reconcile_stage(
         stage_tracker,
         "reconcile_channel_invitation:project_channel_peer_membership",
@@ -1422,6 +1408,20 @@ async fn reconcile_accepted_channel_invitation_authoritative(
             .unwrap_or_else(|_| Ok(None))?;
         }
     }
+    // Commit the channel after joining: a rejoin after leaving only lists it
+    // once our membership is restored.
+    update_accept_reconcile_stage(
+        stage_tracker,
+        "reconcile_channel_invitation:materialize_channel",
+    );
+    materialize_accepted_channel(
+        app_core,
+        runtime,
+        authoritative_channel,
+        channel_name_hint,
+        inviter,
+    )
+    .await?;
     crate::workflows::messaging::publish_authoritative_channel_membership_ready(
         app_core,
         local_channel_id,

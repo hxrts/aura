@@ -181,15 +181,23 @@ pub async fn replace_neighborhood_projection_observed(
 /// 2. CHAT_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
+/// The chat state observed updates build on: the live `CHAT_SIGNAL` (the
+/// runtime view emits there), falling back to the ViewState snapshot when
+/// the signal is not available. Building on the snapshot alone would write
+/// back state the runtime has since changed (e.g. a channel just left).
+async fn current_chat_projection(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
+    match read_signal(app_core, &*CHAT_SIGNAL, CHAT_SIGNAL_NAME).await {
+        Ok(chat) => chat,
+        Err(_) => app_core.read().await.snapshot().chat,
+    }
+}
+
 pub async fn update_chat_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut ChatState) -> T,
 ) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().chat;
-        (update(&mut state), state)
-    };
+    let mut state = current_chat_projection(app_core).await;
+    let output = update(&mut state);
 
     replace_chat_projection_observed(app_core, state).await?;
 
@@ -211,8 +219,7 @@ pub async fn reduce_chat_fact_observed(
     let reducer = ChatViewReducer;
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None);
     let state = {
-        let core = app_core.read().await;
-        let mut state = core.views().get_chat();
+        let mut state = current_chat_projection(app_core).await;
         for delta in deltas {
             let Some(chat_delta) = downcast_delta::<ChatDelta>(&delta) else {
                 continue;

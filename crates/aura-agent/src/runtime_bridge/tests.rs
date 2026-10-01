@@ -1474,3 +1474,82 @@ async fn sync_seeded_peers_requires_seeded_peer_set() {
         "expected empty-peer sync error, got: {error}"
     );
 }
+
+#[test]
+fn leaving_a_channel_removes_it_from_the_chat_projection() {
+    run_async_test_on_large_stack(async move {
+        use aura_journal::DomainFact as _;
+        let authority = AuthorityId::new_from_entropy([70u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([71u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        let effects = agent.runtime().effects();
+        let context = ContextId::new_from_entropy([72u8; 32]);
+        let channel = ChannelId::from_bytes(hash(b"leave-removes-channel"));
+        bridge
+            .amp_create_channel(ChannelCreateParams {
+                context,
+                channel: Some(channel),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .expect("create channel");
+        bridge
+            .amp_join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("join channel");
+        let created = aura_chat::ChatFact::channel_created_ms(
+            context,
+            channel,
+            "lab".to_string(),
+            None,
+            false,
+            1,
+            authority,
+        )
+        .to_generic();
+        bridge
+            .commit_relational_facts(std::slice::from_ref(&created))
+            .await
+            .expect("commit channel");
+        effects.await_next_view_update().await;
+        let listed = |chat: aura_app::views::chat::ChatState| chat.channel(&channel).is_some();
+        let chat = effects
+            .reactive_handler()
+            .read(&*aura_app::signal_defs::CHAT_SIGNAL)
+            .await
+            .expect("chat signal");
+        assert!(listed(chat), "channel listed after creation");
+
+        bridge
+            .amp_leave_channel(ChannelLeaveParams {
+                context,
+                channel,
+                participant: authority,
+            })
+            .await
+            .expect("leave channel");
+        effects.await_next_view_update().await;
+        let chat = effects
+            .reactive_handler()
+            .read(&*aura_app::signal_defs::CHAT_SIGNAL)
+            .await
+            .expect("chat signal");
+        assert!(!listed(chat), "channel removed after leaving");
+    });
+}
