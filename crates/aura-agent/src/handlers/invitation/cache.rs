@@ -349,7 +349,10 @@ impl<'a> InvitationCacheHandler<'a> {
                 invitation_id: shareable.invitation_id,
                 context_id,
                 sender_id: shareable.sender_id,
-                receiver_id: own_id,
+                receiver_id: super::imported_invitation_receiver(
+                    &shareable.invitation_type,
+                    own_id,
+                ),
                 invitation_type: shareable.invitation_type,
                 status,
                 created_at,

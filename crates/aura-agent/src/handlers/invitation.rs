@@ -1894,13 +1894,10 @@ impl InvitationHandler {
         // Imported invitations are "received" by the current authority, except a
         // device enrollment, which names the authority it invited: the new device
         // re-imports the code after its runtime switches to the subject authority.
-        let receiver_id = match &shareable.invitation_type {
-            InvitationType::DeviceEnrollment {
-                invitee_authority: Some(invitee),
-                ..
-            } => *invitee,
-            _ => self.context.authority.authority_id(),
-        };
+        let receiver_id = imported_invitation_receiver(
+            &shareable.invitation_type,
+            self.context.authority.authority_id(),
+        );
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
             context_id,
@@ -2232,7 +2229,7 @@ impl InvitationHandler {
                     invitation_id: shareable.invitation_id,
                     context_id,
                     sender_id: shareable.sender_id,
-                    receiver_id: own_id,
+                    receiver_id: imported_invitation_receiver(&shareable.invitation_type, own_id),
                     invitation_type: shareable.invitation_type,
                     status,
                     created_at: if created_at == 0 { now_ms } else { created_at },
@@ -2854,6 +2851,21 @@ fn channel_invitation_acceptance_transcript(
     }
 }
 
+/// Receiver of an imported invitation: the importing authority, except a device
+/// enrollment, which names the authority it invited (the new device re-imports
+/// and rehydrates the code after its runtime switches to the subject authority).
+pub(super) fn imported_invitation_receiver(
+    invitation_type: &InvitationType,
+    own_id: AuthorityId,
+) -> AuthorityId {
+    match invitation_type {
+        InvitationType::DeviceEnrollment {
+            invitee_authority: Some(invitee),
+            ..
+        } => *invitee,
+        _ => own_id,
+    }
+}
 async fn sign_invitation_acceptance_transcript<T>(
     effects: &AuraEffectSystem,
     authority: AuthorityId,
