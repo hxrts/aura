@@ -1891,12 +1891,21 @@ impl InvitationHandler {
             _ => self.context.effect_context.context_id(),
         };
 
-        // Imported invitations are "received" by the current authority.
+        // Imported invitations are "received" by the current authority, except a
+        // device enrollment, which names the authority it invited: the new device
+        // re-imports the code after its runtime switches to the subject authority.
+        let receiver_id = match &shareable.invitation_type {
+            InvitationType::DeviceEnrollment {
+                invitee_authority: Some(invitee),
+                ..
+            } => *invitee,
+            _ => self.context.authority.authority_id(),
+        };
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
             context_id,
             sender_id: shareable.sender_id,
-            receiver_id: self.context.authority.authority_id(),
+            receiver_id,
             invitation_type: shareable.invitation_type,
             status: InvitationStatus::Pending,
             created_at: now_ms,

@@ -134,6 +134,11 @@ pub enum InvitationType {
     DeviceEnrollment {
         /// Account authority being modified
         subject_authority: AuthorityId,
+        /// Authority the new device was invited as. The new device may re-import
+        /// the code after its runtime switches to `subject_authority`, so the
+        /// invited identity is carried in the signed invitation itself.
+        #[serde(default)]
+        invitee_authority: Option<AuthorityId>,
         /// Initiator device id (used for routing acceptance back to the right device runtime)
         initiator_device_id: DeviceId,
         /// Device id being enrolled

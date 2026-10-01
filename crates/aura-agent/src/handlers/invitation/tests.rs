@@ -3419,6 +3419,7 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
         context_id: Some(context_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority,
+            invitee_authority: None,
             initiator_device_id,
             device_id,
             nickname_suggestion: Some("WebApp".to_string()),
@@ -3440,6 +3441,7 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
 
     match decoded.invitation_type {
         InvitationType::DeviceEnrollment {
+            invitee_authority: _,
             subject_authority: decoded_subject_authority,
             initiator_device_id: decoded_initiator_device_id,
             device_id: decoded_device_id,
@@ -3475,6 +3477,7 @@ fn test_device_enrollment_invitation(invitation_id: &str) -> Invitation {
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
+            invitee_authority: None,
             initiator_device_id: DeviceId::new_from_entropy([152u8; 32]),
             device_id: DeviceId::new_from_entropy([153u8; 32]),
             nickname_suggestion: Some("Tablet".to_string()),
@@ -3638,6 +3641,7 @@ fn device_enrollment_test_invitation(
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
+            invitee_authority: None,
             initiator_device_id: DeviceId::new_from_entropy([153u8; 32]),
             device_id,
             nickname_suggestion: Some("Tablet".to_string()),
@@ -5036,4 +5040,30 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
 large_stack_async_test!(guardian_choreography_completes_when_guardian_accepts_late, {
     // Longer than one principal receive window, as when a person accepts later.
     run_guardian_choreography(191, std::time::Duration::from_millis(6_000)).await;
+});
+
+// Regression (work/8.md task 7): the new device re-imports the enrollment code
+// after its runtime switches to the subject authority; the invitation must
+// still name the authority that was invited, or the initiator rejects the
+// signed acceptance.
+large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
+    let mut invitation = test_device_enrollment_invitation("reimport-after-switch");
+    let invited = invitation.receiver_id;
+    if let InvitationType::DeviceEnrollment {
+        invitee_authority, ..
+    } = &mut invitation.invitation_type
+    {
+        *invitee_authority = Some(invited);
+    }
+    // The importing runtime already runs as the subject authority.
+    let subject_context = AuthorityContext::new(invitation.sender_id);
+    let effects = effects_for(&subject_context);
+    let handler = handler_for(subject_context);
+
+    let imported = handler
+        .import_invitation_code(&effects, &unsigned_test_code_for_invitation(&invitation))
+        .await
+        .expect("device enrollment code should import");
+
+    assert_eq!(imported.receiver_id, invited);
 });

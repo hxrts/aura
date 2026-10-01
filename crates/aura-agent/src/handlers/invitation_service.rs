@@ -648,6 +648,7 @@ impl InvitationServiceApi {
                 receiver_id,
                 InvitationType::DeviceEnrollment {
                     subject_authority,
+                    invitee_authority: Some(receiver_id),
                     initiator_device_id,
                     device_id,
                     nickname_suggestion,
