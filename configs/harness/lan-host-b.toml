@@ -34,3 +34,21 @@ demo_mode = false
 env = [
   "AURA_HARNESS_BROWSER_HEADLESS=true",
 ]
+
+# A device of another authority's account, enrolled during runs (work/8.md L-series).
+[[instances]]
+id = "barbara-tui2"
+mode = "local"
+data_dir = ".tmp/e2e/run/host-b/state/barbara-tui2"
+device_id = "barbara-tui2-01"
+bind_address = "192.168.0.32:43102"
+demo_mode = false
+env = [
+  "AURA_CLIPBOARD_MODE=file_only",
+]
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "0.0.0.0"
+broadcast_addr = "255.255.255.255"
+port = 19433
