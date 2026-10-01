@@ -105,7 +105,15 @@ async fn async_main() -> Result<(), AuraError> {
     }
 
     if let Commands::Tui(tui_args) = &command {
-        aura_terminal::handlers::tui::handle_tui(tui_args)
+        // The global `--data-dir` may capture the flag written after `tui`.
+        let mut tui_args = tui_args.clone();
+        if tui_args.data_dir.is_none() {
+            tui_args.data_dir = args
+                .data_dir
+                .as_ref()
+                .map(|dir| dir.to_string_lossy().into_owned());
+        }
+        aura_terminal::handlers::tui::handle_tui(&tui_args)
             .await
             .map_err(|e| AuraError::agent(format!("{e}")))?;
         return Ok(());
@@ -530,6 +538,23 @@ mod tests {
             .unwrap();
         assert!(matches!(args.command, Commands::Version));
         assert!(args.verbose);
+    }
+
+    #[test]
+    fn tui_data_dir_is_available_whichever_parser_takes_it() {
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&["tui", "--data-dir", "/tmp/aura-x"]))
+            .unwrap();
+        let Commands::Tui(tui_args) = &args.command else {
+            panic!("expected tui command");
+        };
+        let effective = tui_args.data_dir.clone().or_else(|| {
+            args.data_dir
+                .as_ref()
+                .map(|dir| dir.to_string_lossy().into_owned())
+        });
+        assert_eq!(effective.as_deref(), Some("/tmp/aura-x"));
     }
 
     #[test]
