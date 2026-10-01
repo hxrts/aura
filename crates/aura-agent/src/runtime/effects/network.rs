@@ -549,6 +549,17 @@ async fn resolve_network_peer(
         if manager.get_own_device_peer(device).await.is_some() {
             return (effects.authority_id, Some(device));
         }
+        // Peers known through rendezvous or relay rather than LAN broadcast.
+        for authority in manager.list_cached_peers().await {
+            if manager
+                .list_cached_descriptors_for_authority(authority)
+                .await
+                .iter()
+                .any(|descriptor| descriptor.device_id == Some(device))
+            {
+                return (authority, Some(device));
+            }
+        }
     }
     if let Some(authority) = effects
         .transport
