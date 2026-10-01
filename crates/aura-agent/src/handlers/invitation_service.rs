@@ -13,15 +13,10 @@ use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
-use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::effects::secure::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
-use aura_core::secrets::SecretExportContext;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_core::Hash32;
@@ -883,31 +878,15 @@ impl InvitationServiceApi {
         code
     }
 
+    /// The authority's identity signing keys, from plain or encrypted
+    /// participant storage at the current epoch (shared with rendezvous).
     async fn retrieve_identity_keys_from_effects(
         effects: &AuraEffectSystem,
         authority: &AuthorityId,
     ) -> Option<(Vec<u8>, Vec<u8>)> {
-        let caps = vec![SecureStorageCapability::Read];
-        for epoch in [1_u64, 0_u64] {
-            let location = SecureStorageLocation::with_sub_key(
-                "signing_keys",
-                format!("{authority}:{epoch}"),
-                "1",
-            );
-            let Ok(bytes) = effects.secure_retrieve(&location, &caps).await else {
-                continue;
-            };
-            let Ok(pkg) = SingleSignerKeyPackage::import_from_secure_storage(
-                &bytes,
-                SecretExportContext::secure_storage(
-                    "aura-agent::handlers::invitation_service::retrieve_identity_keys",
-                ),
-            ) else {
-                continue;
-            };
-            return Some((pkg.signing_key().to_vec(), pkg.verifying_key().to_vec()));
-        }
-        None
+        crate::handlers::rendezvous_identity::retrieve_identity_keys(effects, authority)
+            .await
+            .map(|(signing, verifying)| (signing.to_vec(), verifying.to_vec()))
     }
 
     pub(crate) async fn export_signed_invitation_with_transport(
