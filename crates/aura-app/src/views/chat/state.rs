@@ -175,15 +175,25 @@ impl ChatState {
     }
 
     pub fn apply_message(&mut self, channel_id: ChannelId, message: Message) {
+        let is_latest = self
+            .channel_messages
+            .get(&channel_id)
+            .and_then(|messages| messages.last())
+            .is_none_or(|last| message.timestamp >= last.timestamp);
         if let Some(channel) = self.channel_mut(&channel_id) {
-            channel.last_message = Some(message.content.clone());
-            channel.last_message_time = Some(message.timestamp);
-            channel.last_activity = message.timestamp;
+            if is_latest {
+                channel.last_message = Some(message.content.clone());
+                channel.last_message_time = Some(message.timestamp);
+                channel.last_activity = message.timestamp;
+            }
         }
 
         let channel_msgs = self.channel_messages.entry(channel_id).or_default();
         if !channel_msgs.iter().any(|m| m.id == message.id) {
-            channel_msgs.push(message);
+            // Messages can arrive out of order; keep them ordered by send time
+            // (stable for equal timestamps).
+            let position = channel_msgs.partition_point(|m| m.timestamp <= message.timestamp);
+            channel_msgs.insert(position, message);
             if channel_msgs.len() > Self::MAX_ACTIVE_MESSAGES {
                 let overflow = channel_msgs.len() - Self::MAX_ACTIVE_MESSAGES;
                 channel_msgs.drain(0..overflow);
@@ -346,4 +356,41 @@ fn merge_channel_projection(canonical: &mut Channel, previous: Channel) {
     canonical.last_finalized_epoch = canonical
         .last_finalized_epoch
         .max(previous.last_finalized_epoch);
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+
+    fn message(channel_id: ChannelId, id: &str, timestamp: u64) -> Message {
+        Message {
+            id: id.to_string(),
+            channel_id,
+            sender_id: aura_core::types::identifiers::AuthorityId::new_from_entropy([3u8; 32]),
+            sender_name: String::new(),
+            content: id.to_string(),
+            timestamp,
+            reply_to: None,
+            is_own: false,
+            is_read: false,
+            delivery_status: MessageDeliveryStatus::default(),
+            epoch_hint: None,
+            is_finalized: false,
+        }
+    }
+
+    #[test]
+    fn out_of_order_arrivals_are_kept_in_send_order() {
+        let channel_id = ChannelId::from_bytes([9u8; 32]);
+        let mut state = ChatState::default();
+        for (id, timestamp) in [("m1", 10), ("m3", 30), ("m2", 20), ("m4", 40)] {
+            state.apply_message(channel_id, message(channel_id, id, timestamp));
+        }
+        let ids: Vec<_> = state
+            .messages_for_channel(&channel_id)
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["m1", "m2", "m3", "m4"]);
+    }
 }

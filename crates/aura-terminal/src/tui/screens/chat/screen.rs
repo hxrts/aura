@@ -345,7 +345,14 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             .all_channels()
             .find(|app_channel| app_channel.id.to_string() == channel.id)
             .filter(|app_channel| app_channel.is_dm)
-            .and_then(|app_channel| app_channel.member_ids.first())
+            .and_then(|app_channel| {
+                // The counterpart is the member we know as a contact; member
+                // lists may include our own authority.
+                app_channel.member_ids.iter().find(|member| {
+                    let member = member.to_string();
+                    contacts.iter().any(|contact| contact.id == member)
+                })
+            })
         {
             channel.name = format!(
                 "DM: {}",
