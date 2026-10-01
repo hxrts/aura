@@ -996,7 +996,11 @@ impl RawUiBackend for PlaywrightBrowserBackend {
                 "control {control_id:?} is disabled: {click_error}"
             ));
         }
-        if let Some(fallback_key) = control_id.activation_key() {
+        // Only navigation controls may fall back to a key: their effect is
+        // observable, so the activation is verified before it is reported.
+        if let (Some(target_screen), Some(fallback_key)) =
+            (target_screen, control_id.activation_key())
+        {
             self.with_session(|session| {
                 session.rpc_call(
                     "send_key",
@@ -1014,12 +1018,13 @@ impl RawUiBackend for PlaywrightBrowserBackend {
                      fallback key '{fallback_key}' failed: {send_error}"
                 )
             })?;
-            if let Some(target_screen) = target_screen {
-                if self.current_screen_is(target_screen) {
-                    return Ok(());
-                }
+            if self.current_screen_is(target_screen) {
+                return Ok(());
             }
-            return Ok(());
+            return Err(anyhow::anyhow!(
+                "control activation failed for {control_id:?}: click via {selector} failed: \
+                 {click_error}; fallback key '{fallback_key}' did not reach {target_screen:?}"
+            ));
         }
         Err(match navigation_error {
             Some(navigation_error) => anyhow::anyhow!(
@@ -1354,6 +1359,30 @@ mod tests {
         assert!(click_error_is_disabled_control(&disabled));
         let absent = anyhow::anyhow!("css_click_retries_exhausted selector=#x timeout");
         assert!(!click_error_is_disabled_control(&absent));
+    }
+
+    #[test]
+    fn failed_control_clicks_are_not_reported_as_activations() {
+        let source = include_str!("playwright_browser.rs");
+        let (_, tail) = source
+            .split_once("fn activate_control(&mut self, control_id: ControlId) -> Result<()> {")
+            .unwrap_or_else(|| panic!("missing activate_control"));
+        let (_, failure_path) = tail
+            .split_once("if click_error_is_disabled_control(&click_error) {")
+            .unwrap_or_else(|| panic!("missing disabled-control refusal"));
+        let failure_path = failure_path
+            .split_once("\n    fn click_target(&mut self, selector: &str) -> Result<()> {")
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("missing activate_control terminator"));
+        assert!(
+            failure_path.contains("(target_screen, control_id.activation_key())"),
+            "only navigation controls may fall back to an activation key after a failed click"
+        );
+        assert_eq!(
+            failure_path.matches("return Ok(());").count(),
+            1,
+            "a failed click may only report success once the fallback reached its target screen"
+        );
     }
     use crate::tool_api::ToolKey;
     use aura_app::ui::contract::{ControlId, FieldId, ScreenId};

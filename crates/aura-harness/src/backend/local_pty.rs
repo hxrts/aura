@@ -189,6 +189,17 @@ fn require_channel_binding_submission(
     }
 }
 
+/// Whether `control_id` belongs to a modal and so cannot exist with no modal open.
+fn is_modal_control(control_id: ControlId) -> bool {
+    matches!(
+        control_id,
+        ControlId::ModalConfirmButton
+            | ControlId::ModalCancelButton
+            | ControlId::ModalCopyButton
+            | ControlId::ModalInput
+    )
+}
+
 fn require_contact_invitation_submission(
     receipt: HarnessUiCommandReceipt,
     operation_name: &str,
@@ -1487,12 +1498,19 @@ impl RawUiBackend for LocalPtyBackend {
             }
             _ => {}
         }
-        if control_id == ControlId::ModalConfirmButton {
+        if is_modal_control(control_id) {
             let snapshot = self.ui_snapshot()?;
-            if matches!(
-                snapshot.open_modal,
-                Some(ModalId::CreateInvitation | ModalId::AddDevice)
-            ) {
+            // A key sent with no modal open would be reported as an activation
+            // of a control that is not on screen.
+            if snapshot.open_modal.is_none() {
+                anyhow::bail!("control {control_id:?} is not present: no modal is open");
+            }
+            if control_id == ControlId::ModalConfirmButton
+                && matches!(
+                    snapshot.open_modal,
+                    Some(ModalId::CreateInvitation | ModalId::AddDevice)
+                )
+            {
                 return self.send_keys("\r");
             }
         }
@@ -2079,6 +2097,20 @@ mod tests {
 
     use super::*;
     use crate::config::InstanceMode;
+
+    #[test]
+    fn modal_controls_require_an_open_modal() {
+        assert!(is_modal_control(ControlId::ModalConfirmButton));
+        assert!(is_modal_control(ControlId::ModalCancelButton));
+        assert!(!is_modal_control(ControlId::NavChat));
+        let source = include_str!("local_pty.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production
+                .contains("if snapshot.open_modal.is_none() {\n                anyhow::bail!("),
+            "modal controls must fail instead of sending keys when no modal is open"
+        );
+    }
 
     #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {
