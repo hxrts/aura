@@ -177,10 +177,14 @@ impl ChoreographicEffects for AuraEffectSystem {
             "aura-source-device-id".to_string(),
             current_role.device_id.to_string(),
         );
-        metadata.insert(
-            "aura-destination-device-id".to_string(),
-            role.device_id.to_string(),
-        );
+        // Authority-scoped roles carry a placeholder device id; stamping it would
+        // make the receiving device reject the envelope.
+        if !role.is_authority_scoped() {
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                role.device_id.to_string(),
+            );
+        }
         if let Some(protocol_id) = session.protocol_id.as_ref() {
             metadata.insert("protocol-id".to_string(), protocol_id.clone());
         }
@@ -957,7 +961,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_sends_include_protocol_and_device_routing_metadata() {
+    async fn session_sends_include_protocol_routing_metadata_without_placeholder_destination_device(
+    ) {
         let authority_id = AuthorityId::from_uuid(Uuid::from_bytes([0x71; 16]));
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
@@ -995,7 +1000,6 @@ mod tests {
             .expect("loopback send should queue one envelope");
         let session_id_string = session_id.to_string();
         let source_device_string = self_role.device_id.to_string();
-        let destination_device_string = loopback_peer.device_id.to_string();
 
         assert_eq!(
             envelope.metadata.get("content-type").map(String::as_str),
@@ -1016,13 +1020,10 @@ mod tests {
                 .map(String::as_str),
             Some(source_device_string.as_str())
         );
-        assert_eq!(
-            envelope
-                .metadata
-                .get("aura-destination-device-id")
-                .map(String::as_str),
-            Some(destination_device_string.as_str())
-        );
+        // Authority-scoped peers must not be pinned to the placeholder device id,
+        // or a real receiving device would never match the envelope.
+        assert!(loopback_peer.is_authority_scoped());
+        assert_eq!(envelope.metadata.get("aura-destination-device-id"), None);
 
         effects.end_session().await.expect("session ends");
     }

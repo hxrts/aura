@@ -169,11 +169,17 @@ impl ChoreographicRole {
 
     /// Create an authority-scoped role without reusing the authority UUID as a device id.
     pub fn for_authority(authority_id: AuthorityId, role_index: RoleIndex) -> Self {
-        Self::new(
-            DeviceId::new_from_entropy([0u8; 32]),
-            authority_id,
-            role_index,
-        )
+        Self::new(Self::authority_scoped_device_id(), authority_id, role_index)
+    }
+
+    /// Placeholder device id carried by authority-scoped roles.
+    fn authority_scoped_device_id() -> DeviceId {
+        DeviceId::new_from_entropy([0u8; 32])
+    }
+
+    /// Whether this role addresses an authority rather than a specific device.
+    pub fn is_authority_scoped(&self) -> bool {
+        self.device_id == Self::authority_scoped_device_id()
     }
 
     /// Create a new role from a 0-based index.
