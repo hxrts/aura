@@ -5,8 +5,9 @@ use aura_core::effects::StorageCoreEffects;
 use tokio::sync::mpsc;
 use tracing_subscriber::EnvFilter;
 
-use crate::env::{tui_allows_stdio, tui_log_path_override};
+use crate::env::{tui_allows_stdio, tui_log_path_override, tui_runtime_log_file};
 use crate::tui::tasks::UiTaskOwner;
+use aura_app::harness_mode_enabled;
 
 use super::{TuiMode, MAX_TUI_LOG_BYTES, TUI_LOG_KEY_PREFIX, TUI_LOG_QUEUE_CAPACITY};
 
@@ -37,6 +38,24 @@ impl io::Write for StorageLogWriter {
 
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
+    // Harness runs observe runtime behavior through a plaintext log the
+    // harness `tail_log` can read; the encrypted storage log is unreadable there.
+    if harness_mode_enabled() {
+        if let Some(path) = tui_runtime_log_file() {
+            if let Some(file) = open_runtime_log_file(&path) {
+                let filter =
+                    EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(filter)
+                    .with_ansi(false)
+                    .with_target(true)
+                    .with_writer(std::sync::Mutex::new(file))
+                    .try_init();
+                return;
+            }
+        }
+    }
+
     if tui_allows_stdio() {
         let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
         let _ = tracing_subscriber::fmt()
@@ -84,4 +103,16 @@ pub(super) fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMo
         .with_target(false)
         .with_writer(make_writer)
         .try_init();
+}
+
+fn open_runtime_log_file(path: &str) -> Option<std::fs::File> {
+    let path = std::path::Path::new(path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .ok()
 }

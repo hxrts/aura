@@ -10,6 +10,7 @@ use aura_agent::BootstrapBrokerLanBindPolicy;
 
 const AURA_TUI_ALLOW_STDIO: &str = "AURA_TUI_ALLOW_STDIO";
 const AURA_TUI_LOG_PATH: &str = "AURA_TUI_LOG_PATH";
+const AURA_TUI_RUNTIME_LOG_FILE: &str = "AURA_TUI_RUNTIME_LOG_FILE";
 const AURA_DEMO_DEVICE_ID: &str = "AURA_DEMO_DEVICE_ID";
 const AURA_CLIPBOARD_MODE: &str = "AURA_CLIPBOARD_MODE";
 const AURA_CLIPBOARD_FILE: &str = "AURA_CLIPBOARD_FILE";
@@ -53,6 +54,11 @@ pub fn tui_allows_stdio() -> bool {
 
 pub fn tui_log_path_override() -> Option<String> {
     non_empty_env(AURA_TUI_LOG_PATH)
+}
+
+/// Plaintext runtime tracing file, set by the harness for observability.
+pub fn tui_runtime_log_file() -> Option<String> {
+    non_empty_env(AURA_TUI_RUNTIME_LOG_FILE)
 }
 
 pub fn demo_device_id_override() -> Option<String> {

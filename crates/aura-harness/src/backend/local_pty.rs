@@ -425,6 +425,11 @@ impl LocalPtyBackend {
         self.transient_root().join("clipboard.txt")
     }
 
+    /// Plaintext runtime tracing written by the TUI in harness mode.
+    fn runtime_log_path(&self) -> PathBuf {
+        self.transient_root().join("runtime.log")
+    }
+
     fn child_pid_path(&self, session_generation: u64) -> PathBuf {
         self.transient_root()
             .join(format!("child-gen{session_generation}.pid"))
@@ -879,6 +884,13 @@ impl InstanceBackend for LocalPtyBackend {
                 clipboard_file.to_string_lossy().to_string(),
             );
         }
+        if Self::env_value("AURA_TUI_RUNTIME_LOG_FILE", &self.config.env).is_none() {
+            let runtime_log = Self::absolutize_path(self.runtime_log_path());
+            command.env(
+                "AURA_TUI_RUNTIME_LOG_FILE",
+                runtime_log.to_string_lossy().to_string(),
+            );
+        }
         if Self::env_value("AURA_TUI_UI_STATE_SOCKET", &self.config.env).is_none() {
             let ui_state_socket =
                 Self::absolutize_path(self.ui_state_socket_path(session_generation));
@@ -1255,13 +1267,14 @@ impl DiagnosticBackend for LocalPtyBackend {
     }
 
     fn tail_log(&self, lines: usize) -> Result<Vec<String>> {
-        let Some(path) = &self.config.log_path else {
-            return Ok(Vec::new());
-        };
-
-        let mut candidates = Vec::with_capacity(2);
-        candidates.push(path.clone());
-        candidates.push(PathBuf::from(format!("{}.dat", path.display())));
+        // Prefer the plaintext runtime tracing log; fall back to the PTY capture.
+        let runtime_log = Self::absolutize_path(self.runtime_log_path());
+        let mut candidates = Vec::with_capacity(3);
+        candidates.push(runtime_log);
+        if let Some(path) = &self.config.log_path {
+            candidates.push(path.clone());
+            candidates.push(PathBuf::from(format!("{}.dat", path.display())));
+        }
 
         let mut body: Option<String> = None;
         for candidate in candidates {
@@ -2556,6 +2569,37 @@ mod tests {
             Err(error) => panic!("tail_log should succeed: {error}"),
         };
         assert_eq!(lines, vec!["line-2".to_string()]);
+    }
+
+    #[test]
+    fn local_tail_log_prefers_runtime_tracing_log() {
+        let temp_root = unique_test_dir("tail-log-runtime");
+        let _ = fs::remove_dir_all(&temp_root);
+        if let Err(error) = fs::create_dir_all(&temp_root) {
+            panic!("create temp dir: {error}");
+        }
+
+        let mut config = test_config();
+        config.data_dir = temp_root.clone();
+        config.log_path = Some(temp_root.join("instance.log"));
+        if let Err(error) = fs::write(temp_root.join("instance.log"), "pty-bytes\n") {
+            panic!("write pty log: {error}");
+        }
+
+        let backend = LocalPtyBackend::new(config, Some(40), Some(120));
+        let runtime_log = LocalPtyBackend::absolutize_path(backend.runtime_log_path());
+        if let Some(parent) = runtime_log.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Err(error) = fs::write(&runtime_log, "INFO runtime started\n") {
+            panic!("write runtime log: {error}");
+        }
+        let lines = match backend.tail_log(5) {
+            Ok(lines) => lines,
+            Err(error) => panic!("tail_log should succeed: {error}"),
+        };
+        let _ = fs::remove_file(&runtime_log);
+        assert_eq!(lines, vec!["INFO runtime started".to_string()]);
     }
 
     #[test]
