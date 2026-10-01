@@ -302,7 +302,9 @@ impl CeremonyTracker {
             CeremonyKind::GuardianRotation | CeremonyKind::DeviceRotation => {
                 Duration::from_secs(60)
             }
-            CeremonyKind::DeviceEnrollment | CeremonyKind::DeviceRemoval => Duration::from_secs(45),
+            // Enrollment waits for a person to import the code on the new device.
+            CeremonyKind::DeviceEnrollment => Duration::from_secs(600),
+            CeremonyKind::DeviceRemoval => Duration::from_secs(45),
             CeremonyKind::Recovery | CeremonyKind::OtaActivation => Duration::from_secs(90),
             // Invitations wait on a human accepting on another device.
             CeremonyKind::Invitation => Duration::from_secs(600),

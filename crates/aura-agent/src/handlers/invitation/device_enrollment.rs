@@ -6,6 +6,11 @@ use super::*;
 use crate::runtime::open_owned_manifest_vm_session_admitted;
 use std::collections::BTreeMap;
 
+/// How long the initiator waits for the new device to import the code and
+/// accept. A person carries the code between devices, so this is far longer
+/// than a VM round.
+const DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS: u64 = 600_000;
+
 pub(super) struct InvitationDeviceEnrollmentHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -189,7 +194,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             let budget = invitation_timeout_budget(
                 effects.as_ref(),
                 "device_enrollment_initiator_vm",
-                INVITATION_VM_LOOP_TIMEOUT_MS,
+                DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS,
             )
             .await?;
 
@@ -238,7 +243,9 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
 
                     if handle_invitation_vm_wait_status(
                         round.host_wait_status,
-                        true,
+                        // Deferred only means the invitee has not answered yet; it
+                        // imports the code on another device, possibly minutes later.
+                        false,
                         "device enrollment initiator VM timed out while waiting for receive",
                         "device enrollment initiator VM cancelled while waiting for receive",
                     )?
