@@ -11,6 +11,9 @@ use std::collections::BTreeMap;
 /// than a VM round.
 const DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS: u64 = 600_000;
 
+/// Pause between initiator attempts while waiting for the new device.
+const DEVICE_ENROLLMENT_RETRY_DELAY_MS: u64 = 5_000;
+
 pub(super) struct InvitationDeviceEnrollmentHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -121,7 +124,53 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         Ok(None)
     }
 
+    /// Run the initiator until the new device accepts or the acceptance window
+    /// closes. The new device only becomes reachable as a device of this
+    /// authority once a person imports the code on it, so each attempt re-opens
+    /// the session and re-sends the request.
     pub(super) async fn execute_device_enrollment_initiator(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+        ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+    ) -> AgentResult<()> {
+        let now_ms = |effects: Arc<AuraEffectSystem>| async move {
+            PhysicalTimeEffects::physical_time(effects.as_ref())
+                .await
+                .map(|time| time.ts_ms)
+                .unwrap_or_default()
+        };
+        let deadline = now_ms(effects.clone())
+            .await
+            .saturating_add(DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS);
+        loop {
+            let attempt = self
+                .run_device_enrollment_initiator_attempt(
+                    effects.clone(),
+                    invitation,
+                    ceremony_runner.clone(),
+                )
+                .await;
+            match attempt {
+                Ok(()) => return Ok(()),
+                Err(error) if now_ms(effects.clone()).await < deadline => {
+                    tracing::debug!(
+                        invitation_id = %invitation.invitation_id,
+                        error = %error,
+                        "device enrollment initiator attempt ended; retrying until the new device accepts"
+                    );
+                    let _ = PhysicalTimeEffects::sleep_ms(
+                        effects.as_ref(),
+                        DEVICE_ENROLLMENT_RETRY_DELAY_MS,
+                    )
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn run_device_enrollment_initiator_attempt(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
@@ -194,7 +243,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
             let budget = invitation_timeout_budget(
                 effects.as_ref(),
                 "device_enrollment_initiator_vm",
-                DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS,
+                INVITATION_VM_LOOP_TIMEOUT_MS,
             )
             .await?;
 
