@@ -25,7 +25,8 @@ async fn publish_channel_acceptance_chat_projection(
         context_id,
         home_id,
         Some(home_name.to_string()),
-        Some(format!("Home channel {}", home_id)),
+        // The invitation carries no topic; leave the channel's own topic intact.
+        None,
         Some(2),
         Some(vec![receiver_id]),
         now_ms,

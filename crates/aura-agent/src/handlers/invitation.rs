@@ -334,7 +334,6 @@ pub(crate) struct PreparedInvitation {
 struct ChannelInviteDetails {
     context_id: ContextId,
     channel_id: ChannelId,
-    home_id: String,
     home_name: String,
     sender_id: AuthorityId,
     bootstrap: Option<ChannelBootstrapPackage>,

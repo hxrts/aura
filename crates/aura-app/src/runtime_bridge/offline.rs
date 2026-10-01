@@ -45,6 +45,8 @@ pub struct OfflineRuntimeBridge {
     accept_invitation_result: OfflineAcceptInvitationResult,
     #[cfg(test)]
     process_ceremony_result: OfflineProcessCeremonyResult,
+    #[cfg(test)]
+    recorded_relational_facts: Arc<Mutex<Option<Vec<RelationalFact>>>>,
 }
 
 impl OfflineRuntimeBridge {
@@ -67,6 +69,8 @@ impl OfflineRuntimeBridge {
             accept_invitation_result: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             process_ceremony_result: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            recorded_relational_facts: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -115,6 +119,26 @@ impl OfflineRuntimeBridge {
             .try_lock()
             .unwrap_or_else(|| panic!("materialized channel name matches mutex already locked"))
             .insert(channel_name.into().trim().to_ascii_lowercase(), channel_ids);
+    }
+
+    #[cfg(test)]
+    /// Accept relational fact commits and record them instead of failing.
+    pub fn record_relational_facts(&self) {
+        *self
+            .recorded_relational_facts
+            .try_lock()
+            .unwrap_or_else(|| panic!("recorded relational facts mutex already locked")) =
+            Some(Vec::new());
+    }
+
+    #[cfg(test)]
+    /// Relational facts committed since recording was enabled.
+    pub fn recorded_relational_facts(&self) -> Vec<RelationalFact> {
+        self.recorded_relational_facts
+            .try_lock()
+            .unwrap_or_else(|| panic!("recorded relational facts mutex already locked"))
+            .clone()
+            .unwrap_or_default()
     }
 
     #[cfg(test)]
@@ -260,7 +284,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         self.task_spawner.clone()
     }
 
-    async fn commit_relational_facts(&self, _facts: &[RelationalFact]) -> Result<(), IntentError> {
+    async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError> {
+        #[cfg(test)]
+        if let Some(recorded) = self.recorded_relational_facts.lock().await.as_mut() {
+            recorded.extend_from_slice(facts);
+            return Ok(());
+        }
+        let _ = facts;
         Err(IntentError::no_agent(
             "Relational fact commit not available in offline mode",
         ))

@@ -2710,3 +2710,70 @@ fn send_message_publishes_success_before_remote_delivery_followups() {
         "send_message_ref_owned must publish terminal success before best-effort remote delivery followups"
     );
 }
+
+#[tokio::test]
+async fn test_update_channel_info_commits_rename_and_topic() {
+    let local = AuthorityId::new_from_entropy([91u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+    runtime.record_relational_facts();
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let channel_id = ChannelId::from_bytes(hash(b"rename-channel"));
+    let context_id = ContextId::new_from_entropy([92u8; 32]);
+    runtime.set_amp_channel_context(channel_id, context_id);
+    update_chat_projection_observed(&app_core, |chat| {
+        chat.upsert_channel(Channel {
+            id: channel_id,
+            context_id: Some(context_id),
+            name: "e2e-group".to_string(),
+            topic: Some("topic one".to_string()),
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: vec![local],
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await
+    .unwrap();
+
+    update_channel_info(
+        &app_core,
+        channel_id,
+        Some("  renamed-group ".to_string()),
+        Some("topic two".to_string()),
+        7,
+    )
+    .await
+    .unwrap();
+
+    let updates: Vec<_> = runtime
+        .recorded_relational_facts()
+        .iter()
+        .filter_map(|fact| match fact {
+            aura_journal::fact::RelationalFact::Generic { envelope, .. } => {
+                aura_chat::ChatFact::from_envelope(envelope)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        updates.iter().any(|fact| matches!(
+            fact,
+            aura_chat::ChatFact::ChannelUpdated { channel_id: id, context_id: ctx, name, topic, .. }
+                if *id == channel_id
+                    && *ctx == context_id
+                    && name.as_deref() == Some("renamed-group")
+                    && topic.as_deref() == Some("topic two")
+        )),
+        "expected a ChannelUpdated fact carrying the new name and topic, got {updates:?}"
+    );
+}

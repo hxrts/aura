@@ -126,7 +126,7 @@ impl<'a> InvitationContactHandler<'a> {
             context_id,
             home_id,
             Some(home_name.to_string()),
-            Some(format!("Home channel {}", home_id)),
+            None,
             Some(2),
             Some(vec![receiver_id]),
             now_ms,
