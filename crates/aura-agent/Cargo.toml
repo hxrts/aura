@@ -40,7 +40,6 @@ aura-mpst = { package = "hxrts-aura-mpst", path = "../aura-mpst", version = "=0.
 aura-signature = { package = "hxrts-aura-signature", path = "../aura-signature", version = "=0.2.0" }
 aura-store = { package = "hxrts-aura-store", path = "../aura-store", version = "=0.2.0" }
 
-ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
 rand_core = { workspace = true }
 rand = { workspace = true }

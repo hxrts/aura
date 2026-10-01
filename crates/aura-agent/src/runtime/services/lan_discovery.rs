@@ -5,6 +5,7 @@
 //! `aura-rendezvous` as pure data.
 
 use crate::runtime::TaskGroup;
+use aura_core::crypto::{Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey};
 use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
 use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
 use aura_core::types::identifiers::AuthorityId;
@@ -12,7 +13,6 @@ use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryPacket, RendezvousDescriptor,
     LAN_DISCOVERY_FRESHNESS_WINDOW_MS,
 };
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -47,10 +47,13 @@ mod tests {
 
     fn signed_packet(
         authority_id: AuthorityId,
-        signing_key: &SigningKey,
+        signing_key: &Ed25519SigningKey,
         timestamp_ms: u64,
     ) -> LanDiscoveryPacket {
-        let descriptor = test_descriptor(authority_id, signing_key.verifying_key().to_bytes());
+        let descriptor = test_descriptor(
+            authority_id,
+            signing_key.verifying_key().unwrap().to_bytes(),
+        );
         let payload =
             LanDiscoveryPacket::signing_payload_for(authority_id, &descriptor, timestamp_ms)
                 .unwrap();
@@ -58,17 +61,17 @@ mod tests {
             authority_id,
             descriptor,
             timestamp_ms,
-            signing_key.sign(&payload).to_bytes().to_vec(),
+            signing_key.sign(&payload).unwrap().to_bytes().to_vec(),
         )
     }
 
     #[test]
     fn rejects_forged_lan_packet_for_another_authority() {
         let claimed = AuthorityId::new_from_entropy([1u8; 32]);
-        let attacker = SigningKey::from_bytes(&[9u8; 32]);
-        let victim = SigningKey::from_bytes(&[8u8; 32]);
+        let attacker = Ed25519SigningKey::from_bytes([9u8; 32]);
+        let victim = Ed25519SigningKey::from_bytes([8u8; 32]);
         let mut packet = signed_packet(claimed, &attacker, 1_000);
-        packet.descriptor.public_key = victim.verifying_key().to_bytes();
+        packet.descriptor.public_key = victim.verifying_key().unwrap().to_bytes();
 
         assert!(!validate_authenticated_packet(&packet, 1_000));
     }
@@ -77,7 +80,7 @@ mod tests {
     fn rejects_authority_descriptor_mismatch() {
         let authority = AuthorityId::new_from_entropy([1u8; 32]);
         let other = AuthorityId::new_from_entropy([2u8; 32]);
-        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([9u8; 32]);
         let mut packet = signed_packet(authority, &signing_key, 1_000);
         packet.descriptor.authority_id = other;
 
@@ -87,7 +90,7 @@ mod tests {
     #[test]
     fn rejects_stale_lan_packet() {
         let authority = AuthorityId::new_from_entropy([1u8; 32]);
-        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([9u8; 32]);
         let packet = signed_packet(authority, &signing_key, 1_000);
 
         assert!(!validate_authenticated_packet(
@@ -99,7 +102,7 @@ mod tests {
     #[test]
     fn accepts_fresh_authenticated_lan_packet() {
         let authority = AuthorityId::new_from_entropy([1u8; 32]);
-        let signing_key = SigningKey::from_bytes(&[9u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([9u8; 32]);
         let packet = signed_packet(authority, &signing_key, 1_000);
 
         assert!(validate_authenticated_packet(&packet, 1_000));
@@ -177,10 +180,10 @@ fn validate_authenticated_packet(packet: &LanDiscoveryPacket, received_at_ms: u6
     let Some(payload) = packet.signing_payload() else {
         return false;
     };
-    let Ok(verifying_key) = VerifyingKey::from_bytes(&packet.descriptor.public_key) else {
+    let Ok(verifying_key) = Ed25519VerifyingKey::from_bytes(packet.descriptor.public_key) else {
         return false;
     };
-    let Ok(signature) = Signature::from_slice(&packet.signature) else {
+    let Ok(signature) = Ed25519Signature::try_from_slice(&packet.signature) else {
         return false;
     };
     verifying_key.verify(&payload, &signature).is_ok()
@@ -336,8 +339,18 @@ impl LanDiscoveryService {
                     metrics.last_error_ms = timestamp_ms;
                     continue;
                 };
-                let signing_key = SigningKey::from_bytes(&announcement.signing_key);
-                let signature = signing_key.sign(&payload).to_bytes().to_vec();
+                let signature = match Ed25519SigningKey::from_bytes(announcement.signing_key)
+                    .sign(&payload)
+                {
+                    Ok(signature) => signature.to_bytes().to_vec(),
+                    Err(error) => {
+                        warn!(error = %error, "LAN announcer: failed to sign announcement");
+                        let mut metrics = shared.metrics.lock().await;
+                        metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
+                        metrics.last_error_ms = timestamp_ms;
+                        continue;
+                    }
+                };
                 let packet = LanDiscoveryPacket::new_signed(
                     authority_id,
                     announcement.descriptor.clone(),

@@ -1945,6 +1945,10 @@ with optional architecture-specific hardware acceleration
             packageId = "sysinfo";
           }
           {
+            name = "tempfile";
+            packageId = "tempfile";
+          }
+          {
             name = "thiserror";
             packageId = "thiserror 1.0.69";
           }
@@ -1991,10 +1995,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "serial_test";
             packageId = "serial_test";
-          }
-          {
-            name = "tempfile";
-            packageId = "tempfile";
           }
           {
             name = "tokio";
@@ -12176,11 +12176,6 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "dirs 5.0.1";
           }
           {
-            name = "ed25519-dalek";
-            packageId = "ed25519-dalek";
-            features = [ "rand_core" "serde" ];
-          }
-          {
             name = "frost-ed25519";
             packageId = "frost-ed25519";
             features = [ "serialization" ];
@@ -12506,7 +12501,7 @@ as in the AES-GCM authenticated encryption cipher.
         features = {
           "choreo-backend-telltale-machine" = [ "dep:telltale-machine" "aura-effects/telltale-runtime-capability" ];
           "default" = [ "choreo-backend-telltale-machine" ];
-          "simulation" = [ "aura-core/simulation" ];
+          "simulation" = [ "aura-core/simulation" "aura-journal/simulation" ];
           "transparent_onion" = [ "aura-core/transparent_onion" "aura-effects/transparent_onion" "aura-protocol/transparent_onion" "aura-social/transparent_onion" "aura-sync/transparent_onion" ];
         };
         resolvedDefaultFeatures = [ "android" "choreo-backend-telltale-machine" "default" "ios" "real-android-keystore" "simulation" "transparent_onion" "web" ];
@@ -12697,9 +12692,23 @@ as in the AES-GCM authenticated encryption cipher.
         ];
         devDependencies = [
           {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
             name = "proptest";
             packageId = "proptest";
             usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
             features = [ "std" ];
           }
           {
@@ -13674,7 +13683,7 @@ as in the AES-GCM authenticated encryption cipher.
             name = "indexed_db_futures";
             packageId = "indexed_db_futures";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "serde" ];
+            features = [ "serde" "cursors" ];
           }
           {
             name = "js-sys";
@@ -13800,7 +13809,7 @@ as in the AES-GCM authenticated encryption cipher.
             name = "web-sys";
             packageId = "web-sys";
             target = { target, features }: ("wasm32" == target."arch" or null);
-            features = [ "Window" "Storage" ];
+            features = [ "Window" "Storage" "Crypto" "SubtleCrypto" "CryptoKey" "AesGcmParams" ];
           }
           {
             name = "web-time";
@@ -13815,6 +13824,11 @@ as in the AES-GCM authenticated encryption cipher.
         ];
         devDependencies = [
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
             name = "proptest";
             packageId = "proptest";
             usesDefaultFeatures = false;
@@ -13823,6 +13837,11 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "wasm-bindgen-test";
+            packageId = "wasm-bindgen-test";
+            target = { target, features }: ("wasm32" == target."arch" or null);
           }
         ];
         features = {
@@ -13920,6 +13939,10 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "tokio";
             usesDefaultFeatures = false;
             features = [ "io-util" "macros" "rt" "sync" "time" ];
+          }
+          {
+            name = "trybuild";
+            packageId = "trybuild";
           }
         ];
 
@@ -14140,7 +14163,10 @@ as in the AES-GCM authenticated encryption cipher.
             features = [ "io-util" "macros" "rt" "sync" "time" ];
           }
         ];
-
+        features = {
+          "simulation" = [ "aura-core/simulation" ];
+        };
+        resolvedDefaultFeatures = [ "default" "simulation" ];
       };
       "hxrts-aura-macros" = rec {
         crateName = "hxrts-aura-macros";
@@ -14591,6 +14617,10 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "bincode";
           }
           {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
+          }
+          {
             name = "futures";
             packageId = "futures";
           }
@@ -14948,6 +14978,11 @@ as in the AES-GCM authenticated encryption cipher.
         ];
         dependencies = [
           {
+            name = "frost-ed25519";
+            packageId = "frost-ed25519";
+            features = [ "serialization" ];
+          }
+          {
             name = "hex";
             packageId = "hex";
           }
@@ -14993,8 +15028,13 @@ as in the AES-GCM authenticated encryption cipher.
             features = [ "std" ];
           }
           {
-            name = "rand";
-            packageId = "rand 0.8.6";
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "rand_core";
+            packageId = "rand_core 0.6.4";
+            features = [ "std" ];
           }
           {
             name = "signature";
@@ -15147,6 +15187,10 @@ as in the AES-GCM authenticated encryption cipher.
             name = "biscuit-auth";
             packageId = "biscuit-auth";
             features = [ "wasm" ];
+          }
+          {
+            name = "curve25519-dalek";
+            packageId = "curve25519-dalek";
           }
           {
             name = "futures";
@@ -16373,7 +16417,7 @@ as in the AES-GCM authenticated encryption cipher.
           "tx-done" = [ "dep:wasm_evt_listener" ];
           "version-change" = [ "tokio/macros" "dep:wasm_evt_listener" ];
         };
-        resolvedDefaultFeatures = [ "serde" ];
+        resolvedDefaultFeatures = [ "cursors" "serde" ];
       };
       "indexed_db_futures_macros_internal" = rec {
         crateName = "indexed_db_futures_macros_internal";
@@ -31079,7 +31123,7 @@ dependency.
           "default" = [ "std" ];
           "std" = [ "wasm-bindgen/std" "js-sys/std" ];
         };
-        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AnimationEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "CssRule" "CssRuleList" "CssStyleDeclaration" "CssStyleRule" "CssStyleSheet" "CustomEvent" "DataTransfer" "DataTransferItem" "DataTransferItemList" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringList" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtendableEvent" "FetchEvent" "File" "FileList" "FileReader" "FocusEvent" "FormData" "Headers" "History" "HtmlCanvasElement" "HtmlElement" "HtmlFormElement" "HtmlHeadElement" "HtmlInputElement" "HtmlSelectElement" "HtmlStyleElement" "HtmlTextAreaElement" "IdbDatabase" "IdbFactory" "IdbKeyRange" "IdbObjectStore" "IdbObjectStoreParameters" "IdbOpenDbRequest" "IdbRequest" "IdbRequestReadyState" "IdbTransaction" "IdbTransactionMode" "IdbVersionChangeEvent" "InputEvent" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "Performance" "PointerEvent" "ProgressEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserverEntry" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "ScrollBehavior" "ScrollIntoViewOptions" "ScrollLogicalPosition" "ScrollRestoration" "ScrollToOptions" "ServiceWorkerGlobalScope" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StreamPipeOptions" "StyleSheet" "SvgElement" "Text" "Touch" "TouchEvent" "TouchList" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "WebSocket" "WheelEvent" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
+        resolvedDefaultFeatures = [ "AbortController" "AbortSignal" "AddEventListenerOptions" "AesGcmParams" "AnimationEvent" "BinaryType" "Blob" "BlobPropertyBag" "CanvasRenderingContext2d" "CharacterData" "Clipboard" "ClipboardEvent" "CloseEvent" "CloseEventInit" "Comment" "CompositionEvent" "Crypto" "CryptoKey" "CssRule" "CssRuleList" "CssStyleDeclaration" "CssStyleRule" "CssStyleSheet" "CustomEvent" "DataTransfer" "DataTransferItem" "DataTransferItemList" "Document" "DocumentFragment" "DomException" "DomRect" "DomRectReadOnly" "DomStringList" "DomTokenList" "DragEvent" "Element" "ErrorEvent" "Event" "EventSource" "EventTarget" "ExtendableEvent" "FetchEvent" "File" "FileList" "FileReader" "FocusEvent" "FormData" "Headers" "History" "HtmlCanvasElement" "HtmlElement" "HtmlFormElement" "HtmlHeadElement" "HtmlInputElement" "HtmlSelectElement" "HtmlStyleElement" "HtmlTextAreaElement" "IdbCursor" "IdbCursorDirection" "IdbCursorWithValue" "IdbDatabase" "IdbFactory" "IdbKeyRange" "IdbObjectStore" "IdbObjectStoreParameters" "IdbOpenDbRequest" "IdbRequest" "IdbRequestReadyState" "IdbTransaction" "IdbTransactionMode" "IdbVersionChangeEvent" "InputEvent" "IntersectionObserverEntry" "KeyboardEvent" "Location" "MediaQueryList" "MessageEvent" "MouseEvent" "Navigator" "Node" "NodeList" "ObserverCallback" "Performance" "PointerEvent" "ProgressEvent" "QueuingStrategy" "ReadableByteStreamController" "ReadableStream" "ReadableStreamByobReader" "ReadableStreamByobRequest" "ReadableStreamDefaultController" "ReadableStreamDefaultReader" "ReadableStreamGetReaderOptions" "ReadableStreamReadResult" "ReadableStreamReaderMode" "ReadableStreamType" "ReadableWritablePair" "ReferrerPolicy" "Request" "RequestCache" "RequestCredentials" "RequestInit" "RequestMode" "RequestRedirect" "ResizeObserverEntry" "ResizeObserverSize" "Response" "ResponseInit" "ResponseType" "ScrollBehavior" "ScrollIntoViewOptions" "ScrollLogicalPosition" "ScrollRestoration" "ScrollToOptions" "ServiceWorkerGlobalScope" "ShadowRoot" "ShadowRootInit" "ShadowRootMode" "Storage" "StreamPipeOptions" "StyleSheet" "SubtleCrypto" "SvgElement" "Text" "Touch" "TouchEvent" "TouchList" "TransformStream" "TransformStreamDefaultController" "Transformer" "TransitionEvent" "UiEvent" "UnderlyingSink" "UnderlyingSource" "Url" "UrlSearchParams" "WebSocket" "WheelEvent" "Window" "WorkerGlobalScope" "WritableStream" "WritableStreamDefaultController" "WritableStreamDefaultWriter" "console" "default" "std" ];
       };
       "web-time" = rec {
         crateName = "web-time";
