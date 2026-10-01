@@ -23,6 +23,7 @@ enum SiblingFactsFrame {
     Digest([u8; 32]),
     Index(Vec<Vec<u8>>),
     Facts(Vec<TypedFact>),
+    JournalFacts(aura_core::Fact),
 }
 
 fn fact_key(fact: &TypedFact) -> Result<Vec<u8>, AuraError> {
@@ -76,7 +77,13 @@ pub(crate) async fn exchange_facts_with_sibling(
     for fact in local {
         by_key.insert(fact_key(&fact)?, fact);
     }
-    let digest = hash(&by_key.keys().flatten().copied().collect::<Vec<u8>>());
+    // AMP channel state lives in the authority journal's facts, not the typed store.
+    let mut journal = aura_core::effects::JournalEffects::get_journal(effects).await?;
+    let journal_bytes = aura_core::util::serialization::to_vec(&journal.facts)
+        .map_err(|error| AuraError::internal(format!("encode journal facts: {error}")))?;
+    let mut digest_input: Vec<u8> = by_key.keys().flatten().copied().collect();
+    digest_input.extend_from_slice(&hash(&journal_bytes));
+    let digest = hash(&digest_input);
 
     send_frame(effects, peer, &SiblingFactsFrame::Digest(digest)).await?;
     let SiblingFactsFrame::Digest(peer_digest) = receive_frame(effects, peer).await? else {
@@ -106,7 +113,23 @@ pub(crate) async fn exchange_facts_with_sibling(
     let SiblingFactsFrame::Facts(received) = receive_frame(effects, peer).await? else {
         return Err(protocol_error("facts"));
     };
-    effects.import_committed_facts(received).await
+    let imported = effects.import_committed_facts(received).await?;
+
+    send_frame(
+        effects,
+        peer,
+        &SiblingFactsFrame::JournalFacts(journal.facts.clone()),
+    )
+    .await?;
+    let SiblingFactsFrame::JournalFacts(peer_facts) = receive_frame(effects, peer).await? else {
+        return Err(protocol_error("journal facts"));
+    };
+    let before = journal.facts.clone();
+    journal.merge_facts(peer_facts);
+    if journal.facts != before {
+        aura_core::effects::JournalEffects::persist_journal(effects, &journal).await?;
+    }
+    Ok(imported)
 }
 
 #[cfg(test)]
@@ -159,18 +182,39 @@ mod tests {
             .commit_relational_facts((1..=3).map(generic_fact).collect())
             .await
             .expect("commit facts");
+        let mut journal = aura_core::effects::JournalEffects::get_journal(&existing)
+            .await
+            .expect("journal");
+        journal
+            .facts
+            .insert(
+                "amp_channel_state",
+                aura_core::FactValue::String("epoch-1".to_string()),
+            )
+            .expect("insert journal fact");
+        aura_core::effects::JournalEffects::persist_journal(&existing, &journal)
+            .await
+            .expect("persist journal");
 
         let (from_existing, from_joined) = tokio::join!(
             exchange_facts_with_sibling(&existing, joined.device_id()),
             exchange_facts_with_sibling(&joined, existing.device_id()),
         );
+        let originals = existing
+            .load_committed_facts(authority)
+            .await
+            .expect("load original facts");
         assert_eq!(from_existing.expect("existing side"), 0);
-        assert_eq!(from_joined.expect("joined side"), 3);
+        assert_eq!(from_joined.expect("joined side"), originals.len());
         let replicated = joined
             .load_committed_facts(authority)
             .await
             .expect("load replicated facts");
-        assert_eq!(replicated.len(), 3);
+        assert_eq!(replicated, originals);
+        let joined_journal = aura_core::effects::JournalEffects::get_journal(&joined)
+            .await
+            .expect("joined journal");
+        assert!(joined_journal.facts.contains_key("amp_channel_state"));
 
         // A second round finds the stores equal and moves nothing.
         let (again_a, again_b) = tokio::join!(
