@@ -63,7 +63,10 @@ impl SyncService {
     }
 
     /// Update sync metrics based on sync results.
-    pub(super) async fn update_sync_metrics(&self, results: &[(DeviceId, u64)]) -> SyncResult<()> {
+    pub(super) async fn update_sync_metrics(
+        &self,
+        results: &[(DeviceId, Option<u64>)],
+    ) -> SyncResult<()> {
         let now_ms = self
             .time_effects
             .physical_time()
@@ -74,9 +77,11 @@ impl SyncService {
         let metrics = self.metrics.write();
         for &(peer, synced_ops) in results {
             metrics.increment_sync_attempts(peer);
+            let Some(synced_ops) = synced_ops else {
+                continue;
+            };
             metrics.increment_sync_successes(peer);
             metrics.update_last_sync(peer, now_ms);
-
             if synced_ops > 0 {
                 metrics.add_synced_operations(peer, synced_ops);
             }

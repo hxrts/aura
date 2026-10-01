@@ -252,7 +252,7 @@ impl SyncService {
         // 5. Update peer scores based on sync success/failure
         let score_results: Vec<(DeviceId, bool)> = sync_results
             .iter()
-            .map(|&(peer, ops)| (peer, ops > 0)) // ops > 0 = success
+            .map(|&(peer, ops)| (peer, ops.is_some())) // completed, even with nothing to move
             .collect();
         let now = effects.physical_time().await.map_err(time_error_to_aura)?;
         Self::update_peer_scores_from_sync(&self.peer_manager, &score_results, &now).await?;
@@ -342,7 +342,7 @@ impl SyncService {
         &self,
         effects: &E,
         peers: &[DeviceId],
-    ) -> SyncResult<Vec<(DeviceId, u64)>>
+    ) -> SyncResult<Vec<(DeviceId, Option<u64>)>>
     where
         E: SyncProtocolEffects,
     {
@@ -364,7 +364,7 @@ impl SyncService {
 
             match result {
                 Ok(synced_operations) => {
-                    sync_results.push((peer, synced_operations));
+                    sync_results.push((peer, Some(synced_operations)));
                     tracing::info!(
                         operation_id = JOURNAL_SYNC_OPERATION_ID,
                         authority_id = %authority_id,
@@ -381,7 +381,7 @@ impl SyncService {
                         error = %e,
                         "Failed to sync with peer"
                     );
-                    sync_results.push((peer, 0));
+                    sync_results.push((peer, None));
                 }
             }
         }
