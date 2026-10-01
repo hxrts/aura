@@ -16,6 +16,9 @@ const DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS: u64 = 600_000;
 /// and retries on a cycle, so this must span several initiator attempts.
 const DEVICE_ENROLLMENT_INVITEE_WAIT_MS: u64 = 240_000;
 
+/// Pause between invitee attempts while waiting for the initiator.
+const DEVICE_ENROLLMENT_INVITEE_RETRY_DELAY_MS: u64 = 500;
+
 /// Pause between initiator attempts while waiting for the new device.
 const DEVICE_ENROLLMENT_RETRY_DELAY_MS: u64 = 5_000;
 
@@ -328,7 +331,48 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         result
     }
 
+    /// Run the invitee until the initiator's request arrives or the wait window
+    /// closes. A single receive waits only a few seconds while the initiator
+    /// re-sends on its own cycle; a request that arrives between attempts stays
+    /// queued under the invitation's session for the next attempt.
     pub(super) async fn execute_device_enrollment_invitee(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        let now_ms = |effects: Arc<AuraEffectSystem>| async move {
+            PhysicalTimeEffects::physical_time(effects.as_ref())
+                .await
+                .map(|time| time.ts_ms)
+                .unwrap_or_default()
+        };
+        let deadline = now_ms(effects.clone())
+            .await
+            .saturating_add(DEVICE_ENROLLMENT_INVITEE_WAIT_MS);
+        loop {
+            match self
+                .run_device_enrollment_invitee_attempt(effects.clone(), invitation)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) if now_ms(effects.clone()).await < deadline => {
+                    tracing::debug!(
+                        invitation_id = %invitation.invitation_id,
+                        error = %error,
+                        "device enrollment invitee attempt ended; waiting for the initiator again"
+                    );
+                    let _ = PhysicalTimeEffects::sleep_ms(
+                        effects.as_ref(),
+                        DEVICE_ENROLLMENT_INVITEE_RETRY_DELAY_MS,
+                    )
+                    .await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn run_device_enrollment_invitee_attempt(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
@@ -397,7 +441,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         let budget = invitation_timeout_budget(
             effects.as_ref(),
             "device_enrollment_invitee_vm",
-            DEVICE_ENROLLMENT_INVITEE_WAIT_MS,
+            INVITATION_VM_LOOP_TIMEOUT_MS,
         )
         .await?;
 
