@@ -1321,6 +1321,8 @@ impl ChatSignalView {
         channel_id: ChannelId,
         sender_id: AuthorityId,
         sent_at_ms: u64,
+        // Sender is a recorded member of the channel (e.g. its creator).
+        known_channel_member: bool,
     ) -> bool {
         if sender_id == self.own_authority {
             return true;
@@ -1333,9 +1335,10 @@ impl ChatSignalView {
         let candidates =
             app_signal_projection::collect_moderation_homes(&homes, context_id, channel_id);
         if candidates.is_empty() {
-            return self
-                .sender_allowed_via_channel_invitation(channel_id, sender_id)
-                .await;
+            return known_channel_member
+                || self
+                    .sender_allowed_via_channel_invitation(channel_id, sender_id)
+                    .await;
         }
 
         if candidates.iter().any(|home| home.is_banned(&sender_id)) {
@@ -1352,9 +1355,10 @@ impl ChatSignalView {
             .iter()
             .any(|home| home.member(&sender_id).is_some());
         if !has_member_roster {
-            return self
-                .sender_allowed_via_channel_invitation(channel_id, sender_id)
-                .await;
+            return known_channel_member
+                || self
+                    .sender_allowed_via_channel_invitation(channel_id, sender_id)
+                    .await;
         }
         if !sender_is_member {
             if self
@@ -1382,7 +1386,11 @@ impl ReactiveView for ChatSignalView {
             let mut state = self.state.lock().await;
             let mut changed = false;
 
-            for fact in facts {
+            // Apply channel creation before messages in the same batch (journal
+            // replay after a restart), so senders are known channel members.
+            let mut ordered: Vec<&Fact> = facts.iter().collect();
+            ordered.sort_by_key(|fact| u8::from(!is_chat_channel_created(fact)));
+            for fact in ordered {
                 match &fact.content {
                     // Handle consensus finalization: mark messages as finalized when epoch is committed
                     FactContent::Relational(RelationalFact::Protocol(
@@ -1566,6 +1574,9 @@ impl ReactiveView for ChatSignalView {
                                 let context = context_id;
                                 let note_to_self_channel =
                                     note_to_self_channel_id(self.own_authority);
+                                let known_member = state
+                                    .channel(&channel_id)
+                                    .is_some_and(|channel| channel.member_ids.contains(&sender_id));
                                 drop(state);
                                 if !self
                                     .sender_allowed_for_context(
@@ -1573,6 +1584,7 @@ impl ReactiveView for ChatSignalView {
                                         channel_id,
                                         sender_id,
                                         sent_at.ts_ms,
+                                        known_member,
                                     )
                                     .await
                                 {
@@ -2095,6 +2107,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replayed_message_before_channel_creation_is_kept() {
+        use aura_journal::DomainFact as _;
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([61u8; 32]);
+        let creator = AuthorityId::new_from_entropy([62u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive.clone(), effects);
+        let context_id = ContextId::new_from_entropy([63u8; 32]);
+        let channel_id = ChannelId::from_bytes([64u8; 32]);
+        let message = ChatFact::message_sent_sealed_ms(
+            context_id,
+            channel_id,
+            "m1".to_string(),
+            creator,
+            "Creator".to_string(),
+            vec![1, 2, 3],
+            20,
+            None,
+            None,
+        );
+        let created = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "DM: Creator".to_string(),
+            None,
+            true,
+            10,
+            creator,
+        );
+        // Journal replay may deliver the message ahead of its channel.
+        view.update(&[
+            fact_from_relational(message.to_generic()),
+            fact_from_relational(created.to_generic()),
+        ])
+        .await;
+        let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
+        assert_eq!(chat.messages_for_channel(&channel_id).len(), 1);
+    }
+
+    #[tokio::test]
     async fn sender_allowed_for_context_denies_when_homes_unavailable() {
         let reactive = ReactiveHandler::new();
         let own_authority = AuthorityId::new_from_entropy([35u8; 32]);
@@ -2113,6 +2172,7 @@ mod tests {
                 ChannelId::from_bytes([37u8; 32]),
                 AuthorityId::new_from_entropy([38u8; 32]),
                 1_700_000_000_000,
+                false,
             )
             .await;
 
@@ -2161,6 +2221,7 @@ mod tests {
                 ChannelId::from_bytes([44u8; 32]),
                 sender_id,
                 1_700_000_000_001,
+                false,
             )
             .await;
 
@@ -2582,4 +2643,16 @@ mod tests {
             Some(ContactRelationshipState::PendingInbound)
         );
     }
+}
+
+/// Whether a fact creates a chat channel.
+fn is_chat_channel_created(fact: &Fact) -> bool {
+    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content else {
+        return false;
+    };
+    envelope.type_id.as_str() == CHAT_FACT_TYPE_ID
+        && matches!(
+            ChatFact::from_envelope(envelope),
+            Some(ChatFact::ChannelCreated { .. })
+        )
 }
