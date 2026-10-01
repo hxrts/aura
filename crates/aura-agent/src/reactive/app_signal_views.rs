@@ -1499,7 +1499,23 @@ impl ReactiveView for ChatSignalView {
                                     last_activity: created_at.ts_ms,
                                     last_finalized_epoch: 0,
                                 };
-                                state.add_channel(channel);
+                                // An update may have created the entry first; the creation
+                                // fact is authoritative for DM-ness and seeded members.
+                                if let Some(existing) = state.channel_mut(&channel.id) {
+                                    if channel.is_dm {
+                                        existing.is_dm = true;
+                                        existing.channel_type = ChannelType::DirectMessage;
+                                    }
+                                    for member in channel.member_ids {
+                                        if !existing.member_ids.contains(&member) {
+                                            existing.member_ids.push(member);
+                                        }
+                                    }
+                                    existing.member_count =
+                                        existing.member_count.max(channel.member_count);
+                                } else {
+                                    state.add_channel(channel);
+                                }
                                 changed = true;
                             }
                             ChatFact::ChannelClosed { channel_id, .. } => {
