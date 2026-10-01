@@ -388,8 +388,22 @@ async fn exchange_facts_with_siblings(
         .await
         .map(|time| time.ts_ms)
         .unwrap_or_default();
+    // Opens bootstrap keys sealed to this device by a sibling.
+    let key_agreement_secret = bridge
+        .agent
+        .runtime()
+        .threshold_signing()
+        .current_local_key_agreement_secret(&bridge.agent.authority_id())
+        .await
+        .ok();
     for sibling in sync.take_due_siblings(siblings, now_ms).await {
-        match super::sibling_facts::exchange_facts_with_sibling(&effects, sibling).await {
+        match super::sibling_facts::exchange_facts_with_sibling(
+            &effects,
+            sibling,
+            key_agreement_secret,
+        )
+        .await
+        {
             Ok(imported) => tracing::debug!(
                 sibling = %sibling,
                 imported,

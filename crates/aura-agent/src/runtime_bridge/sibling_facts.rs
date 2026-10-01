@@ -24,6 +24,7 @@ enum SiblingFactsFrame {
     Index(Vec<Vec<u8>>),
     Facts(Vec<TypedFact>),
     JournalFacts(aura_core::Fact),
+    AmpKeys(Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>),
 }
 
 fn fact_key(fact: &TypedFact) -> Result<Vec<u8>, AuraError> {
@@ -92,6 +93,7 @@ fn protocol_error(expected: &str) -> AuraError {
 pub(crate) async fn exchange_facts_with_sibling(
     effects: &AuraEffectSystem,
     peer: DeviceId,
+    key_agreement_secret: Option<[u8; 32]>,
 ) -> Result<usize, AuraError> {
     let authority = aura_guards::GuardContextProvider::authority_id(effects);
     let local = effects.load_committed_facts(authority).await?;
@@ -103,8 +105,19 @@ pub(crate) async fn exchange_facts_with_sibling(
     let mut journal = aura_core::effects::JournalEffects::get_journal(effects).await?;
     let journal_bytes = aura_core::util::serialization::to_vec(&journal.facts)
         .map_err(|error| AuraError::internal(format!("encode journal facts: {error}")))?;
+    // Held bootstrap keys are part of the digest, so a sibling missing a key
+    // still runs the full exchange after the channel facts have converged.
+    let held_keys = held_bootstrap_keys(effects).await?;
+    let held_ids = aura_core::util::serialization::to_vec(
+        &held_keys
+            .iter()
+            .map(|key| (key.context, key.channel, key.bootstrap_id))
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| AuraError::internal(format!("encode held key ids: {error}")))?;
     let mut digest_input: Vec<u8> = by_key.keys().flatten().copied().collect();
     digest_input.extend_from_slice(&hash(&journal_bytes));
+    digest_input.extend_from_slice(&hash(&held_ids));
     let digest = hash(&digest_input);
 
     send_frame(effects, peer, &SiblingFactsFrame::Digest(digest)).await?;
@@ -179,7 +192,152 @@ pub(crate) async fn exchange_facts_with_sibling(
     if journal.facts != before {
         aura_core::effects::JournalEffects::persist_journal(effects, &journal).await?;
     }
+
+    // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
+    // travel sealed to the sibling device's leaf key.
+    let sealed = seal_bootstrap_keys(effects, authority, peer, &held_keys).await?;
+    send_frame(effects, peer, &SiblingFactsFrame::AmpKeys(sealed)).await?;
+    let SiblingFactsFrame::AmpKeys(peer_sealed) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::AmpKeys(_)),
+        "amp_keys",
+    )
+    .await?
+    else {
+        return Err(protocol_error("amp keys"));
+    };
+    if let (Some(peer_sealed), Some(secret)) = (peer_sealed, key_agreement_secret) {
+        store_bootstrap_keys(effects, authority, &peer_sealed, &secret).await?;
+    }
     Ok(imported)
+}
+
+/// One AMP channel bootstrap key, as held in this device's secure storage.
+#[derive(Serialize, Deserialize)]
+struct SiblingBootstrapKey {
+    context: aura_core::types::identifiers::ContextId,
+    channel: aura_core::types::identifiers::ChannelId,
+    bootstrap_id: aura_core::Hash32,
+    key: Vec<u8>,
+}
+
+const SIBLING_AMP_KEYS_PURPOSE: &str = "aura.sibling.amp-bootstrap-keys";
+
+fn bootstrap_key_location(key: &SiblingBootstrapKey) -> aura_core::effects::SecureStorageLocation {
+    aura_core::effects::SecureStorageLocation::amp_bootstrap_key(
+        &key.context,
+        &key.channel,
+        &key.bootstrap_id,
+    )
+}
+
+async fn held_bootstrap_keys(
+    effects: &AuraEffectSystem,
+) -> Result<Vec<SiblingBootstrapKey>, AuraError> {
+    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+    let mut held = Vec::new();
+    for (context, channel, bootstrap_id) in aura_amp::list_channel_bootstraps(effects).await? {
+        let location = aura_core::effects::SecureStorageLocation::amp_bootstrap_key(
+            &context,
+            &channel,
+            &bootstrap_id,
+        );
+        if let Ok(key) = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+        {
+            held.push(SiblingBootstrapKey {
+                context,
+                channel,
+                bootstrap_id,
+                key,
+            });
+        }
+    }
+    Ok(held)
+}
+
+async fn device_leaf_public_key(
+    effects: &AuraEffectSystem,
+    device: DeviceId,
+) -> Result<Option<Vec<u8>>, AuraError> {
+    let tree = aura_protocol::effects::TreeEffects::get_current_state(effects).await?;
+    Ok(tree
+        .leaves
+        .values()
+        .find(|leaf| leaf.device_id == device)
+        .map(|leaf| Vec::from(&leaf.public_key)))
+}
+
+async fn seal_bootstrap_keys(
+    effects: &AuraEffectSystem,
+    authority: aura_core::AuthorityId,
+    peer: DeviceId,
+    held: &[SiblingBootstrapKey],
+) -> Result<Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>, AuraError> {
+    // A sibling not yet in the tree has no verified key to seal to.
+    let Some(peer_public_key) = device_leaf_public_key(effects, peer).await? else {
+        return Ok(None);
+    };
+    if held.is_empty() {
+        return Ok(None);
+    }
+    let bundle = aura_core::util::serialization::to_vec(&held)
+        .map_err(|error| AuraError::internal(format!("encode bootstrap keys: {error}")))?;
+    aura_sync::protocols::device_sealed::seal_for_device(
+        effects,
+        SIBLING_AMP_KEYS_PURPOSE,
+        authority,
+        peer,
+        &peer_public_key,
+        &bundle,
+    )
+    .await
+    .map(Some)
+}
+
+async fn store_bootstrap_keys(
+    effects: &AuraEffectSystem,
+    authority: aura_core::AuthorityId,
+    sealed: &aura_sync::protocols::device_sealed::DeviceSealedPayload,
+    secret: &[u8; 32],
+) -> Result<(), AuraError> {
+    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+    let own_device = effects.device_id();
+    let Some(own_public_key) = device_leaf_public_key(effects, own_device).await? else {
+        return Ok(());
+    };
+    let bundle = aura_sync::protocols::device_sealed::open_for_device(
+        effects,
+        SIBLING_AMP_KEYS_PURPOSE,
+        authority,
+        own_device,
+        &own_public_key,
+        secret,
+        sealed,
+    )
+    .await?;
+    let keys: Vec<SiblingBootstrapKey> = aura_core::util::serialization::from_slice(&bundle)
+        .map_err(|error| AuraError::internal(format!("decode bootstrap keys: {error}")))?;
+    for key in keys {
+        let location = bootstrap_key_location(&key);
+        if effects.secure_exists(&location).await.unwrap_or(false) {
+            continue;
+        }
+        effects
+            .secure_store(
+                &location,
+                &key.key,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|error| AuraError::storage(format!("store bootstrap key: {error}")))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -221,6 +379,91 @@ mod tests {
     }
 
     // Regression (work/8.md task 7, L3): a newly enrolled device must receive
+    // Bootstrap keys travel only sealed to the sibling's leaf key: the right
+    // device opens them; another device, a tampered ciphertext or a different
+    // purpose does not.
+    #[tokio::test]
+    async fn bootstrap_keys_are_sealed_to_the_sibling_device() {
+        use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects};
+        use aura_sync::protocols::device_sealed::{open_for_device, seal_for_device};
+        let shared = crate::SharedTransport::new();
+        let authority = AuthorityId::new_from_entropy([0x5C; 32]);
+        let effects = device(&shared, authority, 0x65);
+        let recipient = DeviceId::new_from_entropy([0x66; 32]);
+        let (private_key, public_key) = effects.ed25519_generate_keypair().await.expect("keypair");
+        let secret = effects
+            .convert_ed25519_to_x25519_private(&private_key)
+            .await
+            .expect("x25519 secret");
+
+        let sealed = seal_for_device(
+            &effects,
+            SIBLING_AMP_KEYS_PURPOSE,
+            authority,
+            recipient,
+            &public_key,
+            b"bootstrap keys",
+        )
+        .await
+        .expect("seal");
+        let opened = open_for_device(
+            &effects,
+            SIBLING_AMP_KEYS_PURPOSE,
+            authority,
+            recipient,
+            &public_key,
+            &secret,
+            &sealed,
+        )
+        .await
+        .expect("recipient opens");
+        assert_eq!(opened, b"bootstrap keys".to_vec());
+
+        let (other_private, other_public) =
+            effects.ed25519_generate_keypair().await.expect("keypair");
+        let other_secret = effects
+            .convert_ed25519_to_x25519_private(&other_private)
+            .await
+            .expect("x25519 secret");
+        assert!(open_for_device(
+            &effects,
+            SIBLING_AMP_KEYS_PURPOSE,
+            authority,
+            recipient,
+            &other_public,
+            &other_secret,
+            &sealed,
+        )
+        .await
+        .is_err());
+
+        let mut tampered = sealed.clone();
+        tampered.ciphertext[0] ^= 0x01;
+        assert!(open_for_device(
+            &effects,
+            SIBLING_AMP_KEYS_PURPOSE,
+            authority,
+            recipient,
+            &public_key,
+            &secret,
+            &tampered,
+        )
+        .await
+        .is_err());
+
+        assert!(open_for_device(
+            &effects,
+            "another-purpose",
+            authority,
+            recipient,
+            &public_key,
+            &secret,
+            &sealed,
+        )
+        .await
+        .is_err());
+    }
+
     // the authority's existing facts from its sibling.
     #[tokio::test]
     async fn new_sibling_device_receives_existing_facts() {
@@ -256,8 +499,8 @@ mod tests {
         .expect("stale frame");
 
         let (from_existing, from_joined) = tokio::join!(
-            exchange_facts_with_sibling(&existing, joined.device_id()),
-            exchange_facts_with_sibling(&joined, existing.device_id()),
+            exchange_facts_with_sibling(&existing, joined.device_id(), None),
+            exchange_facts_with_sibling(&joined, existing.device_id(), None),
         );
         let originals = existing
             .load_committed_facts(authority)
@@ -277,8 +520,8 @@ mod tests {
 
         // A second round finds the stores equal and moves nothing.
         let (again_a, again_b) = tokio::join!(
-            exchange_facts_with_sibling(&existing, joined.device_id()),
-            exchange_facts_with_sibling(&joined, existing.device_id()),
+            exchange_facts_with_sibling(&existing, joined.device_id(), None),
+            exchange_facts_with_sibling(&joined, existing.device_id(), None),
         );
         assert_eq!((again_a.expect("a"), again_b.expect("b")), (0, 0));
     }

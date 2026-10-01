@@ -43,6 +43,7 @@
 
 pub mod anti_entropy;
 pub mod device_epoch_rotation;
+pub mod device_sealed;
 pub mod epochs;
 pub mod fact_sync;
 pub(crate) mod ingress;

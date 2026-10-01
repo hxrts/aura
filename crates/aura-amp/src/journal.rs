@@ -89,6 +89,35 @@ impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> 
 // Channel State Reduction
 // ============================================================================
 
+/// Every channel in this journal that has bootstrap key material, as
+/// `(context, channel, bootstrap_id)`. The keys themselves stay in secure storage.
+pub async fn list_channel_bootstraps<A: AmpJournalEffects>(
+    effects: &A,
+) -> Result<Vec<(ContextId, ChannelId, aura_core::Hash32)>> {
+    let journal = effects.get_journal().await?;
+    let contents = extract_fact_contents(&journal);
+    let mut contexts: Vec<ContextId> = contents
+        .iter()
+        .filter_map(|(_, content)| match content {
+            FactContent::Relational(fact) => Some(fact.context_id()),
+            _ => None,
+        })
+        .collect();
+    contexts.sort();
+    contexts.dedup();
+    let mut bootstraps = Vec::new();
+    for context in contexts {
+        let state = reduce_context(&build_context_journal(context, contents.clone()))
+            .map_err(|e| AuraError::internal(format!("context reduction failed: {e}")))?;
+        for (channel, epoch_state) in state.channel_epochs {
+            if let Some(bootstrap) = epoch_state.bootstrap {
+                bootstraps.push((context, channel, bootstrap.bootstrap_id));
+            }
+        }
+    }
+    Ok(bootstraps)
+}
+
 /// Reduce to AMP channel state for a (context, channel) pair.
 ///
 /// This fetches the context journal and reduces it to extract the current
