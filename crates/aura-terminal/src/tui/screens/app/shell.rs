@@ -906,6 +906,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Shared selection state for messages subscription synchronization
             let tui_selected_for_updates = tui_selected;
             let ready_join_channel_instances_for_updates = ready_join_channel_instances;
+            let mut screen_for_updates = screen;
             async move {
                 let Some(rx_holder) = rx_holder else {
                     return;
@@ -955,6 +956,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }
 
                     let updated_state = tui.read_clone();
+                    // Updates may navigate (e.g. opening a started DM); render it.
+                    if updated_state.screen() != screen_for_updates.get() {
+                        screen_for_updates.set(updated_state.screen());
+                    }
                     if updated_state.should_exit && !should_exit.get() {
                         should_exit.set(true);
                         bg_shutdown
