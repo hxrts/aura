@@ -568,6 +568,36 @@ pub async fn amp_recv<E>(
 where
     E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
 {
+    amp_open(effects, context, sender, bytes, true).await
+}
+
+/// Open a message that is already committed to the local journal.
+///
+/// Projections re-read committed messages (for example after a restart); those
+/// reads are not new arrivals, so they skip the persistent replay marker that
+/// `amp_recv` records for transport ingress.
+pub async fn amp_open_committed<E>(
+    effects: &E,
+    context: ContextId,
+    sender: AuthorityId,
+    bytes: Vec<u8>,
+) -> Result<AmpMessage>
+where
+    E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
+{
+    amp_open(effects, context, sender, bytes, false).await
+}
+
+async fn amp_open<E>(
+    effects: &E,
+    context: ContextId,
+    sender: AuthorityId,
+    bytes: Vec<u8>,
+    record_replay: bool,
+) -> Result<AmpMessage>
+where
+    E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
+{
     let wire_size = bytes.len();
 
     // Phase 1: Deserialize
@@ -626,21 +656,23 @@ where
                 AuraError::crypto(format!("AMP open failed: {e}")),
             )
         })?;
-    record_amp_replay_marker(
-        effects,
-        "amp_recv_replay_markers",
-        &transport_header,
-        sender,
-    )
-    .await
-    .map_err(|e| {
-        return_receive_failure(
-            context,
-            Some(&transport_header),
-            Some(&window_validation),
-            e,
+    if record_replay {
+        record_amp_replay_marker(
+            effects,
+            "amp_recv_replay_markers",
+            &transport_header,
+            sender,
         )
-    })?;
+        .await
+        .map_err(|e| {
+            return_receive_failure(
+                context,
+                Some(&transport_header),
+                Some(&window_validation),
+                e,
+            )
+        })?;
+    }
 
     // Success telemetry
     AMP_TELEMETRY.log_receive_success(

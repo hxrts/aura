@@ -31,7 +31,7 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
 use aura_protocol::amp::{
-    amp_recv, get_channel_state, ChannelMembershipFact, ChannelParticipantEvent,
+    amp_open_committed, get_channel_state, ChannelMembershipFact, ChannelParticipantEvent,
 };
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -1591,7 +1591,7 @@ impl ReactiveView for ChatSignalView {
                                         format!("[sealed: {} bytes]", sealed_len)
                                     })
                                 } else {
-                                    match amp_recv(
+                                    match amp_open_committed(
                                         self.effects.as_ref(),
                                         context,
                                         sender_id,

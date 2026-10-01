@@ -74,9 +74,9 @@ pub use channel::{AmpChannelCoordinator, ChannelMembershipFact, ChannelParticipa
 // ============================================================================
 
 pub use protocol::{
-    amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
-    emit_soft_safe_bump, prepare_send, validate_header, AmpDelivery, AmpReceipt, AmpTelemetry,
-    WindowValidationResult, AMP_TELEMETRY,
+    amp_open_committed, amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus,
+    emit_proposed_bump, emit_soft_safe_bump, prepare_send, validate_header, AmpDelivery,
+    AmpReceipt, AmpTelemetry, WindowValidationResult, AMP_TELEMETRY,
 };
 
 // ============================================================================
