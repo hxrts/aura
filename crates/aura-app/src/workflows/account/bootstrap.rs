@@ -197,6 +197,15 @@ pub async fn reconcile_pending_runtime_account_bootstrap(
 ) -> Result<PendingRuntimeBootstrapResolution, AuraError> {
     let account_ready = has_runtime_bootstrapped_account(app_core).await?;
     match (account_ready, pending_bootstrap) {
+        // A device joining an existing account gets its tree from the enrollment
+        // (the initiator's baseline ops); bootstrapping here would fabricate a
+        // separate single-device tree and keys for the subject authority.
+        (false, Some(pending_bootstrap)) if pending_bootstrap.has_pending_device_enrollment() => {
+            Ok(PendingRuntimeBootstrapResolution {
+                account_ready: false,
+                action: PendingRuntimeBootstrapAction::None,
+            })
+        }
         (false, Some(pending_bootstrap)) => {
             initialize_runtime_account(app_core, pending_bootstrap.nickname_suggestion).await?;
             Ok(PendingRuntimeBootstrapResolution {

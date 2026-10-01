@@ -1623,5 +1623,10 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             .await
             .expect("tree state");
         assert!(tree.leaves.values().any(|leaf| leaf.device_id == start.device_id));
+        let devices = super::identity::list_devices(&bridge)
+            .await
+            .expect("list devices");
+        eprintln!("DBG devices={:?} current={}", devices.iter().map(|d| (d.id, d.is_current)).collect::<Vec<_>>(), agent.context().device_id());
+        assert_eq!(devices.len(), 2, "initiator should list itself and the new device");
     });
 }
