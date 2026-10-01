@@ -169,6 +169,7 @@ impl UiModel {
             .map(|(idx, content)| MessageSnapshot {
                 id: format!("local-message-{idx}"),
                 content: content.clone(),
+                delivery_status: None,
             })
             .collect::<Vec<_>>();
         let open_modal = self.modal_state().map(ModalState::contract_id);

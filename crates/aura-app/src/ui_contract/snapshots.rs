@@ -492,6 +492,9 @@ impl RuntimeEventSnapshot {
 pub struct MessageSnapshot {
     pub id: String,
     pub content: String,
+    /// Delivery status for the message (e.g. "Sent", "Delivered", "Failed").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

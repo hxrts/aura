@@ -263,6 +263,7 @@ pub(in crate::app) fn runtime_semantic_snapshot(
         .map(|(idx, message)| MessageSnapshot {
             id: format!("chat-message-{idx}"),
             content: message.content.clone(),
+            delivery_status: None,
         })
         .collect();
     snapshot.quiescence = aura_app::ui_contract::QuiescenceSnapshot::derive(

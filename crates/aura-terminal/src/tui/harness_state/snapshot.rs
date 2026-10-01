@@ -388,6 +388,9 @@ fn build_authoritative_ui_snapshot(
                             .map(|message| MessageSnapshot {
                                 id: message.id.clone(),
                                 content: message.content.clone(),
+                                delivery_status: Some(
+                                    message.delivery_status.description().to_string(),
+                                ),
                             })
                             .collect::<Vec<_>>()
                     })
@@ -400,6 +403,7 @@ fn build_authoritative_ui_snapshot(
             .map(|message| MessageSnapshot {
                 id: message.id.clone(),
                 content: message.content.clone(),
+                delivery_status: Some(message.delivery_status.description().to_string()),
             })
             .collect::<Vec<_>>()
     };
