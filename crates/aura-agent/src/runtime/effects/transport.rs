@@ -376,7 +376,15 @@ async fn send_planned_envelope(
             .get("aura-destination-device-id")
             .and_then(|value| value.parse::<aura_core::DeviceId>().ok())
         {
-            Some(device_id) => resolve_own_device_addr(effects, device_id).await,
+            Some(device_id) => {
+                let addr = resolve_own_device_addr(effects, device_id).await;
+                tracing::debug!(
+                    device_id = %device_id,
+                    resolved = addr.is_some(),
+                    "routing envelope to another device of this authority"
+                );
+                addr
+            }
             None => None,
         }
     } else {

@@ -474,7 +474,14 @@ impl RendezvousManager {
                         // rather than as a peer authority descriptor.
                         if peer.authority_id == local_authority_id {
                             if let Some(device_id) = peer.descriptor.device_id {
-                                if !Self::descriptor_has_placeholder_crypto(&peer.descriptor) {
+                                let placeholder =
+                                    Self::descriptor_has_placeholder_crypto(&peer.descriptor);
+                                tracing::debug!(
+                                    device_id = %device_id,
+                                    placeholder,
+                                    "LAN packet from another device of this authority"
+                                );
+                                if !placeholder {
                                     state.own_device_peers.insert(device_id, peer);
                                 }
                             }

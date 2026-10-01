@@ -11,6 +11,11 @@ use std::collections::BTreeMap;
 /// than a VM round.
 const DEVICE_ENROLLMENT_ACCEPT_WINDOW_MS: u64 = 600_000;
 
+/// How long the new device waits for the initiator's request. The initiator
+/// only reaches this device once it is discovered under the subject authority
+/// and retries on a cycle, so this must span several initiator attempts.
+const DEVICE_ENROLLMENT_INVITEE_WAIT_MS: u64 = 240_000;
+
 /// Pause between initiator attempts while waiting for the new device.
 const DEVICE_ENROLLMENT_RETRY_DELAY_MS: u64 = 5_000;
 
@@ -392,7 +397,7 @@ impl<'a> InvitationDeviceEnrollmentHandler<'a> {
         let budget = invitation_timeout_budget(
             effects.as_ref(),
             "device_enrollment_invitee_vm",
-            INVITATION_VM_LOOP_TIMEOUT_MS,
+            DEVICE_ENROLLMENT_INVITEE_WAIT_MS,
         )
         .await?;
 
