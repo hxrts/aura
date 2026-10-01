@@ -2162,7 +2162,7 @@ async fn resolve_authoritative_context_id_for_channel_ignores_pending_invitation
 
 // OWNERSHIP: test-only-helper
 #[tokio::test]
-async fn test_leave_then_join_name_reuses_canonical_channel_id() {
+async fn test_leave_removes_channel_from_projection() {
     let config = AppConfig::default();
     let core = AppCore::new(config).unwrap();
     let app_core = Arc::new(RwLock::new(core));
@@ -2192,19 +2192,11 @@ async fn test_leave_then_join_name_reuses_canonical_channel_id() {
 
     apply_authoritative_membership_projection(&app_core, channel_id, context_id, false, None)
         .await
-        .expect("leave projection should preserve canonical channel entry");
+        .expect("leave projection should apply");
 
-    let resolved =
-        resolve_local_chat_channel_id_from_observed_state_or_input(&app_core, "slash-lab")
-            .await
-            .expect("name selector should resolve");
-    assert_eq!(resolved, channel_id);
-
+    // Leaving removes the channel from this client.
     let chat = observed_chat_snapshot(&app_core).await;
-    let channel = chat
-        .channel(&channel_id)
-        .expect("channel entry should remain");
-    assert_eq!(channel.member_count, 0);
+    assert!(chat.channel(&channel_id).is_none());
 }
 
 #[tokio::test]

@@ -203,35 +203,12 @@ pub(in crate::workflows) async fn apply_authoritative_membership_projection(
         return Ok(());
     }
 
-    let existing_name = observed_chat_snapshot(app_core)
-        .await
-        .channel(&channel_id)
-        .map(|channel| channel.name.clone())
-        .filter(|name| !name.trim().is_empty())
-        .filter(|name| name != &channel_id.to_string());
-    let canonical_name = name_hint
-        .map(normalize_channel_name)
-        .filter(|value| !value.is_empty())
-        .or(existing_name)
-        .ok_or_else(|| {
-            AuraError::from(super::super::error::WorkflowError::Precondition(
-                "authoritative membership projection missing canonical channel name",
-            ))
-        })?;
-    let updated_at_ms = next_observed_projection_timestamp_ms(app_core).await;
-    reduce_chat_fact_observed(
-        app_core,
-        &ChatFact::channel_updated_ms(
-            context_id,
-            channel_id,
-            Some(canonical_name),
-            None,
-            Some(0),
-            None,
-            updated_at_ms,
-            AuthorityId::new_from_entropy([0u8; 32]),
-        ),
-    )
+    // Leaving removes the channel from this client, matching the runtime view
+    // (which drops it on our own Left membership event).
+    let _ = (context_id, name_hint);
+    update_chat_projection_observed(app_core, |chat| {
+        let _ = chat.remove_channel(&channel_id);
+    })
     .await
 }
 
