@@ -12,6 +12,7 @@ pub struct ChatCallbacks {
     pub(crate) on_retry_message: RetryMessageCallback,
     pub(crate) on_create_channel: CreateChannelCallback,
     pub(crate) on_set_topic: SetTopicCallback,
+    pub(crate) on_edit_channel_info: EditChannelInfoCallback,
     pub(crate) on_close_channel: IdLocalOwnedCallback,
     pub on_list_participants: IdCallback,
 }
@@ -32,6 +33,7 @@ impl ChatCallbacks {
             on_retry_message: Self::make_retry_message(ctx.clone(), tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
             on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
+            on_edit_channel_info: Self::make_edit_channel_info(ctx.clone(), tx.clone()),
             on_close_channel: Self::make_close_channel(ctx.clone(), tx.clone()),
             on_list_participants: Self::make_list_participants(ctx, tx),
         }
@@ -588,6 +590,55 @@ impl ChatCallbacks {
                             )),
                         )
                         .await;
+                    },
+                );
+            },
+        )
+    }
+
+    fn make_edit_channel_info(ctx: Arc<IoContext>, tx: UiUpdateSender) -> EditChannelInfoCallback {
+        Arc::new(
+            move |channel_id: String,
+                  name: String,
+                  topic: String,
+                  operation: LocalTerminalOperationOwner| {
+                let ch = channel_id.clone();
+                let t = topic.clone();
+                spawn_local_terminal_result_callback(
+                    ctx.clone(),
+                    tx.clone(),
+                    operation,
+                    "EditChannelInfo callback",
+                    move |ctx| async move {
+                        let app_core = ctx.app_core_raw().clone();
+                        let timestamp_ms =
+                            aura_app::ui::workflows::time::current_time_ms(&app_core)
+                                .await
+                                .map_err(aura_core::AuraError::from)
+                                .map_err(crate::error::TerminalError::from)?;
+                        aura_app::ui::workflows::messaging::update_channel_info_by_input(
+                            &app_core,
+                            &channel_id,
+                            Some(name),
+                            Some(topic),
+                            timestamp_ms,
+                        )
+                        .await
+                        .map_err(Into::into)
+                    },
+                    move |tx, ()| async move {
+                        send_ui_update_required(
+                            &tx,
+                            UiUpdate::TopicSet {
+                                channel: ch,
+                                topic: t,
+                            },
+                        )
+                        .await;
+                    },
+                    |tx, error| async move {
+                        emit_error_toast(&tx, "chat", format!("Edit channel failed: {error}"))
+                            .await;
                     },
                 );
             },

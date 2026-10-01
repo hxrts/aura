@@ -1443,11 +1443,13 @@ fn submit_simple_modal_action(
                 return true;
             }
 
-            let topic = current_model
+            let edit_state = current_model
                 .as_ref()
-                .and_then(|model| model.edit_channel_info())
+                .and_then(|model| model.edit_channel_info());
+            let topic = edit_state
                 .map(|state| state.topic.trim().to_string())
                 .unwrap_or_default();
+            let new_name = edit_state.map(|state| state.name.trim().to_string());
 
             let operation = UiLocalOperationOwner::submit(
                 controller.clone(),
@@ -1466,10 +1468,11 @@ fn submit_simple_modal_action(
                         return;
                     }
                 };
-                match messaging_workflows::set_topic_by_name(
+                match messaging_workflows::update_channel_info_by_input(
                     &app_core,
                     &channel_name,
-                    &topic,
+                    new_name,
+                    Some(topic),
                     timestamp_ms,
                 )
                 .await

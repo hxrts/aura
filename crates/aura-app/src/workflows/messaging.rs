@@ -133,7 +133,7 @@ pub use channels::{
     join_authoritative_channel_binding_with_terminal_status, join_channel, join_channel_by_name,
     join_channel_by_name_with_binding_terminal_status, join_channel_by_name_with_instance,
     join_channel_by_name_with_terminal_status, leave_channel, leave_channel_by_name, set_topic,
-    set_topic_by_name,
+    set_topic_by_name, update_channel_info, update_channel_info_by_input,
 };
 pub(in crate::workflows) use followups::post_terminal_join_followups;
 pub use followups::run_post_channel_invite_followups;

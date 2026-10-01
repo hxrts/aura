@@ -96,6 +96,9 @@ pub(crate) type JoinChannelCallback = IdHandoffCallback;
 pub type CreateChannelCallback = StringOptStringVecU8LocalOwnedCallback;
 pub(crate) type RetryMessageCallback = ThreeStringHandoffCallback;
 pub(crate) type SetTopicCallback = TwoStringLocalOwnedCallback;
+/// (channel id, new name, new topic, operation)
+pub(crate) type EditChannelInfoCallback =
+    Arc<dyn Fn(String, String, String, LocalTerminalOperationOwner) + Send + Sync>;
 
 // --- Contacts Screen ---
 pub(crate) type UpdateNicknameCallback = TwoStringLocalOwnedCallback;

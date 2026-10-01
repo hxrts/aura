@@ -933,9 +933,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::set_channel_topic(),
                 SemanticOperationKind::SetChannelTopic,
             );
-            (cb.chat.on_set_topic)(channel_id.to_string(), topic, operation);
-            // Note: channel name update will be handled when the backend supports it
-            let _ = name;
+            (cb.chat.on_edit_channel_info)(channel_id.to_string(), name, topic, operation);
         }
         DispatchCommand::DeleteChannel { channel_id } => {
             let Some(update_tx) = update_tx_for_events else {

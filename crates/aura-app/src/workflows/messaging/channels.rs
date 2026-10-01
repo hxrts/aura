@@ -1009,49 +1009,125 @@ pub async fn close_channel_by_name(
     .await
 }
 
-async fn set_topic_authoritative(
+/// Commit a `ChannelUpdated` fact for an authoritative channel and deliver it
+/// to the channel's other members so their projections follow. Delivery is
+/// best-effort: an unreachable member catches up through sync.
+async fn update_channel_info_authoritative(
     app_core: &Arc<RwLock<AppCore>>,
     channel: AuthoritativeChannelRef,
-    text: &str,
+    name: Option<String>,
+    topic: Option<String>,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
+    let name = name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if name.is_none() && topic.is_none() {
+        return Ok(());
+    }
     let runtime = require_runtime(app_core).await?;
+    let own_authority = runtime.authority_id();
+    let fact = aura_chat::ChatFact::channel_updated_ms(
+        channel.context_id(),
+        channel.channel_id(),
+        name,
+        topic,
+        None,
+        None,
+        timestamp_ms,
+        own_authority,
+    )
+    .to_generic();
 
     timeout_runtime_call(
         &runtime,
-        "set_topic",
-        "channel_set_topic",
+        "update_channel_info",
+        "commit_relational_facts",
         MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-        || {
-            runtime.channel_set_topic(
-                channel.context_id(),
-                channel.channel_id(),
-                text.to_string(),
-                timestamp_ms,
-            )
-        },
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
     )
     .await
-    .map_err(|e| error::runtime_call("set channel topic", e))?
-    .map_err(|e| error::runtime_call("set channel topic", e))?;
+    .map_err(|e| error::runtime_call("update channel info", e))?
+    .map_err(|e| error::runtime_call("update channel info", e))?;
 
+    let members = crate::workflows::signals::read_signal(
+        app_core,
+        &*crate::signal_defs::CHAT_SIGNAL,
+        crate::signal_defs::CHAT_SIGNAL_NAME,
+    )
+    .await
+    .ok()
+    .and_then(|chat| {
+        chat.channel(&channel.channel_id())
+            .map(|entry| entry.member_ids.clone())
+    })
+    .unwrap_or_default();
+    for member in members
+        .into_iter()
+        .filter(|member| *member != own_authority)
+    {
+        let _ = timeout_runtime_call(
+            &runtime,
+            "update_channel_info",
+            "send_chat_fact",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.send_chat_fact(member, channel.context_id(), &fact),
+        )
+        .await;
+    }
     Ok(())
 }
 
+/// Update a channel's name and/or topic using a typed ChannelId.
+pub async fn update_channel_info(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    name: Option<String>,
+    topic: Option<String>,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let channel =
+        require_authoritative_channel_ref(app_core, &runtime, channel_id, "update_channel_info")
+            .await?;
+    update_channel_info_authoritative(app_core, channel, name, topic, timestamp_ms).await
+}
+
+/// Update a channel's name and/or topic for callers that carry a channel
+/// id or name as text.
+pub async fn update_channel_info_by_input(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_input: &str,
+    name: Option<String>,
+    topic: Option<String>,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let binding = resolve_authoritative_channel_binding_from_input(app_core, channel_input).await?;
+    update_channel_info_authoritative(
+        app_core,
+        authoritative_channel_ref(binding.channel_id, binding.context_id),
+        name,
+        topic,
+        timestamp_ms,
+    )
+    .await
+}
+
 /// Set a channel topic using a typed ChannelId.
-///
-/// Today this is a UI-local operation that updates the channel entry in `CHAT_SIGNAL`.
-/// A fully persisted implementation will commit a topic fact.
 pub async fn set_topic(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let runtime = require_runtime(app_core).await?;
-    let channel =
-        require_authoritative_channel_ref(app_core, &runtime, channel_id, "set_topic").await?;
-    set_topic_authoritative(app_core, channel, text, timestamp_ms).await
+    update_channel_info(
+        app_core,
+        channel_id,
+        None,
+        Some(text.to_string()),
+        timestamp_ms,
+    )
+    .await
 }
 
 /// Set a channel topic by name for callers that only carry channel names.
@@ -1061,11 +1137,11 @@ pub async fn set_topic_by_name(
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let binding = resolve_authoritative_channel_binding_from_input(app_core, channel_name).await?;
-    set_topic_authoritative(
+    update_channel_info_by_input(
         app_core,
-        authoritative_channel_ref(binding.channel_id, binding.context_id),
-        text,
+        channel_name,
+        None,
+        Some(text.to_string()),
         timestamp_ms,
     )
     .await
