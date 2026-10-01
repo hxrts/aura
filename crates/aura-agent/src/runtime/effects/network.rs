@@ -528,7 +528,7 @@ impl AuraEffectSystem {
                     })
                 }
             }
-            if PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
+            if aura_core::effects::time::PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
                 .await
                 .is_err()
             {
