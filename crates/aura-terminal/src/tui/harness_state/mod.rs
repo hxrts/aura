@@ -1428,6 +1428,48 @@ mod tests {
     }
 
     #[test]
+    fn semantic_snapshot_notifications_follow_rendered_order_and_selection() {
+        let mut state = TuiState::new();
+        state.notifications.selected_index = 1;
+        *state
+            .notifications
+            .visible_ids
+            .lock()
+            .unwrap_or_else(|_| panic!("visible ids lock")) = vec![
+            "contact-accepted:peer-a".to_string(),
+            "inv-guardian".to_string(),
+        ];
+
+        let app_snapshot = StateSnapshot::default();
+        let snapshot = authoritative_ui_snapshot(
+            &state,
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+            },
+        );
+
+        let notifications = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Notifications)
+            .unwrap_or_else(|| panic!("notifications list should exist"));
+        let ids: Vec<_> = notifications
+            .items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["contact-accepted:peer-a", "inv-guardian"]);
+        assert!(notifications
+            .items
+            .iter()
+            .any(|item| item.id == "inv-guardian" && item.selected));
+    }
+
+    #[test]
     fn semantic_snapshot_exports_amp_transition_runtime_notification_items() {
         let mut state = TuiState::new();
         state.notifications.selected_index = 0;

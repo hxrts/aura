@@ -66,6 +66,13 @@ fn passive_notification_runtime_fact_id(fact: &RuntimeFact) -> Option<String> {
 }
 
 fn exported_notification_ids(state: &TuiState, app_snapshot: &StateSnapshot) -> Vec<String> {
+    // Prefer the order the screen rendered, so exported selection matches the
+    // row the keyboard handler acts on.
+    if let Ok(visible) = state.notifications.visible_ids.lock() {
+        if !visible.is_empty() {
+            return visible.clone();
+        }
+    }
     let mut notification_ids = app_snapshot
         .invitations
         .all_pending()
