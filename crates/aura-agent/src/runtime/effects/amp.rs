@@ -163,6 +163,11 @@ impl AmpChannelEffects for AuraEffectSystem {
         self.insert_relational_fact(membership.to_generic())
             .await
             .map_err(map_amp_err)?;
+        // AMP state reads the context journal above; the chat projection reads
+        // committed facts, so commit (persist and publish) there as well.
+        self.commit_relational_facts(vec![membership.to_generic()])
+            .await
+            .map_err(|e| AmpChannelError::Storage(e.to_string()))?;
 
         tracing::debug!(
             "Participant {:?} joined channel {:?} in context {:?}",
@@ -189,6 +194,11 @@ impl AmpChannelEffects for AuraEffectSystem {
         self.insert_relational_fact(membership.to_generic())
             .await
             .map_err(map_amp_err)?;
+        // AMP state reads the context journal above; the chat projection reads
+        // committed facts, so commit (persist and publish) there as well.
+        self.commit_relational_facts(vec![membership.to_generic()])
+            .await
+            .map_err(|e| AmpChannelError::Storage(e.to_string()))?;
 
         tracing::debug!(
             "Participant {:?} left channel {:?} in context {:?}",

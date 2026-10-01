@@ -1213,7 +1213,32 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError> {
         let effects = self.agent.runtime().effects();
-        effects.leave_channel(params).await.map_err(map_amp_error)
+        // Members to tell, read before the local leave removes the channel.
+        let members = effects
+            .reactive_handler()
+            .read(&*aura_app::signal_defs::CHAT_SIGNAL)
+            .await
+            .ok()
+            .and_then(|chat| chat.channel(&params.channel).map(|c| c.member_ids.clone()))
+            .unwrap_or_default();
+        let (context, channel, participant) = (params.context, params.channel, params.participant);
+        effects.leave_channel(params).await.map_err(map_amp_error)?;
+
+        // Best effort: other members drop us from their member lists.
+        let membership = ChannelMembershipFact::new(
+            context,
+            channel,
+            participant,
+            ChannelParticipantEvent::Left,
+            ChannelMembershipFact::random_timestamp(&effects).await,
+        )
+        .to_generic();
+        for member in members.into_iter().filter(|member| *member != participant) {
+            if let Err(error) = self.send_chat_fact(member, context, &membership).await {
+                tracing::debug!(%member, %error, "channel leave notification not sent");
+            }
+        }
+        Ok(())
     }
 
     async fn bump_channel_epoch(
