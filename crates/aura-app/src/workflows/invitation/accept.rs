@@ -1487,8 +1487,7 @@ pub(in crate::workflows) async fn wait_for_contact_link(
     })
 }
 
-/// Commit the accepted channel into the local journal when it is not already
-/// known, so the chat projection lists it without waiting for the creator's
+/// Commit the accepted channel into the local journal so the chat projection lists it without waiting for the creator's
 /// channel fact to arrive. The fact is attributed to the inviter, who created
 /// the channel; it carries only metadata from the signed invitation.
 #[cfg(feature = "signals")]
@@ -1503,17 +1502,9 @@ async fn materialize_accepted_channel(
         return Ok(());
     };
     let channel_id = authoritative_channel.channel_id();
-    let already_listed = crate::workflows::signals::read_signal(
-        app_core,
-        &*crate::signal_defs::CHAT_SIGNAL,
-        crate::signal_defs::CHAT_SIGNAL_NAME,
-    )
-    .await
-    .map(|chat| chat.channel(&channel_id).is_some())
-    .unwrap_or(false);
-    if already_listed {
-        return Ok(());
-    }
+    // Always commit: the chat signal may already list the channel as an
+    // observed-only entry that the runtime view would later drop. The fact is
+    // idempotent by channel id.
     let created_at_ms = crate::workflows::time::current_time_ms(app_core).await?;
     let fact = aura_chat::ChatFact::channel_created_ms(
         authoritative_channel.context_id(),
