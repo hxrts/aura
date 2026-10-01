@@ -533,6 +533,18 @@ impl ThresholdSigningService {
             .await
     }
 
+    /// Decrypted key package stored for `participant` at `epoch` during a rotation.
+    pub(crate) async fn participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Result<Vec<u8>, AuraError> {
+        let location = Self::participant_share_location(authority, epoch, participant);
+        self.retrieve_participant_key_package(authority, epoch, participant, &location)
+            .await
+    }
+
     /// Return the current local key-agreement secret for the active signing
     /// participant on this device.
     pub async fn current_local_key_agreement_secret(

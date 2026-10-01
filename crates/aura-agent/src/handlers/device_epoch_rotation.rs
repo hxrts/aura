@@ -846,35 +846,45 @@ impl DeviceEpochRotationService {
         }
 
         let participant = ParticipantIdentity::device(device_id);
-        let key_location = SecureStorageLocation::with_sub_key(
-            "participant_shares",
-            format!("{}:{}", self.authority_id, ceremony_state.new_epoch),
-            participant.storage_key(),
-        );
+        // Stored shares are encrypted envelopes; the signing service decrypts them.
         let key_package = self
-            .effects
-            .secure_retrieve(&key_location, &[SecureStorageCapability::Read])
+            .signing_service
+            .participant_key_package(&self.authority_id, ceremony_state.new_epoch, &participant)
             .await
             .map_err(map_internal_error)?;
-        let share = share_from_key_package_bytes(&key_package).map_err(map_internal_error)?;
-
-        let pubkey_location = SecureStorageLocation::with_sub_key(
-            "threshold_pubkey",
-            self.authority_id.to_string(),
-            ceremony_state.new_epoch.to_string(),
-        );
-        let pubkey_bytes = self
-            .effects
-            .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
-            .await
-            .map_err(map_internal_error)?;
-        let public_key_package =
-            public_key_package_from_bytes(&pubkey_bytes).map_err(map_internal_error)?;
-        let public_key_bytes = public_key_package
-            .signer_public_keys
-            .get(&share.identifier)
-            .cloned()
-            .ok_or_else(|| AgentError::internal("missing verifying share for enrollment signer"))?;
+        // A threshold-1 epoch holds single-signer Ed25519 packages, not FROST shares.
+        let public_key_bytes = match share_from_key_package_bytes(&key_package) {
+            Ok(share) => {
+                let pubkey_location = SecureStorageLocation::with_sub_key(
+                    "threshold_pubkey",
+                    self.authority_id.to_string(),
+                    ceremony_state.new_epoch.to_string(),
+                );
+                let pubkey_bytes = self
+                    .effects
+                    .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
+                    .await
+                    .map_err(map_internal_error)?;
+                let public_key_package =
+                    public_key_package_from_bytes(&pubkey_bytes).map_err(map_internal_error)?;
+                public_key_package
+                    .signer_public_keys
+                    .get(&share.identifier)
+                    .cloned()
+                    .ok_or_else(|| {
+                        AgentError::internal("missing verifying share for enrollment signer")
+                    })?
+            }
+            Err(_) => aura_core::crypto::SingleSignerKeyPackage::import_from_secure_storage(
+                &key_package,
+                aura_core::secrets::SecretExportContext::secure_storage(
+                    "aura-agent::device_epoch_rotation::finalize_enrollment",
+                ),
+            )
+            .map_err(map_internal_error)?
+            .verifying_key()
+            .to_vec(),
+        };
 
         let next_leaf_id = tree_state
             .leaves

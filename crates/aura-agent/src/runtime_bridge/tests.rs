@@ -1553,3 +1553,75 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
         assert!(!listed(chat), "channel removed after leaving");
     });
 }
+
+/// Regression (work/8.md task 7): with one existing device, the initiator
+/// finalizes the enrollment itself once the new device accepts. Cross-machine,
+/// the invitee reported success while the initiator failed to sign the commit.
+#[test]
+fn sole_device_enrollment_commits_after_new_device_accepts() {
+    run_async_test_on_large_stack(async move {
+        let authority = AuthorityId::new_from_entropy([73u8; 32]);
+        let build_context = EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([74u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&build_context)
+                .await
+                .expect("build testing agent"),
+        );
+        let bridge = AgentRuntimeBridge::new(agent.clone());
+        bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("bootstrap local identity keys");
+
+        let start = bridge
+            .initiate_device_enrollment_ceremony(
+                "Tablet".to_string(),
+                AuthorityId::new_from_entropy([75u8; 32]),
+            )
+            .await
+            .expect("start device enrollment");
+        let runner = agent.runtime().ceremony_runner().clone();
+        runner
+            .record_local_response(
+                &start.ceremony_id,
+                aura_core::threshold::ParticipantIdentity::device(start.device_id),
+            )
+            .await
+            .expect("record new device acceptance");
+
+        let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+            authority,
+            agent.runtime().effects(),
+            agent.runtime().ceremony_tracker().clone(),
+            runner.clone(),
+            agent.runtime().threshold_signing(),
+            agent.runtime().reconfiguration().clone(),
+        );
+        service
+            .finalize_sole_device_enrollment(&start.ceremony_id)
+            .await
+            .expect("initiator should finalize the enrollment");
+        let effects = agent.runtime().effects();
+        let ceremony = agent
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .expect("ceremony");
+        assert!(
+            ceremony.is_committed,
+            "enrollment should commit, got error {:?}",
+            ceremony.error_message
+        );
+        let tree = aura_protocol::effects::TreeEffects::get_current_state(effects.as_ref())
+            .await
+            .expect("tree state");
+        assert!(tree.leaves.values().any(|leaf| leaf.device_id == start.device_id));
+    });
+}
