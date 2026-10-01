@@ -4,7 +4,8 @@
 //! A newly enrolled device starts empty, and facts committed on one device
 //! must reach the others. Anti-entropy compares operation logs only, so this
 //! symmetric lockstep exchange carries the facts themselves:
-//! digest, then sealed AMP keys, journal facts, key index and the facts the
+//! digest, then commitment-tree ops, sealed AMP keys, journal facts, key index
+//! and the facts the
 //! peer lacks, in that order so a message is openable when its fact lands.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -25,6 +26,7 @@ enum SiblingFactsFrame {
     Index(Vec<Vec<u8>>),
     Facts(Vec<TypedFact>),
     JournalFacts(aura_core::Fact),
+    TreeOps(Vec<aura_core::AttestedOp>),
     AmpKeys(Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>),
 }
 
@@ -119,6 +121,15 @@ pub(crate) async fn exchange_facts_with_sibling(
     let mut digest_input: Vec<u8> = by_key.keys().flatten().copied().collect();
     digest_input.extend_from_slice(&hash(&journal_bytes));
     digest_input.extend_from_slice(&hash(&held_ids));
+    // The commitment tree: a device enrolled on a sibling learns its own leaf
+    // (and later device changes) only through these ops.
+    let tree_ops = effects
+        .export_tree_ops()
+        .await
+        .map_err(|error| AuraError::internal(format!("export tree ops: {error}")))?;
+    let tree_bytes = aura_core::util::serialization::to_vec(&tree_ops)
+        .map_err(|error| AuraError::internal(format!("encode tree ops: {error}")))?;
+    digest_input.extend_from_slice(&hash(&tree_bytes));
     let digest = hash(&digest_input);
 
     send_frame(effects, peer, &SiblingFactsFrame::Digest(digest)).await?;
@@ -135,6 +146,24 @@ pub(crate) async fn exchange_facts_with_sibling(
     if peer_digest == digest {
         return Ok(0);
     }
+
+    send_frame(effects, peer, &SiblingFactsFrame::TreeOps(tree_ops)).await?;
+    let SiblingFactsFrame::TreeOps(peer_tree_ops) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::TreeOps(_)),
+        "tree_ops",
+    )
+    .await?
+    else {
+        return Err(protocol_error("tree ops"));
+    };
+    // Only ops that extend this tree (and verify, for threshold trees) apply;
+    // a provisional op a joining device made for itself never does.
+    effects
+        .import_verified_tree_ops(&peer_tree_ops)
+        .await
+        .map_err(|error| AuraError::internal(format!("import tree ops: {error}")))?;
 
     // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
     // travel sealed to the sibling device's leaf key. They go first so the

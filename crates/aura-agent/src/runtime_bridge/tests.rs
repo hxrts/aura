@@ -1561,6 +1561,12 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
 fn sole_device_enrollment_commits_after_new_device_accepts() {
     run_async_test_on_large_stack(async move {
         let authority = AuthorityId::new_from_entropy([73u8; 32]);
+        // Fresh storage: a previous run's enrolled device would otherwise make
+        // this a multi-device account.
+        let storage_root = unique_test_path("sole-device-enrollment");
+        let _ = fs::remove_dir_all(&storage_root);
+        let mut config = AgentConfig::default();
+        config.storage.base_path = storage_root;
         let build_context = EffectContext::new(
             authority,
             ContextId::new_from_entropy([74u8; 32]),
@@ -1569,6 +1575,7 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
         let agent = Arc::new(
             AgentBuilder::new()
                 .with_authority(authority)
+                .with_config(config)
                 .build_testing_async(&build_context)
                 .await
                 .expect("build testing agent"),
@@ -1578,6 +1585,8 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             .bootstrap_signing_keys()
             .await
             .expect("bootstrap local identity keys");
+
+        let baseline = agent.runtime().effects().export_tree_ops().await.expect("baseline");
 
         let start = bridge
             .initiate_device_enrollment_ceremony(
@@ -1626,7 +1635,46 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
         let devices = super::identity::list_devices(&bridge)
             .await
             .expect("list devices");
-        eprintln!("DBG devices={:?} current={}", devices.iter().map(|d| (d.id, d.is_current)).collect::<Vec<_>>(), agent.context().device_id());
         assert_eq!(devices.len(), 2, "initiator should list itself and the new device");
+
+        // The joining device holds the pre-enrollment baseline; replicating the
+        // initiator's verified ops gives it its own leaf (work/8.md task 32).
+        let joiner = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &crate::core::AgentConfig {
+                device_id: start.device_id,
+                ..crate::core::AgentConfig::default()
+            },
+            authority,
+            crate::SharedTransport::new(),
+        );
+        joiner.replace_tree_ops(&baseline).await.expect("adopt baseline");
+        let all_ops = effects.export_tree_ops().await.expect("initiator ops");
+        assert!(joiner.import_verified_tree_ops(&all_ops).await.expect("import") > 0);
+        let joiner_tree = aura_protocol::effects::TreeEffects::get_current_state(joiner.as_ref())
+            .await
+            .expect("joiner tree");
+        assert!(joiner_tree.leaves.values().any(|leaf| leaf.device_id == start.device_id));
+
+        // A provisional op a joining device made for itself does not extend the
+        // account tree and is not applied by the initiator.
+        let provisional = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &crate::core::AgentConfig {
+                device_id: aura_core::DeviceId::new_from_entropy([0x7E; 32]),
+                ..crate::core::AgentConfig::default()
+            },
+            authority,
+            crate::SharedTransport::new(),
+        );
+        crate::runtime::services::ThresholdSigningService::new(provisional.clone())
+            .bootstrap_authority(&authority)
+            .await
+            .expect("provisional bootstrap");
+        let before = effects.export_tree_ops().await.expect("before");
+        let provisional_ops = provisional.export_tree_ops().await.expect("provisional ops");
+        assert_eq!(
+            effects.import_verified_tree_ops(&provisional_ops).await.expect("import"),
+            0
+        );
+        assert_eq!(effects.export_tree_ops().await.expect("after"), before);
     });
 }

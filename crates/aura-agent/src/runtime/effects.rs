@@ -789,6 +789,56 @@ impl AuraEffectSystem {
             .map_err(|error| crate::core::AgentError::effects(error.to_string()))
     }
 
+    /// Import tree ops replicated from another device of this authority.
+    ///
+    /// Only ops that extend the current tree (parent epoch and commitment
+    /// match) and carry a valid signature under it are applied, in order;
+    /// anything else, such as a provisional op a joining device created for
+    /// itself, is skipped. Returns how many ops were applied.
+    pub async fn import_verified_tree_ops(
+        &self,
+        ops: &[aura_core::AttestedOp],
+    ) -> Result<usize, crate::core::AgentError> {
+        use aura_protocol::effects::TreeEffects;
+        let encode = |op: &aura_core::AttestedOp| {
+            aura_core::util::serialization::to_vec(op)
+                .map_err(|error| crate::core::AgentError::internal(error.to_string()))
+        };
+        let mut known = std::collections::BTreeSet::new();
+        for op in self.export_tree_ops().await? {
+            known.insert(encode(&op)?);
+        }
+        let mut applied = 0;
+        for op in ops {
+            if !known.insert(encode(op)?) {
+                continue;
+            }
+            let state = self
+                .get_current_state()
+                .await
+                .map_err(|error| crate::core::AgentError::effects(error.to_string()))?;
+            let extends = op.op.parent_epoch == state.epoch
+                && op.op.parent_commitment == state.root_commitment;
+            // A threshold tree carries branch signing keys and every op must
+            // verify under them. A single-signer authority's tree has none (its
+            // ops are signed with the authority key); there the op must extend
+            // this tree and come from an authenticated sibling device, which
+            // already holds the authority's keys.
+            let verified = extends
+                && (state.signing_keys().is_empty()
+                    || self.verify_aggregate_sig(op, &state).await.unwrap_or(false));
+            if !verified {
+                tracing::debug!(extends, "skipping unverified tree op from sibling");
+                continue;
+            }
+            self.apply_attested_op(op.clone())
+                .await
+                .map_err(|error| crate::core::AgentError::effects(error.to_string()))?;
+            applied += 1;
+        }
+        Ok(applied)
+    }
+
     /// Adopt `ops` as this device's whole tree OpLog (a device joining an
     /// existing account drops any provisional history; see `replace_ops`).
     pub async fn replace_tree_ops(
