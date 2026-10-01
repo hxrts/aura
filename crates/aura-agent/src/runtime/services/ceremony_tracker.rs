@@ -1094,7 +1094,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(enrollment.timeout, Duration::from_secs(45));
+        assert_eq!(enrollment.timeout, Duration::from_secs(600));
         assert_eq!(recovery.timeout, Duration::from_secs(90));
     }
 
