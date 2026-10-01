@@ -47,7 +47,8 @@ const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
 /// Upper bound for the invitee to import the code and accept (matches the
 /// enrollment ceremony timeout).
-const SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS: u64 = 45_000;
+/// Matches the enrollment acceptance window: a person imports the code later.
+const SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS: u64 = 600_000;
 const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
 const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
 

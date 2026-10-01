@@ -90,7 +90,7 @@ pub async fn accept_device_enrollment_invitation(
         &runtime,
         "accept_device_enrollment_invitation",
         "accept_invitation",
-        INVITATION_RUNTIME_OPERATION_TIMEOUT,
+        DEVICE_ENROLLMENT_ACCEPT_TIMEOUT,
         || runtime.accept_invitation(invitation.invitation_id.as_str()),
     )
     .await;

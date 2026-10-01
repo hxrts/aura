@@ -144,6 +144,10 @@ const CHANNEL_BOOTSTRAP_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_INVITATION_CREATE_TIMEOUT_MS: u64 = 5_000;
 const INVITATION_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
 const INVITATION_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
+/// Accepting a device enrollment waits for the initiator, which only reaches the
+/// new device after it is discovered under the subject authority and retries
+/// on a cycle; this matches the runtime's invitee wait.
+const DEVICE_ENROLLMENT_ACCEPT_TIMEOUT: Duration = Duration::from_millis(240_000);
 
 /// Move-owned invitation lifecycle handle.
 ///
