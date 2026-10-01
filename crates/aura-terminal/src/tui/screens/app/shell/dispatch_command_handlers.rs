@@ -1418,6 +1418,17 @@ pub(super) fn handle_dispatch_command_match(
                     SemanticOperationKind::DeclineInvitation,
                 );
                 (cb.invitations.on_decline)(invitation_id, operation);
+            } else if let Some(NotificationSelection::SentInvitation(invitation_id)) = selected {
+                // On a sent invitation, `x` revokes it after confirmation.
+                new_state
+                    .modal_queue
+                    .enqueue(crate::tui::state::QueuedModal::Confirm {
+                        title: "Revoke Invitation".to_string(),
+                        message: "Revoke this invitation? Its code will stop working.".to_string(),
+                        on_confirm: Some(crate::tui::state::ConfirmAction::RevokeInvitation {
+                            invitation_id: invitation_id.into(),
+                        }),
+                    });
             } else {
                 new_state.toast_error("Select a received invitation to decline");
             }

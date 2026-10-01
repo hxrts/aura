@@ -5,7 +5,7 @@
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::{CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::ui::types::invitations::{InvitationDirection, InvitationStatus, InvitationType};
+use aura_app::ui::types::invitations::{InvitationDirection, InvitationType};
 use aura_app::ui::types::{truncate_id_for_display, EffectiveName};
 use aura_app::ui_contract::{
     AmpTransitionPolicySnapshot, AmpTransitionState, InvitationFactKind, OperationState,
@@ -26,6 +26,7 @@ enum NotificationKind {
     GuardianInvite,
     HomeInvite,
     RecoveryApproval,
+    SentInvite,
     ContactInviteAccepted,
     GuardianInviteAccepted,
     DeviceInviteAccepted,
@@ -39,6 +40,7 @@ impl NotificationKind {
             Self::GuardianInvite => "◆",
             Self::HomeInvite => "■",
             Self::RecoveryApproval => "⊗",
+            Self::SentInvite => "↗",
             Self::ContactInviteAccepted => "✓",
             Self::GuardianInviteAccepted => "✓",
             Self::DeviceInviteAccepted => "✓",
@@ -52,6 +54,7 @@ impl NotificationKind {
             Self::GuardianInvite => "Guardian request",
             Self::HomeInvite => "Home invite",
             Self::RecoveryApproval => "Approval request",
+            Self::SentInvite => "Sent invite",
             Self::ContactInviteAccepted => "Contact invite accepted",
             Self::GuardianInviteAccepted => "Guardian invite accepted",
             Self::DeviceInviteAccepted => "Device invite accepted",
@@ -65,6 +68,7 @@ impl NotificationKind {
             Self::GuardianInvite => Theme::WARNING,
             Self::HomeInvite => Theme::TEXT,
             Self::RecoveryApproval => Theme::SUCCESS,
+            Self::SentInvite => Theme::TEXT_MUTED,
             Self::ContactInviteAccepted => Theme::SUCCESS,
             Self::GuardianInviteAccepted => Theme::SUCCESS,
             Self::DeviceInviteAccepted => Theme::SUCCESS,
@@ -108,6 +112,29 @@ fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &
         Some(AmpTransitionPolicySnapshot::EmergencyQuarantine) => "emergency quarantine",
         Some(AmpTransitionPolicySnapshot::EmergencyCryptoshred) => "emergency cryptoshred",
         None => "transition",
+    }
+}
+
+/// A pending invitation this account sent, offered for copying or revoking.
+fn sent_invitation_item(inv: &aura_app::ui::types::Invitation) -> NotificationItem {
+    let kind_label = match inv.invitation_type {
+        InvitationType::Guardian => "Guardian",
+        InvitationType::Chat => "Contact",
+        InvitationType::Home => "Home",
+    };
+    let recipient = inv
+        .to_name
+        .clone()
+        .filter(|name| !name.is_empty())
+        .or_else(|| inv.to_id.map(|id| truncate_id_for_display(&id.to_string())))
+        .unwrap_or_else(|| "anyone with the code".to_string());
+    NotificationItem {
+        id: inv.id.clone(),
+        title: format!("{kind_label} invite to {recipient}"),
+        subtitle: "Waiting for response - c copy code, x revoke".to_string(),
+        kind: NotificationKind::SentInvite,
+        timestamp: inv.created_at,
+        from_id: None,
     }
 }
 
@@ -269,10 +296,9 @@ pub fn NotificationsScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
                 let mut items = Vec::new();
-                for inv in state.all_pending() {
-                    if inv.direction != InvitationDirection::Received
-                        || inv.status != InvitationStatus::Pending
-                    {
+                for inv in state.open_invitations() {
+                    if inv.direction == InvitationDirection::Sent {
+                        items.push(sent_invitation_item(inv));
                         continue;
                     }
 
@@ -486,4 +512,36 @@ pub async fn run_notifications_screen() -> std::io::Result<()> {
     }
     .fullscreen()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_app::ui::types::invitations::{Invitation, InvitationStatus};
+    use aura_core::types::identifiers::AuthorityId;
+
+    #[test]
+    fn sent_invitations_become_revocable_notification_items() {
+        let invitation = Invitation {
+            id: "sent-1".to_string(),
+            invitation_type: InvitationType::Chat,
+            status: InvitationStatus::Pending,
+            direction: InvitationDirection::Sent,
+            from_id: AuthorityId::new_from_entropy([1u8; 32]),
+            from_name: "Alex".to_string(),
+            to_id: None,
+            to_name: Some("Bob".to_string()),
+            created_at: 42,
+            expires_at: None,
+            message: None,
+            home_id: None,
+            home_name: None,
+        };
+        let item = sent_invitation_item(&invitation);
+        assert_eq!(item.id, "sent-1");
+        assert_eq!(item.kind, NotificationKind::SentInvite);
+        assert_eq!(item.title, "Contact invite to Bob");
+        assert!(item.subtitle.contains("x revoke"));
+        assert_eq!(item.timestamp, 42);
+    }
 }

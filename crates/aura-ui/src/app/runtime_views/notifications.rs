@@ -53,7 +53,7 @@ fn build_notifications_runtime_view(
 ) -> NotificationsRuntimeView {
     let mut items = Vec::new();
 
-    for invitation in invitations.all_pending() {
+    for invitation in invitations.open_invitations() {
         if !matches!(
             invitation.status,
             aura_app::ui::types::InvitationStatus::Pending
@@ -727,6 +727,47 @@ mod tests {
         assert_eq!(
             runtime.items[0].action,
             NotificationRuntimeAction::AmpApproveCryptoshred
+        );
+    }
+
+    #[test]
+    fn build_notifications_runtime_view_lists_sent_invitations_with_actions() {
+        use aura_app::ui::types::{
+            Invitation, InvitationDirection, InvitationStatus, InvitationType,
+        };
+        let bob = AuthorityId::new_from_entropy([7u8; 32]);
+        let mut invitations = InvitationsState::default();
+        invitations.add_invitation(Invitation {
+            id: "sent-1".to_string(),
+            invitation_type: InvitationType::Chat,
+            status: InvitationStatus::Pending,
+            direction: InvitationDirection::Sent,
+            from_id: AuthorityId::new_from_entropy([6u8; 32]),
+            from_name: "Alex".to_string(),
+            to_id: Some(bob),
+            to_name: Some("Bob".to_string()),
+            created_at: 10,
+            expires_at: None,
+            message: None,
+            home_id: None,
+            home_name: None,
+        });
+
+        let runtime = build_notifications_runtime_view(
+            invitations,
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[],
+        );
+
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(runtime.items[0].id, "sent-1");
+        assert_eq!(runtime.items[0].kind_label, "Sent Contact Invite");
+        assert_eq!(runtime.items[0].title, "Contact invite to Bob");
+        assert_eq!(
+            runtime.items[0].action,
+            NotificationRuntimeAction::SentInvitation
         );
     }
 }

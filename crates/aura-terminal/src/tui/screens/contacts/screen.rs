@@ -29,9 +29,7 @@ use iocraft::prelude::*;
 
 use aura_app::harness_mode_enabled;
 use aura_app::ui::contract::{contacts_friend_action_controls, ControlId};
-use aura_app::ui::signals::{
-    CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, SETTINGS_SIGNAL,
-};
+use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL};
 
 use crate::tui::callbacks::{StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
@@ -42,12 +40,28 @@ use crate::tui::layout::dim;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{focus_border_color, Spacing, Theme};
 use crate::tui::types::{
-    short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
-    InvitationType, ReadReceiptPolicyExt,
+    Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus, InvitationType,
+    ReadReceiptPolicyExt,
 };
 use aura_app::ui::signals::DiscoveredPeerMethod;
 use aura_app::ui::types::{format_relative_time_from, ContactRelationshipState, EffectiveName};
-use std::collections::HashSet;
+
+/// Count contact invitations this account sent that are still awaiting a
+/// response and have not expired.
+fn pending_contact_invite_count(invitations: &[Invitation], now_ms: Option<u64>) -> usize {
+    invitations
+        .iter()
+        .filter(|invitation| {
+            invitation.direction == InvitationDirection::Outbound
+                && invitation.status == InvitationStatus::Pending
+                && invitation.invitation_type == InvitationType::Contact
+                && !matches!(
+                    (invitation.expires_at, now_ms),
+                    (Some(expires_at), Some(now)) if now >= expires_at
+                )
+        })
+        .count()
+}
 
 fn contact_relationship_label(state: ContactRelationshipState) -> &'static str {
     match state {
@@ -374,7 +388,6 @@ pub fn ContactsScreen(
     // Initialize reactive state with defaults - will be populated by signal subscriptions
     let reactive_contacts = hooks.use_state(Vec::new);
     let reactive_invitations = hooks.use_state(Vec::new);
-    let own_authority_id = hooks.use_state(String::new);
 
     // Subscribe to contacts signal updates
     // Uses the unified ReactiveEffects system from aura-core
@@ -386,17 +399,6 @@ pub fn ContactsScreen(
                 let contacts: Vec<Contact> =
                     contacts_state.all_contacts().map(Contact::from).collect();
                 reactive_contacts.set(contacts);
-            })
-            .await;
-        }
-    });
-
-    hooks.use_future({
-        let mut own_authority_id = own_authority_id.clone();
-        let app_core = app_ctx.app_core.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                own_authority_id.set(settings_state.authority_id);
             })
             .await;
         }
@@ -423,7 +425,6 @@ pub fn ContactsScreen(
     // Use reactive state for rendering (populated by signal subscription)
     let contacts = reactive_contacts.read().clone();
     let invitations = reactive_invitations.read().clone();
-    let own_authority_id = own_authority_id.read().clone();
 
     // Bootstrap-candidate state (reactive via signal subscription)
     let lan_peers_state = hooks.use_state(DiscoveredPeersState::new);
@@ -464,53 +465,10 @@ pub fn ContactsScreen(
         }
     });
 
-    let mut display_contacts = contacts;
-    if !invitations.is_empty() {
-        let mut existing_ids: HashSet<String> =
-            display_contacts.iter().map(|c| c.id.clone()).collect();
-
-        for invitation in invitations.iter() {
-            if invitation.direction != InvitationDirection::Outbound {
-                continue;
-            }
-            if invitation.status != InvitationStatus::Pending {
-                continue;
-            }
-            if invitation.invitation_type != InvitationType::Contact {
-                continue;
-            }
-
-            if let (Some(expires_at), Some(now_ms)) = (invitation.expires_at, props.now_ms) {
-                if now_ms >= expires_at {
-                    continue;
-                }
-            }
-
-            let is_self_addressed =
-                !own_authority_id.is_empty() && invitation.other_party_id == own_authority_id;
-
-            let (id, name) = if !invitation.other_party_id.is_empty() && !is_self_addressed {
-                let id = invitation.other_party_id.clone();
-                let name = if !invitation.other_party_name.is_empty() {
-                    invitation.other_party_name.clone()
-                } else {
-                    short_id(&id, 8)
-                };
-                (id, name)
-            } else {
-                let id = invitation.id.clone();
-                let name = format!("Pending invite {}", short_id(&invitation.id, 6));
-                (id, name)
-            };
-
-            if existing_ids.contains(&id) {
-                continue;
-            }
-            existing_ids.insert(id.clone());
-
-            display_contacts.push(Contact::new(id, name).with_status(ContactStatus::Pending));
-        }
-    }
+    // Pending sent invitations are not contacts: Notifications lists them with
+    // copy and revoke, and they are only counted here.
+    let display_contacts = contacts;
+    let pending_invites = pending_contact_invite_count(&invitations, props.now_ms);
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_selected = props.view.selected_index;
@@ -570,6 +528,10 @@ pub fn ContactsScreen(
                 Text(
                     content: format!("Contacts: {}", display_contacts.len()),
                     color: Theme::TEXT,
+                )
+                Text(
+                    content: format!("Pending invites: {pending_invites}"),
+                    color: Theme::TEXT_MUTED,
                 )
                 #(detail_lines.into_iter().map(|line| {
                     element! {
@@ -644,7 +606,7 @@ pub fn ContactsScreen(
                     })
                     // Contacts list
                     ContactList(
-                        contacts: display_contacts.clone(),
+                        contacts: display_contacts,
                         selected_index: current_selected,
                         focused: contacts_focused,
                     )
@@ -677,4 +639,31 @@ pub async fn run_contacts_screen() -> std::io::Result<()> {
     }
     .fullscreen()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_contact_invites_are_counted_separately_from_contacts() {
+        let sent = |id: &str| {
+            Invitation::new(id, "", InvitationDirection::Outbound)
+                .with_type(InvitationType::Contact)
+                .with_status(InvitationStatus::Pending)
+        };
+        let mut expired = sent("expired");
+        expired.expires_at = Some(100);
+        let invitations = vec![
+            sent("open"),
+            expired,
+            sent("accepted").with_status(InvitationStatus::Accepted),
+            Invitation::new("received", "Bob", InvitationDirection::Inbound)
+                .with_type(InvitationType::Contact)
+                .with_status(InvitationStatus::Pending),
+            sent("guardian").with_type(InvitationType::Guardian),
+        ];
+        assert_eq!(pending_contact_invite_count(&invitations, Some(200)), 1);
+        assert_eq!(pending_contact_invite_count(&invitations, None), 2);
+    }
 }

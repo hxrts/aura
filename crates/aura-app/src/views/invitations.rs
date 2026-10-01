@@ -173,6 +173,17 @@ impl InvitationsState {
             .find(|inv| inv.id == id)
     }
 
+    /// Invitations still awaiting a response, received first and then sent.
+    ///
+    /// Sent invitations are listed here so frontends can offer Copy/Revoke;
+    /// they are not contacts and must not be counted as such.
+    pub fn open_invitations(&self) -> impl Iterator<Item = &Invitation> {
+        self.pending
+            .iter()
+            .chain(self.sent.iter())
+            .filter(|inv| inv.status == InvitationStatus::Pending)
+    }
+
     /// Count pending received invitations (filtered by status).
     pub fn pending_received_count(&self) -> usize {
         self.pending
@@ -393,5 +404,25 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(state.sent_count(), 0);
         assert_eq!(state.history_count(), 1);
+    }
+
+    #[test]
+    fn test_open_invitations_include_sent_until_revoked() {
+        let mut state = InvitationsState::default();
+        state.add_invitation(make_invitation("received", InvitationDirection::Received));
+        state.add_invitation(make_invitation("sent", InvitationDirection::Sent));
+
+        let open: Vec<_> = state
+            .open_invitations()
+            .map(|inv| inv.id.as_str())
+            .collect();
+        assert_eq!(open, vec!["received", "sent"]);
+
+        state.revoke_invitation("sent").unwrap();
+        let open: Vec<_> = state
+            .open_invitations()
+            .map(|inv| inv.id.as_str())
+            .collect();
+        assert_eq!(open, vec!["received"]);
     }
 }

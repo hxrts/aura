@@ -561,6 +561,9 @@ pub fn handle_notifications_key(
         KeyCode::Char('x') => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::DeclineInvitation));
         }
+        KeyCode::Char('c') => {
+            commands.push(TuiCommand::Dispatch(DispatchCommand::ExportInvitation));
+        }
         KeyCode::Char('r') => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::ApproveRecovery));
         }
