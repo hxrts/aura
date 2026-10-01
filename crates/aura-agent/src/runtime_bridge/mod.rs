@@ -3564,6 +3564,7 @@ async fn run_guardian_ceremony_initiator(
 
     // Step 4: Execute guardian ceremony choreography (send proposals + collect responses)
     let guardian_ids = operation.guardian_ids.clone();
+    let threshold = operation.threshold_k;
     let accepted_guardian_responses = recovery_service
         .execute_guardian_ceremony_initiator(
             ceremony_id_hash,
@@ -3623,6 +3624,34 @@ async fn run_guardian_ceremony_initiator(
             tracing::info!(
                 guardian_id = %guardian_id,
                 "Committed GuardianBinding fact"
+            );
+        }
+    }
+
+    // Step 8: Record setup completion so the recovery view shows the new
+    // guardian set and threshold.
+    {
+        use aura_journal::DomainFact as _;
+        let completed_at = effects
+            .physical_time()
+            .await
+            .map_err(|e| format!("Failed to read time for guardian setup completion: {e}"))?;
+        let completed = aura_recovery::RecoveryFact::GuardianSetupCompleted {
+            context_id: crate::core::default_context_id_for_authority(authority_id),
+            guardian_ids: accepted_guardian_responses
+                .iter()
+                .map(|response| response.payload().guardian_id)
+                .collect(),
+            trace_id: Some(ceremony_id.to_string()),
+            threshold,
+            completed_at,
+        }
+        .to_generic();
+        if let Err(e) = effects.commit_relational_facts(vec![completed]).await {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                error = %e,
+                "Failed to commit GuardianSetupCompleted fact"
             );
         }
     }

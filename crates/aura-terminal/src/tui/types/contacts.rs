@@ -73,6 +73,24 @@ pub struct Contact {
 }
 
 impl Contact {
+    /// Name to show: the local petname, else the contact's suggested
+    /// nickname, else a short id.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        if !self.nickname.trim().is_empty() {
+            return self.nickname.clone();
+        }
+        if let Some(suggestion) = self
+            .nickname_suggestion
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return suggestion.to_string();
+        }
+        self.id.chars().take(8).collect()
+    }
+
     pub fn new(id: impl Into<String>, nickname: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -192,6 +210,29 @@ mod tests {
         assert_eq!(
             format_contact_name(&fallback_only.to_string(), &contacts),
             short_id(&fallback_only.to_string(), 8)
+        );
+    }
+}
+
+#[cfg(test)]
+mod display_name_tests {
+    use super::Contact;
+
+    #[test]
+    fn display_name_falls_back_to_suggestion_then_id() {
+        assert_eq!(
+            Contact::new("authority-1234abcd", "Bee").display_name(),
+            "Bee"
+        );
+        assert_eq!(
+            Contact::new("authority-1234abcd", "")
+                .with_suggestion("Barbara")
+                .display_name(),
+            "Barbara"
+        );
+        assert_eq!(
+            Contact::new("authority-1234abcd", "").display_name(),
+            "authorit"
         );
     }
 }

@@ -986,7 +986,7 @@ fn open_ceremony_setup_modal(
                 .iter()
                 .map(|c| crate::tui::state::GuardianCandidate {
                     id: c.id.clone(),
-                    name: c.nickname.clone(),
+                    name: c.display_name(),
                     is_current_guardian: c.is_guardian,
                 })
                 .collect();
