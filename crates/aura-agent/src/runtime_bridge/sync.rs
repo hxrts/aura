@@ -396,24 +396,42 @@ async fn exchange_facts_with_siblings(
         .current_local_key_agreement_secret(&bridge.agent.authority_id())
         .await
         .ok();
+    // The exchange spans several lockstep waits, longer than the timeouts
+    // callers put around trigger_sync, so it runs as its own owned task.
     for sibling in sync.take_due_siblings(siblings, now_ms).await {
-        match super::sibling_facts::exchange_facts_with_sibling(
-            &effects,
-            sibling,
-            key_agreement_secret,
-        )
-        .await
-        {
-            Ok(imported) => tracing::debug!(
-                sibling = %sibling,
-                imported,
-                "exchanged committed facts with sibling device"
-            ),
-            Err(error) => tracing::debug!(
-                sibling = %sibling,
-                error = %error,
-                "sibling fact exchange did not complete"
-            ),
+        if !sync.begin_sibling_exchange(sibling).await {
+            continue;
+        }
+        let effects = effects.clone();
+        let sync = sync.clone();
+        let fut = async move {
+            match super::sibling_facts::exchange_facts_with_sibling(
+                &effects,
+                sibling,
+                key_agreement_secret,
+            )
+            .await
+            {
+                Ok(imported) => tracing::debug!(
+                    sibling = %sibling,
+                    imported,
+                    "exchanged committed facts with sibling device"
+                ),
+                Err(error) => tracing::debug!(
+                    sibling = %sibling,
+                    error = %error,
+                    "sibling fact exchange did not complete"
+                ),
+            }
+            sync.end_sibling_exchange(sibling).await;
+        };
+        let task_name = format!("sibling_fact_exchange.{sibling}");
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task_handle = bridge.agent.runtime().tasks().spawn_local_named(task_name, fut);
+            } else {
+                let _task_handle = bridge.agent.runtime().tasks().spawn_named(task_name, fut);
+            }
         }
     }
 }

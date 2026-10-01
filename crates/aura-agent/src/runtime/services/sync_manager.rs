@@ -207,6 +207,8 @@ struct SyncManagerShared {
     recent_peer_syncs: Mutex<HashMap<DeviceId, u64>>,
     /// Wall-clock ms of the last fact exchange per sibling device.
     recent_sibling_exchanges: Mutex<HashMap<DeviceId, u64>>,
+    /// Sibling devices with an exchange currently running.
+    sibling_exchanges_in_flight: Mutex<std::collections::HashSet<DeviceId>>,
 }
 
 #[derive(Clone)]
@@ -350,6 +352,7 @@ impl SyncServiceManager {
             denial_backoff: std::sync::atomic::AtomicU32::new(0),
             recent_peer_syncs: Mutex::new(HashMap::new()),
             recent_sibling_exchanges: Mutex::new(HashMap::new()),
+            sibling_exchanges_in_flight: Mutex::new(std::collections::HashSet::new()),
         })
     }
 
@@ -737,6 +740,24 @@ impl SyncServiceManager {
             siblings,
             now_ms,
         )
+    }
+
+    /// Claim a sibling for one exchange; false if one is already running.
+    pub async fn begin_sibling_exchange(&self, sibling: DeviceId) -> bool {
+        self.shared
+            .sibling_exchanges_in_flight
+            .lock()
+            .await
+            .insert(sibling)
+    }
+
+    /// Release a sibling claimed by `begin_sibling_exchange`.
+    pub async fn end_sibling_exchange(&self, sibling: DeviceId) {
+        self.shared
+            .sibling_exchanges_in_flight
+            .lock()
+            .await
+            .remove(&sibling);
     }
 
     /// Add a peer to the known peers list

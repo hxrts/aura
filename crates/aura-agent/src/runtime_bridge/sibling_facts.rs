@@ -4,7 +4,8 @@
 //! A newly enrolled device starts empty, and facts committed on one device
 //! must reach the others. Anti-entropy compares operation logs only, so this
 //! symmetric lockstep exchange carries the facts themselves:
-//! digest, then key index, then the facts the peer lacks.
+//! digest, then sealed AMP keys, journal facts, key index and the facts the
+//! peer lacks, in that order so a message is openable when its fact lands.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -135,6 +136,47 @@ pub(crate) async fn exchange_facts_with_sibling(
         return Ok(0);
     }
 
+    // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
+    // travel sealed to the sibling device's leaf key. They go first so the
+    // chat view can open messages as soon as their facts arrive.
+    let sealed = seal_bootstrap_keys(effects, authority, peer, &held_keys).await?;
+    send_frame(effects, peer, &SiblingFactsFrame::AmpKeys(sealed)).await?;
+    let SiblingFactsFrame::AmpKeys(peer_sealed) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::AmpKeys(_)),
+        "amp_keys",
+    )
+    .await?
+    else {
+        return Err(protocol_error("amp keys"));
+    };
+    if let (Some(peer_sealed), Some(secret)) = (peer_sealed, key_agreement_secret) {
+        store_bootstrap_keys(effects, authority, &peer_sealed, &secret).await?;
+    }
+
+    send_frame(
+        effects,
+        peer,
+        &SiblingFactsFrame::JournalFacts(journal.facts.clone()),
+    )
+    .await?;
+    let SiblingFactsFrame::JournalFacts(peer_facts) = receive_expected(
+        effects,
+        peer,
+        |frame| matches!(frame, SiblingFactsFrame::JournalFacts(_)),
+        "journal_facts",
+    )
+    .await?
+    else {
+        return Err(protocol_error("journal facts"));
+    };
+    let before = journal.facts.clone();
+    journal.merge_facts(peer_facts);
+    if journal.facts != before {
+        aura_core::effects::JournalEffects::persist_journal(effects, &journal).await?;
+    }
+
     send_frame(
         effects,
         peer,
@@ -170,46 +212,6 @@ pub(crate) async fn exchange_facts_with_sibling(
         return Err(protocol_error("facts"));
     };
     let imported = effects.import_committed_facts(received).await?;
-
-    send_frame(
-        effects,
-        peer,
-        &SiblingFactsFrame::JournalFacts(journal.facts.clone()),
-    )
-    .await?;
-    let SiblingFactsFrame::JournalFacts(peer_facts) = receive_expected(
-        effects,
-        peer,
-        |frame| matches!(frame, SiblingFactsFrame::JournalFacts(_)),
-        "journal_facts",
-    )
-    .await?
-    else {
-        return Err(protocol_error("journal facts"));
-    };
-    let before = journal.facts.clone();
-    journal.merge_facts(peer_facts);
-    if journal.facts != before {
-        aura_core::effects::JournalEffects::persist_journal(effects, &journal).await?;
-    }
-
-    // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
-    // travel sealed to the sibling device's leaf key.
-    let sealed = seal_bootstrap_keys(effects, authority, peer, &held_keys).await?;
-    send_frame(effects, peer, &SiblingFactsFrame::AmpKeys(sealed)).await?;
-    let SiblingFactsFrame::AmpKeys(peer_sealed) = receive_expected(
-        effects,
-        peer,
-        |frame| matches!(frame, SiblingFactsFrame::AmpKeys(_)),
-        "amp_keys",
-    )
-    .await?
-    else {
-        return Err(protocol_error("amp keys"));
-    };
-    if let (Some(peer_sealed), Some(secret)) = (peer_sealed, key_agreement_secret) {
-        store_bootstrap_keys(effects, authority, &peer_sealed, &secret).await?;
-    }
     Ok(imported)
 }
 
