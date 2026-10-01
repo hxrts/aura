@@ -1532,6 +1532,15 @@ impl ReactiveView for ChatSignalView {
                                 updated_at,
                                 ..
                             } => {
+                                // A channel we left stays gone; updates must not re-create it.
+                                if self
+                                    .hidden_channels_after_leave
+                                    .lock()
+                                    .await
+                                    .contains(&channel_id)
+                                {
+                                    continue;
+                                }
                                 if let Some(channel) = state.channel_mut(&channel_id) {
                                     channel.context_id = Some(context_id);
                                     if let Some(name) = name {
