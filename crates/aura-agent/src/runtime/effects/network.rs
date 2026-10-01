@@ -88,88 +88,8 @@ impl NetworkCoreEffects for AuraEffectSystem {
         peer_id: uuid::Uuid,
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
-        if self.execution_mode.is_deterministic() {
-            if let Some(shared) = self.transport.shared_transport() {
-                let (peer, device) = resolve_network_peer(self, peer_id).await;
-                let mut metadata = HashMap::new();
-                metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
-                metadata.insert(
-                    SOURCE_DEVICE_METADATA_KEY.to_string(),
-                    self.device_id().to_string(),
-                );
-                if let Some(device) = device {
-                    metadata.insert("aura-destination-device-id".to_string(), device.to_string());
-                }
-                let envelope = TransportEnvelope {
-                    destination: peer,
-                    source: self.authority_id,
-                    context: default_context_id_for_authority(peer),
-                    payload: message,
-                    metadata,
-                    receipt: None,
-                };
-                shared.route_envelope(envelope);
-                return Ok(());
-            }
-            self.ensure_mock_network()?;
-            return Ok(());
-        }
-
-        // Sync peers are devices; address the owning authority and that device.
-        let (peer, device) = resolve_network_peer(self, peer_id).await;
-        let mut metadata = HashMap::new();
-        metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
-        metadata.insert(
-            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
-            aura_core::effects::RandomExtendedEffects::random_uuid(self)
-                .await
-                .to_string(),
-        );
-        metadata.insert(
-            SOURCE_DEVICE_METADATA_KEY.to_string(),
-            self.device_id().to_string(),
-        );
-        if let Some(device) = device {
-            metadata.insert("aura-destination-device-id".to_string(), device.to_string());
-        }
-        let context = default_context_id_for_authority(peer);
-        // Production transport requires guard-chain receipt evidence.
-        let receipt = aura_core::effects::FlowBudgetEffects::charge_flow(
-            self,
-            &context,
-            &peer,
-            aura_core::FlowCost::new(1),
-        )
-        .await
-        .map_err(|e| NetworkError::SendFailed {
-            peer_id: Some(peer_id),
-            reason: format!("flow charge failed: {e}"),
-        })?;
-        let envelope = TransportEnvelope {
-            destination: peer,
-            source: self.authority_id,
-            context,
-            payload: message,
-            metadata,
-            receipt: Some(aura_core::effects::transport::TransportReceipt {
-                context: receipt.ctx,
-                src: receipt.src,
-                dst: receipt.dst,
-                epoch: receipt.epoch.value(),
-                cost: receipt.cost.value(),
-                nonce: receipt.nonce.value(),
-                prev: receipt.prev.0,
-                sig: receipt.sig.into_bytes(),
-            }),
-        };
-
-        send_guarded_transport_envelope(self, envelope)
+        self.send_device_payload(peer_id, NETWORK_CONTENT_TYPE, message)
             .await
-            .map_err(|e| NetworkError::SendFailed {
-                peer_id: Some(peer_id),
-                reason: e.to_string(),
-            })?;
-        Ok(())
     }
 
     async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
@@ -252,29 +172,8 @@ impl NetworkCoreEffects for AuraEffectSystem {
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for AuraEffectSystem {
     async fn receive_from(&self, peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
-        // Take only this peer's network frame; other sessions' envelopes stay queued.
-        // Wait a bounded time so lockstep peers (sync) can answer before we give up.
-        for _ in 0..RECEIVE_FROM_POLLS {
-            match self.take_inbound_envelope(|env| {
-                env.metadata.get("content-type").map(String::as_str) == Some(NETWORK_CONTENT_TYPE)
-                    && network_source_id(env) == peer_id
-            }) {
-                Ok(envelope) => return Ok(envelope.payload),
-                Err(TransportError::NoMessage) => {}
-                Err(e) => {
-                    return Err(NetworkError::ReceiveFailed {
-                        reason: e.to_string(),
-                    })
-                }
-            }
-            if PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
-                .await
-                .is_err()
-            {
-                break;
-            }
-        }
-        Err(NetworkError::NoMessage)
+        self.receive_device_payload(peer_id, NETWORK_CONTENT_TYPE)
+            .await
     }
 
     async fn connected_peers(&self) -> Vec<uuid::Uuid> {
@@ -515,6 +414,130 @@ where
     make_fut().await
 }
 
+impl AuraEffectSystem {
+    /// Send `message` to a peer device under `content_type`, addressed by device
+    /// and carrying a flow receipt; shared by sync and sibling replication.
+    pub(crate) async fn send_device_payload(
+        &self,
+        peer_id: uuid::Uuid,
+        content_type: &str,
+        message: Vec<u8>,
+    ) -> Result<(), NetworkError> {
+        if self.execution_mode.is_deterministic() {
+            if let Some(shared) = self.transport.shared_transport() {
+                let (peer, device) = resolve_network_peer(self, peer_id).await;
+                let mut metadata = HashMap::new();
+                metadata.insert("content-type".to_string(), content_type.to_string());
+                metadata.insert(
+                    SOURCE_DEVICE_METADATA_KEY.to_string(),
+                    self.device_id().to_string(),
+                );
+                if let Some(device) = device {
+                    metadata.insert("aura-destination-device-id".to_string(), device.to_string());
+                }
+                let envelope = TransportEnvelope {
+                    destination: peer,
+                    source: self.authority_id,
+                    context: default_context_id_for_authority(peer),
+                    payload: message,
+                    metadata,
+                    receipt: None,
+                };
+                shared.route_envelope(envelope);
+                return Ok(());
+            }
+            self.ensure_mock_network()?;
+            return Ok(());
+        }
+
+        // Sync peers are devices; address the owning authority and that device.
+        let (peer, device) = resolve_network_peer(self, peer_id).await;
+        let mut metadata = HashMap::new();
+        metadata.insert("content-type".to_string(), content_type.to_string());
+        metadata.insert(
+            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
+            aura_core::effects::RandomExtendedEffects::random_uuid(self)
+                .await
+                .to_string(),
+        );
+        metadata.insert(
+            SOURCE_DEVICE_METADATA_KEY.to_string(),
+            self.device_id().to_string(),
+        );
+        if let Some(device) = device {
+            metadata.insert("aura-destination-device-id".to_string(), device.to_string());
+        }
+        let context = default_context_id_for_authority(peer);
+        // Production transport requires guard-chain receipt evidence.
+        let receipt = aura_core::effects::FlowBudgetEffects::charge_flow(
+            self,
+            &context,
+            &peer,
+            aura_core::FlowCost::new(1),
+        )
+        .await
+        .map_err(|e| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason: format!("flow charge failed: {e}"),
+        })?;
+        let envelope = TransportEnvelope {
+            destination: peer,
+            source: self.authority_id,
+            context,
+            payload: message,
+            metadata,
+            receipt: Some(aura_core::effects::transport::TransportReceipt {
+                context: receipt.ctx,
+                src: receipt.src,
+                dst: receipt.dst,
+                epoch: receipt.epoch.value(),
+                cost: receipt.cost.value(),
+                nonce: receipt.nonce.value(),
+                prev: receipt.prev.0,
+                sig: receipt.sig.into_bytes(),
+            }),
+        };
+
+        send_guarded_transport_envelope(self, envelope)
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: Some(peer_id),
+                reason: e.to_string(),
+            })?;
+        Ok(())
+    }
+
+    /// Take the next `content_type` payload from `peer_id`, waiting a bounded time.
+    pub(crate) async fn receive_device_payload(
+        &self,
+        peer_id: uuid::Uuid,
+        content_type: &str,
+    ) -> Result<Vec<u8>, NetworkError> {
+        // Take only this peer's network frame; other sessions' envelopes stay queued.
+        // Wait a bounded time so lockstep peers (sync) can answer before we give up.
+        for _ in 0..RECEIVE_FROM_POLLS {
+            match self.take_inbound_envelope(|env| {
+                env.metadata.get("content-type").map(String::as_str) == Some(content_type)
+                    && network_source_id(env) == peer_id
+            }) {
+                Ok(envelope) => return Ok(envelope.payload),
+                Err(TransportError::NoMessage) => {}
+                Err(e) => {
+                    return Err(NetworkError::ReceiveFailed {
+                        reason: e.to_string(),
+                    })
+                }
+            }
+            if PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        Err(NetworkError::NoMessage)
+    }
+}
 const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
 
 /// Sync peers are addressed by device; prefer the sender's device id when present.

@@ -205,6 +205,8 @@ struct SyncManagerShared {
     denial_backoff: std::sync::atomic::AtomicU32,
     /// Wall-clock ms of the last sync attempt per peer, for coalescing triggers.
     recent_peer_syncs: Mutex<HashMap<DeviceId, u64>>,
+    /// Wall-clock ms of the last fact exchange per sibling device.
+    recent_sibling_exchanges: Mutex<HashMap<DeviceId, u64>>,
 }
 
 #[derive(Clone)]
@@ -347,6 +349,7 @@ impl SyncServiceManager {
             denial_skip_remaining: std::sync::atomic::AtomicU32::new(0),
             denial_backoff: std::sync::atomic::AtomicU32::new(0),
             recent_peer_syncs: Mutex::new(HashMap::new()),
+            recent_sibling_exchanges: Mutex::new(HashMap::new()),
         })
     }
 
@@ -725,6 +728,15 @@ impl SyncServiceManager {
             Err(_) => {}
         }
         result
+    }
+
+    /// Sibling devices due for a fact exchange, coalesced like peer syncs.
+    pub async fn take_due_siblings(&self, siblings: Vec<DeviceId>, now_ms: u64) -> Vec<DeviceId> {
+        take_due_peers(
+            &mut *self.shared.recent_sibling_exchanges.lock().await,
+            siblings,
+            now_ms,
+        )
     }
 
     /// Add a peer to the known peers list

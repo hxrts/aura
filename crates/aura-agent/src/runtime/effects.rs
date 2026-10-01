@@ -1442,6 +1442,37 @@ impl AuraEffectSystem {
             .unwrap_or_else(|| unreachable!("commit_relational_facts committed exactly one")))
     }
 
+    /// Import committed facts replicated from another device of this authority.
+    ///
+    /// Facts keep their original order key, so importing is idempotent; only
+    /// facts not already stored are persisted and published. Returns how many
+    /// were new.
+    pub async fn import_committed_facts(&self, facts: Vec<TypedFact>) -> Result<usize, AuraError> {
+        let mut imported = Vec::new();
+        for fact in facts {
+            let key = Self::typed_fact_storage_key(self.authority_id, &fact.order);
+            let present = self
+                .retrieve(&key)
+                .await
+                .map_err(|e| AuraError::storage(format!("retrieve: {e}")))?
+                .is_some();
+            if present {
+                continue;
+            }
+            let bytes = aura_core::util::serialization::to_vec(&fact)
+                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            self.store(&key, bytes)
+                .await
+                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+            imported.push(fact);
+        }
+        let count = imported.len();
+        if count > 0 {
+            self.publish_typed_facts(imported).await?;
+        }
+        Ok(count)
+    }
+
     /// Load all committed typed facts for the given authority from storage.
     pub async fn load_committed_facts(
         &self,

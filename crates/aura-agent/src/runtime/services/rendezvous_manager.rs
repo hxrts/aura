@@ -271,6 +271,9 @@ enum RendezvousCommand {
         device_id: DeviceId,
         reply: oneshot::Sender<Option<DiscoveredPeer>>,
     },
+    ListOwnDevicePeers {
+        reply: oneshot::Sender<Vec<DeviceId>>,
+    },
     IsLanDiscoveryRunning {
         reply: oneshot::Sender<bool>,
     },
@@ -560,6 +563,9 @@ impl RendezvousManager {
                     RendezvousCommand::GetOwnDevicePeer { device_id, reply } => {
                         let peer = state.own_device_peers.get(&device_id).cloned();
                         let _ = reply.send(peer);
+                    }
+                    RendezvousCommand::ListOwnDevicePeers { reply } => {
+                        let _ = reply.send(state.own_device_peers.keys().copied().collect());
                     }
                     RendezvousCommand::IsLanDiscoveryRunning { reply } => {
                         let running = state.lan_discovery.is_some();
@@ -1597,6 +1603,17 @@ impl RendezvousManager {
             .request(|reply| RendezvousCommand::GetOwnDevicePeer { device_id, reply })
             .await
             .ok()?
+    }
+
+    /// Other devices of this authority discovered on the LAN.
+    pub async fn list_own_device_peers(&self) -> Vec<DeviceId> {
+        match self.command_handle().await {
+            Ok(commands) => commands
+                .request(|reply| RendezvousCommand::ListOwnDevicePeers { reply })
+                .await
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Check if LAN discovery is enabled and running

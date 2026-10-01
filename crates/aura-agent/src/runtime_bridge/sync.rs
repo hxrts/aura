@@ -94,6 +94,7 @@ pub(super) async fn get_sync_peers(
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
     let sync = require_sync_service(bridge)?;
+    exchange_facts_with_siblings(bridge, sync).await;
 
     let effects = bridge.agent.runtime().effects();
     let rounds = if harness_mode_enabled() {
@@ -364,4 +365,41 @@ pub(super) async fn sync_with_peer_list(
 ) -> Result<(), crate::runtime::services::sync_manager::SyncManagerError> {
     let _ = sync.ensure_biscuit_authorization(effects).await;
     sync.sync_with_peers(effects, peers).await
+}
+
+/// Replicate committed facts with other devices of this authority (best effort).
+///
+/// Anti-entropy compares operation logs only, so the authority's facts reach a
+/// sibling device, such as one just enrolled, through this exchange.
+async fn exchange_facts_with_siblings(
+    bridge: &AgentRuntimeBridge,
+    sync: &crate::runtime::services::SyncServiceManager,
+) {
+    let Some(rendezvous) = bridge.agent.runtime().rendezvous() else {
+        return;
+    };
+    let siblings = rendezvous.list_own_device_peers().await;
+    if siblings.is_empty() {
+        return;
+    }
+    let effects = bridge.agent.runtime().effects();
+    let now_ms = effects
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .unwrap_or_default();
+    for sibling in sync.take_due_siblings(siblings, now_ms).await {
+        match super::sibling_facts::exchange_facts_with_sibling(&effects, sibling).await {
+            Ok(imported) => tracing::debug!(
+                sibling = %sibling,
+                imported,
+                "exchanged committed facts with sibling device"
+            ),
+            Err(error) => tracing::debug!(
+                sibling = %sibling,
+                error = %error,
+                "sibling fact exchange did not complete"
+            ),
+        }
+    }
 }

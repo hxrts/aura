@@ -82,6 +82,7 @@ mod invitation;
 mod recovery;
 mod rendezvous;
 mod settings;
+mod sibling_facts;
 mod sync;
 
 use amp::map_amp_error;
