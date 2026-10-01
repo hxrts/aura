@@ -400,7 +400,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             *guard = next_selection;
         }
     }
-    let messages: Vec<Message> = props
+    let mut messages: Vec<Message> = props
         .shared_messages
         .as_ref()
         .map(|messages_ref| messages_ref.read().clone())
@@ -425,6 +425,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 })
                 .collect()
         });
+    // Fact sender names are recorded from the sender's point of view; label
+    // each message for this viewer.
+    for message in &mut messages {
+        if message.is_own {
+            message.sender = "You".to_string();
+        } else if !message.sender_id.is_empty() {
+            message.sender = format_contact_name(&message.sender_id, &contacts);
+        }
+    }
 
     let empty_message = if channels.is_empty() {
         "No channels available for this block.".to_string()

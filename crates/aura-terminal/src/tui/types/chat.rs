@@ -75,6 +75,8 @@ pub struct Message {
     /// Channel this message belongs to.
     pub channel_id: String,
     pub sender: String,
+    /// Sending authority id, when known; used to label received messages.
+    pub sender_id: String,
     pub content: String,
     pub timestamp: String,
     pub is_own: bool,
@@ -90,6 +92,7 @@ impl From<&AppMessage> for Message {
             id: msg.id.clone(),
             channel_id: msg.channel_id.to_string(),
             sender: msg.sender_name.clone(),
+            sender_id: msg.sender_id.to_string(),
             content: msg.content.clone(),
             timestamp: format_timestamp(msg.timestamp),
             is_own: msg.is_own,
@@ -109,6 +112,7 @@ impl Message {
             id: id.into(),
             channel_id: String::new(),
             sender: sender.into(),
+            sender_id: String::new(),
             content: content.into(),
             timestamp: String::new(),
             is_own: false,
@@ -128,6 +132,7 @@ impl Message {
             id: id.into(),
             channel_id: channel_id.into(),
             sender: sender.into(),
+            sender_id: String::new(),
             content: content.into(),
             timestamp: String::new(),
             is_own: true,
