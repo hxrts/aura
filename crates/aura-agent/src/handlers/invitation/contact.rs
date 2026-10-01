@@ -895,6 +895,9 @@ impl<'a> InvitationContactHandler<'a> {
                         .await
                         .map_err(|e| AgentError::effects(e.to_string()))?;
                     effects.await_next_view_update().await;
+                    if let Err(error) = self.send_delivery_receipt(effects.as_ref(), fact).await {
+                        tracing::debug!(error = %error, "message delivery receipt not sent");
+                    }
 
                     processed = processed.saturating_add(1);
                     in_flight_envelope = None;
@@ -987,6 +990,73 @@ impl<'a> InvitationContactHandler<'a> {
             }
             Err(TimeoutRunError::Operation(error)) => Err(error),
         }
+    }
+
+    /// Tell the sender of an inbound message that it reached this authority, so
+    /// their view advances from sent to delivered.
+    async fn send_delivery_receipt(
+        &self,
+        effects: &AuraEffectSystem,
+        fact: &RelationalFact,
+    ) -> AgentResult<()> {
+        let RelationalFact::Generic { envelope, .. } = fact else {
+            return Ok(());
+        };
+        if envelope.type_id.as_str() != aura_chat::CHAT_FACT_TYPE_ID {
+            return Ok(());
+        }
+        let Some(aura_chat::ChatFact::MessageSentSealed {
+            context_id,
+            channel_id,
+            message_id,
+            sender_id,
+            ..
+        }) = aura_chat::ChatFact::from_envelope(envelope)
+        else {
+            return Ok(());
+        };
+        let own_authority = self.handler.context.authority.authority_id();
+        if sender_id == own_authority {
+            return Ok(());
+        }
+        let updated_at_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+        let receipt_fact = aura_chat::ChatFact::message_delivery_updated_ms(
+            context_id,
+            channel_id,
+            message_id,
+            aura_chat::ChatMessageDeliveryStatus::Delivered,
+            updated_at_ms,
+            own_authority,
+        )
+        .to_generic();
+        let payload = aura_core::util::serialization::to_vec(&receipt_fact)
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+        let delivery_context = default_context_id_for_authority(sender_id);
+        let mut receipt_envelope = TransportEnvelope {
+            destination: sender_id,
+            source: own_authority,
+            context: delivery_context,
+            payload,
+            metadata: crate::handlers::shared::build_transport_metadata(
+                CHAT_FACT_CONTENT_TYPE,
+                [("channel-id", channel_id.to_string())],
+            ),
+            receipt: super::execute_charge_flow_budget(
+                FlowCost::new(1),
+                delivery_context,
+                sender_id,
+                effects,
+            )
+            .await?
+            .map(transport_receipt_from_flow),
+        };
+        super::attach_invitation_test_receipt_if_needed(effects, &mut receipt_envelope);
+        super::execution::attempt_network_send_envelope(
+            effects,
+            "message delivery receipt send failed",
+            receipt_envelope,
+        )
+        .await
     }
 
     /// Install the bootstrap key for an inbound direct-message channel invitation.

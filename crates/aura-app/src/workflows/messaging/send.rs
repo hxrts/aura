@@ -106,18 +106,28 @@ pub(super) async fn mark_message_delivery_failed(
     message_id: &str,
     actor_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    reduce_chat_fact_observed(
-        app_core,
-        &ChatFact::message_delivery_updated_ms(
-            context_id,
-            channel_id,
-            message_id.to_string(),
-            ChatMessageDeliveryStatus::Failed,
-            next_observed_projection_timestamp_ms(app_core).await,
-            actor_id,
-        ),
-    )
-    .await?;
+    let failed = ChatFact::message_delivery_updated_ms(
+        context_id,
+        channel_id,
+        message_id.to_string(),
+        ChatMessageDeliveryStatus::Failed,
+        next_observed_projection_timestamp_ms(app_core).await,
+        actor_id,
+    );
+    // Commit so the runtime chat view keeps the failure; an observed-only
+    // update would be replaced on its next emission.
+    if let Ok(runtime) = require_runtime(app_core).await {
+        let generic = failed.to_generic();
+        let _ = timeout_runtime_call(
+            &runtime,
+            "mark_message_delivery_failed",
+            "commit_relational_facts",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.commit_relational_facts(std::slice::from_ref(&generic)),
+        )
+        .await;
+    }
+    reduce_chat_fact_observed(app_core, &failed).await?;
 
     #[cfg(feature = "instrumented")]
     tracing::warn!(
