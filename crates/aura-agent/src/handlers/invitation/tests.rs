@@ -4969,3 +4969,76 @@ async fn guardian_acceptance_records_verified_recovery_key() {
         Some(public_key)
     );
 }
+/// Run the guardian choreography between two runtimes with real device ids,
+/// starting the guardian after `guardian_delay`.
+async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration) {
+    let shared_transport = crate::runtime::SharedTransport::new();
+    let principal_id = AuthorityId::new_from_entropy([seed; 32]);
+    let guardian_id = AuthorityId::new_from_entropy([seed + 1; 32]);
+    let principal_device = DeviceId::new_from_entropy([seed + 2; 32]);
+    let guardian_device = DeviceId::new_from_entropy([seed + 3; 32]);
+    let principal_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &AgentConfig {
+                device_id: principal_device,
+                ..Default::default()
+            },
+            principal_id,
+            shared_transport.clone(),
+        );
+    let guardian_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &AgentConfig {
+                device_id: guardian_device,
+                ..Default::default()
+            },
+            guardian_id,
+            shared_transport.clone(),
+        );
+    install_full_invitation_biscuit_cache(&principal_effects, principal_id);
+    install_full_invitation_biscuit_cache(&guardian_effects, guardian_id);
+    let principal_handler = handler_for(AuthorityContext::new_with_device(
+        principal_id,
+        principal_device,
+    ));
+    let guardian_handler =
+        handler_for(AuthorityContext::new_with_device(guardian_id, guardian_device));
+
+    let mut invitation = device_enrollment_test_invitation(
+        "inv-guardian-cross-runtime",
+        principal_id,
+        guardian_id,
+        guardian_device,
+    );
+    invitation.invitation_type = InvitationType::Guardian {
+        subject_authority: principal_id,
+    };
+
+    let principal_invitation = invitation.clone();
+    let principal_task_effects = principal_effects.clone();
+    let principal = tokio::spawn(async move {
+        principal_handler
+            .execute_guardian_invitation_principal(principal_task_effects, &principal_invitation)
+            .await
+    });
+    tokio::time::sleep(guardian_delay).await;
+    guardian_handler
+        .execute_guardian_invitation_guardian(guardian_effects.clone(), &invitation)
+        .await
+        .expect("guardian side completes");
+    principal
+        .await
+        .expect("principal task joins")
+        .expect("principal side completes");
+
+    let key_path = crate::handlers::recovery_guardian_public_key_storage_key(guardian_id);
+    assert!(
+        principal_effects.retrieve(&key_path).await.unwrap().is_some(),
+        "principal records the guardian recovery key"
+    );
+}
+
+large_stack_async_test!(guardian_choreography_completes_when_guardian_accepts_late, {
+    // Longer than one principal receive window, as when a person accepts later.
+    run_guardian_choreography(191, std::time::Duration::from_millis(6_000)).await;
+});

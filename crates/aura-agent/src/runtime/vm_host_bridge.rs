@@ -21,7 +21,9 @@ use std::sync::Arc;
 use telltale_machine::coroutine::{
     BlockReason as ProtocolMachineBlockReason, CoroStatus as ProtocolMachineCoroStatus,
 };
-use telltale_machine::model::effects::{EffectFailure, EffectHandler, EffectResult};
+use telltale_machine::model::effects::{
+    EffectFailure, EffectHandler, EffectResult, SendDecision, SendDecisionInput,
+};
 use telltale_machine::{
     runtime::loader::CodeImage as ProtocolMachineCodeImage, EffectTraceEntry, FinalizationPath,
     ProtocolMachine, ProtocolMachineSemanticObjects, RuntimeContracts, SessionId,
@@ -237,6 +239,14 @@ impl EffectHandler for AuraQueuedVmBridgeHandler {
                 payload: payload_bytes.clone(),
             });
         EffectResult::success(Self::bytes_to_value(&payload_bytes))
+    }
+
+    // The protocol machine may precompute a payload, in which case the default
+    // decision skips `handle_send`. Every send must go through it so the queued
+    // payload is recorded for the host bridge to put on the transport.
+    fn send_decision(&self, input: SendDecisionInput<'_>) -> EffectResult<SendDecision> {
+        self.handle_send(input.role, input.partner, input.label, input.state)
+            .map_success(SendDecision::Deliver)
     }
 
     fn handle_recv(
@@ -774,9 +784,18 @@ pub fn blocked_recv_edge(
             return None;
         }
         match &coro.status {
+            // A message injected for this edge is consumed on the next step; the
+            // coroutine still reads as blocked until then, so waiting on the
+            // host transport here would stall for a message that never comes.
             ProtocolMachineCoroStatus::Blocked(ProtocolMachineBlockReason::Recv {
                 edge, ..
-            }) => Some((edge.sender.clone(), edge.receiver.clone())),
+            }) if !vm
+                .sessions()
+                .get(sid)
+                .is_some_and(|session| session.has_message(&edge.sender, &edge.receiver)) =>
+            {
+                Some((edge.sender.clone(), edge.receiver.clone()))
+            }
             _ => None,
         }
     })

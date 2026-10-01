@@ -230,7 +230,9 @@ impl<'a> InvitationGuardianHandler<'a> {
 
                     if handle_invitation_vm_wait_status(
                         round.host_wait_status,
-                        true,
+                        // No message yet means the guardian has not accepted; keep
+                        // waiting within the acceptance window.
+                        false,
                         "guardian principal VM timed out while waiting for receive",
                         "guardian principal VM cancelled while waiting for receive",
                     )?
