@@ -1526,6 +1526,7 @@ async fn materialize_accepted_channel(
         created_at_ms,
         inviter,
     );
+    use aura_journal::DomainFact as _;
     let generic = fact.to_generic();
     timeout_runtime_call(
         runtime,
