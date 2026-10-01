@@ -108,16 +108,42 @@ impl NetworkCoreEffects for AuraEffectSystem {
             return Ok(());
         }
 
-        let peer = AuthorityId::from_uuid(peer_id);
+        // Sync peers are devices; address the owning authority and that device.
+        let (peer, device) = resolve_network_peer(self, peer_id).await;
         let mut metadata = HashMap::new();
         metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
+        if let Some(device) = device {
+            metadata.insert("aura-destination-device-id".to_string(), device.to_string());
+        }
+        let context = default_context_id_for_authority(peer);
+        // Production transport requires guard-chain receipt evidence.
+        let receipt = aura_core::effects::FlowBudgetEffects::charge_flow(
+            self,
+            &context,
+            &peer,
+            aura_core::FlowCost::new(1),
+        )
+        .await
+        .map_err(|e| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason: format!("flow charge failed: {e}"),
+        })?;
         let envelope = TransportEnvelope {
             destination: peer,
             source: self.authority_id,
-            context: default_context_id_for_authority(peer),
+            context,
             payload: message,
             metadata,
-            receipt: None,
+            receipt: Some(aura_core::effects::transport::TransportReceipt {
+                context: receipt.ctx,
+                src: receipt.src,
+                dst: receipt.dst,
+                epoch: receipt.epoch.value(),
+                cost: receipt.cost.value(),
+                nonce: receipt.nonce.value(),
+                prev: receipt.prev.0,
+                sig: receipt.sig.into_bytes(),
+            }),
         };
 
         send_guarded_transport_envelope(self, envelope)
@@ -576,4 +602,27 @@ mod tests {
             .expect_err("closing an already closed handle should fail");
         assert!(matches!(close_err, NetworkError::ConnectionFailed(_)));
     }
+}
+
+/// Resolve a network peer id (a device id for sync peers) to the owning
+/// authority and, when known, the device to address.
+async fn resolve_network_peer(
+    effects: &AuraEffectSystem,
+    peer_id: uuid::Uuid,
+) -> (AuthorityId, Option<aura_core::DeviceId>) {
+    let device = aura_core::DeviceId::from_uuid(peer_id);
+    if let Some(manager) = effects.rendezvous_manager() {
+        if let Some(peer) = manager
+            .list_lan_discovered_peers()
+            .await
+            .into_iter()
+            .find(|peer| peer.descriptor.device_id == Some(device))
+        {
+            return (peer.authority_id, Some(device));
+        }
+        if manager.get_own_device_peer(device).await.is_some() {
+            return (effects.authority_id, Some(device));
+        }
+    }
+    (AuthorityId::from_uuid(peer_id), None)
 }
