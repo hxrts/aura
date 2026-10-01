@@ -1432,6 +1432,12 @@ impl ReactiveView for ChatSignalView {
                                 creator_id,
                                 ..
                             } => {
+                                tracing::debug!(
+                                    channel_id = %channel_id,
+                                    %creator_id,
+                                    is_dm,
+                                    "ChatSignalView: ChannelCreated"
+                                );
                                 let hidden_after_leave = {
                                     self.hidden_channels_after_leave
                                         .lock()
@@ -1439,6 +1445,7 @@ impl ReactiveView for ChatSignalView {
                                         .contains(&channel_id)
                                 };
                                 if hidden_after_leave {
+                                    tracing::debug!(channel_id = %channel_id, "ChatSignalView: channel hidden after leave");
                                     continue;
                                 }
 
