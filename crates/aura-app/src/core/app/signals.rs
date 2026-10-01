@@ -15,16 +15,17 @@ impl AppCore {
     /// Initialize all application signals with default values.
     pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), IntentError> {
         if let Some(runtime) = self.runtime.as_ref() {
-            if crate::workflows::runtime::timeout_runtime_call(
-                runtime,
-                "ensure_signals_registered",
-                "get_threshold_config",
-                APP_RUNTIME_QUERY_TIMEOUT,
-                || runtime.get_threshold_config(),
-            )
-            .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?
-            .is_none()
+            if !self.defer_signing_bootstrap
+                && crate::workflows::runtime::timeout_runtime_call(
+                    runtime,
+                    "ensure_signals_registered",
+                    "get_threshold_config",
+                    APP_RUNTIME_QUERY_TIMEOUT,
+                    || runtime.get_threshold_config(),
+                )
+                .await
+                .map_err(|error| IntentError::internal_error(error.to_string()))?
+                .is_none()
             {
                 let bootstrap = crate::workflows::runtime::timeout_runtime_call(
                     runtime,

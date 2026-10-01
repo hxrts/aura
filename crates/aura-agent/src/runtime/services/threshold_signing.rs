@@ -1795,6 +1795,42 @@ mod tests {
         );
     }
 
+    // Regression (work/8.md task 32): a device joining an account materializes
+    // the initiator's tree from its exported baseline ops, with the
+    // initiator's device as the leaf (not the joining device's own id).
+    #[tokio::test]
+    async fn joining_device_imports_the_initiators_leaf() {
+        let (_temp, config) = isolated_test_config();
+        let initiator = crate::testing::simulation_effect_system_arc(&config);
+        ThresholdSigningService::new(initiator.clone())
+            .bootstrap_authority(&test_authority())
+            .await
+            .unwrap();
+        let ops = initiator.export_tree_ops().await.unwrap();
+
+        let (_joiner_temp, mut joiner_config) = isolated_test_config();
+        joiner_config.device_id = aura_core::DeviceId::new_from_entropy([0x4A; 32]);
+        let joiner = crate::testing::simulation_effect_system_arc(&joiner_config);
+        // Before importing, the joining device ran as its prepared invitee
+        // authority, which bootstraps a tree with its own provisional leaf.
+        ThresholdSigningService::new(joiner.clone())
+            .bootstrap_authority(&AuthorityId::new_from_entropy([0x4B; 32]))
+            .await
+            .unwrap();
+        joiner.import_tree_ops(&ops).await.unwrap();
+
+        let devices: Vec<_> = joiner
+            .get_current_state()
+            .await
+            .unwrap()
+            .leaves
+            .values()
+            .filter(|leaf| leaf.role == LeafRole::Device)
+            .map(|leaf| leaf.device_id)
+            .collect();
+        assert_eq!(devices, vec![initiator.device_id()]);
+    }
+
     #[tokio::test]
     async fn commit_key_rotation_uses_threshold_config_metadata_written_by_effects() {
         let (_temp, config) = isolated_test_config();

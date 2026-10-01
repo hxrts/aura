@@ -30,6 +30,9 @@ pub struct AppCore {
     pub(super) chat_refresh_hook_installed: bool,
     #[cfg(feature = "signals")]
     pub(super) authoritative_readiness_hook_installed: bool,
+    /// Skip the implicit signing-key bootstrap while a device enrollment is
+    /// pending: the joining device takes its tree and keys from the enrollment.
+    pub(super) defer_signing_bootstrap: bool,
 }
 
 impl AppCore {
@@ -58,6 +61,7 @@ impl AppCore {
             chat_refresh_hook_installed: false,
             #[cfg(feature = "signals")]
             authoritative_readiness_hook_installed: false,
+            defer_signing_bootstrap: false,
         })
     }
 
@@ -97,6 +101,7 @@ impl AppCore {
             chat_refresh_hook_installed: false,
             #[cfg(feature = "signals")]
             authoritative_readiness_hook_installed: false,
+            defer_signing_bootstrap: false,
         })
     }
 
