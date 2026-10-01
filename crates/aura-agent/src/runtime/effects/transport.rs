@@ -255,6 +255,25 @@ async fn resolve_peer_addr(
         .and_then(|route| route_destination_addr(&route.destination))
 }
 
+async fn resolve_own_device_addr(
+    effects: &AuraEffectSystem,
+    device_id: aura_core::DeviceId,
+) -> Option<String> {
+    let manager = effects.rendezvous_manager()?;
+    let peer = manager.get_own_device_peer(device_id).await?;
+    let mut paths = peer.descriptor.advertised_move_paths();
+    paths.sort_by_key(|path| match path.route.destination.protocol {
+        LinkProtocol::Tcp => 0u8,
+        LinkProtocol::WebSocket => 1u8,
+        _ => 2u8,
+    });
+    paths
+        .into_iter()
+        .map(|path| path.route)
+        .find(|route| direct_route_allowed(effects, route))
+        .and_then(|route| route_destination_addr(&route.destination))
+}
+
 async fn resolve_move_route(
     effects: &AuraEffectSystem,
     context: ContextId,
@@ -382,7 +401,25 @@ async fn send_planned_envelope(
         return Ok(());
     }
 
-    let addr = match resolve_peer_addr(effects, envelope.context, envelope.destination).await {
+    // Another device of our own authority: route by that device's LAN
+    // descriptor; authority descriptors do not distinguish our devices.
+    let sibling_device_addr = if envelope.destination == effects.authority_id {
+        match envelope
+            .metadata
+            .get("aura-destination-device-id")
+            .and_then(|value| value.parse::<aura_core::DeviceId>().ok())
+        {
+            Some(device_id) => resolve_own_device_addr(effects, device_id).await,
+            None => None,
+        }
+    } else {
+        None
+    };
+    let addr = match sibling_device_addr {
+        Some(addr) => Some(addr),
+        None => resolve_peer_addr(effects, envelope.context, envelope.destination).await,
+    };
+    let addr = match addr {
         Some(addr) => Some(addr),
         // Choreography sessions run in a fresh per-session context that never
         // has a peer descriptor. Like invitation delivery, they ride the

@@ -213,6 +213,8 @@ struct RendezvousState {
     #[cfg(not(target_arch = "wasm32"))]
     bootstrap_broker: Option<Arc<LocalBootstrapBrokerService>>,
     lan_discovered_peers: HashMap<AuthorityId, DiscoveredPeer>,
+    /// Other devices of this authority seen on the LAN, by device.
+    own_device_peers: HashMap<DeviceId, DiscoveredPeer>,
 }
 
 #[derive(Clone)]
@@ -265,6 +267,10 @@ enum RendezvousCommand {
         authority_id: AuthorityId,
         reply: oneshot::Sender<Option<DiscoveredPeer>>,
     },
+    GetOwnDevicePeer {
+        device_id: DeviceId,
+        reply: oneshot::Sender<Option<DiscoveredPeer>>,
+    },
     IsLanDiscoveryRunning {
         reply: oneshot::Sender<bool>,
     },
@@ -279,6 +285,7 @@ impl RendezvousState {
             #[cfg(not(target_arch = "wasm32"))]
             bootstrap_broker: None,
             lan_discovered_peers: HashMap::new(),
+            own_device_peers: HashMap::new(),
         }
     }
 }
@@ -463,6 +470,17 @@ impl RendezvousManager {
                         reply,
                     } => {
                         let peer = *peer;
+                        // Another device of this authority: keep it as a device route
+                        // rather than as a peer authority descriptor.
+                        if peer.authority_id == local_authority_id {
+                            if let Some(device_id) = peer.descriptor.device_id {
+                                if !Self::descriptor_has_placeholder_crypto(&peer.descriptor) {
+                                    state.own_device_peers.insert(device_id, peer);
+                                }
+                            }
+                            let _ = reply.send(());
+                            continue;
+                        }
                         if peer.authority_id != peer.descriptor.authority_id
                             || Self::descriptor_has_placeholder_crypto(&peer.descriptor)
                         {
@@ -530,6 +548,10 @@ impl RendezvousManager {
                         reply,
                     } => {
                         let peer = state.lan_discovered_peers.get(&authority_id).cloned();
+                        let _ = reply.send(peer);
+                    }
+                    RendezvousCommand::GetOwnDevicePeer { device_id, reply } => {
+                        let peer = state.own_device_peers.get(&device_id).cloned();
                         let _ = reply.send(peer);
                     }
                     RendezvousCommand::IsLanDiscoveryRunning { reply } => {
@@ -1556,6 +1578,16 @@ impl RendezvousManager {
                 authority_id,
                 reply,
             })
+            .await
+            .ok()?
+    }
+
+    /// A sibling device of this authority discovered on the LAN.
+    pub async fn get_own_device_peer(&self, device_id: DeviceId) -> Option<DiscoveredPeer> {
+        self.command_handle()
+            .await
+            .ok()?
+            .request(|reply| RendezvousCommand::GetOwnDevicePeer { device_id, reply })
             .await
             .ok()?
     }

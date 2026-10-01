@@ -426,7 +426,20 @@ impl LanDiscoveryService {
                         };
 
                         if packet.authority_id == local_authority {
-                            continue;
+                            // Keep other devices of this authority (multi-device
+                            // accounts route between them); drop our own echo.
+                            let own_device = shared
+                                .state
+                                .lock()
+                                .await
+                                .descriptor
+                                .as_ref()
+                                .and_then(|announced| announced.descriptor.device_id);
+                            if packet.descriptor.device_id.is_none()
+                                || packet.descriptor.device_id == own_device
+                            {
+                                continue;
+                            }
                         }
 
                         let discovered_at_ms = received_at_ms;
