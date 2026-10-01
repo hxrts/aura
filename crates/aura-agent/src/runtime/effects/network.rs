@@ -90,9 +90,16 @@ impl NetworkCoreEffects for AuraEffectSystem {
     ) -> Result<(), NetworkError> {
         if self.execution_mode.is_deterministic() {
             if let Some(shared) = self.transport.shared_transport() {
-                let peer = AuthorityId::from_uuid(peer_id);
+                let (peer, device) = resolve_network_peer(self, peer_id).await;
                 let mut metadata = HashMap::new();
                 metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
+                metadata.insert(
+                    SOURCE_DEVICE_METADATA_KEY.to_string(),
+                    self.device_id().to_string(),
+                );
+                if let Some(device) = device {
+                    metadata.insert("aura-destination-device-id".to_string(), device.to_string());
+                }
                 let envelope = TransportEnvelope {
                     destination: peer,
                     source: self.authority_id,
@@ -112,6 +119,10 @@ impl NetworkCoreEffects for AuraEffectSystem {
         let (peer, device) = resolve_network_peer(self, peer_id).await;
         let mut metadata = HashMap::new();
         metadata.insert("content-type".to_string(), NETWORK_CONTENT_TYPE.to_string());
+        metadata.insert(
+            SOURCE_DEVICE_METADATA_KEY.to_string(),
+            self.device_id().to_string(),
+        );
         if let Some(device) = device {
             metadata.insert("aura-destination-device-id".to_string(), device.to_string());
         }
@@ -227,7 +238,7 @@ impl NetworkCoreEffects for AuraEffectSystem {
             return Err(NetworkError::NoMessage);
         }
 
-        Ok((envelope.source.uuid(), envelope.payload))
+        Ok((network_source_id(&envelope), envelope.payload))
     }
 }
 
@@ -251,7 +262,7 @@ impl NetworkExtendedEffects for AuraEffectSystem {
             return Err(NetworkError::NoMessage);
         };
 
-        if content_type != NETWORK_CONTENT_TYPE || envelope.source.uuid() != peer_id {
+        if content_type != NETWORK_CONTENT_TYPE || network_source_id(&envelope) != peer_id {
             self.requeue_envelope(envelope);
             return Err(NetworkError::NoMessage);
         }
@@ -513,6 +524,35 @@ mod tests {
         config
     }
 
+    // Sync digests are matched against the peer *device* id; the receiver must
+    // see the sender device, not its authority.
+    #[tokio::test]
+    async fn sync_receive_reports_sender_device_not_authority() {
+        let shared = crate::SharedTransport::new();
+        let alice = AuthorityId::new_from_entropy([71u8; 32]);
+        let bob = AuthorityId::new_from_entropy([72u8; 32]);
+        let alice_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
+            &AgentConfig::default(),
+            alice,
+            shared.clone(),
+        );
+        let bob_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
+            &AgentConfig::default(),
+            bob,
+            shared,
+        );
+
+        alice_fx
+            .send_to_peer(bob.uuid(), b"digest".to_vec())
+            .await
+            .expect("send digest");
+        let (source, payload) = bob_fx.receive().await.expect("receive digest");
+
+        assert_eq!(payload, b"digest".to_vec());
+        assert_eq!(source, alice_fx.device_id().uuid());
+        assert_ne!(source, alice.uuid());
+    }
+
     #[test]
     fn connection_id_round_trip() {
         let original = ConnectionId::new(uuid::Uuid::from_u128(
@@ -625,4 +665,15 @@ async fn resolve_network_peer(
         }
     }
     (AuthorityId::from_uuid(peer_id), None)
+}
+
+const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
+
+/// Sync peers are addressed by device; prefer the sender's device id when present.
+fn network_source_id(envelope: &aura_core::effects::TransportEnvelope) -> uuid::Uuid {
+    envelope
+        .metadata
+        .get(SOURCE_DEVICE_METADATA_KEY)
+        .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+        .unwrap_or_else(|| envelope.source.uuid())
 }
