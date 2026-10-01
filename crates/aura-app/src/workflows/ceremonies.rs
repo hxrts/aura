@@ -46,8 +46,10 @@ fn ceremony_monitor_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Durati
     match kind {
         crate::runtime_bridge::CeremonyKind::GuardianRotation
         | crate::runtime_bridge::CeremonyKind::DeviceRotation => Duration::from_secs(60),
-        crate::runtime_bridge::CeremonyKind::DeviceEnrollment
-        | crate::runtime_bridge::CeremonyKind::DeviceRemoval => Duration::from_secs(45),
+        // Enrollment waits for a person to import the code on the new device; this
+        // matches the runtime's 10 minute acceptance window.
+        crate::runtime_bridge::CeremonyKind::DeviceEnrollment => Duration::from_secs(600),
+        crate::runtime_bridge::CeremonyKind::DeviceRemoval => Duration::from_secs(45),
         crate::runtime_bridge::CeremonyKind::Recovery
         | crate::runtime_bridge::CeremonyKind::OtaActivation => Duration::from_secs(90),
         crate::runtime_bridge::CeremonyKind::Invitation
@@ -755,7 +757,7 @@ mod tests {
         let recovery =
             CeremonyPollPolicy::for_kind(crate::runtime_bridge::CeremonyKind::Recovery, interval);
 
-        assert_eq!(enrollment.max_attempts, 182);
+        assert_eq!(enrollment.max_attempts, 2402);
         assert_eq!(recovery.max_attempts, 362);
         assert!(!enrollment.rollback_on_failure);
         assert!(!recovery.rollback_on_failure);
