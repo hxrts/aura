@@ -43,6 +43,7 @@ struct SharedTransportState {
     inboxes: HashMap<AuthorityId, Arc<RwLock<Vec<TransportEnvelope>>>>,
     inbox_notifiers: HashMap<AuthorityId, Arc<Notify>>,
     online: HashSet<AuthorityId>,
+    device_authorities: HashMap<aura_core::DeviceId, AuthorityId>,
 }
 
 impl SharedTransportState {
@@ -133,6 +134,19 @@ impl SharedTransport {
         let notify = self.inbox_notify_inner(envelope.destination);
         inbox.write().push(envelope);
         notify.notify_waiters();
+    }
+
+    /// Record which authority owns a simulated device, so device-addressed
+    /// peers (e.g. sync) resolve the way LAN discovery resolves them in production.
+    pub fn register_device(&self, device_id: aura_core::DeviceId, authority_id: AuthorityId) {
+        self.with_state_mut(|state| {
+            state.device_authorities.insert(device_id, authority_id);
+        });
+    }
+
+    /// Authority owning a registered simulated device.
+    pub fn authority_for_device(&self, device_id: aura_core::DeviceId) -> Option<AuthorityId> {
+        self.with_state(|state| state.device_authorities.get(&device_id).copied())
     }
 
     /// Register an authority as "online" in this shared network.

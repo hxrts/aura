@@ -1881,6 +1881,18 @@ impl ReactiveView for ChatSignalView {
     }
 }
 
+/// Whether a fact creates a chat channel.
+fn is_chat_channel_created(fact: &Fact) -> bool {
+    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content else {
+        return false;
+    };
+    envelope.type_id.as_str() == CHAT_FACT_TYPE_ID
+        && matches!(
+            ChatFact::from_envelope(envelope),
+            Some(ChatFact::ChannelCreated { .. })
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2668,16 +2680,4 @@ mod tests {
             Some(ContactRelationshipState::PendingInbound)
         );
     }
-}
-
-/// Whether a fact creates a chat channel.
-fn is_chat_channel_created(fact: &Fact) -> bool {
-    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content else {
-        return false;
-    };
-    envelope.type_id.as_str() == CHAT_FACT_TYPE_ID
-        && matches!(
-            ChatFact::from_envelope(envelope),
-            Some(ChatFact::ChannelCreated { .. })
-        )
 }

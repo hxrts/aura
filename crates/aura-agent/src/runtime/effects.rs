@@ -582,6 +582,7 @@ impl AuraEffectSystem {
         }
         if let Some(shared) = &shared_transport {
             shared.register(authority);
+            shared.register_device(config.device_id, authority);
         }
         let transport_inbox = shared_inbox.unwrap_or_else(|| {
             shared_transport

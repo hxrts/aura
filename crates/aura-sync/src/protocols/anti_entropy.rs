@@ -46,8 +46,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::capabilities::SyncCapability;
 use crate::core::{
-    binary_serialize, exchange_json_with_peer, json_serialize, send_bytes_to_peer,
-    sync_biscuit_guard_error, sync_session_error, SyncResult,
+    binary_serialize, exchange_json_with_peer, json_serialize, receive_json_from_expected_peer,
+    send_json_to_peer, sync_biscuit_guard_error, sync_session_error, SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::journal_apply::JournalApplyService;
@@ -872,17 +872,10 @@ impl AntiEntropyProtocol {
         );
 
         let pull_future = async {
-            let remote_ops: Vec<AttestedOp> = exchange_json_with_peer(
-                effects,
-                peer.0,
-                &peer,
-                "request",
-                "operation request",
-                &request,
-                "operations",
-                "operations",
-            )
-            .await?;
+            // Lockstep: the peer saw the same digests and pushes what we lack.
+            let remote_ops: Vec<AttestedOp> =
+                receive_json_from_expected_peer(effects, peer.0, &peer, "operations", "operations")
+                    .await?;
 
             let remote_ops = crate::protocols::ingress::verified_device_payload(
                 peer,
@@ -1235,11 +1228,17 @@ impl AntiEntropyProtocol {
             "Pushing operations to peer"
         );
 
+        // Always send a batch, even an empty one: the peer is waiting on it in lockstep.
+        send_json_to_peer(
+            effects,
+            peer.0,
+            &peer,
+            "operations",
+            "operations",
+            &ops_to_send,
+        )
+        .await?;
         if !ops_to_send.is_empty() {
-            // Serialize operations
-            let ops_data = json_serialize("operations", "operations", ops_to_send)?;
-            send_bytes_to_peer(effects, peer.0, &peer, "operations", ops_data).await?;
-
             tracing::info!(
                 operation_id = ANTI_ENTROPY_OPERATION_ID,
                 peer_id = %peer,

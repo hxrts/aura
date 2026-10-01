@@ -245,29 +245,30 @@ impl NetworkCoreEffects for AuraEffectSystem {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl NetworkExtendedEffects for AuraEffectSystem {
-    async fn receive_from(&self, _peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
-        let peer_id = _peer_id;
-        let envelope = match TransportEffects::receive_envelope(self).await {
-            Ok(env) => env,
-            Err(TransportError::NoMessage) => return Err(NetworkError::NoMessage),
-            Err(e) => {
-                return Err(NetworkError::ReceiveFailed {
-                    reason: e.to_string(),
-                });
+    async fn receive_from(&self, peer_id: uuid::Uuid) -> Result<Vec<u8>, NetworkError> {
+        // Take only this peer's network frame; other sessions' envelopes stay queued.
+        // Wait a bounded time so lockstep peers (sync) can answer before we give up.
+        for _ in 0..RECEIVE_FROM_POLLS {
+            match self.take_inbound_envelope(|env| {
+                env.metadata.get("content-type").map(String::as_str) == Some(NETWORK_CONTENT_TYPE)
+                    && network_source_id(env) == peer_id
+            }) {
+                Ok(envelope) => return Ok(envelope.payload),
+                Err(TransportError::NoMessage) => {}
+                Err(e) => {
+                    return Err(NetworkError::ReceiveFailed {
+                        reason: e.to_string(),
+                    })
+                }
             }
-        };
-
-        let Some(content_type) = envelope.metadata.get("content-type") else {
-            self.requeue_envelope(envelope);
-            return Err(NetworkError::NoMessage);
-        };
-
-        if content_type != NETWORK_CONTENT_TYPE || network_source_id(&envelope) != peer_id {
-            self.requeue_envelope(envelope);
-            return Err(NetworkError::NoMessage);
+            if PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
+                .await
+                .is_err()
+            {
+                break;
+            }
         }
-
-        Ok(envelope.payload)
+        Err(NetworkError::NoMessage)
     }
 
     async fn connected_peers(&self) -> Vec<uuid::Uuid> {
@@ -508,6 +509,51 @@ where
     make_fut().await
 }
 
+const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
+
+/// Sync peers are addressed by device; prefer the sender's device id when present.
+fn network_source_id(envelope: &aura_core::effects::TransportEnvelope) -> uuid::Uuid {
+    envelope
+        .metadata
+        .get(SOURCE_DEVICE_METADATA_KEY)
+        .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
+        .unwrap_or_else(|| envelope.source.uuid())
+}
+
+/// Bounded wait for a peer frame in `receive_from`: 200 x 25 ms = 5 s.
+const RECEIVE_FROM_POLLS: usize = 200;
+const RECEIVE_FROM_POLL_MS: u64 = 25;
+
+/// Resolve a network peer id (a device id for sync peers) to the owning
+/// authority and, when known, the device to address.
+async fn resolve_network_peer(
+    effects: &AuraEffectSystem,
+    peer_id: uuid::Uuid,
+) -> (AuthorityId, Option<aura_core::DeviceId>) {
+    let device = aura_core::DeviceId::from_uuid(peer_id);
+    if let Some(manager) = effects.rendezvous_manager() {
+        if let Some(peer) = manager
+            .list_lan_discovered_peers()
+            .await
+            .into_iter()
+            .find(|peer| peer.descriptor.device_id == Some(device))
+        {
+            return (peer.authority_id, Some(device));
+        }
+        if manager.get_own_device_peer(device).await.is_some() {
+            return (effects.authority_id, Some(device));
+        }
+    }
+    if let Some(authority) = effects
+        .transport
+        .shared_transport()
+        .and_then(|shared| shared.authority_for_device(device))
+    {
+        return (authority, Some(device));
+    }
+    (AuthorityId::from_uuid(peer_id), None)
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[allow(clippy::disallowed_methods)]
 mod tests {
@@ -551,6 +597,59 @@ mod tests {
         assert_eq!(payload, b"digest".to_vec());
         assert_eq!(source, alice_fx.device_id().uuid());
         assert_ne!(source, alice.uuid());
+    }
+
+    fn sync_agent(shared: &crate::SharedTransport, seed: u8) -> AuraEffectSystem {
+        let config = AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy([seed; 32]),
+            ..AgentConfig::default()
+        };
+        AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            &config,
+            0x5_1C00 + u64::from(seed),
+            AuthorityId::new_from_entropy([seed.wrapping_add(1); 32]),
+            shared.clone(),
+        )
+        .expect("simulation effect system")
+    }
+
+    fn sync_protocol(effects: &AuraEffectSystem) -> aura_sync::protocols::AntiEntropyProtocol {
+        let (token_manager, guard_evaluator) = effects
+            .sync_biscuit_authorization()
+            .expect("frontier should verify")
+            .expect("simulation runtime has a Biscuit frontier");
+        aura_sync::protocols::AntiEntropyProtocol::with_biscuit_authorization(
+            aura_sync::protocols::AntiEntropyConfig::default(),
+            token_manager,
+            guard_evaluator,
+        )
+    }
+
+    // Regression (work/8.md task 3): peers sync with each other concurrently,
+    // addressed by device. Sessions must not consume each other's frames.
+    #[tokio::test]
+    async fn concurrent_anti_entropy_between_device_addressed_peers_completes() {
+        let shared = crate::SharedTransport::new();
+        let alex = sync_agent(&shared, 81);
+        let barbara = sync_agent(&shared, 83);
+        let carol = sync_agent(&shared, 85);
+        let (pa, pb, pc) = (
+            sync_protocol(&alex),
+            sync_protocol(&barbara),
+            sync_protocol(&carol),
+        );
+
+        let (ab, ac, ba, ca) = tokio::join!(
+            pa.execute(&alex, barbara.device_id()),
+            pa.execute(&alex, carol.device_id()),
+            pb.execute(&barbara, alex.device_id()),
+            pc.execute(&carol, alex.device_id()),
+        );
+
+        for (label, result) in [("a->b", ab), ("a->c", ac), ("b->a", ba), ("c->a", ca)] {
+            let result = result.unwrap_or_else(|error| panic!("{label} sync failed: {error}"));
+            assert!(result.rounds >= 1, "{label} ran no rounds");
+        }
     }
 
     #[test]
@@ -642,38 +741,4 @@ mod tests {
             .expect_err("closing an already closed handle should fail");
         assert!(matches!(close_err, NetworkError::ConnectionFailed(_)));
     }
-}
-
-/// Resolve a network peer id (a device id for sync peers) to the owning
-/// authority and, when known, the device to address.
-async fn resolve_network_peer(
-    effects: &AuraEffectSystem,
-    peer_id: uuid::Uuid,
-) -> (AuthorityId, Option<aura_core::DeviceId>) {
-    let device = aura_core::DeviceId::from_uuid(peer_id);
-    if let Some(manager) = effects.rendezvous_manager() {
-        if let Some(peer) = manager
-            .list_lan_discovered_peers()
-            .await
-            .into_iter()
-            .find(|peer| peer.descriptor.device_id == Some(device))
-        {
-            return (peer.authority_id, Some(device));
-        }
-        if manager.get_own_device_peer(device).await.is_some() {
-            return (effects.authority_id, Some(device));
-        }
-    }
-    (AuthorityId::from_uuid(peer_id), None)
-}
-
-const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
-
-/// Sync peers are addressed by device; prefer the sender's device id when present.
-fn network_source_id(envelope: &aura_core::effects::TransportEnvelope) -> uuid::Uuid {
-    envelope
-        .metadata
-        .get(SOURCE_DEVICE_METADATA_KEY)
-        .and_then(|raw| uuid::Uuid::parse_str(raw).ok())
-        .unwrap_or_else(|| envelope.source.uuid())
 }

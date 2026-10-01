@@ -144,40 +144,7 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
-        let self_device_id = self.config.device_id.to_string();
-        let inbox = self.transport.inbox();
-        let maybe = {
-            let mut inbox = inbox.write();
-            // In shared transport mode, filter by destination (this agent's authority ID)
-            inbox
-                .iter()
-                .position(|env| {
-                    let device_match = env
-                        .metadata
-                        .get("aura-destination-device-id")
-                        .is_some_and(|dst| dst == &self_device_id);
-
-                    if env.destination == self.authority_id {
-                        return match env.metadata.get("aura-destination-device-id") {
-                            Some(dst) => dst == &self_device_id,
-                            None => true,
-                        };
-                    }
-
-                    // Allow device-targeted envelopes for other authorities (multi-authority devices).
-                    device_match
-                })
-                .map(|pos| inbox.remove(pos))
-        };
-
-        match maybe {
-            Some(env) => {
-                validate_inbound_transport_receipt(&env)?;
-                self.transport.record_receive();
-                Ok(env)
-            }
-            None => Err(TransportError::NoMessage),
-        }
+        self.take_inbound_envelope(|_| true)
     }
 
     async fn receive_envelope_from(
@@ -919,6 +886,42 @@ fn browser_target_uses_harness_transport(current_host: &str, normalized_target: 
         return false;
     }
     normalized_target == normalize_ws_url(current_host)
+}
+
+impl AuraEffectSystem {
+    /// Take the first inbound envelope addressed to this device that also
+    /// satisfies `accept`, leaving every other envelope queued in order.
+    pub(crate) fn take_inbound_envelope(
+        &self,
+        accept: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Result<TransportEnvelope, TransportError> {
+        let self_device_id = self.config.device_id.to_string();
+        let inbox = self.transport.inbox();
+        let maybe = {
+            let mut inbox = inbox.write();
+            // In shared transport mode, filter by destination (this agent's authority ID)
+            inbox
+                .iter()
+                .position(|env| {
+                    let addressed_here = match env.metadata.get("aura-destination-device-id") {
+                        Some(dst) => dst == &self_device_id,
+                        // Device-less envelopes are addressed to the whole authority.
+                        None => env.destination == self.authority_id,
+                    };
+                    addressed_here && accept(env)
+                })
+                .map(|pos| inbox.remove(pos))
+        };
+
+        match maybe {
+            Some(env) => {
+                validate_inbound_transport_receipt(&env)?;
+                self.transport.record_receive();
+                Ok(env)
+            }
+            None => Err(TransportError::NoMessage),
+        }
+    }
 }
 
 #[cfg(test)]
