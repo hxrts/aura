@@ -5067,3 +5067,42 @@ large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
 
     assert_eq!(imported.receiver_id, invited);
 });
+
+// Regression (work/8.md task 32): listing invitations re-caches persisted
+// records; a device enrollment must be cached with its secure payload
+// restored, or accepting it skips the baseline tree and key package.
+large_stack_async_test!(listing_restores_device_enrollment_payload_before_caching, {
+    let authority = create_test_authority(156);
+    let effects = effects_for(&authority);
+    let handler = handler_for(authority.clone());
+    let invitation = test_device_enrollment_invitation("listed-device-enrollment");
+    let shareable = ShareableInvitation {
+        version: ShareableInvitation::CURRENT_VERSION,
+        invitation_id: invitation.invitation_id.clone(),
+        sender_id: invitation.sender_id,
+        context_id: Some(invitation.context_id),
+        invitation_type: invitation.invitation_type.clone(),
+        expires_at: invitation.expires_at,
+        message: invitation.message.clone(),
+    };
+    InvitationCacheHandler::persist_imported_invitation(
+        effects.as_ref(),
+        authority.authority_id(),
+        &StoredImportedInvitation::pending(
+            shareable,
+            invitation.created_at,
+            ImportedSenderTrust::SelfCertified,
+        ),
+    )
+    .await
+    .expect("persist imported device enrollment");
+
+    let _ = handler.list_with_storage(effects.as_ref()).await;
+
+    let cached = handler
+        .invitation_cache
+        .get_invitation(&invitation.invitation_id)
+        .await
+        .expect("listing caches the invitation");
+    assert_device_enrollment_payload_restored(&cached.invitation_type);
+});

@@ -2193,6 +2193,25 @@ impl InvitationHandler {
                 let Ok(invitation) = serde_json::from_slice::<Invitation>(&bytes) else {
                     continue;
                 };
+                // Stored device enrollments are redacted; restore the secure payload
+                // before caching, or later readers see an empty enrollment.
+                let invitation = if matches!(
+                    invitation.invitation_type,
+                    InvitationType::DeviceEnrollment { .. }
+                ) {
+                    match InvitationHandler::load_created_invitation(
+                        effects,
+                        own_id,
+                        &invitation.invitation_id,
+                    )
+                    .await
+                    {
+                        Some(restored) => restored,
+                        None => continue,
+                    }
+                } else {
+                    invitation
+                };
                 self.invitation_cache
                     .cache_invitation(invitation.clone())
                     .await;
@@ -2213,6 +2232,25 @@ impl InvitationHandler {
                     InvitationCacheHandler::parse_imported_invitation_bytes(&bytes, preserved)
                 else {
                     continue;
+                };
+                // Stored device enrollments are redacted; restore the secure payload.
+                let stored = if matches!(
+                    stored.shareable.invitation_type,
+                    InvitationType::DeviceEnrollment { .. }
+                ) {
+                    match InvitationHandler::load_imported_invitation(
+                        effects,
+                        own_id,
+                        &stored.invitation_id,
+                        preserved,
+                    )
+                    .await
+                    {
+                        Some(restored) => restored,
+                        None => continue,
+                    }
+                } else {
+                    stored
                 };
                 let status = stored.status.clone();
                 let created_at = stored.created_at;
