@@ -14,6 +14,7 @@ use crate::tui::semantic_lifecycle::{
 };
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::updates::{publish_ui_update, UiOperationFailure, UiUpdatePublication};
+use aura_app::ui::types::chat::is_note_to_self_channel_name;
 use aura_app::ui_contract::ChannelBindingWitness;
 use aura_app::ui_contract::SemanticOperationKind;
 
@@ -938,7 +939,13 @@ fn open_chat_modal_from_authoritative_selection(
                 contract,
                 ModalOpenContract::AuthoritativeSelection
             ));
-            if let Some(channel) = channels.get(idx) {
+            if let Some(channel) = channels
+                .get(idx)
+                .filter(|channel| is_note_to_self_channel_name(&channel.name))
+            {
+                let _ = channel;
+                new_state.toast_info("Note to Self is private and can't be edited");
+            } else if let Some(channel) = channels.get(idx) {
                 let modal_state = crate::tui::state::TopicModalState::for_channel(
                     &channel.id,
                     &channel.name,
