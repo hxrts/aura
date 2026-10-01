@@ -3740,6 +3740,19 @@ impl AgentRuntimeBridge {
         else {
             return Ok(());
         };
+        // The enrollment stored this device's share raw; the signing service
+        // only reads its own encrypted envelope.
+        let own_participant = aura_core::threshold::ParticipantIdentity::device(
+            self.agent.runtime().effects().device_id(),
+        );
+        self.agent
+            .runtime()
+            .threshold_signing()
+            .adopt_enrolled_participant_share(&subject_authority, pending_epoch, &own_participant)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("Adopt enrolled share: {error}"))
+            })?;
         let effects = self.agent.runtime().effects();
         effects
             .commit_key_rotation(&subject_authority, pending_epoch)

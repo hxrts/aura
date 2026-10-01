@@ -544,6 +544,32 @@ impl ThresholdSigningService {
             .and_then(|context| context.my_signer_index)
     }
 
+    /// Wrap a share a device enrollment stored raw into this service's
+    /// encrypted envelope, so the joining device can use it after committing
+    /// the epoch. No-op if the share is already enveloped.
+    pub(crate) async fn adopt_enrolled_participant_share(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+    ) -> Result<(), AuraError> {
+        if self
+            .participant_key_package(authority, epoch, participant)
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        let location = Self::participant_share_location(authority, epoch, participant);
+        let key_package = self
+            .effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to load enrolled share: {e}")))?;
+        self.store_participant_key_package(authority, epoch, participant, &location, &key_package)
+            .await
+    }
+
     /// Decrypted key package stored for `participant` at `epoch` during a rotation.
     pub(crate) async fn participant_key_package(
         &self,
@@ -1874,6 +1900,47 @@ mod tests {
             .unwrap();
 
         assert_eq!(service.signer_index(&authority).await, Some(2));
+    }
+
+    // Regression (work/8.md task 32): a device enrollment stores the joining
+    // device's share raw; adopting it makes it readable through the service.
+    #[tokio::test]
+    async fn enrolled_raw_share_is_adopted_into_the_service_envelope() {
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ThresholdSigningService::new(effects.clone());
+        let authority = test_authority();
+        let participant = ParticipantIdentity::Device(effects.device_id());
+        let location =
+            ThresholdSigningService::participant_share_location(&authority, 1, &participant);
+        effects
+            .secure_store(
+                &location,
+                b"raw-enrolled-share",
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .unwrap();
+        assert!(service
+            .participant_key_package(&authority, 1, &participant)
+            .await
+            .is_err());
+
+        service
+            .adopt_enrolled_participant_share(&authority, 1, &participant)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service
+                .participant_key_package(&authority, 1, &participant)
+                .await
+                .unwrap(),
+            b"raw-enrolled-share".to_vec()
+        );
     }
 
     #[tokio::test]
