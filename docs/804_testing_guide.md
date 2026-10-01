@@ -580,6 +580,8 @@ The runtime harness executes real Aura instances in PTYs for end-to-end validati
 
 The harness is the single executor for real frontend scenarios. Scripted mode uses the shared semantic scenario contract. Agent mode uses LLM-driven execution toward goals.
 
+Multi-host runs use one harness per host with the same run token. Set `[run] fixed_ports = true` so configured `bind_address` and `lan_discovery.port` values stay literal instead of being namespaced by the run token; peers on different hosts must agree on these ports.
+
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.

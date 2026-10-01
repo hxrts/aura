@@ -31,10 +31,7 @@ pub fn materialize_run_config_with_artifact_base(
 
     let seed_bundle = build_seed_bundle(&config);
     let run_token = run_token();
-    let port_namespace = run_token
-        .as_deref()
-        .map(namespaced_port_offset)
-        .unwrap_or_default();
+    let port_namespace = port_namespace_for(config.run.fixed_ports, run_token.as_deref());
     let mut used_ports = HashSet::new();
 
     for instance in &mut config.instances {
@@ -213,6 +210,15 @@ fn absolutize_path(path: PathBuf) -> PathBuf {
     workspace_root().join(path)
 }
 
+/// Port offset for this run: none for fixed-port (multi-host) configs,
+/// otherwise derived from the run token so parallel runs do not collide.
+fn port_namespace_for(fixed_ports: bool, run_token: Option<&str>) -> u16 {
+    if fixed_ports {
+        return 0;
+    }
+    run_token.map(namespaced_port_offset).unwrap_or_default()
+}
+
 fn namespaced_port_offset(token: &str) -> u16 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     token.hash(&mut hasher);
@@ -373,6 +379,19 @@ mod tests {
     }
 
     #[test]
+    fn fixed_ports_keep_configured_ports_literal() {
+        assert_eq!(
+            super::port_namespace_for(true, Some("lan-e2e-shared-run-9")),
+            0
+        );
+        assert_eq!(super::namespace_port(19_433, 0), 19_433);
+        assert_ne!(
+            super::port_namespace_for(false, Some("lan-e2e-shared-run-9")),
+            0
+        );
+    }
+
+    #[test]
     fn materialize_respects_cli_artifact_base_override() {
         let config = sample_run_config();
         let override_root = PathBuf::from("/tmp/aura-artifacts");
@@ -409,6 +428,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![
                 InstanceConfig {

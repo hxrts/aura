@@ -83,6 +83,10 @@ pub struct RunSection {
     pub require_remote_artifact_sync: bool,
     #[serde(default)]
     pub runtime_substrate: RuntimeSubstrate,
+    /// Keep configured ports literal instead of namespacing them by run token.
+    /// Multi-host runs need this so peers on different hosts agree on ports.
+    #[serde(default)]
+    pub fixed_ports: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -736,6 +740,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![
                 InstanceConfig {
@@ -942,6 +947,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -992,6 +998,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![
                 InstanceConfig {
@@ -1069,6 +1076,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: RuntimeSubstrate::Simulator,
+                fixed_ports: false,
             },
             instances: vec![InstanceConfig {
                 id: "browser".to_string(),

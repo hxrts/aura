@@ -215,6 +215,7 @@ fn local_run_config(name: &str, port: u16) -> RunConfig {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -258,6 +259,7 @@ fn mixed_run_config(name: &str, local_port: u16, ssh_port: u16) -> RunConfig {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![
             InstanceConfig {

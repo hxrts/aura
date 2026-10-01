@@ -78,6 +78,7 @@ fn one_local_run(name: &str) -> RunConfig {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),

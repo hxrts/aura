@@ -778,6 +778,7 @@ fn compatibility_and_agent_modes_share_same_transition_path() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -864,6 +865,7 @@ fn repeated_runs_with_same_seed_share_same_report_shape() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -932,6 +934,7 @@ fn send_chat_command_dismisses_toast_then_sends_slash_command() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),
@@ -1121,6 +1124,7 @@ fn send_clipboard_retries_until_clipboard_file_is_written() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![
             InstanceConfig {
@@ -1255,6 +1259,7 @@ fn send_clipboard_long_payload_is_chunked_and_reassembled() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: crate::config::RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![
             InstanceConfig {

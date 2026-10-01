@@ -39,6 +39,7 @@ fn phase5_run_rejects_shared_semantic_ssh_config_before_execution() {
             max_open_files: None,
             require_remote_artifact_sync: true,
             runtime_substrate: RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![
             InstanceConfig {

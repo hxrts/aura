@@ -42,6 +42,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             max_open_files: None,
             require_remote_artifact_sync: false,
             runtime_substrate: RuntimeSubstrate::default(),
+            fixed_ports: false,
         },
         instances: vec![local_instance(
             "alice",

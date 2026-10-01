@@ -177,6 +177,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![
                 base_instance("alice", InstanceMode::Local),
@@ -207,6 +208,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![base_instance("alice", InstanceMode::Browser)],
         };
@@ -236,6 +238,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: false,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![
                 base_instance("alice", InstanceMode::Local),

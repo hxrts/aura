@@ -410,6 +410,7 @@ mod tests {
                 max_open_files: None,
                 require_remote_artifact_sync: true,
                 runtime_substrate: crate::config::RuntimeSubstrate::default(),
+                fixed_ports: false,
             },
             instances: vec![InstanceConfig {
                 id: "remote-1".to_string(),
