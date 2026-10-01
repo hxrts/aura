@@ -7,7 +7,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::types::{BootstrapEvent, BootstrapEventKind, BootstrapSurface};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
-use aura_agent::core::{default_storage_path, AgentConfig};
+use aura_agent::core::AgentConfig;
 use aura_agent::{AgentBuilder, BuildError, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs, ThresholdArgs};
@@ -75,7 +75,7 @@ async fn async_main() -> Result<(), AuraError> {
             // Check if this is a help request (exit code 0)
             let exit_code = e.clone().exit_code();
             if exit_code == 0 {
-                CliOutput::new().println(format!("{e:?}")).render();
+                CliOutput::new().println(e.unwrap_stdout()).render();
                 std::process::exit(0);
             }
             // For other errors, show our friendly usage
@@ -113,8 +113,18 @@ async fn async_main() -> Result<(), AuraError> {
 
     // Create CLI device ID. Authority/context must come from persisted bootstrap state.
     let device_id = ids::device_id("cli:main-device");
-    let storage_base_path = derive_storage_base_path(&command, args.config.as_ref())
-        .unwrap_or_else(default_storage_path);
+    // Explicit data dir, then config-derived path, then the TUI's default
+    // location so subcommands find the account the TUI created.
+    let storage_base_path = args
+        .data_dir
+        .clone()
+        .or_else(|| derive_storage_base_path(&command, args.config.as_ref()))
+        .unwrap_or_else(|| {
+            aura_terminal::handlers::tui::resolve_storage_path(
+                None,
+                aura_terminal::handlers::tui::TuiMode::Production,
+            )
+        });
     let loaded_account = try_load_account_from_path(&storage_base_path)
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
@@ -160,11 +170,21 @@ async fn async_main() -> Result<(), AuraError> {
         .map_err(|e| AuraError::agent(format!("{e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
-    // Initialize logging through effects
-    let log_level = if args.verbose { "debug" } else { "info" };
-    CliOutput::new()
-        .println(format!("Initializing Aura CLI with log level: {log_level}"))
-        .render();
+    // Command handlers report through ConsoleEffects (tracing); print those
+    // messages plainly on stdout. Runtime diagnostics appear only with -v.
+    let filter = if args.verbose {
+        "debug".to_string()
+    } else {
+        "off,aura_effects::console=info,aura_agent::runtime::effects::system=info".to_string()
+    };
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+        .with_writer(std::io::stdout)
+        .without_time()
+        .with_target(false)
+        .with_level(false)
+        .with_ansi(false)
+        .try_init();
 
     // Create CLI handler with agent and AppCore
     let cli_handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
@@ -176,13 +196,17 @@ async fn async_main() -> Result<(), AuraError> {
             .await
             .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Status(status) => {
-            let config_path =
-                resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
-                    .map_err(|e| AuraError::agent(format!("{e}")))?;
-            cli_handler
-                .handle_status(&config_path)
-                .await
-                .map_err(|e| AuraError::agent(format!("{e}")))?;
+            match resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler) {
+                Ok(config_path) => cli_handler
+                    .handle_status(&config_path)
+                    .await
+                    .map_err(|e| AuraError::agent(format!("{e}")))?,
+                // No device config: report the loaded account itself.
+                Err(_) => cli_handler
+                    .handle_account_status()
+                    .await
+                    .map_err(|e| AuraError::agent(format!("{e}")))?,
+            }
         }
         Commands::Node(node) => {
             let config_path =

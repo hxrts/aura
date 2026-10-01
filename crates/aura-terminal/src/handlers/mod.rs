@@ -228,6 +228,27 @@ impl CliHandler {
         Ok(())
     }
 
+    /// Report the loaded account: identity, threshold, devices and contacts.
+    pub async fn handle_account_status(&self) -> TerminalResult<()> {
+        let runtime = self.agent.clone().as_runtime_bridge();
+        let settings = runtime
+            .try_get_settings()
+            .await
+            .map_err(|e| TerminalError::Operation(e.to_string()))?;
+        let mut output = CliOutput::new();
+        output.section("Account Status");
+        output.kv("Authority", self.agent.authority_id().to_string());
+        output.kv("Nickname", settings.nickname_suggestion.clone());
+        output.kv(
+            "Threshold",
+            format!("{} of {}", settings.threshold_k, settings.threshold_n),
+        );
+        output.kv("Devices", settings.device_count.to_string());
+        output.kv("Contacts", settings.contact_count.to_string());
+        output.render();
+        Ok(())
+    }
+
     /// Handle node command through effects
     ///
     /// Returns structured output that is rendered to stdout/stderr
@@ -396,7 +417,7 @@ impl CliHandler {
     pub async fn handle_chat(&self, command: &ChatCommands) -> TerminalResult<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
+        let ctx = self.make_ctx(effects, true);
         chat::handle_chat(&ctx, effects, command).await
     }
 

@@ -107,7 +107,13 @@ async fn list_authorities(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
         .await
         .unwrap_or_default();
     if keys.is_empty() {
-        output.println("No authorities stored yet");
+        // Accounts created by the TUI keep their identity in the account
+        // config rather than the legacy authority store.
+        output.section("Stored authorities (1)");
+        output.println(format!(
+            "  - {} (current account)",
+            ctx.effect_context().authority_id()
+        ));
     } else {
         output.section(format!("Stored authorities ({})", keys.len()));
         for key in keys {

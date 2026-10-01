@@ -150,31 +150,25 @@ This command runs a local end-to-end smoke flow (init, status, and threshold-sig
 
 ## CLI Interaction
 
-The Aura CLI provides commands for account management and protocol testing. These commands demonstrate core functionality.
+The `aura` CLI operates on the same account as the TUI. It reads the account from `--data-dir`, falling back to the TUI's default location (`$AURA_PATH/.aura`, or `~/.aura`). Run `aura --help` or `aura COMMAND --help` to see the available commands.
 
-View account information:
-
-```bash
-aura status --verbose
-```
-
-This shows detailed account state including journal facts, capability sets, and trust relationships. The journal contains all distributed state updates.
-
-Run a threshold signature test:
+View the account:
 
 ```bash
-aura threshold-test --message "hello world" --threshold 2
+aura --data-dir ~/.aura status
 ```
 
-The threshold test coordinates signature generation across virtual devices. Two devices must participate to create a valid signature.
+This prints the account's authority, nickname, threshold, device count and contact count. Pass `-c CONFIG` to report a device config file instead.
 
-View recent protocol activity:
+Inspect chat, invitations and the authority:
 
 ```bash
-aura journal-query --limit 10
+aura chat list
+aura invite list
+aura authority list
 ```
 
-This command shows recent journal entries created by protocol execution. Each entry represents a state change with cryptographic verification.
+Command output is printed plainly. Add `-v` to also print runtime diagnostics.
 
 ## Testing Your Protocol
 

@@ -98,6 +98,8 @@ pub enum Commands {
 pub struct GlobalArgs {
     pub verbose: bool,
     pub config: Option<PathBuf>,
+    /// Account data directory shared with the TUI (`aura tui --data-dir`).
+    pub data_dir: Option<PathBuf>,
     pub command: Commands,
 }
 
@@ -112,10 +114,15 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
         .help("Global config file")
         .argument::<PathBuf>("CONFIG")
         .optional();
+    let data_dir = long("data-dir")
+        .help("Account data directory (same as `aura tui --data-dir`)")
+        .argument::<PathBuf>("DIR")
+        .optional();
     let command = commands_parser();
     construct!(GlobalArgs {
         verbose,
         config,
+        data_dir,
         command
     })
 }
