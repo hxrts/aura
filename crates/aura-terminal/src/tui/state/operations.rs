@@ -140,7 +140,7 @@ impl OperationTracker {
     ) -> bool {
         self.entries.get(operation_id).is_some_and(|entry| {
             entry.state == OperationState::Failed
-                && instance_id.is_none_or(|instance| *instance == entry.instance_id)
+                && instance_id.map_or(true, |instance| *instance == entry.instance_id)
         })
     }
 

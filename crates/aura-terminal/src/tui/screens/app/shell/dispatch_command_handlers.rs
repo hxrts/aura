@@ -1053,7 +1053,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::invitation_create(),
                 SemanticOperationKind::CreateGuardianInvitation,
             );
-            (cb.recovery.on_select_guardian)(contact.id.to_string(), operation);
+            (cb.recovery.on_select_guardian)(contact.id, operation);
         }
         DispatchCommand::SendSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;
