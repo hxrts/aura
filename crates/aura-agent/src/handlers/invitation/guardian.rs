@@ -228,10 +228,14 @@ impl<'a> InvitationGuardianHandler<'a> {
                         continue;
                     }
 
+                    // No message yet means the guardian has not accepted. The VM
+                    // reports itself stuck on that receive, so wait again within
+                    // the acceptance window instead of judging the step.
+                    if matches!(round.host_wait_status, AuraVmHostWaitStatus::Deferred) {
+                        continue;
+                    }
                     if handle_invitation_vm_wait_status(
                         round.host_wait_status,
-                        // No message yet means the guardian has not accepted; keep
-                        // waiting within the acceptance window.
                         false,
                         "guardian principal VM timed out while waiting for receive",
                         "guardian principal VM cancelled while waiting for receive",
