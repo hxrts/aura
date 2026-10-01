@@ -4523,46 +4523,44 @@ mod tests {
         let operation = rotation_op(guardian_ids.clone());
         let initiator_guardians = guardian_ids.clone();
         let initiator_packages = key_packages.clone();
-        let initiator_task = tokio::spawn(async move {
-            initiator
-                .execute_guardian_ceremony_initiator(
-                    ceremony_id,
-                    prestate_hash,
-                    operation,
-                    initiator_guardians,
-                    initiator_packages,
-                )
-                .await
-        });
-
-        // Both guardians learn about the ceremony from the queued proposal.
-        for guardian in &fixture.guardians {
-            let found = discover_until_registered(guardian).await;
-            assert_eq!(found, vec![tracker_ceremony_id(ceremony_id)]);
-        }
-
-        // People approve later: longer than a single VM receive window.
-        tokio::time::sleep(Duration::from_millis(6_000)).await;
-        let initiator_id = fixture.initiator_id;
-        let (first, second) = tokio::join!(
-            fixture.guardians[0]
-                .service
-                .execute_guardian_ceremony_guardian(
-                    initiator_id,
-                    ceremony_id,
-                    responses[0],
-                    &guardian_ids,
-                ),
-            fixture.guardians[1]
-                .service
-                .execute_guardian_ceremony_guardian(
-                    initiator_id,
-                    ceremony_id,
-                    responses[1],
-                    &guardian_ids,
-                ),
+        let initiator_run = initiator.execute_guardian_ceremony_initiator(
+            ceremony_id,
+            prestate_hash,
+            operation,
+            initiator_guardians,
+            initiator_packages,
         );
-        let initiator_result = initiator_task.await.expect("initiator task joins");
+        let guardians_run = async {
+            // Both guardians learn about the ceremony from the queued proposal.
+            for guardian in &fixture.guardians {
+                let found = discover_until_registered(guardian).await;
+                assert_eq!(found, vec![tracker_ceremony_id(ceremony_id)]);
+            }
+
+            // People approve later: longer than a single VM receive window.
+            tokio::time::sleep(Duration::from_millis(6_000)).await;
+            let initiator_id = fixture.initiator_id;
+            let (first, second) = tokio::join!(
+                fixture.guardians[0]
+                    .service
+                    .execute_guardian_ceremony_guardian(
+                        initiator_id,
+                        ceremony_id,
+                        responses[0],
+                        &guardian_ids,
+                    ),
+                fixture.guardians[1]
+                    .service
+                    .execute_guardian_ceremony_guardian(
+                        initiator_id,
+                        ceremony_id,
+                        responses[1],
+                        &guardian_ids,
+                    ),
+            );
+            (first, second)
+        };
+        let (initiator_result, (first, second)) = tokio::join!(initiator_run, guardians_run);
         (fixture, vec![first, second], initiator_result, key_packages)
     }
 

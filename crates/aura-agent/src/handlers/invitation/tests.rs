@@ -5014,22 +5014,17 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
         subject_authority: principal_id,
     };
 
-    let principal_invitation = invitation.clone();
-    let principal_task_effects = principal_effects.clone();
-    let principal = tokio::spawn(async move {
-        principal_handler
-            .execute_guardian_invitation_principal(principal_task_effects, &principal_invitation)
-            .await
-    });
-    tokio::time::sleep(guardian_delay).await;
-    guardian_handler
-        .execute_guardian_invitation_guardian(guardian_effects.clone(), &invitation)
-        .await
-        .expect("guardian side completes");
-    principal
-        .await
-        .expect("principal task joins")
-        .expect("principal side completes");
+    let (principal_result, guardian_result) = tokio::join!(
+        principal_handler.execute_guardian_invitation_principal(principal_effects.clone(), &invitation),
+        async {
+            tokio::time::sleep(guardian_delay).await;
+            guardian_handler
+                .execute_guardian_invitation_guardian(guardian_effects.clone(), &invitation)
+                .await
+        },
+    );
+    guardian_result.expect("guardian side completes");
+    principal_result.expect("principal side completes");
 
     let key_path = crate::handlers::recovery_guardian_public_key_storage_key(guardian_id);
     assert!(
