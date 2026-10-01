@@ -29,6 +29,8 @@ pub struct AccountSetupModalProps {
     pub success: bool,
     /// Error message if creation failed
     pub error: String,
+    /// Inline validation error for the nickname field
+    pub nickname_error: String,
     /// Bootstrap candidates available for enrollment during first-run startup
     pub bootstrap_candidates: Vec<String>,
 }
@@ -112,7 +114,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     // Input field props
     let input_props = LabeledInputProps::new("Create a new account", "Enter your nickname...")
         .with_value(nickname_suggestion)
-        .with_focused(props.name_focused);
+        .with_focused(props.name_focused)
+        .with_error((!props.nickname_error.is_empty()).then(|| props.nickname_error.clone()));
     let import_props = LabeledInputProps::new(
         "Join an existing account",
         "Enter device enrollment code...",

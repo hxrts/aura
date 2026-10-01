@@ -12,9 +12,9 @@ use super::super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::super::modal_queue::{ContactSelectModalState, QueuedModal};
 use super::super::super::toast::{QueuedToast, ToastLevel};
 use super::super::super::views::{
-    AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
+    validate_nickname_suggestion, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
     DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, ImportInvitationModalState,
-    NicknameSuggestionModalState,
+    NicknameSuggestionError, NicknameSuggestionModalState,
 };
 use super::super::super::TuiState;
 use super::{dismiss_on_escape, list_nav_from_key, modal_text_char_from_key, parse_authority_id};
@@ -30,20 +30,38 @@ pub(super) fn handle_settings_nickname_suggestion_key_queue(
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
-        KeyCode::Enter => {
-            if modal_state.can_submit() {
+        KeyCode::Enter => match validate_nickname_suggestion(&modal_state.value) {
+            Ok(nickname_suggestion) => {
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::UpdateNicknameSuggestion {
-                        nickname_suggestion: modal_state.value,
+                        nickname_suggestion,
                     },
                 ));
                 state.modal_queue.dismiss();
             }
-        }
+            Err(error) => {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::SettingsNicknameSuggestion(ref mut s) = modal {
+                        s.error = Some(error.to_string());
+                    }
+                });
+            }
+        },
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsNicknameSuggestion(ref mut s) = modal {
-                    s.value.push(c);
+                    let mut candidate = s.value.clone();
+                    candidate.push(c);
+                    // Refuse input past the maximum length instead of failing on submit.
+                    match validate_nickname_suggestion(&candidate) {
+                        Err(error @ NicknameSuggestionError::TooLong { .. }) => {
+                            s.error = Some(error.to_string());
+                        }
+                        _ => {
+                            s.value = candidate;
+                            s.error = None;
+                        }
+                    }
                 }
             });
         }
@@ -51,6 +69,7 @@ pub(super) fn handle_settings_nickname_suggestion_key_queue(
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsNicknameSuggestion(ref mut s) = modal {
                     s.value.pop();
+                    s.error = None;
                 }
             });
         }
@@ -84,6 +103,14 @@ pub(super) fn handle_settings_add_device_key_queue(
             });
         }
         KeyCode::Enter => {
+            if let Some(missing) = modal_state.missing_field_error() {
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                        s.error = Some(missing.to_string());
+                    }
+                });
+                return;
+            }
             if modal_state.can_submit() {
                 let invitee_authority_id = match parse_authority_id(
                     state,
@@ -103,6 +130,7 @@ pub(super) fn handle_settings_add_device_key_queue(
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                    s.error = None;
                     match s.focused_field {
                         AddDeviceField::Name => s.name.push(c),
                         AddDeviceField::InviteeAuthority => s.invitee_authority_id.push(c),
@@ -113,6 +141,7 @@ pub(super) fn handle_settings_add_device_key_queue(
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                    s.error = None;
                     match s.focused_field {
                         AddDeviceField::Name => {
                             s.name.pop();

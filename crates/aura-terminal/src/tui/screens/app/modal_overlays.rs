@@ -12,7 +12,8 @@ use crate::tui::components::{
     ModalScaffold, TextInputModal,
 };
 use crate::tui::props::{
-    ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
+    AddDeviceModalViewProps, ChatViewProps, ContactsViewProps, NeighborhoodViewProps,
+    SettingsViewProps,
 };
 use crate::tui::screens::{
     ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
@@ -21,6 +22,7 @@ use crate::tui::screens::{
 };
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::Contact;
+use aura_app::ui::types::MAX_NICKNAME_SUGGESTION_LENGTH;
 
 // =============================================================================
 // Global Modal Props
@@ -38,6 +40,7 @@ pub struct AccountSetupOverlayProps {
     pub show_spinner: bool,
     pub success: bool,
     pub error: Option<String>,
+    pub nickname_error: Option<String>,
 }
 
 #[derive(Default, Clone)]
@@ -168,6 +171,7 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                 show_spinner: global.account_setup.show_spinner,
                 success: global.account_setup.success,
                 error: global.account_setup.error.clone().unwrap_or_default(),
+                nickname_error: global.account_setup.nickname_error.clone().unwrap_or_default(),
             )
         }
         .into_any(),
@@ -538,24 +542,65 @@ pub fn render_nickname_suggestion_modal(
         title: "Edit Nickname".to_string(),
         value: modal.value.clone(),
         placeholder: "Enter what you want to be called...".to_string(),
-        hint: String::new(),
-        error: String::new(),
+        hint: format!("Up to {MAX_NICKNAME_SUGGESTION_LENGTH} characters"),
+        error: modal.error.clone(),
         submitting: false,
     })
 }
 
 pub fn render_add_device_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
     let modal = &settings.modals.add_device;
-    render_text_input_modal(TextInputOverlayProps {
-        visible: modal.visible,
-        focused: true,
-        title: "Add Device — Step 1 of 3".to_string(),
-        value: modal.name.clone(),
-        placeholder: "e.g. Mobile, Laptop".to_string(),
-        hint: "This is the device you're inviting (not the current device).".to_string(),
-        error: String::new(),
-        submitting: false,
-    })
+    if !modal.visible {
+        return None;
+    }
+    render_modal(true, add_device_modal_body(modal))
+}
+
+fn add_device_modal_body(modal: &AddDeviceModalViewProps) -> AnyElement<'static> {
+    let name_props =
+        crate::tui::components::LabeledInputProps::new("Device name", "e.g. Mobile, Laptop")
+            .with_value(modal.name.clone())
+            .with_focused(!modal.invitee_focused);
+    let invitee_props = crate::tui::components::LabeledInputProps::new(
+        "New device's authority ID",
+        "Shown on the new device",
+    )
+    .with_value(modal.invitee_authority_id.clone())
+    .with_focused(modal.invitee_focused);
+
+    let header_props = crate::tui::components::ModalHeaderProps::new("Add Device — Step 1 of 3")
+        .with_subtitle("This is the device you're inviting (not the current device).");
+    let footer_props = crate::tui::components::ModalFooterProps::new(vec![
+        crate::tui::types::KeyHint::new("Esc", "Cancel"),
+        crate::tui::types::KeyHint::new("Tab", "Switch field"),
+        crate::tui::types::KeyHint::new("Enter", "Continue"),
+    ]);
+    let (status, border_color) = if modal.error.is_empty() {
+        (crate::tui::components::ModalStatus::Idle, Theme::PRIMARY)
+    } else {
+        (
+            crate::tui::components::ModalStatus::Error(modal.error.clone()),
+            Theme::ERROR,
+        )
+    };
+
+    element! {
+        ModalScaffold(
+            header: header_props,
+            footer: footer_props,
+            status: status,
+            border_color: Some(border_color),
+            body_overflow: Overflow::Hidden,
+        ) {
+            View(margin_bottom: Spacing::XS) {
+                #(Some(crate::tui::components::labeled_input(&name_props).into()))
+            }
+            View(margin_bottom: Spacing::XS) {
+                #(Some(crate::tui::components::labeled_input(&invitee_props).into()))
+            }
+        }
+    }
+    .into_any()
 }
 
 pub fn render_device_import_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
@@ -755,5 +800,28 @@ pub fn render_capability_config_modal(
         )
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_device_modal_renders_invitee_field_and_inline_error() {
+        let modal = AddDeviceModalViewProps {
+            visible: true,
+            name: "Laptop".to_string(),
+            invitee_authority_id: String::new(),
+            invitee_focused: true,
+            error: "Enter the new device's authority ID".to_string(),
+        };
+        let rendered = add_device_modal_body(&modal).to_string();
+        assert!(rendered.contains("Device name"), "{rendered}");
+        assert!(rendered.contains("authority ID"), "{rendered}");
+        assert!(
+            rendered.contains("Enter the new device's authority ID"),
+            "{rendered}"
+        );
     }
 }

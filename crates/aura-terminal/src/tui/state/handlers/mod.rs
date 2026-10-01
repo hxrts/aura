@@ -51,10 +51,14 @@ pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, ke
     if key.code == KeyCode::Char('y') {
         if let Some(toast) = state.toast_queue.current() {
             if toast.level == ToastLevel::Error {
-                let message = toast.message.clone();
+                let text = toast
+                    .details
+                    .clone()
+                    .unwrap_or_else(|| toast.message.clone());
                 state.toast_queue.dismiss();
-                if copy_to_clipboard(&message).is_ok() {
-                    state.toast_success("Error copied to clipboard");
+                match copy_to_clipboard(&text) {
+                    Ok(()) => state.toast_success("Error copied to clipboard"),
+                    Err(error) => state.toast_warning(format!("Couldn't copy the error: {error}")),
                 }
                 return;
             }

@@ -580,4 +580,103 @@ mod tests {
             "Mouse scroll down should decrease scroll_offset by 3"
         );
     }
+
+    #[test]
+    fn test_help_modal_toggles_with_question_mark() {
+        let state = TuiState::new();
+        let (state, _) = transition(&state, events::char('?'));
+        assert!(matches!(
+            state.modal_queue.current(),
+            Some(QueuedModal::Help { .. })
+        ));
+        let (state, _) = transition(&state, events::char('?'));
+        assert!(!state.has_modal());
+    }
+
+    #[test]
+    fn test_account_setup_rejects_invalid_nickname_inline() {
+        use crate::tui::state::views::MAX_NICKNAME_SUGGESTION_LENGTH;
+
+        let state = TuiState::with_account_setup();
+
+        // Empty nickname: Enter reports an inline error and dispatches nothing.
+        let (mut state, commands) = transition(&state, events::enter());
+        assert!(commands.is_empty());
+        let modal = state.account_setup_state().unwrap();
+        assert!(modal.nickname_error.is_some());
+        assert!(!modal.creating);
+
+        // Input stops at the maximum length and explains why.
+        for _ in 0..MAX_NICKNAME_SUGGESTION_LENGTH + 5 {
+            state = transition(&state, events::char('a')).0;
+        }
+        let modal = state.account_setup_state().unwrap();
+        assert_eq!(
+            modal.nickname_suggestion.len(),
+            MAX_NICKNAME_SUGGESTION_LENGTH
+        );
+        assert!(modal.nickname_error.is_some());
+
+        // Editing clears the error; a valid nickname submits.
+        let (state, _) = transition(&state, events::backspace());
+        assert!(state
+            .account_setup_state()
+            .unwrap()
+            .nickname_error
+            .is_none());
+        let (state, commands) = transition(&state, events::enter());
+        assert!(state.account_setup_state().unwrap().creating);
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            TuiCommand::Dispatch(DispatchCommand::CreateAccount { .. })
+        )));
+    }
+
+    #[test]
+    fn test_settings_nickname_modal_reports_validation_errors() {
+        let mut state = TuiState::new();
+        state
+            .modal_queue
+            .enqueue(QueuedModal::SettingsNicknameSuggestion(
+                crate::tui::state::views::NicknameSuggestionModalState::default(),
+            ));
+        let (state, commands) = transition(&state, events::char(' '));
+        assert!(commands.is_empty());
+        let (state, commands) = transition(&state, events::enter());
+        assert!(commands.is_empty());
+        match state.modal_queue.current() {
+            Some(QueuedModal::SettingsNicknameSuggestion(modal)) => {
+                assert!(modal.error.is_some());
+            }
+            other => panic!("nickname modal should stay open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_add_device_requires_invitee_authority_with_inline_error() {
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::SettingsAddDevice(
+            crate::tui::state::views::AddDeviceModalState::default(),
+        ));
+        let (state, _) = transition(&state, events::char('L'));
+        let (state, commands) = transition(&state, events::enter());
+        assert!(commands.is_empty());
+        match state.modal_queue.current() {
+            Some(QueuedModal::SettingsAddDevice(modal)) => {
+                let error = modal.error.as_deref().unwrap_or_default();
+                assert!(error.contains("authority ID"), "{error}");
+            }
+            other => panic!("add device modal should stay open, got {other:?}"),
+        }
+        // Typing into the invitee field clears the error.
+        let (state, _) = transition(&state, events::tab());
+        let (state, _) = transition(&state, events::char('x'));
+        match state.modal_queue.current() {
+            Some(QueuedModal::SettingsAddDevice(modal)) => {
+                assert!(modal.error.is_none());
+                assert_eq!(modal.invitee_authority_id, "x");
+            }
+            other => panic!("add device modal should stay open, got {other:?}"),
+        }
+    }
 }

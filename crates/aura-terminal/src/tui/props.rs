@@ -20,8 +20,8 @@
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::ChatFocus as ScreenChatFocus;
 use crate::tui::state::{
-    ChatFocus, ContactsListFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
-    GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
+    AddDeviceField, ChatFocus, ContactsListFocus, CreateInvitationField, DetailFocus,
+    GuardianCeremonyResponse, GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::{AccessLevel, Contact, Device};
 use aura_app::ui_contract::RuntimeFact;
@@ -520,12 +520,16 @@ pub struct AuthorityPickerModalViewProps {
 pub struct SettingsNicknameModalViewProps {
     pub visible: bool,
     pub value: String,
+    pub error: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AddDeviceModalViewProps {
     pub visible: bool,
     pub name: String,
+    pub invitee_authority_id: String,
+    pub invitee_focused: bool,
+    pub error: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -593,10 +597,13 @@ pub struct SettingsViewProps {
 /// Extract SettingsScreen view props from TuiState
 pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Extract modal state from queue (all modals now use queue system)
-    let (nickname_suggestion_visible, nickname_suggestion_value) = match state.modal_queue.current()
-    {
-        Some(QueuedModal::SettingsNicknameSuggestion(s)) => (true, s.value.clone()),
-        _ => (false, String::new()),
+    let nickname_suggestion = match state.modal_queue.current() {
+        Some(QueuedModal::SettingsNicknameSuggestion(s)) => SettingsNicknameModalViewProps {
+            visible: true,
+            value: s.value.clone(),
+            error: s.error.clone().unwrap_or_default(),
+        },
+        _ => SettingsNicknameModalViewProps::default(),
     };
 
     // Authority picker modal
@@ -613,9 +620,15 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             _ => (false, vec![], 0),
         };
 
-    let (add_device_visible, add_device_name) = match state.modal_queue.current() {
-        Some(QueuedModal::SettingsAddDevice(s)) => (true, s.name.clone()),
-        _ => (false, String::new()),
+    let add_device = match state.modal_queue.current() {
+        Some(QueuedModal::SettingsAddDevice(s)) => AddDeviceModalViewProps {
+            visible: true,
+            name: s.name.clone(),
+            invitee_authority_id: s.invitee_authority_id.clone(),
+            invitee_focused: s.focused_field == AddDeviceField::InviteeAuthority,
+            error: s.error.clone().unwrap_or_default(),
+        },
+        _ => AddDeviceModalViewProps::default(),
     };
 
     let (device_import_visible, device_import_code) = match state.modal_queue.current() {
@@ -762,14 +775,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
                 authorities: authority_picker_contacts,
                 selected_index: authority_picker_selected,
             },
-            nickname_suggestion: SettingsNicknameModalViewProps {
-                visible: nickname_suggestion_visible,
-                value: nickname_suggestion_value,
-            },
-            add_device: AddDeviceModalViewProps {
-                visible: add_device_visible,
-                name: add_device_name,
-            },
+            nickname_suggestion,
+            add_device,
             device_import: DeviceImportModalViewProps {
                 visible: device_import_visible,
                 code: device_import_code,

@@ -53,7 +53,7 @@ pub(super) fn handle_account_setup_key_queue(
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::AccountSetup(ref mut s) = modal {
                     match s.active_field {
-                        AccountSetupField::AccountName => s.nickname_suggestion.push(c),
+                        AccountSetupField::AccountName => s.push_nickname_char(c),
                         AccountSetupField::DeviceImportCode => s.device_import_code.push(c),
                     }
                 }
@@ -65,6 +65,7 @@ pub(super) fn handle_account_setup_key_queue(
                     match s.active_field {
                         AccountSetupField::AccountName => {
                             s.nickname_suggestion.pop();
+                            s.nickname_error = None;
                         }
                         AccountSetupField::DeviceImportCode => {
                             s.device_import_code.pop();
@@ -84,6 +85,14 @@ pub(super) fn handle_account_setup_key_queue(
                 commands.push(TuiCommand::Dispatch(DispatchCommand::CreateAccount {
                     name,
                 }));
+            }
+            AccountSetupField::AccountName => {
+                // Invalid nicknames are refused with an inline reason, not silently.
+                state.modal_queue.update_active(|modal| {
+                    if let QueuedModal::AccountSetup(ref mut s) = modal {
+                        s.validate_nickname_for_submit();
+                    }
+                });
             }
             AccountSetupField::DeviceImportCode if current_state.can_import_device() => {
                 let code = current_state.device_import_code;

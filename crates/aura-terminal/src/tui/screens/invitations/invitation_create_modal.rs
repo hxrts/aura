@@ -94,11 +94,6 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
     } else {
         Theme::BORDER
     };
-    let ttl_border = if ttl_focused {
-        Theme::BORDER_FOCUS
-    } else {
-        Theme::BORDER
-    };
 
     // Focus indicator
     let nickname_pointer = if nickname_focused { "▸ " } else { "  " };
@@ -239,7 +234,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 overflow: Overflow::Hidden,
             ) {
                 // Optional nickname
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                View(flex_direction: FlexDirection::Column) {
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Nickname", color: if nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
@@ -259,7 +254,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
 
                 // Optional invitee nickname
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                View(flex_direction: FlexDirection::Column) {
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: receiver_nickname_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Their Nickname", color: if receiver_nickname_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
@@ -279,7 +274,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
 
                 // Optional message
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
+                View(flex_direction: FlexDirection::Column) {
                     View(flex_direction: FlexDirection::Row) {
                         Text(content: message_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
                         Text(content: "Message", color: if message_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
@@ -298,24 +293,13 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                     }
                 }
 
-                // TTL selector
-                View(flex_direction: FlexDirection::Column, margin_bottom: Spacing::XS) {
-                    View(flex_direction: FlexDirection::Row) {
-                        Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
-                        Text(content: "Expiry", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
-                        Text(content: " - ", color: Theme::TEXT_MUTED)
-                        Text(content: "How long the invite code remains valid", color: Theme::TEXT_MUTED)
-                    }
-                    View(
-                        margin_left: 2,
-                        width: 24,
-                        border_style: Borders::INPUT,
-                        border_color: ttl_border,
-                        padding_left: Spacing::PANEL_PADDING,
-                        padding_right: Spacing::PANEL_PADDING,
-                    ) {
-                        Text(content: ttl_display, color: if ttl_focused { Theme::PRIMARY } else { Theme::TEXT })
-                    }
+                // TTL selector: a single row so it stays visible below the
+                // three text fields within the modal height.
+                View(flex_direction: FlexDirection::Row, flex_shrink: 0.0) {
+                    Text(content: ttl_pointer.to_string(), color: Theme::PRIMARY, weight: Weight::Bold)
+                    Text(content: "Expiry: ", color: if ttl_focused { Theme::TEXT } else { Theme::TEXT_MUTED })
+                    Text(content: ttl_display, color: if ttl_focused { Theme::PRIMARY } else { Theme::TEXT }, weight: Weight::Bold)
+                    Text(content: " - How long the invite code remains valid", color: Theme::TEXT_MUTED)
                 }
 
                 // Error message
@@ -352,5 +336,20 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expiry_field_is_rendered_with_its_value() {
+        let rendered = element! {
+            InvitationCreateModal(visible: true, focused: true, ttl_hours: 24u32)
+        }
+        .to_string();
+        assert!(rendered.contains("Expiry"), "{rendered}");
+        assert!(rendered.contains("1 day"), "{rendered}");
     }
 }

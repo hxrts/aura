@@ -31,9 +31,39 @@ pub struct AccountSetupModalState {
     pub success: bool,
     /// Error message if creation failed
     pub error: Option<String>,
+    /// Inline nickname validation error shown under the name field
+    pub nickname_error: Option<String>,
 }
 
 impl AccountSetupModalState {
+    /// Append a character to the nickname, refusing input past the maximum length.
+    pub fn push_nickname_char(&mut self, c: char) {
+        let mut candidate = self.nickname_suggestion.clone();
+        candidate.push(c);
+        if let Err(error @ NicknameSuggestionError::TooLong { .. }) =
+            validate_nickname_suggestion(&candidate)
+        {
+            self.nickname_error = Some(error.to_string());
+            return;
+        }
+        self.nickname_suggestion = candidate;
+        self.nickname_error = None;
+    }
+
+    /// Validate the nickname for submission, recording an inline error when invalid.
+    pub fn validate_nickname_for_submit(&mut self) -> bool {
+        match validate_nickname_suggestion(&self.nickname_suggestion) {
+            Ok(_) => {
+                self.nickname_error = None;
+                true
+            }
+            Err(error) => {
+                self.nickname_error = Some(error.to_string());
+                false
+            }
+        }
+    }
+
     /// Whether we can create an account with the current input.
     /// Uses portable validation from aura-app.
     #[must_use]

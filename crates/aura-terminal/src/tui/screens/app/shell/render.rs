@@ -24,6 +24,7 @@ pub(super) fn build_global_modals(
                 global_modals.account_setup.show_spinner = state.should_show_spinner();
                 global_modals.account_setup.success = state.success;
                 global_modals.account_setup.error = state.error.clone();
+                global_modals.account_setup.nickname_error = state.nickname_error.clone();
                 global_modals.account_setup.bootstrap_candidates = discovered_peers
                     .iter()
                     .filter(|peer| peer.method == DiscoveredPeerMethod::BootstrapCandidate)

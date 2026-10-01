@@ -15,7 +15,7 @@ use super::parse_authority_id;
 /// Handle help modal keys (queue-based)
 pub(super) fn handle_help_modal_key_queue(state: &mut TuiState, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc | KeyCode::Enter => {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
             state.modal_queue.dismiss();
         }
         KeyCode::Up | KeyCode::Char('k') => {

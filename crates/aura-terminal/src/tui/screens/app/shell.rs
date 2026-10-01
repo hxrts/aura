@@ -433,7 +433,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut tui = tui.clone();
         let shutdown = bg_shutdown.read().clone();
         async move {
-            let format_error = |err: &AppError| format!("{}: {}", err.code(), err);
+            let format_error = |err: &AppError| format!("{err} ({})", err.code());
 
             // Initial read.
             {

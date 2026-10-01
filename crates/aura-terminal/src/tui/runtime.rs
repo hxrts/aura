@@ -149,6 +149,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
                     message,
                     level,
                     ticks_remaining: 30, // ~3 seconds at 100ms/tick
+                    details: None,
                 };
                 self.state.toast_queue.enqueue(toast);
             }

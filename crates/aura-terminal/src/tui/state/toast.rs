@@ -52,6 +52,8 @@ pub struct QueuedToast {
     pub level: ToastLevel,
     /// Ticks remaining before auto-dismiss
     pub ticks_remaining: u32,
+    /// Full error text when the message was shortened for display
+    pub details: Option<String>,
 }
 
 impl QueuedToast {
@@ -66,11 +68,17 @@ impl QueuedToast {
         } else {
             PORTABLE_DEFAULT_TICKS
         };
+        let (message, details) = if level == ToastLevel::Error {
+            user_facing_error(&message.into())
+        } else {
+            (message.into(), None)
+        };
         Self {
             id,
-            message: message.into(),
+            message,
             level,
             ticks_remaining,
+            details,
         }
     }
 
@@ -109,6 +117,55 @@ impl QueuedToast {
     }
 }
 
+/// Markers that identify internal error chains rather than user-facing text.
+const INTERNAL_ERROR_MARKERS: &[&str] = &[
+    "internal error",
+    "agent configuration error",
+    "json parsing",
+    "detail=",
+    "_id=",
+    "amp operation failed",
+    "operation failed:",
+    "invalid:",
+];
+
+/// Turn a raw error string into a short user-facing message.
+///
+/// Returns the message to show and, when it differs, the raw text kept as
+/// details for copying (`y`) and diagnostics.
+#[must_use]
+pub fn user_facing_error(raw: &str) -> (String, Option<String>) {
+    let lowered = raw.to_ascii_lowercase();
+    let friendly =
+        if lowered.contains("invalid invite code") || lowered.contains("invalid invitation code") {
+            Some("That invitation code isn't valid".to_string())
+        } else if lowered.contains("amp_send_message") || lowered.contains("send_message failed") {
+            Some("Couldn't send the message - retry".to_string())
+        } else if INTERNAL_ERROR_MARKERS
+            .iter()
+            .any(|marker| lowered.contains(marker))
+        {
+            // Keep the leading human label ("Failed to import invitation") and drop
+            // the internal chain behind it.
+            let head = raw.split(": ").next().unwrap_or(raw).trim();
+            let head_is_internal = INTERNAL_ERROR_MARKERS
+                .iter()
+                .any(|marker| head.to_ascii_lowercase().contains(marker))
+                || head.chars().next().is_some_and(|c| !c.is_ascii_uppercase());
+            Some(if head_is_internal || head.len() == raw.trim().len() {
+                "Something went wrong (press y to copy details)".to_string()
+            } else {
+                format!("{head} (press y to copy details)")
+            })
+        } else {
+            None
+        };
+    match friendly {
+        Some(message) => (message, Some(raw.to_string())),
+        None => (raw.to_string(), None),
+    }
+}
+
 impl ToastQueue {
     /// Create a new empty toast queue
     #[must_use]
@@ -118,6 +175,15 @@ impl ToastQueue {
 
     /// Enqueue a toast. If no toast is active, it becomes active immediately.
     pub fn enqueue(&mut self, toast: QueuedToast) {
+        // A repeated error would reappear as soon as the visible copy is dismissed.
+        let is_duplicate_error =
+            toast.level == ToastLevel::Error
+                && self.active.iter().chain(self.pending.iter()).any(|queued| {
+                    queued.level == ToastLevel::Error && queued.message == toast.message
+                });
+        if is_duplicate_error {
+            return;
+        }
         if self.active.is_none() {
             self.active = Some(toast);
         } else {
@@ -226,5 +292,46 @@ impl From<aura_app::ui::types::ToastLevel> for ToastLevel {
             aura_app::ui::types::ToastLevel::Warning => Self::Warning,
             aura_app::ui::types::ToastLevel::Error => Self::Error,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_error_chains_are_shortened_and_kept_as_details() {
+        let raw = "Internal error: import invitation: Internal error: Validation failed: \
+                   Invalid invite code: Agent configuration error: JSON parsing failed";
+        let toast = QueuedToast::error(1, raw);
+        assert_eq!(toast.message, "That invitation code isn't valid");
+        assert_eq!(toast.details.as_deref(), Some(raw));
+
+        let raw = "Failed to accept invitation: Internal error: detail=context_id=abc";
+        let toast = QueuedToast::error(2, raw);
+        assert_eq!(
+            toast.message,
+            "Failed to accept invitation (press y to copy details)"
+        );
+        assert_eq!(toast.details.as_deref(), Some(raw));
+    }
+
+    #[test]
+    fn user_facing_errors_are_left_unchanged() {
+        let toast = QueuedToast::error(1, "Invalid authority ID for device enrollment invitee");
+        assert_eq!(
+            toast.message,
+            "Invalid authority ID for device enrollment invitee"
+        );
+        assert!(toast.details.is_none());
+    }
+
+    #[test]
+    fn duplicate_error_toasts_are_not_queued() {
+        let mut queue = ToastQueue::new();
+        queue.enqueue(QueuedToast::error(1, "Couldn't reach peer"));
+        queue.enqueue(QueuedToast::error(2, "Couldn't reach peer"));
+        queue.dismiss();
+        assert!(queue.current().is_none());
     }
 }

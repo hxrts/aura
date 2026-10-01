@@ -120,6 +120,17 @@ impl AddDeviceModalState {
         !self.name.trim().is_empty() && !self.invitee_authority_id.trim().is_empty()
     }
 
+    /// The inline error naming the first required field that is still empty.
+    pub fn missing_field_error(&self) -> Option<&'static str> {
+        if self.name.trim().is_empty() {
+            Some("Enter a name for the new device")
+        } else if self.invitee_authority_id.trim().is_empty() {
+            Some("Enter the new device's authority ID (Tab to switch fields)")
+        } else {
+            None
+        }
+    }
+
     /// Get the required invitee authority ID input.
     pub fn invitee_authority(&self) -> &str {
         self.invitee_authority_id.trim()
