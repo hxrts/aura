@@ -1483,6 +1483,10 @@ impl InvitationHandler {
             .resolve_device_enrollment_invitation(effects, invitation_id)
             .await?
         {
+            tracing::info!(
+                baseline_ops = enrollment.baseline_tree_ops.len(),
+                "materializing device enrollment baseline tree"
+            );
             if !enrollment.baseline_tree_ops.is_empty() {
                 let baseline_ops = enrollment
                     .baseline_tree_ops
@@ -1498,6 +1502,14 @@ impl InvitationHandler {
                 // The joining device adopts the account's tree; ops it holds are
                 // from its provisional identity and must not be merged in.
                 effects.replace_tree_ops(&baseline_ops).await?;
+                if let Ok(state) =
+                    aura_protocol::effects::TreeEffects::get_current_state(effects).await
+                {
+                    tracing::info!(
+                        leaves = ?state.leaves.values().map(|leaf| leaf.device_id).collect::<Vec<_>>(),
+                        "adopted the account tree"
+                    );
+                }
             }
 
             let participant =
