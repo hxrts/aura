@@ -107,14 +107,14 @@ impl ContactsCallbacks {
                             timestamp_ms,
                         )
                         .await
-                        .map(|_| ())
                         .map_err(Into::into)
                     },
-                    move |tx, ()| async move {
+                    move |tx, channel_id: String| async move {
                         send_ui_update_required(
                             &tx,
                             UiUpdate::ChatStarted {
                                 contact_id: success_contact_id,
+                                channel_id,
                             },
                         )
                         .await;

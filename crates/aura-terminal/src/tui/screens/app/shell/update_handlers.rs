@@ -1106,11 +1106,25 @@ pub(super) async fn process_ui_update_match(
         } => {
             // CONTACTS_SIGNAL owns contact data; no local state update.
         }
-        UiUpdate::ChatStarted { contact_id } => {
-            // Navigate to Chat screen after starting a direct chat
+        UiUpdate::ChatStarted {
+            contact_id,
+            channel_id,
+        } => {
+            // Open the DM: commit it as the selection so the chat projection
+            // keeps it selected once the channel is listed.
             tracing::info!("Chat started with contact: {}", contact_id);
+            *tui_selected_for_updates.write() =
+                Some(CommittedChannelSelection::new(channel_id.clone()));
+            let listed_index = shared_channels_for_updates
+                .read()
+                .iter()
+                .position(|channel| channel.id == channel_id);
             tui.with_mut(|state| {
                 state.router.go_to(Screen::Chat);
+                if let Some(idx) = listed_index {
+                    state.chat.selected_channel = idx;
+                    state.chat.message_scroll = 0;
+                }
             });
         }
         UiUpdate::LanPeerInvited { peer_id: _ } => {

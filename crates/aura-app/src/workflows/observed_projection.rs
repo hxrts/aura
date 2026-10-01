@@ -70,6 +70,19 @@ pub async fn mirror_invitations_signal_into_view(
     Ok(())
 }
 
+/// Mirror the runtime-owned contacts signal into the ViewState cell, which
+/// snapshots read (e.g. contact names for new DMs).
+///
+/// OWNERSHIP: observed-display-update
+pub async fn mirror_contacts_signal_into_view(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let state = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await?;
+    let mut core = app_core.write().await;
+    core.views_mut().set_contacts(state);
+    Ok(())
+}
+
 pub async fn homes_signal_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<HomesState, AuraError> {

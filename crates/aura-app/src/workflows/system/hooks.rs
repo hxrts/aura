@@ -59,7 +59,16 @@ async fn refresh_chat_projection_and_readiness(
 async fn refresh_authoritative_contact_link_readiness_hook(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    crate::workflows::invitation::refresh_authoritative_contact_link_readiness(app_core).await
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(crate::workflows::observed_projection::mirror_contacts_signal_into_view(app_core))
+        .await;
+    let _ = best_effort
+        .capture(
+            crate::workflows::invitation::refresh_authoritative_contact_link_readiness(app_core),
+        )
+        .await;
+    best_effort.finish()
 }
 
 #[cfg(feature = "signals")]

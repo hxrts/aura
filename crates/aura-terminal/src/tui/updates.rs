@@ -520,6 +520,8 @@ pub enum UiUpdate {
     ChatStarted {
         /// The contact ID
         contact_id: String,
+        /// The direct-message channel to select
+        channel_id: String,
     },
 
     /// A LAN peer was invited

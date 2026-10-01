@@ -327,7 +327,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         active_scope.as_deref(),
         committed_selected_channel_id.as_deref(),
     );
-    let channels: Vec<Channel> = props
+    let mut channels: Vec<Channel> = props
         .shared_channels
         .as_ref()
         .map(|channels_ref| channels_ref.read().clone())
@@ -338,6 +338,21 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 .map(Channel::from)
                 .collect()
         });
+    // A DM's stored name is the creator's label; show each viewer the other
+    // member's name from their own contacts.
+    for channel in &mut channels {
+        if let Some(counterpart) = chat_state
+            .all_channels()
+            .find(|app_channel| app_channel.id.to_string() == channel.id)
+            .filter(|app_channel| app_channel.is_dm)
+            .and_then(|app_channel| app_channel.member_ids.first())
+        {
+            channel.name = format!(
+                "DM: {}",
+                format_contact_name(&counterpart.to_string(), &contacts)
+            );
+        }
+    }
     if let Some(shared_channels) = props.shared_channels.as_ref() {
         let mut guard = shared_channels.write();
         if guard.is_empty() && !channels.is_empty() {
