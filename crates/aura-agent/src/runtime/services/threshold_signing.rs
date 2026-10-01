@@ -533,6 +533,17 @@ impl ThresholdSigningService {
             .await
     }
 
+    #[cfg(test)]
+    async fn signer_index(&self, authority: &AuthorityId) -> Option<u16> {
+        self.shared
+            .state
+            .read()
+            .await
+            .contexts
+            .get(authority)
+            .and_then(|context| context.my_signer_index)
+    }
+
     /// Decrypted key package stored for `participant` at `epoch` during a rotation.
     pub(crate) async fn participant_key_package(
         &self,
@@ -1508,6 +1519,16 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         let mode = config_metadata.mode;
         let threshold_k = config_metadata.threshold_k;
         let total_n = config_metadata.total_n;
+        // The participant set can change across epochs (e.g. a device was
+        // enrolled), so this device's signer index is recomputed every time.
+        let device_id = self.effects.device_id();
+        let my_signer_index = participants
+            .iter()
+            .position(|p| match p {
+                ParticipantIdentity::Device(id) => *id == device_id,
+                _ => false,
+            })
+            .map(|idx| (idx + 1) as u16);
 
         with_state_mut_validated(
             &self.shared.state,
@@ -1520,6 +1541,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                     context.mode = mode;
                     context.participants = participants;
                     context.agreement_mode = agreement_mode;
+                    // Guardian epochs list guardians, not this device; keep the
+                    // index then.
+                    if my_signer_index.is_some() {
+                        context.my_signer_index = my_signer_index;
+                    }
 
                     tracing::info!(
                         ?authority,
@@ -1530,15 +1556,6 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                         "Key rotation committed - new epoch is now active"
                     );
                 } else {
-                    let device_id = self.effects.device_id();
-                    let my_signer_index = participants
-                        .iter()
-                        .position(|p| match p {
-                            ParticipantIdentity::Device(id) => *id == device_id,
-                            _ => false,
-                        })
-                        .map(|idx| (idx + 1) as u16);
-
                     let context = SigningContextState {
                         config: new_config,
                         my_signer_index,
@@ -1829,6 +1846,34 @@ mod tests {
             .map(|leaf| leaf.device_id)
             .collect();
         assert_eq!(devices, vec![initiator.device_id()]);
+    }
+
+    // Regression (work/8.md task 32): a device that bootstrapped itself as
+    // signer 1 and then joined an account where another device is listed
+    // first must resolve its own share after the commit, not that device's.
+    #[tokio::test]
+    async fn commit_key_rotation_recomputes_this_devices_signer_index() {
+        let (_temp, config) = isolated_test_config();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ThresholdSigningService::new(effects.clone());
+        let authority = test_authority();
+        service.bootstrap_authority(&authority).await.unwrap();
+        assert_eq!(service.signer_index(&authority).await, Some(1));
+
+        let participants = vec![
+            ParticipantIdentity::Device(aura_core::DeviceId::new_from_entropy([0x4C; 32])),
+            ParticipantIdentity::Device(effects.device_id()),
+        ];
+        let (new_epoch, _, _) = service
+            .rotate_keys(&authority, 2, 2, &participants)
+            .await
+            .unwrap();
+        service
+            .commit_key_rotation(&authority, new_epoch)
+            .await
+            .unwrap();
+
+        assert_eq!(service.signer_index(&authority).await, Some(2));
     }
 
     #[tokio::test]
