@@ -3408,6 +3408,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|error| {
                 IntentError::internal_error(format!("Failed to accept invitation: {error}"))
             })?;
+        self.adopt_enrolled_signing_epoch(&invitation_service, &invitation_id)
+            .await?;
 
         Ok(InvitationMutationOutcome {
             invitation_id,
@@ -3714,6 +3716,47 @@ async fn run_guardian_ceremony_initiator(
 }
 
 impl AgentRuntimeBridge {
+    /// After a device enrollment is accepted, switch this device's signing state
+    /// to the enrollment's epoch for the account it joined.
+    ///
+    /// The enrollment stores this device's share, threshold config and public
+    /// key package for the pending epoch; until they are committed the device
+    /// keeps the provisional keys it started with, so it cannot sign or open
+    /// payloads sealed to its tree leaf.
+    async fn adopt_enrolled_signing_epoch(
+        &self,
+        invitation_service: &crate::handlers::invitation_service::InvitationServiceApi,
+        invitation_id: &aura_core::types::identifiers::InvitationId,
+    ) -> Result<(), IntentError> {
+        use aura_core::effects::ThresholdSigningEffects;
+        let Some(invitation) = invitation_service.get(invitation_id).await else {
+            return Ok(());
+        };
+        let crate::handlers::invitation::InvitationType::DeviceEnrollment {
+            subject_authority,
+            pending_epoch,
+            ..
+        } = invitation.invitation_type
+        else {
+            return Ok(());
+        };
+        let effects = self.agent.runtime().effects();
+        effects
+            .commit_key_rotation(&subject_authority, pending_epoch)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("Activate enrolled epoch: {error}"))
+            })?;
+        self.agent
+            .runtime()
+            .threshold_signing()
+            .commit_key_rotation(&subject_authority, pending_epoch)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("Adopt enrolled signing context: {error}"))
+            })
+    }
+
     fn spawn_sole_device_enrollment_finalizer(
         &self,
         ceremony_id: aura_core::types::identifiers::CeremonyId,
