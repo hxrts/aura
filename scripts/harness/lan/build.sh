@@ -22,8 +22,12 @@ if [[ -n "${AURA_EXPECT_COMMIT:-}" && "$commit" != "$AURA_EXPECT_COMMIT" ]]; the
   exit 1
 fi
 printf 'LAN build: host=%s commit=%s lane=%s recipe=%s\n' "$(hostname)" "$commit" "$lane" "$recipe"
-if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
-  echo 'LAN build: checkout has uncommitted tracked changes; this is not fixed-commit validation' >&2
+if [[ -n "$(git status --porcelain)" ]]; then
+  if [[ -n "${AURA_EXPECT_COMMIT:-}" ]]; then
+    echo 'LAN build: fixed-commit validation requires a clean checkout' >&2
+    exit 1
+  fi
+  echo 'LAN build: checkout has uncommitted changes; this is not fixed-commit validation' >&2
 fi
 [[ "$mode" != --dry-run ]] || { printf 'Dry run: just %s\n' "$recipe"; exit 0; }
 
