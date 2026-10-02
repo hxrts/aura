@@ -505,6 +505,7 @@ fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     for file in commit_files {
         if file.contains("/tests/")
             || file.contains("_test.rs")
+            || file.ends_with("/tests.rs")
             || file.contains("crates/aura-simulator/")
             || file.contains("crates/aura-sync/")
             || file.contains("handlers/shared.rs")

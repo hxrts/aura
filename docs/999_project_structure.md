@@ -1413,6 +1413,9 @@ The `just check-arch` command validates these principles by:
 4. **Global state detection**: Catches `lazy_static`, `Mutex<static>` anti-patterns
 
 Run before every commit to maintain architectural compliance and simulation determinism.
+The retained reactive fact-commit/view-sync heuristic applies to production
+modules; files named `tests.rs` and other test-only modules are excluded, since
+fixture commits do not own a production view-sync contract.
 
 ## Serialization Policy
 
