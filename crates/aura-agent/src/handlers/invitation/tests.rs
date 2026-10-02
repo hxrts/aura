@@ -5106,3 +5106,118 @@ large_stack_async_test!(listing_restores_device_enrollment_payload_before_cachin
         .expect("listing caches the invitation");
     assert_device_enrollment_payload_restored(&cached.invitation_type);
 });
+
+// Regression (work/8.md task 20, D10): a revoked contact invitation's code no
+// longer creates a contact when the invitee accepts it.
+large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
+    let shared_transport = crate::runtime::SharedTransport::new();
+    let config = AgentConfig::default();
+
+    let sender_id = AuthorityId::new_from_entropy([126u8; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([127u8; 32]);
+
+    let sender_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            sender_id,
+            shared_transport.clone(),
+        );
+    let receiver_effects =
+        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+            &config,
+            receiver_id,
+            shared_transport.clone(),
+        );
+
+    let sender_handler = handler_for_id(sender_id);
+    let receiver_handler = handler_for_id(receiver_id);
+    let now_ms = 1_700_000_000_000;
+
+    let _sender_rendezvous_tasks =
+        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+    let _receiver_rendezvous_tasks =
+        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
+    cache_test_peer_descriptor(
+        sender_effects.as_ref(),
+        sender_id,
+        receiver_id,
+        "tcp://127.0.0.1:55033",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        receiver_effects.as_ref(),
+        receiver_id,
+        sender_id,
+        "tcp://127.0.0.1:55034",
+        now_ms,
+    )
+    .await;
+
+    let invitation = sender_handler
+        .create_invitation(
+            sender_effects.clone(),
+            receiver_id,
+            InvitationType::Contact { nickname: None },
+            Some("Contact invitation from sender".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let code = unsigned_test_code_for_invitation(&invitation);
+    let imported = receiver_handler
+        .import_invitation_code(&receiver_effects, &code)
+        .await
+        .unwrap();
+
+    // The sender revokes before the acceptance reaches it.
+    sender_handler
+        .cancel_invitation(sender_effects.clone(), &invitation.invitation_id)
+        .await
+        .unwrap();
+    receiver_handler
+        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+        .await
+        .unwrap();
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
+    receiver_handler
+        .notify_contact_invitation_acceptance(
+            receiver_effects.as_ref(),
+            &imported.invitation_id,
+        )
+        .await
+        .unwrap();
+    // Simulation storage persists across runs, so compare against what the
+    // sender already held before processing this acceptance.
+    let sender_contacts_added = |facts: &[aura_journal::fact::Fact]| {
+        facts
+            .iter()
+            .filter(|fact| {
+                let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
+                    &fact.content
+                else {
+                    return false;
+                };
+                envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID
+                    && matches!(
+                        ContactFact::from_envelope(envelope),
+                        Some(ContactFact::Added { owner_id, .. }) if owner_id == sender_id
+                    )
+            })
+            .count()
+    };
+    let before = sender_contacts_added(
+        &sender_effects.load_committed_facts(sender_id).await.unwrap(),
+    );
+    let processed = sender_handler
+        .process_contact_invitation_acceptances(sender_effects.clone())
+        .await
+        .unwrap();
+
+    let _ = processed;
+    let after = sender_contacts_added(
+        &sender_effects.load_committed_facts(sender_id).await.unwrap(),
+    );
+    assert_eq!(after, before, "a revoked invitation must not add a contact for the sender");
+});

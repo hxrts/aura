@@ -467,6 +467,18 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    // A revoked (or otherwise settled) invitation's code no longer
+                    // creates a contact.
+                    if invitation.status != InvitationStatus::Pending {
+                        tracing::debug!(
+                            invitation_id = %acceptance.invitation_id,
+                            status = ?invitation.status,
+                            "Ignoring acceptance for an invitation that is no longer pending"
+                        );
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
                     let now_ms =
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
                     if invitation.is_expired(now_ms)
