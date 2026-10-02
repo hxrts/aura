@@ -32,6 +32,11 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Category | Command | Purpose |
 |----------|---------|---------|
 | Build | `just build` | Build all crates |
+| Build | `just build-release` | Build and install the deployable terminal release binary |
+| Build | `just build-workspace-release` | Full workspace release validation |
+| Build | `just e2e-build-terminal`, `just e2e-build-web`, `just e2e-build-harness` | Disk-budgeted LAN rebuilds; run on each host |
+| Build | `just disk-report`, `just cache-inventory`, `just build-budget-dry-run` | Read-only disk and cache inventory, cleanup preview |
+| Build | `just prune-inactive-lane wasm-debug --apply` | Guarded whole-lane cleanup when that lane is idle |
 | Build | `just check` | Check without building |
 | Build | `just clippy` | Lint (warnings as errors) |
 | Format | `just fmt` | Format code |
@@ -368,6 +373,7 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 
 ## Usage Efficiency
 
+- Write new repository automation as Bash `.sh` scripts, not Python scripts.
 - Prefer specific file paths over broad searches
 - Use `just check-arch` before complex refactoring
 - For shared user-flow or harness policy work, run `just ci-user-flow-policy`

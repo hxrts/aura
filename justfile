@@ -64,29 +64,55 @@ _ownership-lint mode *PATHS:
 build:
     cargo build --workspace -q
 
-# Build in release mode
-build-release:
+# Build the deployable terminal release; use build-workspace-release for the full gate
+build-release: build-terminal-release
+
+# Build every workspace crate in release mode for release validation
+build-workspace-release:
     cargo build --workspace --release -q
 
 # Build Aura terminal in development mode (release profile + dev features)
 build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
-    mkdir -p bin
-    cp target/release/aura bin/aura
-    codesign -s - bin/aura
-    @echo "Binary available at: ./bin/aura"
+    bash scripts/dev/install-aura-binary.sh
 
 # Build Aura terminal in release mode without dev features
 build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
-    mkdir -p bin
-    cp target/release/aura bin/aura
-    codesign -s - bin/aura
-    @echo "Binary available at: ./bin/aura"
+    bash scripts/dev/install-aura-binary.sh
 
 # Build app-host binary
 build-app-host:
     cargo build -p hxrts-aura-app --bin app-host --features host --release
+
+# Read-only disk inventory for the current checkout
+disk-report:
+    bash scripts/dev/disk-report.sh
+
+# Read-only target lane sizes, ages and active-use status
+cache-inventory:
+    bash scripts/dev/cache-inventory.sh
+
+# Preview or remove one fully inactive debug lane; apply requires an explicit flag
+prune-inactive-lane lane="wasm-debug" mode="--dry-run":
+    bash scripts/dev/prune-inactive-lane.sh --lane {{ lane }} {{ mode }}
+
+# Preview Cargo artifact collection without building or deleting
+build-budget-dry-run:
+    bash scripts/dev/build-budget.sh --dry-run
+
+# Guarded Work 8 production and harness builds (run separately on each host)
+e2e-build-terminal:
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
+
+e2e-build-terminal-dev:
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=development nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-development -- just build-dev
+
+e2e-build-web:
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
+
+e2e-build-harness:
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=default nice -n 10 bash scripts/dev/build-budget.sh --lane harness-tools -- cargo build -p aura-harness --release --bin tool_repl
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Web App
@@ -1019,7 +1045,7 @@ ci-dry-run profile="push":
     failure_tail_lines="${AURA_CI_DRY_RUN_FAILURE_TAIL_LINES:-60}"
     run_id="$(date +%Y%m%d-%H%M%S)"
     log_root="${PWD}/artifacts/ci-dry-run/${profile}/${run_id}"
-    ci_min_free_gib="${AURA_CI_DRY_RUN_MIN_FREE_GIB:-10}"
+    ci_min_free_gib="${AURA_CI_DRY_RUN_MIN_FREE_GIB:-15}"
     ci_prune_target_gib="${AURA_CI_DRY_RUN_PRUNE_TARGET_GIB:-20}"
     mkdir -p "$log_root"
 
@@ -1035,7 +1061,7 @@ ci-dry-run profile="push":
     diagnose_failure() {
         local log_path="$1"
         if rg -q 'No space left on device|errno=28|failed to create a temp dir|couldn'\''t create a temp dir|IO failure on output stream: No space left on device|need at least [0-9]+ GiB free' "$log_path"; then
-            printf 'disk-space:::free disk space or prune target/, .tmp/, and generated artifacts'
+            printf 'disk-space:::free disk space or run the guarded Cargo cache preview; preserve active .tmp/e2e evidence'
         elif rg -q 'not found on PATH|command not found|required command missing from PATH|failed to locate workspace root' "$log_path"; then
             printf 'missing-tool:::install the missing tool or expose it from nix develop'
         elif rg -q 'fetcher-cache.*sqlite|eval-cache.*sqlite|SQLite database .* is busy|disk I/O error' "$log_path"; then
@@ -1051,28 +1077,10 @@ ci-dry-run profile="push":
         df -Pk "${PWD}" | awk 'NR == 2 { printf "%d", ($4 / 1024 / 1024) }'
     }
 
-    best_effort_prune() {
-        local path="$1"
-        chmod -R u+w "$path" 2>/dev/null || true
-        rm -rf "$path" 2>/dev/null || true
-    }
-
     prune_rebuildable_artifacts() {
         local reason="$1"
-        local freed_after
-        echo "  pruning rebuildable artifacts (${reason})"
-        best_effort_prune "${PWD}/target/debug/incremental"
-        best_effort_prune "${PWD}/target/tests"
-        best_effort_prune "${PWD}/target/dylint/target"
-        best_effort_prune "${PWD}/target/tmp"
-        best_effort_prune "${PWD}/.tmp"
-        if [[ -d "${PWD}/target/wasm32-unknown-unknown" ]] && [[ "$(free_gib)" -lt "$ci_prune_target_gib" ]]; then
-            best_effort_prune "${PWD}/target/wasm32-unknown-unknown"
-        fi
-        mkdir -p "${PWD}/target/dylint/target"
-        mkdir -p "${PWD}/.tmp"
-        freed_after="$(free_gib)"
-        echo "  disk free: ${freed_after}GiB"
+        echo "  collecting idle Cargo cache before ${reason}; preserving .tmp and harness evidence"
+        bash scripts/dev/prune-ci-cache.sh --apply --root "${PWD}"
     }
 
     ensure_disk_headroom() {
@@ -1081,11 +1089,14 @@ ci-dry-run profile="push":
         free_now="$(free_gib)"
         if [[ "$free_now" -lt "$ci_prune_target_gib" ]]; then
             echo "  low disk headroom before ${phase}: ${free_now}GiB free"
-            prune_rebuildable_artifacts "$phase"
+            if ! prune_rebuildable_artifacts "$phase"; then
+                echo "  Cargo cleanup unavailable before ${phase}; active builds or harness runs may be using target/" >&2
+            fi
             free_now="$(free_gib)"
         fi
         if [[ "$free_now" -lt "$ci_min_free_gib" ]]; then
-            echo "  warning: continuing with only ${free_now}GiB free before ${phase}"
+            echo "  error: only ${free_now}GiB free before ${phase}; need ${ci_min_free_gib}GiB (${ci_min_free_gib} - ${free_now} = $((ci_min_free_gib - free_now))GiB short)" >&2
+            return 1
         fi
     }
 
@@ -1206,7 +1217,7 @@ ci-dry-run profile="push":
     echo "Logs: $log_root"
     echo ""
 
-    prune_rebuildable_artifacts "startup"
+    ensure_disk_headroom "startup"
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)

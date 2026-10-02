@@ -6,6 +6,7 @@
 #   drv.sh req '<json-no-id>' [timeout-s]
 #                                send a request, print the matching response line
 #   drv.sh stop                  shut down the REPL and its children
+#   drv.sh finish success|failed record outcome after evidence capture
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env.sh
@@ -14,10 +15,43 @@ cd "$AURA_E2E_ROOT"
 D=$AURA_E2E_RUN_DIR
 mkdir -p "$D"
 FIFO=$D/repl.in OUT=$D/repl.out PIDF=$D/repl.pid SEQ=$D/repl.seq
+RETENTION_ROOT_FILE=$D/retention-root
+RETENTION_RUN_FILE=$D/retention-run-id
+RETENTION_TOOL=$AURA_E2E_ROOT/scripts/dev/retain-e2e-runs.sh
+
+retention_root_for_config() {
+  local artifact_dir runs_root
+  artifact_dir="$(awk -F '"' '/^[[:space:]]*artifact_dir[[:space:]]*=/ {print $2; exit}' "$1")"
+  [[ -n "$artifact_dir" && "$artifact_dir" != *..* ]] || {
+    echo 'LAN config needs a safe [run].artifact_dir' >&2; return 1;
+  }
+  if [[ "$artifact_dir" == /* ]]; then runs_root="$artifact_dir/runs";
+  else runs_root="$AURA_E2E_ROOT/$artifact_dir/runs"; fi
+  mkdir -p "$runs_root"
+  runs_root="$(cd "$runs_root" && pwd -P)"
+  local physical_repo
+  physical_repo="$(cd "$AURA_E2E_ROOT" && pwd -P)"
+  case "$runs_root" in
+    "$physical_repo"/.tmp/e2e/run/*/artifacts/runs) printf '%s\n' "$runs_root" ;;
+    *) echo "LAN artifact root is outside the owned run tree: $runs_root" >&2; return 1 ;;
+  esac
+}
 
 case "${1:-}" in
 start)
   [ -n "${2:-}" ] || { echo "usage: $0 start <config>" >&2; exit 2; }
+  [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
+    echo 'LAN run token must be lowercase letters, digits and hyphens' >&2; exit 2;
+  }
+  runs_root="$(retention_root_for_config "$2")"
+  run_bundle="$runs_root/$AURA_E2E_RUN_TOKEN"
+  [[ ! -e "$run_bundle" && ! -L "$run_bundle" ]] || {
+    echo "LAN run bundle already exists; use a new token: $run_bundle" >&2; exit 1;
+  }
+  mkdir "$run_bundle"
+  bash "$RETENTION_TOOL" --root "$runs_root" begin "$AURA_E2E_RUN_TOKEN"
+  printf '%s\n' "$runs_root" > "$RETENTION_ROOT_FILE"
+  printf '%s\n' "$AURA_E2E_RUN_TOKEN" > "$RETENTION_RUN_FILE"
   rm -f "$FIFO" "$OUT"; mkfifo "$FIFO"; echo 0 > "$SEQ"
   export AURA_HARNESS_AURA_BIN="${AURA_HARNESS_AURA_BIN:-$here/aura-wrap.sh}"
   export AURA_HARNESS_RUN_TOKEN="$AURA_E2E_RUN_TOKEN"
@@ -45,10 +79,28 @@ req)
 stop)
   # Only stop the REPL this driver started (and its children).
   if [ -f "$PIDF" ]; then
-    pkill -TERM -P "$(cat "$PIDF")" 2>/dev/null || true
-    kill "$(cat "$PIDF")" 2>/dev/null || true
+    repl_pid="$(cat "$PIDF")"
+    pkill -TERM -P "$repl_pid" 2>/dev/null || true
+    kill "$repl_pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      kill -0 "$repl_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$repl_pid" 2>/dev/null; then
+      echo "LAN REPL $repl_pid did not stop; retaining active run state" >&2
+      exit 1
+    fi
   fi
   rm -f "$PIDF"; echo stopped
   ;;
-*) echo "usage: $0 start <config>|req <json> [timeout]|stop" >&2; exit 2;;
+finish)
+  [[ "${2:-}" == success || "${2:-}" == failed ]] || { echo 'usage: drv.sh finish success|failed' >&2; exit 2; }
+  [[ ! -f "$PIDF" ]] || { echo 'stop the LAN driver before recording an outcome' >&2; exit 1; }
+  [[ -f "$RETENTION_ROOT_FILE" && -f "$RETENTION_RUN_FILE" ]] || {
+    echo 'this LAN run has no retention metadata; inspect it manually' >&2; exit 1;
+  }
+  bash "$RETENTION_TOOL" --root "$(cat "$RETENTION_ROOT_FILE")" \
+    finish "$(cat "$RETENTION_RUN_FILE")" "$2"
+  ;;
+*) echo "usage: $0 start <config>|req <json> [timeout]|stop|finish success|failed" >&2; exit 2;;
 esac

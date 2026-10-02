@@ -8,7 +8,8 @@
 #                         (default: .tmp/e2e/run, as in configs/harness/lan-host-*.toml)
 #   AURA_E2E_TOOL_REPL    tool_repl binary (default: target/release/tool_repl)
 #   AURA_E2E_AURA_BIN     aura binary launched for TUI instances (default: bin/aura)
-#   AURA_E2E_RUN_TOKEN    shared harness run token; both hosts must use the same one
+#   AURA_E2E_RUN_TOKEN    unique lowercase/hyphen run id; both hosts use the
+#                         same token; each start creates a retained run bundle
 #   AURA_E2E_REMOTE       ssh destination of the other host (e.g. user@192.168.0.32)
 #   AURA_E2E_REMOTE_ROOT  repo checkout on the other host (default: ~/projects/aura)
 #   AURA_E2E_REMOTE_PREFIX  instance-id prefix owned by the other host (default: barbara-)

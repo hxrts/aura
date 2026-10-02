@@ -830,6 +830,35 @@ just harness-replay-browser
 
 Browser harness artifacts are written under `artifacts/harness/browser/`.
 
+### LAN Run Artifact Retention
+
+LAN E2E bundles under `.tmp/e2e/run/<host>/artifacts/runs/` are separate from
+Cargo compiler caches. `scripts/harness/lan/drv.sh start <config>` creates a
+unique bundle and active retention manifest using `AURA_E2E_RUN_TOKEN`.
+After stopping the driver and capturing evidence, run
+`scripts/harness/lan/drv.sh finish success` or `finish failed` on that host.
+The driver refuses to mark an outcome while its REPL is running. Use
+`scripts/dev/retain-e2e-runs.sh --root <runs-dir> pin <run-id>` to protect an
+important success. Interrupted runs stay active in the manifest and are
+preserved for review; an existing bundle cannot be reused by `start`.
+
+Preview retention with:
+
+```bash
+scripts/dev/retain-e2e-runs.sh --root <runs-dir> prune --dry-run
+```
+
+Apply it only when no harness consumer is active by replacing `--dry-run`
+with `--apply`. The default policy retains the newest ten successful runs
+within 512 MiB, always keeps the newest success, and preserves failures,
+pinned runs, active runs, and older bundles without a manifest. The command
+lists exact candidate paths and estimated bytes before removing anything.
+Each host runs retention only against its own artifact root. Never delete
+the whole `.tmp/` tree as CI cleanup.
+The harness matrix owns separate run and transient roots under
+`.tmp/harness/`; its run-scope cleanup does not manage LAN bundles or
+override their outcome-based retention.
+
 ### Debugging Browser Failures
 
 Check `web-serve.log` for bundle and runtime startup issues. Check `preflight_report.json` for browser prerequisites including Node, Playwright, and app URL. Check `timeout_diagnostics.json` for authoritative and normalized snapshots and per-instance log tails. Playwright screenshots and traces are stored under each instance `data_dir` in `playwright-artifacts/`.

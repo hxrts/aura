@@ -22,6 +22,52 @@ just build
 
 The build compiles all Aura components and generates the CLI binary. This takes a few minutes on the first run.
 
+For a deployable terminal binary, run `just build-release`. This builds the
+production terminal feature set and installs `bin/aura` atomically. Use
+`just build-dev` for the development feature set, and
+`just build-workspace-release` when validating every workspace crate in the
+release profile. The browser bundle has its own Dioxus build path.
+
+Repeated LAN test builds should use `just e2e-build-terminal`,
+`just e2e-build-web`, and `just e2e-build-harness` in the Nix environment on
+each host. These commands report free space, preview and collect idle Cargo
+artifacts when needed, and stop their own build if free space reaches the
+emergency floor. `just disk-report`, `just cache-inventory`, and
+`just build-budget-dry-run` are read-only. Run the LAN recipes from the same
+pushed commit on both hosts, in the background and one host at a time. Set
+`CARGO_BUILD_JOBS` to half the available cores on the Air. The recipes use
+`nice -n 10`. Use `AURA_BUILD_TARGET_CAP_GIB`, `AURA_BUILD_MIN_FREE_GIB`, and
+`AURA_BUILD_EMERGENCY_FREE_GIB` to adjust Host B thresholds after its own
+read-only baseline. The 24 GiB Cargo target cap is a between-build soft target;
+it is not a quota during compilation. The scripts preserve `.tmp/e2e` and failure
+evidence. Use `scripts/dev/retain-e2e-runs.sh prune --dry-run` to inspect
+completed successful run bundles, then `--apply` when no harness run is
+active. Failed, pinned, active and unclassified bundles are preserved.
+
+The normal guarded build sequence on each host is:
+
+```bash
+just disk-report
+just build-budget-dry-run
+just e2e-build-terminal
+just e2e-build-web
+just e2e-build-harness
+just disk-report
+```
+
+Run `just e2e-build-terminal-dev` separately when a test explicitly needs
+the development feature set. Each successful guarded build also saves its
+own disk report under `artifacts/disk-budget/`.
+The terminal production recipe can run during a live LAN harness when its
+owner permits it: it skips global Cargo sweeping and may collect only an
+idle WASM debug lane. Web and harness-tool rebuilds require the harness to
+stop before cache collection.
+On Host B, pass its own `--root` ending in `/artifacts/runs` to the retention
+script; it never prunes the other host remotely.
+When only an unused debug lane can be released, inspect it with
+`just prune-inactive-lane wasm-debug --dry-run` and then use `--apply`.
+The cleanup checks for active compilers and open files in that lane.
+
 ## Creating an Agent
 
 Aura provides platform-specific builder presets for creating agents. The CLI preset is the simplest path for terminal applications.
