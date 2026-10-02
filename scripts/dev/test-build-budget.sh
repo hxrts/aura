@@ -19,6 +19,8 @@ export PROTECTED_FILE="$test_root/protected-release"
 export PROTECTED_WEB_FILE="$test_root/protected-web"
 export RACE_ON_PREVIEW_FILE="$test_root/race-on-preview"
 export OPEN_TARGET_FILE="$test_root/open-target"
+export DU_FAIL_ONCE_FILE="$test_root/du-fail-once"
+export DU_EMPTY_FILE="$test_root/du-empty"
 export AURA_BUILD_TARGET_CAP_GIB=8
 export PATH="$fakebin:$PATH"
 
@@ -29,7 +31,13 @@ printf 'fake 99999999 0 %s 0%% /\n' "$(cat "$FREE_FILE")"
 EOF
 cat > "$fakebin/du" <<'EOF'
 #!/usr/bin/env bash
+[[ ! -f "$DU_EMPTY_FILE" ]] || exit 1
 printf '%s\t%s\n' "$(cat "$SIZE_FILE")" "${@: -1}"
+if [[ -f "$DU_FAIL_ONCE_FILE" ]]; then
+  rm -f "$DU_FAIL_ONCE_FILE"
+  echo 'du: transient disappearing Cargo artifact' >&2
+  exit 1
+fi
 EOF
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
@@ -59,7 +67,7 @@ reset_case() {
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
-  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE"
+  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE" "$DU_FAIL_ONCE_FILE" "$DU_EMPTY_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
 }
 
@@ -89,6 +97,17 @@ reset_case
 expect_status 0 run_budget --no-prune -- sh -c 'exit 0'
 [[ ! -s "$CALLS_FILE" ]]
 rg -q 'post-build cache collection skipped' "$test_root/output"
+
+reset_case
+expect_status 0 run_budget --no-prune -- sh -c 'touch "$DU_FAIL_ONCE_FILE"'
+[[ ! -f "$DU_FAIL_ONCE_FILE" ]]
+rg -q 'exit=0' "$test_root/output"
+
+reset_case
+touch "$DU_EMPTY_FILE"
+expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" ]]
+rg -q 'could not measure target size' "$test_root/output"
 
 reset_case
 expect_status 0 run_budget --no-prune -- sh -c 'printf "cargo\n" > "$ACTIVE_FILE"'

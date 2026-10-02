@@ -55,7 +55,15 @@ done
 
 free_kib() { df -Pk "$root" | awk 'NR == 2 {print $4}'; }
 target_kib() {
-  if [[ -d "$root/target" ]]; then du -sk "$root/target" | awk 'NR == 1 {print $1}';
+  local sampled mode="${1:-best-effort}"
+  if [[ ! -d "$root/target" ]]; then printf '0\n'; return; fi
+  # Cargo can unlink a temporary artifact while du is walking target/. A
+  # partial size sample is still useful; losing it must not stop the build.
+  sampled="$(du -sk "$root/target" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
+  if [[ "$sampled" =~ ^[0-9]+$ ]]; then printf '%s\n' "$sampled";
+  elif [[ "$mode" == strict ]]; then
+    echo 'build-budget: could not measure target size before build' >&2
+    return 1
   else printf '0\n'; fi
 }
 cap_kib=$((cap_gib * 1024 * 1024))
@@ -145,7 +153,7 @@ prune_safe_lanes() {
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
   "$cap_gib" "$min_free_gib" "$emergency_gib"
 before_free="$(free_kib)"
-before_target="$(target_kib)"
+before_target="$(target_kib strict)"
 printf 'Before: free=%s KiB target=%s KiB\n' "$before_free" "$before_target"
 if [[ "$dry_run" -eq 1 ]]; then
   if (( no_prune == 1 )); then
@@ -203,7 +211,7 @@ if (( before_target > cap_kib || before_free < min_free_kib )); then
   fi
 fi
 pre_free="$(free_kib)"
-pre_target="$(target_kib)"
+pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
 if (( pre_free < min_free_kib )); then
   echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free before building" >&2
