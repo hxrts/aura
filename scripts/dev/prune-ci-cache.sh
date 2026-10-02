@@ -24,8 +24,17 @@ fi
 
 free_kib() { df -Pk "$root" | awk 'NR == 2 {print $4}'; }
 target_kib() {
-  if [[ -d "$root/target" ]]; then du -sk "$root/target" | awk 'NR == 1 {print $1}';
-  else printf '0\n'; fi
+  local sampled mode="${1:-best-effort}"
+  if [[ ! -d "$root/target" ]]; then printf '0\n'; return; fi
+  # Cargo can unlink a temporary artifact while du walks the tree. Keep a
+  # numeric partial sample for the preview, but fail closed before cleanup
+  # decisions if no size could be measured.
+  sampled="$(du -sk "$root/target" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
+  if [[ "$sampled" =~ ^[0-9]+$ ]]; then printf '%s\n' "$sampled";
+  elif [[ "$mode" == strict ]]; then
+    echo 'prune-ci-cache: could not measure target size' >&2
+    return 1
+  else printf 'unavailable\n'; fi
 }
 preview_sweep() {
   local preview rc
@@ -91,6 +100,7 @@ if [[ -n "$found" ]]; then
   echo "prune-ci-cache: active builder or harness consumer: $found" >&2
   exit 1
 fi
+target_kib strict >/dev/null
 printf 'CI cache candidates (preview):\n'
 preview_sweep
 found="$(consumers)"
@@ -107,7 +117,8 @@ if (( release_candidates > 0 )) || target_has_open_files; then
     fi
     found="$(consumers)"
     [[ -z "$found" ]] || { echo "CI cache: builder or harness consumer started: $found" >&2; exit 1; }
-    if (( $(target_kib) <= cap_gib * 1024 * 1024 || $(free_kib) >= 20 * 1024 * 1024 )); then
+    current_target="$(target_kib strict)" || exit 1
+    if (( current_target <= cap_gib * 1024 * 1024 || $(free_kib) >= 20 * 1024 * 1024 )); then
       break
     fi
   done

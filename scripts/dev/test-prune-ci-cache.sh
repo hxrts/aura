@@ -54,6 +54,33 @@ rg -q -- '--dry-run' "$CALLS_FILE"
 [[ -f "$project/.tmp/e2e/run/failed/events.json" && -f "$test_root/outside" ]]
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 
+# A live Cargo tree may change while du walks it. A numeric partial sample
+# remains usable for read-only previews even when du exits nonzero.
+cat > "$fakebin/du" <<'EOF'
+#!/usr/bin/env bash
+printf '42\t%s\n' "${@: -1}"
+exit 1
+EOF
+chmod +x "$fakebin/du"
+expect_status 0 run_prune --dry-run
+rg -q 'target=42 KiB' "$test_root/output"
+mkdir "$project/target/debug"
+expect_status 0 bash "$repo_root/scripts/dev/cache-inventory.sh" "$project"
+rg -q $'^42\t.*\tdebug$' "$test_root/output"
+rmdir "$project/target/debug"
+cat > "$fakebin/du" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+touch "$PROTECTED_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+printf 'keep\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
+expect_status 1 run_prune --apply
+[[ -f "$project/target/wasm32-unknown-unknown/debug/cache" ]]
+[[ ! -d "$project/target/.aura-build-budget.lock" ]]
+rm "$PROTECTED_FILE"
+rm "$fakebin/du"
+
 : > "$CALLS_FILE"
 touch "$PROTECTED_FILE"
 mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug"

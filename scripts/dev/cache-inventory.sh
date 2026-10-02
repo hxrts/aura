@@ -28,7 +28,9 @@ for path in "$target"/*; do
   if [[ ! "$modified" =~ ^[0-9]+$ ]]; then
     modified="$(stat -c %Y "$path")"
   fi
-  size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"
+  # A live build may unlink a temporary artifact during this read-only walk.
+  size="$(du -sk "$path" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
+  [[ "$size" =~ ^[0-9]+$ ]] || size=unavailable
   age=$(((now - modified) / 86400))
   (( age >= 0 )) || age=0
   lane_name="${path##*/}"
