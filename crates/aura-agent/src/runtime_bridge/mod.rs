@@ -1730,7 +1730,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .runtime()
             .replay_committed_facts()
             .await
-            .map_err(|error| IntentError::internal_error(error))
+            .map_err(IntentError::internal_error)
     }
 
     async fn try_get_lan_discovery_stats(
