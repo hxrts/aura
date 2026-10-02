@@ -1,7 +1,9 @@
 use super::*;
 use std::collections::HashSet;
 
-use crate::tui::screens::app::subscriptions::{SharedChannels, SharedContacts, SharedMessages};
+use crate::tui::screens::app::subscriptions::{
+    SharedChannels, SharedContacts, SharedDiscoveredPeers, SharedMessages,
+};
 
 use super::update_handlers::process_ui_update_match;
 
@@ -21,6 +23,7 @@ pub(super) struct UiUpdateContext {
     pub tui: TuiStateHandle,
     pub tasks_for_updates: Arc<crate::tui::tasks::UiTaskOwner>,
     pub shared_contacts_for_updates: SharedContacts,
+    pub shared_discovered_peers_for_updates: SharedDiscoveredPeers,
     pub shared_channels_for_updates: SharedChannels,
     pub shared_devices_for_updates: SharedDevices,
     pub shared_messages_for_updates: SharedMessages,

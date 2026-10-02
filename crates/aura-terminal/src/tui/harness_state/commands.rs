@@ -23,6 +23,8 @@ pub struct TuiSemanticInputs<'a> {
     pub settings_devices: &'a [TuiDevice],
     pub chat_channels: &'a [TuiChannel],
     pub chat_messages: &'a [TuiMessage],
+    /// Authority ids of LAN bootstrap candidates, in Contacts display order.
+    pub bootstrap_candidates: &'a [String],
 }
 
 pub(super) fn map_screen(screen: Screen) -> ScreenId {
@@ -465,6 +467,7 @@ mod tests {
             settings_devices: &[],
             chat_channels: &[],
             chat_messages: &[],
+            bootstrap_candidates: &[],
         }
     }
 

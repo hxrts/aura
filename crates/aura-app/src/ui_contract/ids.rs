@@ -378,6 +378,8 @@ pub enum ListId {
     Devices,
     Authorities,
     SettingsSections,
+    /// LAN-discovered peers offered as bootstrap candidates (Contacts).
+    BootstrapCandidates,
 }
 
 impl ListId {
@@ -394,6 +396,7 @@ impl ListId {
             Self::Devices => "devices",
             Self::Authorities => "authorities",
             Self::SettingsSections => "settings-sections",
+            Self::BootstrapCandidates => "bootstrap-candidates",
         }
     }
 
@@ -410,6 +413,7 @@ impl ListId {
             Self::Devices => "aura-list-devices",
             Self::Authorities => "aura-list-authorities",
             Self::SettingsSections => "aura-list-settings-sections",
+            Self::BootstrapCandidates => "aura-list-bootstrap-candidates",
         }
     }
 }

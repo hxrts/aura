@@ -231,6 +231,13 @@ authoritative removable device from settings state when the snapshot has no
 explicit list selection, and the canonical mixed-runtime anchor remains
 `scenario12-mixed-device-enrollment-removal-e2e.toml`.
 
+LAN bootstrap candidates are observable as `ListId::BootstrapCandidates` in the
+TUI `ui_state`: items are the candidate authority ids in Contacts display
+order, and the selected item follows the LAN peer selection only while the
+Contacts list focus is on LAN peers. Assert discovery, selection and invites
+through this list rather than the rendered peer panel, which the TUI
+diagnostic capture does not include.
+
 Scenario 13 has an additional mixed-runtime receive contract now. On the
 current TUI/browser path, authoritative inbound shared-channel messages may
 surface as sealed placeholders rather than plaintext payloads. Harness

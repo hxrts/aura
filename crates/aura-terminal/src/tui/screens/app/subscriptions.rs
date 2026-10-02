@@ -117,6 +117,16 @@ impl SharedDiscoveredPeers {
     pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<DiscoveredPeer>> {
         self.0.write()
     }
+
+    /// Authority ids of the bootstrap candidates, in display order.
+    #[must_use]
+    pub fn authority_ids(&self) -> Vec<String> {
+        self.0
+            .read()
+            .iter()
+            .map(|peer| peer.authority_id.to_string())
+            .collect()
+    }
 }
 
 /// Create a shared discovered peers holder and subscribe it to DISCOVERED_PEERS_SIGNAL.

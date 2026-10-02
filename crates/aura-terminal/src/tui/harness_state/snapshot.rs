@@ -214,6 +214,33 @@ fn build_authoritative_ui_snapshot(
         selected_contact_id,
     );
 
+    let lan_focused = matches!(
+        state.contacts.list_focus,
+        crate::tui::state::ContactsListFocus::LanPeers
+    );
+    let candidate_items = semantic_inputs
+        .bootstrap_candidates
+        .iter()
+        .enumerate()
+        .map(|(idx, authority_id)| ListItemSnapshot {
+            id: authority_id.clone(),
+            selected: lan_focused && idx == state.contacts.lan_selected_index,
+            confirmation: ConfirmationState::Confirmed,
+            is_current: false,
+        })
+        .collect::<Vec<_>>();
+    let selected_candidate_id = candidate_items
+        .iter()
+        .find(|item| item.selected)
+        .map(|item| item.id.clone());
+    push_list(
+        &mut lists,
+        &mut selections,
+        ListId::BootstrapCandidates,
+        candidate_items,
+        selected_candidate_id,
+    );
+
     let notification_ids = exported_notification_ids(state, app_snapshot);
     let notification_items = notification_ids
         .iter()
@@ -596,6 +623,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 

@@ -220,6 +220,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
         assert_eq!(snapshot.readiness, UiReadiness::Ready);
@@ -241,6 +242,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
         let nav = snapshot
@@ -287,6 +289,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
         let operation_state = snapshot
@@ -312,6 +315,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -343,6 +347,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("navigation command should apply: {error}"));
@@ -365,6 +370,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("settings section command should apply: {error}"));
@@ -388,6 +394,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("dismiss transient command should apply: {error}"));
@@ -412,6 +419,7 @@ mod tests {
                 settings_devices: &devices,
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("remove device command should apply: {error}"));
@@ -438,6 +446,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("remove device command should apply: {error}"));
@@ -466,6 +475,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("switch authority no-op should apply: {error}"));
@@ -489,6 +499,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("create account command should apply: {error}"));
@@ -511,6 +522,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("refresh account command should apply: {error}"));
@@ -535,6 +547,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("join channel command should apply: {error}"));
@@ -560,6 +573,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("create channel command should apply: {error}"));
@@ -592,6 +606,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("device enrollment command should apply: {error}"));
@@ -622,6 +637,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("device import command should apply: {error}"));
@@ -649,6 +665,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("create invitation command should apply: {error}"));
@@ -685,6 +702,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("invite actor command should apply: {error}"));
@@ -716,6 +734,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("import invitation command should apply: {error}"));
@@ -740,6 +759,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -755,6 +775,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("navigation command should apply: {error}"));
@@ -766,6 +787,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -796,6 +818,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("home selection command should apply: {error}"));
@@ -824,6 +847,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &channels,
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("channel selection command should apply: {error}"));
@@ -856,6 +880,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &channels,
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         )
         .unwrap_or_else(|error| panic!("channel selection command should apply: {error}"));
@@ -1412,6 +1437,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -1449,6 +1475,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -1501,6 +1528,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 
@@ -1538,6 +1566,7 @@ mod tests {
                 settings_devices: &[],
                 chat_channels: &[],
                 chat_messages: &[],
+                bootstrap_candidates: &[],
             },
         );
 

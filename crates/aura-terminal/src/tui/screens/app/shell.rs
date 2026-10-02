@@ -653,6 +653,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let shared_callbacks_for_commands = shared_callbacks;
             let mut tui = tui.clone();
             let shared_contacts_for_commands = shared_contacts.clone();
+            let shared_discovered_peers_for_commands = shared_discovered_peers.clone();
             let shared_invitations_for_commands = shared_invitations.clone();
             let shared_pending_requests_for_commands = shared_pending_requests.clone();
             let shared_channels_for_commands = shared_channels.clone();
@@ -730,6 +731,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 settings_devices: &harness_devices_for_command,
                                 chat_channels: &harness_channels_for_command,
                                 chat_messages: &harness_messages_for_command,
+                                bootstrap_candidates: &shared_discovered_peers_for_commands
+                                    .authority_ids(),
                             },
                         )?;
                         for command in followup {
@@ -877,6 +880,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             settings_devices: &harness_devices,
                             chat_channels: &harness_channels,
                             chat_messages: &harness_messages,
+                            bootstrap_candidates: &shared_discovered_peers_for_commands
+                                .authority_ids(),
                         },
                     );
                     if let Err(error) = export_result {
@@ -900,6 +905,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
+            let shared_discovered_peers_for_updates = shared_discovered_peers.clone();
             let shared_channels_for_updates = shared_channels.clone();
             let shared_devices_for_updates = shared_devices.clone();
             let shared_messages_for_updates = shared_messages.clone();
@@ -942,6 +948,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             tui: tui.clone(),
                             tasks_for_updates: tasks_for_updates.clone(),
                             shared_contacts_for_updates: shared_contacts_for_updates.clone(),
+                            shared_discovered_peers_for_updates:
+                                shared_discovered_peers_for_updates.clone(),
                             shared_channels_for_updates: shared_channels_for_updates.clone(),
                             shared_devices_for_updates: shared_devices_for_updates.clone(),
                             shared_messages_for_updates: shared_messages_for_updates.clone(),
@@ -1014,6 +1022,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 settings_devices: &harness_devices,
                 chat_channels: &harness_channels,
                 chat_messages: &harness_messages,
+                bootstrap_candidates: &shared_discovered_peers.authority_ids(),
             },
         ) {
             tracing::warn!(

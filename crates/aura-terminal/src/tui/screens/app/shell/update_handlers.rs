@@ -25,6 +25,7 @@ pub(super) async fn process_ui_update_match(
     let tui = &mut ctx.tui;
     let tasks_for_updates = ctx.tasks_for_updates.clone();
     let shared_contacts_for_updates = &ctx.shared_contacts_for_updates;
+    let shared_discovered_peers_for_updates = &ctx.shared_discovered_peers_for_updates;
     let shared_channels_for_updates = &ctx.shared_channels_for_updates;
     let shared_devices_for_updates = &ctx.shared_devices_for_updates;
     let shared_messages_for_updates = &ctx.shared_messages_for_updates;
@@ -873,6 +874,7 @@ pub(super) async fn process_ui_update_match(
                     settings_devices: &harness_devices,
                     chat_channels: &harness_channels,
                     chat_messages: &harness_messages,
+                    bootstrap_candidates: &shared_discovered_peers_for_updates.authority_ids(),
                 },
             ) {
                 tracing::warn!(
