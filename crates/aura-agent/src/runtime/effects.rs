@@ -1107,6 +1107,17 @@ impl AuraEffectSystem {
         self.queue_runtime_envelope(envelope)
     }
 
+    /// Take a buffered choreography envelope for a session this device has not
+    /// opened (see `ChoreographyState::take_unclaimed_session_envelope`).
+    pub(crate) fn take_unclaimed_choreography_envelope(
+        &self,
+        accept: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Option<TransportEnvelope> {
+        self.choreography_state
+            .write()
+            .take_unclaimed_session_envelope(accept)
+    }
+
     pub(crate) fn queue_runtime_envelope(
         &self,
         envelope: TransportEnvelope,

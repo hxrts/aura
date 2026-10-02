@@ -452,6 +452,28 @@ impl ChoreographyState {
         self.notify_session_inbox(session_id);
     }
 
+    /// Take the first envelope matching `accept` from a session inbox that has
+    /// no started local session. Envelopes for a session this device has not
+    /// opened (e.g. a rotation it only participates in) wait here until a
+    /// handler claims them.
+    pub fn take_unclaimed_session_envelope(
+        &mut self,
+        accept: impl Fn(&TransportEnvelope) -> bool,
+    ) -> Option<TransportEnvelope> {
+        let session_id = self
+            .session_inboxes
+            .iter()
+            .filter(|(session_id, _)| !self.sessions.contains_key(session_id))
+            .find_map(|(session_id, inbox)| inbox.iter().any(&accept).then_some(*session_id))?;
+        let inbox = self.session_inboxes.get_mut(&session_id)?;
+        let position = inbox.iter().position(&accept)?;
+        let envelope = inbox.remove(position);
+        if inbox.is_empty() {
+            self.session_inboxes.remove(&session_id);
+        }
+        Some(envelope)
+    }
+
     /// Remove one matching choreography envelope from one session-local inbox.
     pub fn take_matching_session_envelope(
         &mut self,
@@ -650,6 +672,49 @@ mod tests {
     }
 
     #[test]
+    // Regression (work/8.md task 7, L9): a device that only participates in a
+    // rotation never opens its session first; its proposal waits in the
+    // session buffer and must be claimable, but not once a session is open.
+    #[test]
+    fn unclaimed_session_envelopes_can_be_taken_until_the_session_starts() {
+        let envelope = |payload: u8| TransportEnvelope {
+            destination: AuthorityId::from_uuid(Uuid::from_bytes([5; 16])),
+            source: AuthorityId::from_uuid(Uuid::from_bytes([6; 16])),
+            context: ContextId::new_from_entropy([7; 32]),
+            payload: vec![payload],
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+        let pending = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(45));
+        let open = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(46));
+        let role = ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_bytes([4; 16])),
+            AuthorityId::new_from_entropy([0u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let mut state = ChoreographyState::new();
+        state
+            .start_session(
+                open,
+                None,
+                ContextId::new_from_entropy([8; 32]),
+                vec![role],
+                role,
+                Some(1000),
+                0,
+            )
+            .expect("session starts");
+        state.queue_session_envelope(open, envelope(1));
+        state.queue_session_envelope(pending, envelope(2));
+
+        let taken = state
+            .take_unclaimed_session_envelope(|_| true)
+            .expect("unclaimed envelope");
+        assert_eq!(taken.payload, vec![2]);
+        assert!(state.take_unclaimed_session_envelope(|_| true).is_none());
+        assert_eq!(state.session_inbox_len(open), 1);
+    }
+
     fn session_notifier_tracks_session_lifecycle() {
         let authority_id = DeviceId::from_uuid(Uuid::from_bytes([4; 16]));
         let role = ChoreographicRole::new(

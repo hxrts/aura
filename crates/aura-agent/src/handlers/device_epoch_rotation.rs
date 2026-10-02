@@ -486,7 +486,15 @@ impl DeviceEpochRotationService {
                 .take_inbound_envelope(is_device_epoch_rotation_envelope)
             {
                 Ok(envelope) => envelope,
-                Err(TransportError::NoMessage) => break,
+                // Choreography envelopes are buffered per session on arrival; a
+                // rotation this device only participates in waits there.
+                Err(TransportError::NoMessage) => match self
+                    .effects
+                    .take_unclaimed_choreography_envelope(is_device_epoch_rotation_envelope)
+                {
+                    Some(envelope) => envelope,
+                    None => break,
+                },
                 Err(error) => return Err(AgentError::internal(error.to_string())),
             };
 
