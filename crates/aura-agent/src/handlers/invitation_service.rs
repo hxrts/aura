@@ -824,29 +824,15 @@ impl InvitationServiceApi {
     // =========================================================================
 
     fn sender_transport_metadata(&self) -> ShareableInvitationTransportMetadata {
-        #[cfg(target_arch = "wasm32")]
-        let sender_addr = self
-            .effects
-            .lan_transport()
-            .and_then(|transport| transport.websocket_addrs().first().cloned());
-        #[cfg(not(target_arch = "wasm32"))]
-        let sender_addr = self
-            .effects
-            .lan_transport()
-            .and_then(|transport| transport.advertised_addrs().first().cloned());
-
-        #[cfg(target_arch = "wasm32")]
-        let sender_hint = sender_addr.as_deref().map(|addr| {
-            if addr.starts_with("ws://") || addr.starts_with("wss://") {
-                addr.to_string()
-            } else {
-                format!("ws://{addr}")
-            }
+        // Advertise one address per transport type so the importer can dial
+        // whichever type it supports (browsers only open WebSockets).
+        let sender_hint = self.effects.lan_transport().and_then(|transport| {
+            sender_hint_from_addrs(
+                transport.advertised_addrs().first().map(String::as_str),
+                transport.websocket_addrs().first().map(String::as_str),
+            )
         });
-        #[cfg(not(target_arch = "wasm32"))]
-        let sender_hint = sender_addr.as_deref().map(|addr| format!("tcp://{addr}"));
         tracing::info!(
-            sender_addr = ?sender_addr,
             sender_hint = ?sender_hint,
             "export invitation sender transport hint"
         );
@@ -1042,10 +1028,41 @@ impl InvitationServiceApi {
     }
 }
 
+/// Builds the invitation sender hint: a comma-separated list with one
+/// scheme-tagged address per transport type the sender listens on.
+fn sender_hint_from_addrs(tcp: Option<&str>, websocket: Option<&str>) -> Option<String> {
+    let websocket = websocket.map(|addr| {
+        if addr.starts_with("ws://") || addr.starts_with("wss://") {
+            addr.to_string()
+        } else {
+            format!("ws://{addr}")
+        }
+    });
+    let hints: Vec<String> = tcp
+        .map(|addr| format!("tcp://{addr}"))
+        .into_iter()
+        .chain(websocket)
+        .collect();
+    (!hints.is_empty()).then(|| hints.join(","))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+
+    #[test]
+    fn sender_hint_lists_every_transport_type() {
+        assert_eq!(
+            sender_hint_from_addrs(Some("tcp-endpoint"), Some("ws-endpoint")).as_deref(),
+            Some("tcp://tcp-endpoint,ws://ws-endpoint")
+        );
+        assert_eq!(
+            sender_hint_from_addrs(None, Some("wss://ws-endpoint")).as_deref(),
+            Some("wss://ws-endpoint")
+        );
+        assert_eq!(sender_hint_from_addrs(None, None), None);
+    }
     use crate::runtime::services::ceremony_runner::CeremonyRunner;
     use crate::runtime::services::CeremonyTracker;
     use crate::runtime::TaskSupervisor;

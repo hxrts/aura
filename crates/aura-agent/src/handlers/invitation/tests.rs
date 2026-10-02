@@ -4502,6 +4502,16 @@ async fn production_import_rejects_signed_channel_replay_against_another_context
     assert!(err.to_string().contains("sender proof is invalid"));
 }
 
+#[test]
+fn sender_hint_list_yields_every_transport_type() {
+    let hints = InvitationHandler::transport_hints_from_sender_hint(
+        "tcp://127.0.0.1:1,ws://127.0.0.1:2",
+    );
+    assert_eq!(hints.len(), 2);
+    assert!(matches!(hints[0], TransportHint::TcpDirect { .. }));
+    assert!(matches!(hints[1], TransportHint::WebSocketDirect { .. }));
+}
+
 #[tokio::test]
 async fn sender_hint_suffix_does_not_overwrite_trusted_descriptor_route() {
     let authority = create_test_authority(252);

@@ -1976,9 +1976,12 @@ impl InvitationHandler {
         let Some(manager) = effects.rendezvous_manager() else {
             return;
         };
-        let Some(hint) = addr.and_then(Self::transport_hint_from_sender_hint) else {
+        let hints = addr
+            .map(Self::transport_hints_from_sender_hint)
+            .unwrap_or_default();
+        if hints.is_empty() {
             return;
-        };
+        }
 
         let peer_context = default_context_id_for_authority(peer);
         let local_context = self.context.authority.default_context_id();
@@ -1987,9 +1990,17 @@ impl InvitationHandler {
                 continue;
             }
             let descriptor =
-                Self::verified_hint_descriptor(peer, device_id, context_id, hint.clone(), now_ms);
+                Self::verified_hint_descriptor(peer, device_id, context_id, hints.clone(), now_ms);
             let _ = manager.cache_descriptor(descriptor).await;
         }
+    }
+
+    /// Parses a sender hint, a comma-separated list of scheme-tagged
+    /// addresses, into every transport the sender advertised.
+    fn transport_hints_from_sender_hint(hint: &str) -> Vec<TransportHint> {
+        hint.split(',')
+            .filter_map(Self::transport_hint_from_sender_hint)
+            .collect()
     }
 
     fn transport_hint_from_sender_hint(addr: &str) -> Option<TransportHint> {
@@ -2011,14 +2022,14 @@ impl InvitationHandler {
         peer: AuthorityId,
         device_id: Option<DeviceId>,
         context_id: ContextId,
-        hint: TransportHint,
+        hints: Vec<TransportHint>,
         now_ms: u64,
     ) -> RendezvousDescriptor {
         let mut psk_material = Vec::new();
         psk_material.extend_from_slice(b"aura.invitation.verified-hint.psk.v1");
         psk_material.extend_from_slice(&peer.to_bytes());
         psk_material.extend_from_slice(&context_id.to_bytes());
-        psk_material.extend_from_slice(format!("{hint:?}").as_bytes());
+        psk_material.extend_from_slice(format!("{hints:?}").as_bytes());
         let mut key_material = Vec::new();
         key_material.extend_from_slice(b"aura.invitation.verified-hint.public-key.v1");
         key_material.extend_from_slice(&peer.to_bytes());
@@ -2028,7 +2039,7 @@ impl InvitationHandler {
             authority_id: peer,
             device_id,
             context_id,
-            transport_hints: vec![hint],
+            transport_hints: hints,
             handshake_psk_commitment: hash(&psk_material),
             public_key: hash(&key_material),
             valid_from: now_ms.saturating_sub(1),
