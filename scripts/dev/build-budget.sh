@@ -99,6 +99,7 @@ sweep() {
     echo 'build-budget: preserving production/web caches and live harness artifacts; skipping global sweep' >&2
     return 3
   fi
+  require_idle || return $?
   printf 'Sweep: cargo sweep --maxsize %sGiB .\n' "$cap_gib"
   (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" .)
 }
