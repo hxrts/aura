@@ -384,7 +384,10 @@ async fn persist_created_home(
             topic: Some(home_name.to_string()),
         })
         .await
-        .map_err(|error| AuraError::agent(format!("create home channel: {error}")))?;
+        .map_err(|error| AuraError::Internal {
+            message: "create home channel".to_owned(),
+            source: Some(Arc::new(error)),
+        })?;
     runtime
         .amp_join_channel(ChannelJoinParams {
             context: context_id,
@@ -392,7 +395,10 @@ async fn persist_created_home(
             participant: creator,
         })
         .await
-        .map_err(|error| AuraError::agent(format!("join home channel: {error}")))?;
+        .map_err(|error| AuraError::Internal {
+            message: "join home channel".to_owned(),
+            source: Some(Arc::new(error)),
+        })?;
     let social_home_id = aura_social::HomeId::from_bytes(*home_id.as_bytes());
     let facts = [
         aura_social::SocialFact::home_created_ms(
@@ -415,7 +421,10 @@ async fn persist_created_home(
     runtime
         .commit_relational_facts(&facts)
         .await
-        .map_err(|error| AuraError::agent(format!("persist home: {error}")))
+        .map_err(|error| AuraError::Storage {
+            message: "persist home".to_owned(),
+            source: Some(Arc::new(error)),
+        })
 }
 
 async fn fail_create_home<T>(

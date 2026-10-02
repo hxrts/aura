@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::types::{OpError, OpResponse, OpResult};
+use super::types::{OpError, OpFailureCode, OpResponse, OpResult};
 use super::EffectCommand;
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
@@ -124,9 +124,10 @@ pub async fn handle_network(
             {
                 Ok(invitation) => invitation,
                 Err(error) => {
-                    return Some(Err(OpError::Failed(format!(
-                        "Could not create an invitation for {authority_id}: {error}"
-                    ))))
+                    return Some(Err(OpError::typed(
+                        OpFailureCode::CreateContactInvitation,
+                        format!("Could not create an invitation for {authority_id}: {error}"),
+                    )))
                 }
             };
             let code = match aura_app::ui::workflows::invitation::export_invitation(
@@ -137,9 +138,10 @@ pub async fn handle_network(
             {
                 Ok(code) => code,
                 Err(error) => {
-                    return Some(Err(OpError::Failed(format!(
-                        "Could not export the invitation for {authority_id}: {error}"
-                    ))))
+                    return Some(Err(OpError::typed(
+                        OpFailureCode::ExportInvitation,
+                        format!("Could not export the invitation for {authority_id}: {error}"),
+                    )))
                 }
             };
 
@@ -176,12 +178,14 @@ pub async fn handle_network(
                         message: format!("Invitation sent to {address}"),
                     }))
                 }
-                Ok(Err(error)) => Some(Err(OpError::Failed(format!(
-                    "Sending the invitation to {address} failed: {error}"
-                )))),
-                Err(error) => Some(Err(OpError::Failed(format!(
-                    "Sending the invitation to {address} failed: {error}"
-                )))),
+                Ok(Err(error)) => Some(Err(OpError::typed(
+                    OpFailureCode::SendBootstrapInvitation,
+                    format!("Sending the invitation to {address} failed: {error}"),
+                ))),
+                Err(error) => Some(Err(OpError::typed(
+                    OpFailureCode::SendBootstrapInvitation,
+                    format!("Sending the invitation to {address} failed: {error}"),
+                ))),
             }
         }
 
