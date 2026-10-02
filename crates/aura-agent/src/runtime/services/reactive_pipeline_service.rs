@@ -90,6 +90,10 @@ impl ReactivePipelineService {
             .load_committed_facts(self.authority_id)
             .await
             .map_err(|error| format!("load committed facts: {error}"))?;
+        tracing::info!(
+            count = facts.len(),
+            "replaying committed facts after signal registration"
+        );
         if facts.is_empty() {
             return Ok(());
         }

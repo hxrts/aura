@@ -1023,6 +1023,7 @@ impl HomeSignalView {
                     created_at.ts_ms,
                     context_id,
                 );
+                tracing::info!(home_id = %home_id, context_id = %context_id, "materialized home from HomeCreated fact");
                 let first_home = homes.is_empty();
                 let _ = homes.add_home(home);
                 if first_home {
