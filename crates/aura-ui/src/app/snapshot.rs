@@ -274,3 +274,89 @@ pub(in crate::app) fn runtime_semantic_snapshot(
 
     snapshot
 }
+#[cfg(test)]
+mod projection_source_tests {
+    use super::*;
+    use crate::app::runtime_views::load_neighborhood_runtime_view;
+    use crate::MemoryClipboard;
+    use aura_app::{ui::workflows::context, AppConfig, AppCore, ProjectionSlot};
+    use aura_core::AuthorityId;
+    use std::sync::{Arc, OnceLock};
+
+    #[test]
+    fn published_home_list_carries_its_app_graph_source_revision() {
+        futures::executor::LocalPool::new().run_until(async {
+            let app_core = Arc::new(async_lock::RwLock::new(
+                AppCore::new(AppConfig::default()).expect("app core"),
+            ));
+            AppCore::init_signals_with_hooks(&app_core)
+                .await
+                .expect("register app signals");
+            let home_id = context::initialize_test_home(
+                &app_core,
+                "Revision home",
+                AuthorityId::new_from_entropy([81u8; 32]),
+                1,
+            )
+            .await
+            .expect("publish home through app projection owner");
+            context::add_home_to_neighborhood(&app_core, &home_id.to_string())
+                .await
+                .expect("materialize the home in the neighborhood projection");
+            let graph_revision = app_core
+                .read()
+                .await
+                .projection_owner()
+                .snapshot(ProjectionSlot::homes())
+                .await
+                .expect("homes graph snapshot")
+                .revision;
+            let app_snapshot = app_core.read().await.snapshot();
+            assert_eq!(
+                app_snapshot.projection_source_revisions.homes,
+                Some(graph_revision)
+            );
+
+            let controller = Arc::new(UiController::new(
+                app_core,
+                Arc::new(MemoryClipboard::default()),
+            ));
+            let published = Arc::new(OnceLock::new());
+            controller.set_ui_snapshot_sink(Arc::new({
+                let published = published.clone();
+                move |snapshot| {
+                    let _ = published.set(snapshot);
+                }
+            }));
+            let neighborhood = load_neighborhood_runtime_view(controller.clone()).await;
+            let model = UiModel::new(String::new());
+            let snapshot = runtime_semantic_snapshot(
+                &model,
+                &neighborhood,
+                &ChatRuntimeView::default(),
+                &ContactsRuntimeView::default(),
+                &SettingsRuntimeView::default(),
+                &NotificationsRuntimeView::default(),
+            );
+            controller.publish_ui_snapshot(snapshot);
+            let exported = published.get().expect("published snapshot");
+            let homes = exported
+                .lists
+                .iter()
+                .find(|list| list.id == ListId::Homes)
+                .expect("rendered homes list");
+            assert!(homes
+                .items
+                .iter()
+                .any(|item| item.id == home_id.to_string()));
+            assert_eq!(
+                exported.projection_source_revisions.homes,
+                Some(graph_revision)
+            );
+            assert_eq!(
+                controller.ui_snapshot().projection_source_revisions.homes,
+                Some(graph_revision)
+            );
+        });
+    }
+}

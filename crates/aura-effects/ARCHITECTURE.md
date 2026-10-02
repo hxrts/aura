@@ -63,6 +63,7 @@ The following stateful mechanics are currently allowed because they are low-leve
 
 - `reactive/*`: signal graph subscriptions and task registry used to drive the reactive effect surface
 - Reactive registration uses atomic check-and-insert per signal ID. Repeated `ensure_registered` calls retain the current value; a mismatched value type fails explicitly. An attached subscription establishes its graph receiver before returning a stream to the hook owner.
+- The reactive graph assigns a local source revision to every successful publication. `read_snapshot` returns the value and revision under one lock; `update_signal` applies a synchronous delta atomically and leaves value, revision, and subscribers unchanged on rejection; `compare_and_emit` rejects a replacement derived from a stale revision. Product-level projection ownership remains in `aura-app`, which uses these primitives for app and runtime writers.
 - The `test-support` feature exposes a platform task spawner for lifecycle tests that must acknowledge a running listener. Production runtime ownership continues through its own task registry.
 - `query/handler.rs`: query-side caches, pending-consensus tracking, and subscription plumbing around the reactive/query effect boundary
 - `encrypted_storage.rs`: local master-key cache and one-time initialization guard for the encrypted-storage adapter
@@ -105,8 +106,8 @@ Handler isolation and purity are the primary testing concerns. Each handler must
 ### Commands
 
 ```
-cargo test -p aura-effects
-cargo test -p aura-effects -- --nocapture   # with handler output
+cargo test -p hxrts-aura-effects
+cargo test -p hxrts-aura-effects -- --nocapture   # with handler output
 just lint-arch-syntax
 just check-arch
 ```
@@ -127,6 +128,7 @@ just check-arch
 | Crypto FROST key gen/sign/verify incorrect | `src/crypto.rs` (inline, 14 tests) | Covered |
 | Leakage budget accumulation wrong | `src/leakage.rs` (inline) | Covered |
 | Query reads bypass capability checks or implicit public allowlists | `src/query/handler.rs` (inline) | Covered |
+| Concurrent projection deltas lose updates or stale replacement overwrites a newer value | `src/reactive/graph.rs`, `src/reactive/handler.rs` (inline) | Covered |
 
 ## References
 

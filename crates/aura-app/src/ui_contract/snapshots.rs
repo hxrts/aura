@@ -6,6 +6,7 @@ use super::{
     ListId, ModalId, OperationId, OperationInstanceId, OperationState, RuntimeEventId, ScreenId,
     ToastId, ToastKind, UiReadiness,
 };
+use crate::core::ProjectionSourceRevisions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -725,6 +726,10 @@ pub struct UiSnapshot {
     pub open_modal: Option<ModalId>,
     pub readiness: UiReadiness,
     pub revision: ProjectionRevision,
+    /// Revisions of the source graph projections represented by this UI state.
+    /// These must not be confused with `revision`, which tracks UI publication.
+    #[serde(default)]
+    pub projection_source_revisions: ProjectionSourceRevisions,
     pub quiescence: QuiescenceSnapshot,
     pub selections: Vec<SelectionSnapshot>,
     pub lists: Vec<ListSnapshot>,
@@ -748,6 +753,7 @@ impl UiSnapshot {
                 semantic_seq: 0,
                 render_seq: None,
             },
+            projection_source_revisions: ProjectionSourceRevisions::default(),
             quiescence: QuiescenceSnapshot {
                 state: QuiescenceState::Busy,
                 reason_codes: vec!["readiness_loading".to_string()],

@@ -124,6 +124,7 @@ pub mod errors;
 #[allow(missing_docs)]
 pub mod frontend_primitives;
 pub mod policies;
+pub mod projection_owner;
 pub mod queries;
 pub mod runtime_bridge;
 pub mod scenario_contract;
@@ -134,6 +135,7 @@ pub mod thresholds;
 pub mod ui;
 pub mod ui_contract;
 pub mod views;
+pub use projection_owner::{ProjectionOwner, ProjectionSlot};
 pub(crate) mod workflows;
 
 #[cfg(feature = "signals")]

@@ -53,6 +53,18 @@ startup, navigation, and `ui_state` convergence; they do not yet inject stream
 closure or runtime rebootstrap. The recovery smoke in `work/10.md` Task 14
 must add those fault-injection cases to the PR lane.
 
+## Projection source revisions
+
+`UiSnapshot.projection_source_revisions` reports the graph revision last copied
+into each observed app projection (chat, contacts, homes, invitations,
+recovery, and neighborhood). TUI and browser exports use the same app snapshot
+source. These values are separate from `UiSnapshot.revision`, which advances
+with frontend semantic or render publication. After both observers are
+quiescent on one runtime, their entity sets and source revisions should agree.
+The Task 4 transaction and mirror tests cover stale publication and delayed
+view-copy races; the Task 14 PR smoke must exercise this through both frontend
+observers after a forced stale projection and recovery.
+
 ## Canonical UX Scenario Set
 
 | Scenario | File | Primary Flow |

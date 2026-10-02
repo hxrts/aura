@@ -5,7 +5,7 @@
 use super::{
     ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
-use crate::core::StateSnapshot;
+use crate::core::{ProjectionSourceRevisions, StateSnapshot};
 #[cfg(feature = "signals")]
 use aura_core::types::identifiers::ChannelId;
 #[cfg(feature = "signals")]
@@ -49,6 +49,7 @@ impl ViewState {
     /// Get a snapshot of all view states
     pub fn snapshot(&self) -> StateSnapshot {
         StateSnapshot {
+            projection_source_revisions: ProjectionSourceRevisions::default(),
             chat: clone_view_cell(&self.chat),
             recovery: clone_view_cell(&self.recovery),
             invitations: clone_view_cell(&self.invitations),

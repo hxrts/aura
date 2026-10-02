@@ -194,6 +194,7 @@ impl UiModel {
             open_modal,
             readiness: readiness_owner::account_gate_readiness(self.account_ready()),
             revision: self.semantic_revision,
+            projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
             quiescence: QuiescenceSnapshot::derive(
                 readiness_owner::account_gate_readiness(self.account_ready()),
                 open_modal,
@@ -240,27 +241,29 @@ impl UiController {
     }
 
     pub fn ui_snapshot(&self) -> UiSnapshot {
-        self.model
-            .read()
-            .ok()
-            .map(|model| model.semantic_snapshot())
-            .unwrap_or_else(|| UiSnapshot::loading(ScreenId::Neighborhood))
+        self.semantic_model_snapshot()
     }
 
     pub fn semantic_model_snapshot(&self) -> UiSnapshot {
-        let snapshot = self
+        let mut snapshot = self
             .model
             .read()
             .ok()
             .map(|model| model.semantic_snapshot())
             .unwrap_or_else(|| UiSnapshot::loading(ScreenId::Neighborhood));
+        if let Some(core) = self.app_core.try_read() {
+            snapshot.projection_source_revisions = core.snapshot().projection_source_revisions;
+        }
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid semantic model snapshot export: {error}"));
         snapshot
     }
 
-    pub fn publish_ui_snapshot(&self, snapshot: UiSnapshot) {
+    pub fn publish_ui_snapshot(&self, mut snapshot: UiSnapshot) {
+        if let Some(core) = self.app_core.try_read() {
+            snapshot.projection_source_revisions = core.snapshot().projection_source_revisions;
+        }
         snapshot
             .validate_invariants()
             .unwrap_or_else(|error| panic!("invalid published UI snapshot: {error}"));

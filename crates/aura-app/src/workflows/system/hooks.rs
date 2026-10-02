@@ -3,7 +3,9 @@
 use super::refresh::{emit_chat_snapshot_signal, refresh_connection_status_from_contacts};
 use crate::runtime_bridge::RuntimeBridge;
 #[cfg(feature = "signals")]
-use crate::signal_defs::{CHAT_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, TRANSPORT_PEERS_SIGNAL};
+use crate::signal_defs::{
+    CHAT_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+};
 use crate::signal_defs::{CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL};
 use crate::workflows::runtime::workflow_best_effort;
 use crate::{AppCore, ReactiveHandler};
@@ -88,6 +90,9 @@ async fn refresh_contacts_and_readiness(app_core: &Arc<RwLock<AppCore>>) -> Resu
     {
         let _ = best_effort
             .capture(refresh_authoritative_contact_link_readiness_hook(app_core))
+            .await;
+        let _ = best_effort
+            .capture(crate::workflows::observed_projection::mirror_chat_signal_into_view(app_core))
             .await;
     }
     best_effort.finish()
@@ -335,6 +340,8 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
     let peers_readiness = attempt.attach(&reactive, &*TRANSPORT_PEERS_SIGNAL).await?;
     #[cfg(feature = "signals")]
     let invitation_readiness = attempt.attach(&reactive, &*INVITATIONS_SIGNAL).await?;
+    #[cfg(feature = "signals")]
+    let recovery_projection = attempt.attach(&reactive, &*RECOVERY_SIGNAL).await?;
 
     let (cancel, cancel_rx) = oneshot::channel();
     let cancel_rx = cancel_rx.map(|_| ()).boxed().shared();
@@ -415,13 +422,30 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         .await?;
         spawn_owned_signal_refresh(
             invitation_readiness,
-            spawner,
-            runtime,
+            spawner.clone(),
+            runtime.clone(),
             Arc::clone(app_core),
             "authoritative_invitations_readiness_hook",
             Arc::new(|app_core| {
                 Box::pin(async move {
                     refresh_authoritative_invitation_and_channel_readiness_hook(&app_core).await
+                })
+            }),
+            cancel_rx.clone(),
+        )
+        .await?;
+        spawn_owned_signal_refresh(
+            recovery_projection,
+            spawner,
+            runtime,
+            Arc::clone(app_core),
+            "recovery_projection_hook",
+            Arc::new(|app_core| {
+                Box::pin(async move {
+                    crate::workflows::observed_projection::mirror_recovery_signal_into_view(
+                        &app_core,
+                    )
+                    .await
                 })
             }),
             cancel_rx,
@@ -436,6 +460,14 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             .capture(refresh_authoritative_invitation_and_channel_readiness_hook(
                 app_core,
             ))
+            .await;
+        let _ = best_effort
+            .capture(
+                crate::workflows::observed_projection::mirror_recovery_signal_into_view(app_core),
+            )
+            .await;
+        let _ = best_effort
+            .capture(crate::workflows::observed_projection::mirror_chat_signal_into_view(app_core))
             .await;
         best_effort
             .finish()
@@ -454,6 +486,96 @@ mod tests {
     use aura_effects::reactive::CountingTestTaskSpawner;
     use std::sync::atomic::AtomicUsize;
     use tokio::sync::Notify;
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn replayed_chat_and_recovery_before_hook_attachment_are_mirrored_on_install() {
+        use crate::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
+        use crate::views::recovery::{Guardian, GuardianStatus, RecoveryState};
+        use crate::views::ChatState;
+
+        let runtime =
+            crate::testing::running_offline_runtime(AuthorityId::new_from_entropy([75; 32]));
+        runtime.set_pending_invitations(Vec::new());
+        let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime);
+        let guardian_id = AuthorityId::new_from_entropy([76; 32]);
+        let reactive = { app_core.read().await.reactive().clone() };
+        crate::signal_defs::register_app_signals(&reactive)
+            .await
+            .unwrap();
+        reactive
+            .graph()
+            .emit(
+                CHAT_SIGNAL.id(),
+                ChatState {
+                    total_unread: 3,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        reactive
+            .graph()
+            .emit(
+                RECOVERY_SIGNAL.id(),
+                RecoveryState::from_parts(
+                    [Guardian {
+                        id: guardian_id,
+                        name: "replayed guardian".to_string(),
+                        status: GuardianStatus::Active,
+                        added_at: 1,
+                        last_seen: None,
+                    }],
+                    1,
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                ),
+            )
+            .await
+            .unwrap();
+
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let snapshot = app_core.read().await.snapshot();
+        // Initial runtime refresh may supersede the replayed fixture; the
+        // app must mirror whichever graph revision is current after attach.
+        assert_eq!(
+            snapshot.chat.total_unread,
+            reactive
+                .read_snapshot(&*CHAT_SIGNAL)
+                .await
+                .unwrap()
+                .value
+                .total_unread
+        );
+        assert_eq!(
+            snapshot.projection_source_revisions.chat,
+            Some(
+                reactive
+                    .read_snapshot(&*CHAT_SIGNAL)
+                    .await
+                    .unwrap()
+                    .revision
+            )
+        );
+        assert_eq!(
+            snapshot
+                .recovery
+                .guardian(&guardian_id)
+                .map(|guardian| guardian.name.as_str()),
+            Some("replayed guardian")
+        );
+        assert_eq!(
+            snapshot.projection_source_revisions.recovery,
+            Some(
+                reactive
+                    .read_snapshot(&*RECOVERY_SIGNAL)
+                    .await
+                    .unwrap()
+                    .revision
+            )
+        );
+    }
 
     #[tokio::test]
     async fn blocked_refresh_replays_latest_snapshot_after_burst_and_lag() {
@@ -574,7 +696,8 @@ mod tests {
     #[tokio::test]
     async fn installed_hooks_converge_contacts_chat_invitation_and_readiness() {
         use crate::signal_defs::{
-            SyncStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, SYNC_STATUS_SIGNAL,
+            SyncStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
+            SYNC_STATUS_SIGNAL,
         };
         use crate::ui_contract::AuthoritativeSemanticFact;
         use crate::views::contacts::{
@@ -583,6 +706,7 @@ mod tests {
         use crate::views::invitations::{
             Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
         };
+        use crate::views::recovery::{Guardian, GuardianStatus, RecoveryState};
         use crate::views::ChatState;
 
         let runtime =
@@ -658,6 +782,26 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            reactive
+                .graph()
+                .emit(
+                    RECOVERY_SIGNAL.id(),
+                    RecoveryState::from_parts(
+                        [Guardian {
+                            id: contact_id,
+                            name: format!("guardian-{revision}"),
+                            status: GuardianStatus::Active,
+                            added_at: revision as u64,
+                            last_seen: None,
+                        }],
+                        1,
+                        None,
+                        Vec::new(),
+                        Vec::new(),
+                    ),
+                )
+                .await
+                .unwrap();
         }
 
         let convergence = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -669,6 +813,11 @@ mod tests {
                     .contact(&contact_id)
                     .is_some_and(|contact| contact.nickname == "contact-8")
                     && snapshot.chat.total_unread == 8
+                    && snapshot
+                        .recovery
+                        .guardian(&contact_id)
+                        .is_some_and(|guardian| guardian.name == "guardian-8")
+                    && snapshot.projection_source_revisions.recovery.is_some()
                     && snapshot
                         .invitations
                         .all_pending()
@@ -695,10 +844,11 @@ mod tests {
                 .await
                 .ok();
             panic!(
-                "installed hooks did not converge: contact={:?}, unread={}, chat_signal_unread={:?}, invitations={:?}, facts={:?}",
+                "installed hooks did not converge: contact={:?}, unread={}, chat_signal_unread={:?}, recovery={:?}, invitations={:?}, facts={:?}",
                 snapshot.contacts.contact(&contact_id).map(|contact| &contact.nickname),
                 snapshot.chat.total_unread,
                 chat_signal.map(|chat| chat.total_unread),
+                snapshot.recovery.guardian(&contact_id).map(|guardian| &guardian.name),
                 snapshot.invitations.all_pending().iter().map(|invitation| &invitation.id).collect::<Vec<_>>(),
                 core.authoritative_semantic_facts(),
             );

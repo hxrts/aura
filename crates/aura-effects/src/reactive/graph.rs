@@ -24,6 +24,8 @@ pub struct AnyValue(pub(crate) Arc<dyn Any + Send + Sync>);
 struct SignalSlot {
     /// The current value (type-erased)
     value: AnyValue,
+    /// Monotonic revision of the published value (zero for initial registration).
+    revision: u64,
     /// Broadcast channel for notifying subscribers
     sender: broadcast::Sender<AnyValue>,
     /// Type name for debugging
@@ -36,6 +38,7 @@ impl SignalSlot {
         let (sender, _) = broadcast::channel(256); // Buffer size for updates
         Self {
             value: AnyValue(Arc::new(initial)),
+            revision: 0,
             sender,
             type_name: std::any::type_name::<T>(),
         }
@@ -55,7 +58,7 @@ impl SignalSlot {
     }
 
     /// Update the value and notify subscribers.
-    fn emit<T: Clone + Send + Sync + 'static>(&mut self, value: T) -> Result<(), ReactiveError> {
+    fn emit<T: Clone + Send + Sync + 'static>(&mut self, value: T) -> Result<u64, ReactiveError> {
         // Verify type matches
         if self.type_name != std::any::type_name::<T>() {
             return Err(ReactiveError::TypeMismatch {
@@ -65,20 +68,52 @@ impl SignalSlot {
             });
         }
 
-        // Update value
+        let next_revision =
+            self.revision
+                .checked_add(1)
+                .ok_or_else(|| ReactiveError::Internal {
+                    reason: "reactive signal revision exhausted".to_string(),
+                })?;
+
+        // Update value and revision together while holding the graph write lock.
         let wrapped = AnyValue(Arc::new(value));
         self.value = wrapped.clone();
+        self.revision = next_revision;
 
         // Notify subscribers (ignore send errors - means no subscribers)
         let _ = self.sender.send(wrapped);
 
-        Ok(())
+        Ok(next_revision)
     }
 
     /// Subscribe to changes.
     fn subscribe(&self) -> broadcast::Receiver<AnyValue> {
         self.sender.subscribe()
     }
+}
+
+/// One value and its revision observed under the same graph lock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignalSnapshot<T> {
+    /// Published value.
+    pub value: T,
+    /// Revision assigned at registration or the last successful publication.
+    pub revision: u64,
+}
+
+/// Result of publishing only when the caller's observed revision remains current.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConditionalEmit {
+    /// The value was published at this revision.
+    Published {
+        /// Revision assigned to the published value.
+        revision: u64,
+    },
+    /// A newer value was already published; no notification was sent.
+    Stale {
+        /// Revision that rejected the caller's stale replacement.
+        current_revision: u64,
+    },
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,6 +220,23 @@ impl SignalGraph {
         })
     }
 
+    /// Read a value and its revision atomically.
+    pub async fn read_snapshot<T: Clone + Send + Sync + 'static>(
+        &self,
+        id: &SignalId,
+    ) -> Result<SignalSnapshot<T>, ReactiveError> {
+        let signals = self.signals.read().await;
+        let slot = signals
+            .get(id)
+            .ok_or_else(|| ReactiveError::SignalNotFound { id: id.to_string() })?;
+        Ok(SignalSnapshot {
+            value: slot
+                .read::<T>()
+                .map_err(|error| signal_error_id(error, id))?,
+            revision: slot.revision,
+        })
+    }
+
     /// Emit a new value to a signal.
     pub async fn emit<T: Clone + Send + Sync + 'static>(
         &self,
@@ -197,16 +249,65 @@ impl SignalGraph {
             .get_mut(id)
             .ok_or_else(|| ReactiveError::SignalNotFound { id: id.to_string() })?;
 
-        slot.emit(value).map_err(|e| match e {
-            ReactiveError::TypeMismatch {
-                expected, actual, ..
-            } => ReactiveError::TypeMismatch {
-                id: id.to_string(),
-                expected,
-                actual,
-            },
-            other => other,
-        })
+        slot.emit(value)
+            .map(|_| ())
+            .map_err(|error| signal_error_id(error, id))
+    }
+
+    /// Apply a fallible synchronous mutation to a clone of the current value.
+    /// A rejected mutation leaves the value, revision, and subscribers unchanged.
+    pub async fn update<T, R, E>(
+        &self,
+        id: &SignalId,
+        update: impl FnOnce(&mut T) -> Result<R, E>,
+    ) -> Result<Result<(R, SignalSnapshot<T>), E>, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let mut signals = self.signals.write().await;
+        let slot = signals
+            .get_mut(id)
+            .ok_or_else(|| ReactiveError::SignalNotFound { id: id.to_string() })?;
+        let mut value = slot
+            .read::<T>()
+            .map_err(|error| signal_error_id(error, id))?;
+        if slot.revision == u64::MAX {
+            return Err(ReactiveError::Internal {
+                reason: "reactive signal revision exhausted".to_string(),
+            });
+        }
+        let result = match update(&mut value) {
+            Ok(result) => result,
+            Err(error) => return Ok(Err(error)),
+        };
+        let revision = slot
+            .emit(value.clone())
+            .map_err(|error| signal_error_id(error, id))?;
+        Ok(Ok((result, SignalSnapshot { value, revision })))
+    }
+
+    /// Publish a value only if no update followed the caller's snapshot.
+    pub async fn compare_and_emit<T: Clone + Send + Sync + 'static>(
+        &self,
+        id: &SignalId,
+        expected_revision: u64,
+        value: T,
+    ) -> Result<ConditionalEmit, ReactiveError> {
+        let mut signals = self.signals.write().await;
+        let slot = signals
+            .get_mut(id)
+            .ok_or_else(|| ReactiveError::SignalNotFound { id: id.to_string() })?;
+        slot.read::<T>()
+            .map_err(|error| signal_error_id(error, id))?;
+        if slot.revision != expected_revision {
+            return Ok(ConditionalEmit::Stale {
+                current_revision: slot.revision,
+            });
+        }
+        let revision = slot
+            .emit(value)
+            .map_err(|error| signal_error_id(error, id))?;
+        Ok(ConditionalEmit::Published { revision })
     }
 
     /// Subscribe to a signal's changes.
@@ -232,6 +333,19 @@ impl SignalGraph {
         SignalGraphStats {
             signal_count: signals.len(),
         }
+    }
+}
+
+fn signal_error_id(error: ReactiveError, id: &SignalId) -> ReactiveError {
+    match error {
+        ReactiveError::TypeMismatch {
+            expected, actual, ..
+        } => ReactiveError::TypeMismatch {
+            id: id.to_string(),
+            expected,
+            actual,
+        },
+        other => other,
     }
 }
 
@@ -401,6 +515,141 @@ mod tests {
         // Read updated value
         let value: u32 = graph.read(&id).await.unwrap();
         assert_eq!(value, 42);
+    }
+
+    #[tokio::test]
+    async fn concurrent_updates_preserve_disjoint_fields_and_publish_each_revision() {
+        let graph = Arc::new(SignalGraph::new());
+        let id = SignalId::new("transaction_fields");
+        graph.register(id.clone(), (0u32, 0u32)).await.unwrap();
+        let mut receiver = graph.subscribe(&id).await.unwrap();
+
+        let left_graph = graph.clone();
+        let left_id = id.clone();
+        let left = tokio::spawn(async move {
+            for _ in 0..32 {
+                left_graph
+                    .update(&left_id, |value: &mut (u32, u32)| {
+                        value.0 += 1;
+                        Ok::<_, ()>(())
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+        });
+        let right_graph = graph.clone();
+        let right_id = id.clone();
+        let right = tokio::spawn(async move {
+            for _ in 0..32 {
+                right_graph
+                    .update(&right_id, |value: &mut (u32, u32)| {
+                        value.1 += 1;
+                        Ok::<_, ()>(())
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+        });
+        left.await.unwrap();
+        right.await.unwrap();
+
+        assert_eq!(
+            graph.read_snapshot::<(u32, u32)>(&id).await.unwrap(),
+            SignalSnapshot {
+                value: (32, 32),
+                revision: 64,
+            }
+        );
+        for _ in 0..64 {
+            receiver.try_recv().unwrap();
+        }
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejected_update_and_stale_compare_do_not_publish() {
+        let graph = SignalGraph::new();
+        let id = SignalId::new("conditional");
+        graph.register(id.clone(), vec![1u32]).await.unwrap();
+        let mut receiver = graph.subscribe(&id).await.unwrap();
+
+        let rejected = graph
+            .update(&id, |value: &mut Vec<u32>| {
+                value.push(2);
+                Err::<(), _>("rejected")
+            })
+            .await
+            .unwrap();
+        assert_eq!(rejected, Err("rejected"));
+        assert_eq!(
+            graph.read_snapshot::<Vec<u32>>(&id).await.unwrap().revision,
+            0
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+
+        assert_eq!(
+            graph.compare_and_emit(&id, 0, vec![3u32]).await.unwrap(),
+            ConditionalEmit::Published { revision: 1 }
+        );
+        assert_eq!(
+            graph.compare_and_emit(&id, 0, vec![4u32]).await.unwrap(),
+            ConditionalEmit::Stale {
+                current_revision: 1
+            }
+        );
+        assert_eq!(
+            graph.read_snapshot::<Vec<u32>>(&id).await.unwrap(),
+            SignalSnapshot {
+                value: vec![3],
+                revision: 1,
+            }
+        );
+        assert_eq!(
+            *receiver
+                .try_recv()
+                .unwrap()
+                .0
+                .downcast_ref::<Vec<u32>>()
+                .unwrap(),
+            vec![3]
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn ordinary_emit_advances_revision_seen_by_conditional_writer() {
+        let graph = SignalGraph::new();
+        let id = SignalId::new("ordinary_emit_revision");
+        graph.register(id.clone(), 0u32).await.unwrap();
+        let observed = graph.read_snapshot::<u32>(&id).await.unwrap();
+        graph.emit(&id, 1u32).await.unwrap();
+        assert_eq!(
+            graph
+                .compare_and_emit(&id, observed.revision, 2u32)
+                .await
+                .unwrap(),
+            ConditionalEmit::Stale {
+                current_revision: 1
+            }
+        );
+        assert_eq!(
+            graph.read_snapshot::<u32>(&id).await.unwrap(),
+            SignalSnapshot {
+                value: 1,
+                revision: 1
+            }
+        );
     }
 
     #[tokio::test]

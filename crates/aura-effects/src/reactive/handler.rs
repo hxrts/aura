@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen_futures::spawn_local;
 
-use super::graph::SignalGraph;
+use super::graph::{ConditionalEmit, SignalGraph, SignalSnapshot};
 
 const REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY: usize = 256;
 
@@ -245,6 +245,45 @@ impl ReactiveHandler {
     /// Get statistics about the handler's signal graph.
     pub async fn stats(&self) -> super::graph::SignalGraphStats {
         self.graph.stats().await
+    }
+
+    /// Read a value and the revision at which it was published.
+    pub async fn read_snapshot<T>(
+        &self,
+        signal: &Signal<T>,
+    ) -> Result<SignalSnapshot<T>, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.graph.read_snapshot(signal.id()).await
+    }
+
+    /// Serialize a fallible mutation against other publications to this graph.
+    /// The callback is synchronous and must not await or perform external effects.
+    pub async fn update_signal<T, R, E>(
+        &self,
+        signal: &Signal<T>,
+        update: impl FnOnce(&mut T) -> Result<R, E>,
+    ) -> Result<Result<(R, SignalSnapshot<T>), E>, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.graph.update(signal.id(), update).await
+    }
+
+    /// Publish only if the caller's observed revision is still current.
+    pub async fn compare_and_emit<T>(
+        &self,
+        signal: &Signal<T>,
+        expected_revision: u64,
+        value: T,
+    ) -> Result<ConditionalEmit, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.graph
+            .compare_and_emit(signal.id(), expected_revision, value)
+            .await
     }
 
     /// Subscribe after the graph receiver has attached. The returned stream
@@ -656,6 +695,42 @@ mod tests {
 
         let value = handler.read(&signal).await.unwrap();
         assert_eq!(value, "world");
+    }
+
+    #[tokio::test]
+    async fn handler_transaction_api_preserves_revision_and_stream_delivery() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<Vec<u32>> = Signal::new("handler_transaction");
+        handler.register(&signal, vec![]).await.unwrap();
+        let mut stream = handler.subscribe_attached(&signal).await.unwrap();
+
+        assert_eq!(handler.read_snapshot(&signal).await.unwrap().revision, 0);
+        let result = handler
+            .update_signal(&signal, |items| {
+                items.push(7);
+                Ok::<_, ()>(items.len())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            result,
+            (
+                1,
+                SignalSnapshot {
+                    value: vec![7],
+                    revision: 1
+                }
+            )
+        );
+        assert_eq!(
+            handler.compare_and_emit(&signal, 0, vec![8]).await.unwrap(),
+            ConditionalEmit::Stale {
+                current_revision: 1
+            }
+        );
+        assert_eq!(stream.recv().await.unwrap(), vec![7]);
+        assert_eq!(handler.read_snapshot(&signal).await.unwrap().value, vec![7]);
     }
 
     #[tokio::test]

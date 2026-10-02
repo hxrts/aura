@@ -2,12 +2,12 @@
 
 use crate::runtime_bridge::SyncStatus as RuntimeSyncStatus;
 use crate::signal_defs::{
-    ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONNECTION_STATUS_SIGNAL,
-    CONNECTION_STATUS_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NETWORK_STATUS_SIGNAL,
-    NETWORK_STATUS_SIGNAL_NAME, TRANSPORT_PEERS_SIGNAL, TRANSPORT_PEERS_SIGNAL_NAME,
+    ConnectionStatus, NetworkStatus, CONNECTION_STATUS_SIGNAL, CONNECTION_STATUS_SIGNAL_NAME,
+    CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NETWORK_STATUS_SIGNAL, NETWORK_STATUS_SIGNAL_NAME,
+    TRANSPORT_PEERS_SIGNAL, TRANSPORT_PEERS_SIGNAL_NAME,
 };
-use crate::workflows::observed_projection::replace_chat_projection_observed;
-use crate::workflows::observed_snapshot::{observed_chat_snapshot, observed_contacts_snapshot};
+use crate::workflows::observed_projection::mirror_chat_signal_into_view;
+use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::runtime::{timeout_runtime_call, workflow_best_effort};
 use crate::workflows::signals::{emit_signal_if_changed, read_signal};
 use crate::AppCore;
@@ -169,20 +169,7 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
 pub(super) async fn emit_chat_snapshot_signal(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let runtime_present = {
-        let core = app_core.read().await;
-        core.runtime().is_some()
-    };
-    // OWNERSHIP: observed
-    let snapshot_chat = observed_chat_snapshot(app_core).await;
-    let chat = if runtime_present {
-        read_signal(app_core, &*CHAT_SIGNAL, CHAT_SIGNAL_NAME)
-            .await
-            .unwrap_or(snapshot_chat)
-    } else {
-        snapshot_chat
-    };
-    replace_chat_projection_observed(app_core, chat).await
+    mirror_chat_signal_into_view(app_core).await
 }
 
 pub(super) async fn publish_connection_status_bundle(

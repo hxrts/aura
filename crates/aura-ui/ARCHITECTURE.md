@@ -55,6 +55,7 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
   rather than inferring progress from local timers, local counters, or modal
   transitions alone.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
+- `UiController` exports the app snapshot's `projection_source_revisions` with `UiSnapshot`. Those source graph revisions describe the observed entity values and remain separate from the UI semantic/render `revision`; the UI must not mint or advance source revisions locally.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
 - Mounted runtime subscriptions form one component-owned group per runtime generation, with one observer per distinct required signal. The group reports typed attachment and stream health; a failed attach or closed stream cannot leave the group apparently ready.
 - Unmount and generation change cancel the entire subscription group, including refresh work, before replacement observers attach. Subscription tasks cannot retain the group owner through their own captures.

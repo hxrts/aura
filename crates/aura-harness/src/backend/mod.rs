@@ -771,6 +771,7 @@ mod tests {
                     render_seq: Some(7),
                 },
                 quiescence: QuiescenceSnapshot::settled(),
+                projection_source_revisions: aura_app::core::ProjectionSourceRevisions::default(),
                 selections: Vec::new(),
                 lists: Vec::new(),
                 messages: Vec::new(),

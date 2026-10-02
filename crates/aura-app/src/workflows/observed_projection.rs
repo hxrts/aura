@@ -17,11 +17,10 @@ use aura_composition::{downcast_delta, ViewDeltaReducer};
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_journal::{DomainFact, RelationalFact};
 
-use crate::signal_defs::{
-    CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, HOMES_SIGNAL,
-    HOMES_SIGNAL_NAME, INVITATIONS_SIGNAL, INVITATIONS_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL,
-    NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
-};
+#[cfg(test)]
+use crate::effects::reactive::ConditionalEmit;
+use crate::projection_owner::ProjectionSlot;
+use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
 use crate::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     contacts::ContactsState,
@@ -32,26 +31,48 @@ use crate::views::{
 use crate::workflows::parse::{
     parse_authority_id as parse_workflow_authority_id, parse_context_id,
 };
-use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::signals::read_signal;
 use crate::AppCore;
 use aura_core::AuraError;
 
+#[cfg(test)]
 async fn replace_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
+    expected_revision: u64,
     state: T,
-    set_view: impl FnOnce(&mut AppCore, T),
-    signal: &aura_core::effects::reactive::Signal<T>,
-    signal_name: &str,
+    slot: ProjectionSlot<T>,
+    set_view: impl FnOnce(&mut crate::views::ViewState, T),
 ) -> Result<(), AuraError>
 where
     T: Clone + Send + Sync + 'static,
 {
-    {
-        let mut core = app_core.write().await;
-        set_view(&mut core, state.clone());
+    let owner = app_core.read().await.projection_owner();
+    let publication = owner
+        .replace_if_current(slot, expected_revision, state)
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
+    let revision = match publication {
+        ConditionalEmit::Published { revision } => revision,
+        ConditionalEmit::Stale { current_revision } => {
+            return Err(AuraError::invalid(format!(
+                "stale observed projection replacement: expected {expected_revision}, current {current_revision}"
+            )));
+        }
+    };
+    let snapshot = owner
+        .snapshot(slot)
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
+    if snapshot.revision < revision {
+        return Err(AuraError::internal(
+            "published projection revision unavailable",
+        ));
     }
-
-    emit_signal(app_core, signal, state, signal_name).await
+    app_core
+        .write()
+        .await
+        .mirror_projection_snapshot(slot, snapshot, set_view);
+    Ok(())
 }
 
 /// Mirror the runtime-owned invitations signal into the ViewState cell.
@@ -64,9 +85,15 @@ where
 pub async fn mirror_invitations_signal_into_view(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let state = read_signal(app_core, &*INVITATIONS_SIGNAL, INVITATIONS_SIGNAL_NAME).await?;
+    let owner = app_core.read().await.projection_owner();
+    let snapshot = owner
+        .snapshot(ProjectionSlot::invitations())
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
     let mut core = app_core.write().await;
-    core.views_mut().set_invitations(state);
+    core.mirror_projection_snapshot(ProjectionSlot::invitations(), snapshot, |views, state| {
+        views.set_invitations(state);
+    });
     Ok(())
 }
 
@@ -77,9 +104,50 @@ pub async fn mirror_invitations_signal_into_view(
 pub async fn mirror_contacts_signal_into_view(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let state = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await?;
+    let owner = app_core.read().await.projection_owner();
+    let snapshot = owner
+        .snapshot(ProjectionSlot::contacts())
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
     let mut core = app_core.write().await;
-    core.views_mut().set_contacts(state);
+    core.mirror_projection_snapshot(ProjectionSlot::contacts(), snapshot, |views, state| {
+        views.set_contacts(state);
+    });
+    Ok(())
+}
+
+/// Mirror the current graph revision of chat into the render snapshot without
+/// republishing it or falling back to an older view cell.
+pub async fn mirror_chat_signal_into_view(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let owner = app_core.read().await.projection_owner();
+    let snapshot = owner
+        .snapshot(ProjectionSlot::chat())
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
+    app_core.write().await.mirror_projection_snapshot(
+        ProjectionSlot::chat(),
+        snapshot,
+        |views, state| views.set_chat(state),
+    );
+    Ok(())
+}
+
+/// Mirror the runtime recovery projection at its committed graph revision.
+pub async fn mirror_recovery_signal_into_view(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let owner = app_core.read().await.projection_owner();
+    let snapshot = owner
+        .snapshot(ProjectionSlot::recovery())
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
+    app_core.write().await.mirror_projection_snapshot(
+        ProjectionSlot::recovery(),
+        snapshot,
+        |views, state| views.set_recovery(state),
+    );
     Ok(())
 }
 
@@ -91,33 +159,110 @@ pub async fn mirror_contacts_signal_into_view(
 pub async fn mirror_homes_signal_into_view(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await?;
-    let anchor = {
-        let mut core = app_core.write().await;
-        let anchor = homes
-            .current_home()
-            .map(|home| (home.id, home.name.clone()));
-        if let Some((home_id, _)) = anchor {
-            core.set_active_home_selection(Some(home_id));
+    let gate = app_core.read().await.navigation_projection_gate();
+    let _navigation = gate.lock().await;
+    mirror_homes_signal_into_view_locked(app_core).await
+}
+
+/// Called only while the shared navigation gate is held. A runtime may still
+/// emit into the graph; re-read its revision after each mirror so an emission
+/// during a paired local transition is reconciled before this pass ends.
+pub(crate) async fn mirror_homes_signal_into_view_locked(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let owner = app_core.read().await.projection_owner();
+    loop {
+        let snapshot = owner
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .map_err(|error| AuraError::internal(error.to_string()))?;
+        let revision = snapshot.revision;
+        let homes = snapshot.value.clone();
+        let navigation_change = {
+            let mut core = app_core.write().await;
+            let previous_selection = core.active_home_selection();
+            let previous_position = core.views().get_neighborhood().position;
+            let copied = core.mirror_projection_snapshot(
+                ProjectionSlot::homes(),
+                snapshot,
+                |views, state| views.set_homes(state),
+            );
+            if !copied && core.mirrored_homes_revision() != Some(revision) {
+                None
+            } else {
+                let selected = homes
+                    .current_home()
+                    .map(|home| (home.id, home.name.clone()));
+                core.set_active_home_selection(selected.as_ref().map(|(id, _)| *id));
+                let should_reconcile = previous_selection != selected.as_ref().map(|(id, _)| *id)
+                    && previous_position.as_ref().is_some_and(|position| {
+                        Some(position.current_home_id) == previous_selection
+                    });
+                Some((
+                    selected,
+                    previous_selection,
+                    should_reconcile,
+                    previous_position,
+                ))
+            }
+        };
+        if let Some((selected, previous_selection, should_reconcile, previous_position)) =
+            navigation_change
+        {
+            let neighborhood = owner
+                .snapshot(ProjectionSlot::neighborhood())
+                .await
+                .map_err(|error| AuraError::internal(error.to_string()))?;
+            let needs_anchor =
+                neighborhood.value.home_home_id == ChannelId::default() && selected.is_some();
+            let needs_reconcile = should_reconcile
+                && neighborhood
+                    .value
+                    .position
+                    .as_ref()
+                    .is_some_and(|position| Some(position.current_home_id) == previous_selection);
+            if needs_anchor || needs_reconcile {
+                update_neighborhood_projection_observed(app_core, move |neighborhood| {
+                    if neighborhood.home_home_id == ChannelId::default() {
+                        if let Some((home_id, home_name)) = selected {
+                            neighborhood.home_home_id = home_id;
+                            neighborhood.home_name = home_name.clone();
+                            neighborhood.position =
+                                Some(crate::views::neighborhood::TraversalPosition {
+                                    current_home_id: home_id,
+                                    current_home_name: home_name,
+                                    depth: 2,
+                                    path: vec![home_id],
+                                });
+                        }
+                    } else if should_reconcile
+                        && neighborhood.position.as_ref().is_some_and(|position| {
+                            Some(position.current_home_id) == previous_selection
+                        })
+                    {
+                        neighborhood.position = selected.map(|(home_id, home_name)| {
+                            crate::views::neighborhood::TraversalPosition {
+                                current_home_id: home_id,
+                                current_home_name: home_name,
+                                depth: previous_position
+                                    .as_ref()
+                                    .map_or(2, |position| position.depth),
+                                path: vec![home_id],
+                            }
+                        });
+                    }
+                })
+                .await?;
+            }
         }
-        core.views_mut().set_homes(homes);
-        let neighborhood = core.views().get_neighborhood();
-        anchor
-            .filter(|_| neighborhood.home_home_id == ChannelId::default())
-            .map(|(home_id, home_name)| (neighborhood, home_id, home_name))
-    };
-    let Some((mut neighborhood, home_id, home_name)) = anchor else {
-        return Ok(());
-    };
-    neighborhood.home_home_id = home_id;
-    neighborhood.home_name = home_name.clone();
-    neighborhood.position = Some(crate::views::neighborhood::TraversalPosition {
-        current_home_id: home_id,
-        current_home_name: home_name,
-        depth: 2,
-        path: vec![home_id],
-    });
-    replace_neighborhood_projection_observed(app_core, neighborhood).await
+        let latest = owner
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .map_err(|error| AuraError::internal(error.to_string()))?;
+        if latest.revision == revision {
+            return Ok(());
+        }
+    }
 }
 
 pub async fn homes_signal_snapshot(
@@ -126,87 +271,40 @@ pub async fn homes_signal_snapshot(
     read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await
 }
 
-pub async fn replace_chat_projection_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    state: ChatState,
-) -> Result<(), AuraError> {
-    replace_projection_observed(
-        app_core,
-        state,
-        |core, state| {
-            // OWNERSHIP: observed-display-update
-            core.views_mut().set_chat(state);
-        },
-        &*CHAT_SIGNAL,
-        CHAT_SIGNAL_NAME,
-    )
-    .await
-}
-
+#[cfg(test)]
 pub async fn replace_recovery_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
+    expected_revision: u64,
     state: RecoveryState,
 ) -> Result<(), AuraError> {
     replace_projection_observed(
         app_core,
+        expected_revision,
         state,
-        |core, state| {
+        ProjectionSlot::recovery(),
+        |views, state| {
             // OWNERSHIP: observed-display-update
-            core.views_mut().set_recovery(state);
+            views.set_recovery(state);
         },
-        &*RECOVERY_SIGNAL,
-        RECOVERY_SIGNAL_NAME,
     )
     .await
 }
 
+#[cfg(test)]
 pub async fn replace_homes_projection_observed(
     app_core: &Arc<RwLock<AppCore>>,
+    expected_revision: u64,
     state: HomesState,
 ) -> Result<(), AuraError> {
     replace_projection_observed(
         app_core,
+        expected_revision,
         state,
-        |core, state| {
+        ProjectionSlot::homes(),
+        |views, state| {
             // OWNERSHIP: observed-display-update
-            core.views_mut().set_homes(state);
+            views.set_homes(state);
         },
-        &*HOMES_SIGNAL,
-        HOMES_SIGNAL_NAME,
-    )
-    .await
-}
-
-pub async fn replace_contacts_projection_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    state: ContactsState,
-) -> Result<(), AuraError> {
-    replace_projection_observed(
-        app_core,
-        state,
-        |core, state| {
-            // OWNERSHIP: observed-display-update
-            core.views_mut().set_contacts(state);
-        },
-        &*CONTACTS_SIGNAL,
-        CONTACTS_SIGNAL_NAME,
-    )
-    .await
-}
-
-pub async fn replace_neighborhood_projection_observed(
-    app_core: &Arc<RwLock<AppCore>>,
-    state: NeighborhoodState,
-) -> Result<(), AuraError> {
-    replace_projection_observed(
-        app_core,
-        state,
-        |core, state| {
-            // OWNERSHIP: observed-display-update
-            core.views_mut().set_neighborhood(state);
-        },
-        &*NEIGHBORHOOD_SIGNAL,
-        NEIGHBORHOOD_SIGNAL_NAME,
     )
     .await
 }
@@ -218,27 +316,56 @@ pub async fn replace_neighborhood_projection_observed(
 /// 2. CHAT_SIGNAL (for ReactiveEffects subscribers)
 ///
 /// OWNERSHIP: observed-display-update
-/// The chat state observed updates build on: the live `CHAT_SIGNAL` (the
-/// runtime view emits there), falling back to the ViewState snapshot when
-/// the signal is not available. Building on the snapshot alone would write
-/// back state the runtime has since changed (e.g. a channel just left).
-async fn current_chat_projection(app_core: &Arc<RwLock<AppCore>>) -> ChatState {
-    match read_signal(app_core, &*CHAT_SIGNAL, CHAT_SIGNAL_NAME).await {
-        Ok(chat) => chat,
-        Err(_) => app_core.read().await.snapshot().chat,
-    }
+async fn update_projection_observed<T, R>(
+    app_core: &Arc<RwLock<AppCore>>,
+    slot: ProjectionSlot<T>,
+    update: impl FnOnce(&mut T) -> R,
+    set_view: impl FnOnce(&mut crate::views::ViewState, T),
+) -> Result<R, AuraError>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let owner = app_core.read().await.projection_owner();
+    let (result, snapshot) = owner
+        .update(slot, |state| Ok::<R, AuraError>(update(state)))
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))??;
+    app_core
+        .write()
+        .await
+        .mirror_projection_snapshot(slot, snapshot, set_view);
+    Ok(result)
+}
+
+async fn try_update_projection_observed<T, R>(
+    app_core: &Arc<RwLock<AppCore>>,
+    slot: ProjectionSlot<T>,
+    update: impl FnOnce(&mut T) -> Result<R, AuraError>,
+    set_view: impl FnOnce(&mut crate::views::ViewState, T),
+) -> Result<R, AuraError>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let owner = app_core.read().await.projection_owner();
+    let (result, snapshot) = owner
+        .update(slot, update)
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))??;
+    app_core
+        .write()
+        .await
+        .mirror_projection_snapshot(slot, snapshot, set_view);
+    Ok(result)
 }
 
 pub async fn update_chat_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut ChatState) -> T,
 ) -> Result<T, AuraError> {
-    let mut state = current_chat_projection(app_core).await;
-    let output = update(&mut state);
-
-    replace_chat_projection_observed(app_core, state).await?;
-
-    Ok(output)
+    update_projection_observed(app_core, ProjectionSlot::chat(), update, |views, state| {
+        views.set_chat(state);
+    })
+    .await
 }
 
 /// Apply an authoritative chat fact to the local chat projection through the
@@ -255,18 +382,24 @@ pub async fn reduce_chat_fact_observed(
 
     let reducer = ChatViewReducer;
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None);
-    let state = {
-        let mut state = current_chat_projection(app_core).await;
-        for delta in deltas {
-            let Some(chat_delta) = downcast_delta::<ChatDelta>(&delta) else {
-                continue;
-            };
-            apply_chat_delta_reduced(&mut state, chat_delta.clone())?;
-        }
-        state
-    };
-
-    replace_chat_projection_observed(app_core, state).await?;
+    let owner = app_core.read().await.projection_owner();
+    let (_, snapshot) = owner
+        .update(ProjectionSlot::chat(), |state| {
+            for delta in deltas {
+                let Some(chat_delta) = downcast_delta::<ChatDelta>(&delta) else {
+                    continue;
+                };
+                apply_chat_delta_reduced(state, chat_delta.clone())?;
+            }
+            Ok::<(), AuraError>(())
+        })
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))??;
+    app_core.write().await.mirror_projection_snapshot(
+        ProjectionSlot::chat(),
+        snapshot,
+        |views, state| views.set_chat(state),
+    );
     Ok(())
 }
 
@@ -497,16 +630,26 @@ pub async fn update_recovery_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut RecoveryState) -> T,
 ) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().recovery;
-        let output = update(&mut state);
-        (output, state)
-    };
+    update_projection_observed(
+        app_core,
+        ProjectionSlot::recovery(),
+        update,
+        |views, state| views.set_recovery(state),
+    )
+    .await
+}
 
-    replace_recovery_projection_observed(app_core, state).await?;
-
-    Ok(output)
+pub async fn try_update_recovery_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut RecoveryState) -> Result<T, AuraError>,
+) -> Result<T, AuraError> {
+    try_update_projection_observed(
+        app_core,
+        ProjectionSlot::recovery(),
+        update,
+        |views, state| views.set_recovery(state),
+    )
+    .await
 }
 
 /// Observed-only projection update helper for contacts state.
@@ -520,15 +663,13 @@ pub async fn update_contacts_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut ContactsState) -> T,
 ) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().contacts;
-        (update(&mut state), state)
-    };
-
-    replace_contacts_projection_observed(app_core, state).await?;
-
-    Ok(output)
+    update_projection_observed(
+        app_core,
+        ProjectionSlot::contacts(),
+        update,
+        |views, state| views.set_contacts(state),
+    )
+    .await
 }
 
 /// Observed-only projection update helper for homes state.
@@ -542,16 +683,39 @@ pub async fn update_homes_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut HomesState) -> T,
 ) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().homes;
-        let output = update(&mut state);
-        (output, state)
-    };
+    update_homes_projection_with_revision(app_core, update)
+        .await
+        .map(|(output, _)| output)
+}
 
-    replace_homes_projection_observed(app_core, state).await?;
+pub async fn update_homes_projection_with_revision<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut HomesState) -> T,
+) -> Result<(T, u64), AuraError> {
+    let owner = app_core.read().await.projection_owner();
+    let (output, snapshot) = owner
+        .update(ProjectionSlot::homes(), |homes| {
+            Ok::<T, AuraError>(update(homes))
+        })
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))??;
+    let revision = snapshot.revision;
+    app_core.write().await.mirror_projection_snapshot(
+        ProjectionSlot::homes(),
+        snapshot,
+        |views, state| views.set_homes(state),
+    );
+    Ok((output, revision))
+}
 
-    Ok(output)
+pub async fn try_update_homes_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut HomesState) -> Result<T, AuraError>,
+) -> Result<T, AuraError> {
+    try_update_projection_observed(app_core, ProjectionSlot::homes(), update, |views, state| {
+        views.set_homes(state);
+    })
+    .await
 }
 
 /// Observed-only projection update helper for neighborhood state.
@@ -565,15 +729,26 @@ pub async fn update_neighborhood_projection_observed<T>(
     app_core: &Arc<RwLock<AppCore>>,
     update: impl FnOnce(&mut NeighborhoodState) -> T,
 ) -> Result<T, AuraError> {
-    let (output, state) = {
-        let core = app_core.read().await;
-        let mut state = core.snapshot().neighborhood;
-        (update(&mut state), state)
-    };
+    update_projection_observed(
+        app_core,
+        ProjectionSlot::neighborhood(),
+        update,
+        |views, state| views.set_neighborhood(state),
+    )
+    .await
+}
 
-    replace_neighborhood_projection_observed(app_core, state).await?;
-
-    Ok(output)
+pub async fn try_update_neighborhood_projection_observed<T>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: impl FnOnce(&mut NeighborhoodState) -> Result<T, AuraError>,
+) -> Result<T, AuraError> {
+    try_update_projection_observed(
+        app_core,
+        ProjectionSlot::neighborhood(),
+        update,
+        |views, state| views.set_neighborhood(state),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -718,7 +893,15 @@ mod tests {
             Some(home_id),
         );
 
-        replace_homes_projection_observed(&app_core, homes.clone())
+        let revision = app_core
+            .read()
+            .await
+            .projection_owner()
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .expect("read homes revision")
+            .revision;
+        replace_homes_projection_observed(&app_core, revision, homes.clone())
             .await
             .expect("replace homes projection");
 
@@ -757,7 +940,15 @@ mod tests {
             Vec::new(),
         );
 
-        replace_recovery_projection_observed(&app_core, recovery.clone())
+        let revision = app_core
+            .read()
+            .await
+            .projection_owner()
+            .snapshot(ProjectionSlot::recovery())
+            .await
+            .expect("read recovery revision")
+            .revision;
+        replace_recovery_projection_observed(&app_core, revision, recovery.clone())
             .await
             .expect("replace recovery projection");
 
@@ -773,6 +964,150 @@ mod tests {
         assert_eq!(signal_state.threshold(), recovery.threshold());
         assert_eq!(view_state.guardian_count(), recovery.guardian_count());
         assert_eq!(view_state.threshold(), recovery.threshold());
+    }
+
+    #[tokio::test]
+    async fn delayed_projection_mirror_and_stale_replacement_cannot_regress_view() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+        let owner = app_core.read().await.projection_owner();
+        let before = owner
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .expect("initial homes snapshot");
+        let first_id = ChannelId::from_bytes(hash(b"projection-revision-first"));
+        let second_id = ChannelId::from_bytes(hash(b"projection-revision-second"));
+        let make_home = |id| {
+            crate::views::home::HomeState::new(
+                id,
+                Some(id.to_string()),
+                AuthorityId::new_from_entropy([21u8; 32]),
+                1,
+                ContextId::new_from_entropy([22u8; 32]),
+            )
+        };
+        update_homes_projection_observed(&app_core, |homes| {
+            homes.add_home(make_home(first_id));
+        })
+        .await
+        .expect("first update");
+        let stale = owner
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .expect("first published snapshot");
+        update_homes_projection_observed(&app_core, |homes| {
+            homes.add_home(make_home(second_id));
+        })
+        .await
+        .expect("second update");
+
+        let mirrored = app_core.write().await.mirror_projection_snapshot(
+            ProjectionSlot::homes(),
+            stale.clone(),
+            |views, state| views.set_homes(state),
+        );
+        assert!(!mirrored, "older async mirror must not overwrite the view");
+        let error = replace_homes_projection_observed(&app_core, before.revision, stale.value)
+            .await
+            .expect_err("replacement based on an old revision must fail");
+        assert!(error.to_string().contains("stale observed projection"));
+        let state = app_core.read().await.snapshot();
+        assert!(state.homes.has_home(&first_id));
+        assert!(state.homes.has_home(&second_id));
+        assert_eq!(
+            state.projection_source_revisions.homes,
+            Some(
+                owner
+                    .snapshot(ProjectionSlot::homes())
+                    .await
+                    .unwrap()
+                    .revision
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn homes_mirror_clears_active_selection_after_selected_home_removal() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+        let home_id = ChannelId::from_bytes(hash(b"homes-mirror-removal"));
+        update_homes_projection_observed(&app_core, |homes| {
+            homes.add_home(crate::views::home::HomeState::new(
+                home_id,
+                Some("Removed home".to_string()),
+                AuthorityId::new_from_entropy([31u8; 32]),
+                1,
+                ContextId::new_from_entropy([32u8; 32]),
+            ));
+            homes.select_home(Some(home_id));
+        })
+        .await
+        .unwrap();
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+        assert_eq!(app_core.read().await.active_home_selection(), Some(home_id));
+
+        update_homes_projection_observed(&app_core, |homes| {
+            homes.remove_home(&home_id);
+        })
+        .await
+        .unwrap();
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+        assert_eq!(app_core.read().await.active_home_selection(), None);
+    }
+
+    #[tokio::test]
+    async fn runtime_homes_revision_reconciles_navigation_after_gate_releases() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+        let first_id = ChannelId::from_bytes(hash(b"runtime-navigation-first"));
+        let second_id = ChannelId::from_bytes(hash(b"runtime-navigation-second"));
+        for (home_id, name) in [(first_id, "First"), (second_id, "Second")] {
+            update_homes_projection_observed(&app_core, move |homes| {
+                homes.add_home(crate::views::home::HomeState::new(
+                    home_id,
+                    Some(name.to_string()),
+                    AuthorityId::new_from_entropy([41u8; 32]),
+                    1,
+                    ContextId::new_from_entropy([42u8; 32]),
+                ));
+                homes.select_home(Some(first_id));
+            })
+            .await
+            .unwrap();
+        }
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+        let gate = app_core.read().await.navigation_projection_gate();
+        let held = gate.lock().await;
+        let owner = app_core.read().await.projection_owner();
+        owner
+            .update(ProjectionSlot::homes(), |homes| {
+                homes.select_home(Some(second_id));
+                Ok::<(), AuraError>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        use futures::FutureExt;
+        let mirror = mirror_homes_signal_into_view(&app_core);
+        futures::pin_mut!(mirror);
+        assert!((&mut mirror).now_or_never().is_none());
+        drop(held);
+        mirror.await.unwrap();
+
+        let core = app_core.read().await;
+        assert_eq!(core.active_home_selection(), Some(second_id));
+        assert_eq!(
+            core.views().get_homes().current_home_id().copied(),
+            Some(second_id)
+        );
+        assert_eq!(
+            core.views()
+                .get_neighborhood()
+                .position
+                .as_ref()
+                .map(|position| position.current_home_id),
+            Some(second_id)
+        );
     }
 
     #[test]
@@ -802,14 +1137,14 @@ mod tests {
                 .unwrap_or_else(|error| panic!("failed to read settings.rs: {error}"));
         assert!(!settings_source.contains("async fn emit_recovery_state_observed("));
         assert!(!settings_source.contains("core.views_mut().set_recovery("));
-        assert!(settings_source.contains("replace_homes_projection_observed"));
-        assert!(settings_source.contains("replace_recovery_projection_observed"));
+        assert!(settings_source.contains("try_update_homes_projection_observed"));
+        assert!(settings_source.contains("try_update_recovery_projection_observed"));
 
         let system_refresh_source = std::fs::read_to_string(
             repo_root.join("crates/aura-app/src/workflows/system/refresh.rs"),
         )
         .unwrap_or_else(|error| panic!("failed to read system/refresh.rs: {error}"));
         assert!(!system_refresh_source.contains("emit_signal(app_core, &*CHAT_SIGNAL"));
-        assert!(system_refresh_source.contains("replace_chat_projection_observed"));
+        assert!(system_refresh_source.contains("mirror_chat_signal_into_view"));
     }
 }

@@ -6,15 +6,14 @@
 use crate::workflows::channel_ref::ChannelSelector;
 use crate::workflows::error::WorkflowError;
 use crate::workflows::observed_projection::{
-    homes_signal_snapshot, replace_homes_projection_observed, replace_recovery_projection_observed,
+    try_update_homes_projection_observed, try_update_recovery_projection_observed,
 };
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
     runtime_bridge::AuthoritativeChannelBinding,
     signal_defs::{
-        AuthorityInfo, DeviceInfo, SettingsState, RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
-        SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
+        AuthorityInfo, DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME,
     },
     thresholds::normalize_recovery_threshold,
     AppCore,
@@ -231,36 +230,29 @@ pub async fn set_channel_mode_resolved(
             channel: resolved_channel.to_string(),
         })
     })?;
-    let mut homes = homes_signal_snapshot(app_core).await?;
+    try_update_homes_projection_observed(app_core, |homes| {
+        let target_home_id = if homes.has_home(&resolved_channel) {
+            Some(resolved_channel)
+        } else {
+            homes
+                .iter()
+                .filter(|(_, home)| home.context_id == Some(context_id))
+                .max_by_key(|(_, home)| home.member_count)
+                .map(|(home_id, _)| *home_id)
+        };
 
-    let target_home_id = if homes.has_home(&resolved_channel) {
-        Some(resolved_channel)
-    } else {
-        homes
-            .iter()
-            .filter(|(_, home)| home.context_id == Some(context_id))
-            .max_by_key(|(_, home)| home.member_count)
-            .map(|(home_id, _)| *home_id)
-    };
-
-    if target_home_id.is_none() {
-        return Err(AuraError::from(
-            WorkflowError::MissingAuthoritativeHomeProjection {
+        let home_id = target_home_id.ok_or_else(|| {
+            AuraError::from(WorkflowError::MissingAuthoritativeHomeProjection {
                 context: context_id.to_string(),
-            },
-        ));
-    }
-
-    let Some(home_id) = target_home_id else {
-        return Err(AuraError::permission_denied(resolved_channel.to_string()));
-    };
-
-    let home = homes.home_mut(&home_id).ok_or_else(|| {
-        AuraError::permission_denied("Set channel mode requires a valid home context")
-    })?;
-    home.mode_flags = Some(flags);
-
-    replace_homes_projection_observed(app_core, homes).await
+            })
+        })?;
+        let home = homes.home_mut(&home_id).ok_or_else(|| {
+            AuraError::permission_denied("Set channel mode requires a valid home context")
+        })?;
+        home.mode_flags = Some(flags);
+        Ok(())
+    })
+    .await
 }
 
 async fn set_channel_mode_bound(
@@ -268,33 +260,30 @@ async fn set_channel_mode_bound(
     binding: AuthoritativeChannelBinding,
     flags: String,
 ) -> Result<(), AuraError> {
-    let mut homes = homes_signal_snapshot(app_core).await?;
+    try_update_homes_projection_observed(app_core, |homes| {
+        let target_home_id = if homes.has_home(&binding.channel_id) {
+            Some(binding.channel_id)
+        } else {
+            homes
+                .iter()
+                .filter(|(_, home)| home.context_id == Some(binding.context_id))
+                .max_by_key(|(_, home)| home.member_count)
+                .map(|(home_id, _)| *home_id)
+        };
 
-    let target_home_id = if homes.has_home(&binding.channel_id) {
-        Some(binding.channel_id)
-    } else {
-        homes
-            .iter()
-            .filter(|(_, home)| home.context_id == Some(binding.context_id))
-            .max_by_key(|(_, home)| home.member_count)
-            .map(|(home_id, _)| *home_id)
-    };
-
-    let Some(home_id) = target_home_id else {
-        return Err(AuraError::from(
-            WorkflowError::MissingAuthoritativeHomeProjection {
+        let home_id = target_home_id.ok_or_else(|| {
+            AuraError::from(WorkflowError::MissingAuthoritativeHomeProjection {
                 context: binding.context_id.to_string(),
-            },
-        ));
-    };
-
-    let home = homes.home_mut(&home_id).ok_or_else(|| {
-        AuraError::permission_denied("Set channel mode requires a valid home context")
-    })?;
-    home.context_id = Some(binding.context_id);
-    home.mode_flags = Some(flags);
-
-    replace_homes_projection_observed(app_core, homes).await
+            })
+        })?;
+        let home = homes.home_mut(&home_id).ok_or_else(|| {
+            AuraError::permission_denied("Set channel mode requires a valid home context")
+        })?;
+        home.context_id = Some(binding.context_id);
+        home.mode_flags = Some(flags);
+        Ok(())
+    })
+    .await
 }
 
 /// Update guardian recovery threshold configuration.
@@ -311,30 +300,33 @@ pub async fn update_threshold(
         return Err(AuraError::invalid("Threshold N must be greater than 0"));
     }
 
-    let mut recovery = read_signal(app_core, &*RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME).await?;
-    let guardian_count = recovery.guardian_count() as u8;
+    let normalized_k = try_update_recovery_projection_observed(app_core, |recovery| {
+        let guardian_count = recovery.guardian_count() as u8;
+        if guardian_count == 0 {
+            return Err(AuraError::invalid(
+                "No guardians configured. Add guardians before setting a threshold.",
+            ));
+        }
+        if threshold_n != guardian_count {
+            return Err(AuraError::invalid(format!(
+                "Threshold N ({threshold_n}) must match guardian count ({guardian_count})"
+            )));
+        }
+        let normalized_k = normalize_recovery_threshold(threshold_k, threshold_n);
+        recovery.set_threshold(normalized_k as u32);
+        Ok(normalized_k)
+    })
+    .await?;
 
-    if guardian_count == 0 {
-        return Err(AuraError::invalid(
-            "No guardians configured. Add guardians before setting a threshold.",
-        ));
-    }
-
-    if threshold_n != guardian_count {
-        return Err(AuraError::invalid(format!(
-            "Threshold N ({threshold_n}) must match guardian count ({guardian_count})"
-        )));
-    }
-
-    let normalized_k = normalize_recovery_threshold(threshold_k, threshold_n);
-
-    recovery.set_threshold(normalized_k as u32);
-    replace_recovery_projection_observed(app_core, recovery).await?;
-
-    let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
-    state.threshold_k = normalized_k;
-    state.threshold_n = threshold_n;
-    emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await?;
+    let reactive = app_core.read().await.reactive().clone();
+    let _ = reactive
+        .update_signal(&*SETTINGS_SIGNAL, |state| {
+            state.threshold_k = normalized_k;
+            state.threshold_n = threshold_n;
+            Ok::<(), AuraError>(())
+        })
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))??;
 
     Ok(())
 }

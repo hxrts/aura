@@ -249,6 +249,10 @@ This flow shows how facts propagate to UI. Services emit facts rather than direc
 
 Domain signals are driven by signal views in the reactive scheduler. `ChatSignalView`, `ContactsSignalView`, and `InvitationsSignalView` process facts and emit full state snapshots to their respective signals.
 
+The six observed entity projections (chat, contacts, homes, invitations, recovery, and neighborhood) have one typed publication path through `aura-app::ProjectionOwner`. A synchronous delta updates the current graph value atomically and returns the committed value with a source revision. A full replacement derived from an earlier snapshot must compare that revision before publication; stale replacements do not emit. Failed deltas leave the graph value unchanged. `AppCore` copies a projection into `ViewState` only when its source revision is newer than the last copy, so a delayed refresh cannot regress the render snapshot.
+
+App-owned navigation transitions that pair a homes selection with a neighborhood position share a gate with the homes mirror. The mirror revalidates the homes source revision after reconciliation and retries when a runtime publication arrives during the transition. The gate serializes local paired transitions; runtime publications remain graph-owned and are reconciled at the next mirror pass.
+
 ```rust
 // Define application signals
 pub static CHAT_SIGNAL: LazyLock<Signal<ChatState>> =
@@ -440,9 +444,11 @@ The runtime must preserve coherence-sensitive session and edge state, harmony-se
 The `FactRegistry` provides domain-specific fact type registration and reduction for reactive scheduling. It lives in `aura-journal` and is integrated via `AuraEffectSystem::fact_registry()`. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for home and mute facts.
 
 Reactive subscription policy is explicit:
+- signal source revisions are distinct from frontend semantic and render revisions; exports observing the same graph compare source revisions directly, while independent LAN runtimes compare each export to its own `AppCore` source revision and require their entity sets to converge
 - application signal setup ensures every required signal individually; retry after partial setup preserves registered values and subscriptions
 - query-bound signal setup registers the same required signal set; a failed query binding leaves no partial binding and a later retry can attach it without resetting the signal
 - runtime refresh hooks attach one receiver per required signal and acknowledge every listener's startup before reporting readiness; failure rolls back the group and permits retry with a typed reactive failure
+- chat and recovery have initial replay mirrors during hook installation; the runtime recovery projection also has an owned listener that copies later `RECOVERY_SIGNAL` revisions into the app view, so exported snapshots converge after replay
 - each attached signal has one owned refresh loop: it receives an update, completes one refresh pass, then receives again; a second task cannot race that signal's refresh or clear its pending work
 - detaching an `AppCore` runtime cancels its hook group before another generation attaches
 - subscribing to an unregistered signal fails fast with `ReactiveError::SignalNotFound`

@@ -448,6 +448,7 @@ fn build_authoritative_ui_snapshot(
         open_modal,
         readiness,
         revision,
+        projection_source_revisions: app_snapshot.projection_source_revisions,
         quiescence: QuiescenceSnapshot::derive(readiness, open_modal, &operations),
         selections,
         lists,
@@ -647,5 +648,53 @@ mod tests {
             .find(|list| list.id == ListId::Navigation)
             .unwrap_or_else(|| panic!("navigation list should exist"));
         assert!(navigation.items.iter().all(|item| !item.selected));
+    }
+
+    #[test]
+    fn tui_snapshot_exports_home_entities_with_their_app_source_revision() {
+        use super::authoritative_ui_snapshot;
+        use crate::tui::TuiState;
+        use aura_app::ui::contract::ListId;
+        use aura_app::ui::types::HomeState;
+        use aura_app::ui::types::StateSnapshot;
+        use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+
+        let home_id = ChannelId::from_bytes([77u8; 32]);
+        let mut app_snapshot = StateSnapshot::default();
+        app_snapshot.homes.add_home(HomeState::new(
+            home_id,
+            Some("revision-home".to_string()),
+            AuthorityId::new_from_entropy([78u8; 32]),
+            0,
+            ContextId::new_from_entropy([79u8; 32]),
+        ));
+        app_snapshot.neighborhood.home_home_id = home_id;
+        app_snapshot.neighborhood.home_name = "revision-home".to_string();
+        app_snapshot.projection_source_revisions.homes = Some(7);
+        app_snapshot.projection_source_revisions.neighborhood = Some(4);
+
+        let snapshot = authoritative_ui_snapshot(
+            &TuiState::new(),
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+                bootstrap_candidates: &[],
+            },
+        );
+
+        assert_eq!(snapshot.projection_source_revisions.homes, Some(7));
+        assert_eq!(snapshot.projection_source_revisions.neighborhood, Some(4));
+        let homes = snapshot
+            .lists
+            .iter()
+            .find(|list| list.id == ListId::Homes)
+            .expect("homes list is exported");
+        assert!(homes
+            .items
+            .iter()
+            .any(|item| item.id == home_id.to_string()));
     }
 }

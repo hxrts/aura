@@ -1,10 +1,16 @@
 //! Runtime-backed query and operation access for `AppCore`.
 
 use super::state::{AppCore, APP_RUNTIME_OPERATION_TIMEOUT, APP_RUNTIME_QUERY_TIMEOUT};
-use crate::core::{IntentError, StateSnapshot};
+use crate::core::{IntentError, ProjectionSourceRevisions, StateSnapshot};
+use crate::effects::reactive::SignalSnapshot;
+use crate::projection_owner::{ProjectionOwner, ProjectionSlot};
 use crate::runtime_bridge::{
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, RuntimeBridge,
     SettingsBridgeState, SyncStatus as RuntimeSyncStatus,
+};
+use crate::signal_defs::{
+    CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
+    RECOVERY_SIGNAL,
 };
 use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::views::ViewState;
@@ -63,6 +69,20 @@ impl AppCore {
         self.active_home_selection = home_id;
     }
 
+    /// Apply a selection produced by a homes projection update only while its
+    /// revision remains the latest one mirrored into the app view.
+    pub(crate) fn set_active_home_selection_if_projection_current(
+        &mut self,
+        revision: u64,
+        home_id: ChannelId,
+    ) -> bool {
+        if self.projection_revisions.get(HOMES_SIGNAL.id()).copied() != Some(revision) {
+            return false;
+        }
+        self.active_home_selection = Some(home_id);
+        true
+    }
+
     /// Return a clone of the authoritative semantic-facts store.
     pub fn authoritative_semantic_facts(&self) -> Vec<AuthoritativeSemanticFact> {
         self.authoritative_semantic_facts.clone()
@@ -75,7 +95,19 @@ impl AppCore {
 
     /// Get a snapshot of the current state.
     pub fn snapshot(&self) -> StateSnapshot {
-        self.views.snapshot()
+        let mut snapshot = self.views.snapshot();
+        let revision = |id: &aura_core::effects::reactive::SignalId| {
+            self.projection_revisions.get(id).copied()
+        };
+        snapshot.projection_source_revisions = ProjectionSourceRevisions {
+            chat: revision(CHAT_SIGNAL.id()),
+            contacts: revision(CONTACTS_SIGNAL.id()),
+            homes: revision(HOMES_SIGNAL.id()),
+            invitations: revision(INVITATIONS_SIGNAL.id()),
+            recovery: revision(RECOVERY_SIGNAL.id()),
+            neighborhood: revision(NEIGHBORHOOD_SIGNAL.id()),
+        };
+        snapshot
     }
 
     /// Get access to the view state for reactive subscriptions.
@@ -90,6 +122,7 @@ impl AppCore {
     }
 
     /// Get mutable access to view state (for internal updates).
+    #[cfg(test)]
     pub(crate) fn views_mut(&mut self) -> &mut ViewState {
         &mut self.views
     }
@@ -97,6 +130,48 @@ impl AppCore {
     /// Get a reference to the reactive handler.
     pub fn reactive(&self) -> &ReactiveHandler {
         &self.reactive
+    }
+
+    /// A cloneable handle to the serialized observed-projection writer.
+    pub fn projection_owner(&self) -> ProjectionOwner {
+        ProjectionOwner::new(self.reactive.clone())
+    }
+
+    /// Gate for app-owned navigation transitions spanning homes and
+    /// neighborhood projection cells. Runtime graph publications converge
+    /// through the homes mirror, which takes the same gate.
+    pub(crate) fn navigation_projection_gate(&self) -> Arc<async_lock::Mutex<()>> {
+        Arc::clone(&self.navigation_projection_gate)
+    }
+
+    /// Last homes graph revision copied into the app view.
+    pub(crate) fn mirrored_homes_revision(&self) -> Option<u64> {
+        self.projection_revisions.get(HOMES_SIGNAL.id()).copied()
+    }
+
+    /// Copy a published projection into the snapshot view only when its graph
+    /// revision is newer than the last copy. An older async mirror cannot undo
+    /// a newer runtime or workflow publication.
+    pub(crate) fn mirror_projection_snapshot<T>(
+        &mut self,
+        slot: ProjectionSlot<T>,
+        snapshot: SignalSnapshot<T>,
+        set_view: impl FnOnce(&mut ViewState, T),
+    ) -> bool
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let id = slot.signal().id().clone();
+        if self
+            .projection_revisions
+            .get(&id)
+            .is_some_and(|revision| *revision >= snapshot.revision)
+        {
+            return false;
+        }
+        set_view(&mut self.views, snapshot.value);
+        self.projection_revisions.insert(id, snapshot.revision);
+        true
     }
 
     /// Sign a tree operation and return an attested operation.

@@ -8,10 +8,10 @@
 //! - Applies the relevant domain facts to its aggregate state
 //! - Emits a full snapshot into the corresponding signal (eventual consistency)
 
+use aura_app::effects::reactive::ConditionalEmit;
 use aura_app::errors::AppError;
-use aura_app::signal_defs::{
-    CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
-};
+use aura_app::projection_owner::{ProjectionOwner, ProjectionSlot};
+use aura_app::signal_defs::{ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::views::{
     chat::{
         note_to_self_channel_id, Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
@@ -21,11 +21,11 @@ use aura_app::views::{
         BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
         PinnedMessageMeta,
     },
-    invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationsState},
+    invitations::{Invitation, InvitationDirection, InvitationStatus},
     recovery::{Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState},
 };
 use aura_app::ReactiveHandler;
-use aura_core::effects::reactive::{ReactiveEffects, Signal};
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -69,57 +69,6 @@ async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
         .await;
 }
 
-async fn read_registered_signal<T>(
-    reactive: &ReactiveHandler,
-    signal: &Signal<T>,
-    signal_label: &str,
-) -> Result<T, String>
-where
-    T: Clone + Send + Sync + 'static,
-{
-    reactive.read(signal).await.map_err(|error| {
-        format!("{signal_label} materialization requires registered {signal_label}: {error}")
-    })
-}
-
-async fn emit_registered_signal<T>(
-    reactive: &ReactiveHandler,
-    signal: &Signal<T>,
-    value: T,
-    signal_label: &str,
-) -> Result<(), String>
-where
-    T: Clone + Send + Sync + 'static,
-{
-    reactive
-        .emit(signal, value)
-        .await
-        .map_err(|error| format!("emit {signal_label}: {error}"))
-}
-
-async fn emit_signal_or_internal_error<T>(
-    reactive: &ReactiveHandler,
-    signal: &Signal<T>,
-    value: T,
-    signal_label: &str,
-) where
-    T: Clone + Send + Sync + 'static,
-{
-    if let Err(error) = reactive.emit(signal, value).await {
-        emit_internal_error(reactive, format!("Failed to emit {signal_label}: {error}")).await;
-    }
-}
-
-async fn read_registered_homes_state(reactive: &ReactiveHandler) -> Result<HomesState, String> {
-    read_registered_signal(reactive, &*HOMES_SIGNAL, "homes signal").await
-}
-
-async fn read_registered_invitations_state(
-    reactive: &ReactiveHandler,
-) -> Result<InvitationsState, String> {
-    read_registered_signal(reactive, &*INVITATIONS_SIGNAL, "invitations signal").await
-}
-
 pub(crate) async fn materialize_home_signal_for_channel_invitation(
     reactive: &ReactiveHandler,
     own_authority: AuthorityId,
@@ -129,79 +78,86 @@ pub(crate) async fn materialize_home_signal_for_channel_invitation(
     context_id: ContextId,
     now_ms: u64,
 ) -> Result<(), String> {
-    let mut homes = read_registered_homes_state(reactive).await?;
-    let mut changed = false;
+    let result = ProjectionOwner::new(reactive.clone())
+        .update(ProjectionSlot::homes(), |homes| -> Result<(), ()> {
+            let mut changed = false;
 
-    if !homes.has_home(&channel_id) {
-        let mut home = HomeState::new(
-            channel_id,
-            Some(home_name.to_string()),
-            sender_id,
-            now_ms,
-            context_id,
-        );
+            if !homes.has_home(&channel_id) {
+                let mut home = HomeState::new(
+                    channel_id,
+                    Some(home_name.to_string()),
+                    sender_id,
+                    now_ms,
+                    context_id,
+                );
 
-        if sender_id != own_authority {
-            if let Some(owner) = home.member_mut(&sender_id) {
-                owner.name = sender_id.to_string();
-                owner.is_online = false;
-                owner.last_seen = Some(now_ms);
+                if sender_id != own_authority {
+                    if let Some(owner) = home.member_mut(&sender_id) {
+                        owner.name = sender_id.to_string();
+                        owner.is_online = false;
+                        owner.last_seen = Some(now_ms);
+                    }
+                    home.my_role = HomeRole::Participant;
+                }
+
+                if home.member(&own_authority).is_none() {
+                    home.add_member(HomeMember {
+                        id: own_authority,
+                        name: "You".to_string(),
+                        role: HomeRole::Participant,
+                        is_online: true,
+                        joined_at: now_ms,
+                        last_seen: Some(now_ms),
+                        storage_allocated: HomeState::MEMBER_ALLOCATION,
+                    });
+                }
+
+                homes.add_home(home);
+                if homes.current_home_id().is_none() {
+                    homes.select_home(Some(channel_id));
+                }
+                changed = true;
+            } else if let Some(home) = homes.home_mut(&channel_id) {
+                if home.context_id != Some(context_id) {
+                    home.context_id = Some(context_id);
+                    changed = true;
+                }
+
+                if sender_id != own_authority && home.member(&own_authority).is_none() {
+                    home.add_member(HomeMember {
+                        id: own_authority,
+                        name: "You".to_string(),
+                        role: HomeRole::Participant,
+                        is_online: true,
+                        joined_at: now_ms,
+                        last_seen: Some(now_ms),
+                        storage_allocated: HomeState::MEMBER_ALLOCATION,
+                    });
+                    changed = true;
+                }
+
+                if sender_id != own_authority && matches!(home.my_role, HomeRole::Member) {
+                    home.my_role = HomeRole::Participant;
+                    changed = true;
+                }
             }
-            home.my_role = HomeRole::Participant;
-        }
 
-        if home.member(&own_authority).is_none() {
-            home.add_member(HomeMember {
-                id: own_authority,
-                name: "You".to_string(),
-                role: HomeRole::Participant,
-                is_online: true,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::MEMBER_ALLOCATION,
-            });
-        }
+            if !changed {
+                return Err(());
+            }
 
-        homes.add_home(home);
-        if homes.current_home_id().is_none() {
-            homes.select_home(Some(channel_id));
-        }
-        changed = true;
-    } else if let Some(home) = homes.home_mut(&channel_id) {
-        if home.context_id != Some(context_id) {
-            home.context_id = Some(context_id);
-            changed = true;
-        }
+            if homes.current_home_id().is_none() && homes.has_home(&channel_id) {
+                homes.select_home(Some(channel_id));
+            }
 
-        if sender_id != own_authority && home.member(&own_authority).is_none() {
-            home.add_member(HomeMember {
-                id: own_authority,
-                name: "You".to_string(),
-                role: HomeRole::Participant,
-                is_online: true,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::MEMBER_ALLOCATION,
-            });
-            changed = true;
-        }
-
-        if sender_id != own_authority && matches!(home.my_role, HomeRole::Member) {
-            home.my_role = HomeRole::Participant;
-            changed = true;
-        }
-    }
-
-    if !changed {
-        return Ok(());
-    }
-
-    if homes.current_home_id().is_none() && homes.has_home(&channel_id) {
-        homes.select_home(Some(channel_id));
-    }
-
-    emit_registered_signal(reactive, &*HOMES_SIGNAL, homes, "homes signal").await?;
-
+            Ok(())
+        })
+        .await
+        .map_err(|error| {
+            format!("homes signal materialization requires registered homes signal: {error}")
+        })?;
+    // Err(()) is the no-change path and does not publish a new revision.
+    let _ = result;
     Ok(())
 }
 
@@ -214,55 +170,60 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
     context_id: ContextId,
     now_ms: u64,
 ) -> Result<(), String> {
-    let mut homes = read_registered_homes_state(reactive).await?;
-    let mut changed = false;
+    let result = ProjectionOwner::new(reactive.clone())
+        .update(ProjectionSlot::homes(), |homes| -> Result<(), ()> {
+            let mut changed = false;
 
-    if !homes.has_home(&home_id) {
-        let mut home = HomeState::new(
-            home_id,
-            Some(home_name.to_string()),
-            sender_id,
-            now_ms,
-            context_id,
-        );
-        if home.member(&receiver_id).is_none() {
-            home.add_member(HomeMember {
-                id: receiver_id,
-                name: receiver_id.to_string(),
-                role: HomeRole::Participant,
-                is_online: false,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::MEMBER_ALLOCATION,
-            });
-        }
-        homes.add_home(home);
-        changed = true;
-    } else if let Some(home) = homes.home_mut(&home_id) {
-        if home.context_id != Some(context_id) {
-            home.context_id = Some(context_id);
-            changed = true;
-        }
-        if home.member(&receiver_id).is_none() {
-            home.add_member(HomeMember {
-                id: receiver_id,
-                name: receiver_id.to_string(),
-                role: HomeRole::Participant,
-                is_online: false,
-                joined_at: now_ms,
-                last_seen: Some(now_ms),
-                storage_allocated: HomeState::MEMBER_ALLOCATION,
-            });
-            changed = true;
-        }
-    }
+            if !homes.has_home(&home_id) {
+                let mut home = HomeState::new(
+                    home_id,
+                    Some(home_name.to_string()),
+                    sender_id,
+                    now_ms,
+                    context_id,
+                );
+                if home.member(&receiver_id).is_none() {
+                    home.add_member(HomeMember {
+                        id: receiver_id,
+                        name: receiver_id.to_string(),
+                        role: HomeRole::Participant,
+                        is_online: false,
+                        joined_at: now_ms,
+                        last_seen: Some(now_ms),
+                        storage_allocated: HomeState::MEMBER_ALLOCATION,
+                    });
+                }
+                homes.add_home(home);
+                changed = true;
+            } else if let Some(home) = homes.home_mut(&home_id) {
+                if home.context_id != Some(context_id) {
+                    home.context_id = Some(context_id);
+                    changed = true;
+                }
+                if home.member(&receiver_id).is_none() {
+                    home.add_member(HomeMember {
+                        id: receiver_id,
+                        name: receiver_id.to_string(),
+                        role: HomeRole::Participant,
+                        is_online: false,
+                        joined_at: now_ms,
+                        last_seen: Some(now_ms),
+                        storage_allocated: HomeState::MEMBER_ALLOCATION,
+                    });
+                    changed = true;
+                }
+            }
 
-    if !changed {
-        return Ok(());
-    }
-
-    emit_registered_signal(reactive, &*HOMES_SIGNAL, homes, "homes signal").await?;
-
+            if !changed {
+                return Err(());
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|error| {
+            format!("homes signal materialization requires registered homes signal: {error}")
+        })?;
+    let _ = result;
     Ok(())
 }
 
@@ -278,60 +239,63 @@ pub(crate) async fn materialize_pending_invitation_signal(
     expires_at: Option<u64>,
     message: Option<String>,
 ) -> Result<(), String> {
-    let mut invitations = match read_registered_invitations_state(reactive).await {
-        Ok(invitations) => invitations,
-        Err(error) if error.contains("Signal not found") => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if invitations.invitation(invitation_id).is_some() {
-        return Ok(());
+    let result = ProjectionOwner::new(reactive.clone())
+        .update(
+            ProjectionSlot::invitations(),
+            |invitations| -> Result<(), ()> {
+                if invitations.invitation(invitation_id).is_some() {
+                    return Err(());
+                }
+
+                let direction = if sender_id == own_authority {
+                    InvitationDirection::Sent
+                } else {
+                    InvitationDirection::Received
+                };
+                let is_generic_sent_contact_invitation = direction == InvitationDirection::Sent
+                    && matches!(invitation_type, DomainInvitationType::Contact { .. })
+                    && sender_id == receiver_id;
+                let (home_id, home_name) =
+                    app_signal_projection::map_channel_metadata(invitation_type);
+                invitations.add_invitation(Invitation {
+                    id: invitation_id.to_string(),
+                    invitation_type: app_signal_projection::map_invitation_type(invitation_type),
+                    status: InvitationStatus::Pending,
+                    direction,
+                    from_id: sender_id,
+                    from_name: app_signal_projection::invitation_sender_name(invitation_type),
+                    to_id: (direction == InvitationDirection::Sent
+                        && !is_generic_sent_contact_invitation)
+                        .then_some(receiver_id),
+                    to_name: if direction == InvitationDirection::Sent {
+                        if is_generic_sent_contact_invitation {
+                            receiver_nickname
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned)
+                        } else {
+                            Some("Unknown".to_string())
+                        }
+                    } else {
+                        None
+                    },
+                    created_at,
+                    expires_at,
+                    message,
+                    home_id,
+                    home_name,
+                });
+
+                Ok(())
+            },
+        )
+        .await;
+    match result {
+        Ok(_) => {}
+        // Invitation signals may be deliberately absent before app registration.
+        Err(error) if error.to_string().contains("Signal not found") => return Ok(()),
+        Err(error) => return Err(format!("materialize invitations signal: {error}")),
     }
-
-    let direction = if sender_id == own_authority {
-        InvitationDirection::Sent
-    } else {
-        InvitationDirection::Received
-    };
-    let is_generic_sent_contact_invitation = direction == InvitationDirection::Sent
-        && matches!(invitation_type, DomainInvitationType::Contact { .. })
-        && sender_id == receiver_id;
-    let (home_id, home_name) = app_signal_projection::map_channel_metadata(invitation_type);
-    invitations.add_invitation(Invitation {
-        id: invitation_id.to_string(),
-        invitation_type: app_signal_projection::map_invitation_type(invitation_type),
-        status: InvitationStatus::Pending,
-        direction,
-        from_id: sender_id,
-        from_name: app_signal_projection::invitation_sender_name(invitation_type),
-        to_id: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
-            .then_some(receiver_id),
-        to_name: if direction == InvitationDirection::Sent {
-            if is_generic_sent_contact_invitation {
-                receiver_nickname
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned)
-            } else {
-                Some("Unknown".to_string())
-            }
-        } else {
-            None
-        },
-        created_at,
-        expires_at,
-        message,
-        home_id,
-        home_name,
-    });
-
-    emit_registered_signal(
-        reactive,
-        &*INVITATIONS_SIGNAL,
-        invitations,
-        "invitations signal",
-    )
-    .await?;
-
     Ok(())
 }
 
@@ -359,200 +323,219 @@ impl ReactiveView for InvitationsSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
             let _update_gate = self.update_gate.lock().await;
-            let mut state = match read_registered_invitations_state(&self.reactive).await {
-                Ok(state) => state,
-                Err(error) => {
-                    emit_internal_error(&self.reactive, error).await;
+            let owner = ProjectionOwner::new(self.reactive.clone());
+            loop {
+                let current = match owner.snapshot(ProjectionSlot::invitations()).await {
+                    Ok(current) => current,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to read INVITATIONS_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let mut state = current.value;
+                let mut changed = false;
+
+                for fact in facts {
+                    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
+                        &fact.content
+                    else {
+                        continue;
+                    };
+
+                    if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
+                        continue;
+                    }
+
+                    let Some(inv) = InvitationFact::from_envelope(envelope) else {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!(
+                                "Failed to decode InvitationFact envelope (payload len={})",
+                                envelope.payload.len()
+                            ),
+                        )
+                        .await;
+                        continue;
+                    };
+
+                    match inv {
+                        InvitationFact::Sent {
+                            invitation_id,
+                            sender_id,
+                            receiver_id,
+                            invitation_type,
+                            sent_at,
+                            expires_at,
+                            receiver_nickname,
+                            message,
+                            ..
+                        } => {
+                            // A replayed Sent fact cannot recreate a pending row after
+                            // a newer acceptance, rejection, or cancellation.
+                            if state.invitation(invitation_id.as_str()).is_some() {
+                                continue;
+                            }
+                            let direction = if sender_id == self.own_authority {
+                                InvitationDirection::Sent
+                            } else {
+                                InvitationDirection::Received
+                            };
+                            let is_generic_sent_contact_invitation = direction
+                                == InvitationDirection::Sent
+                                && matches!(invitation_type, DomainInvitationType::Contact { .. })
+                                && sender_id == receiver_id;
+                            let (home_id, home_name) =
+                                app_signal_projection::map_channel_metadata(&invitation_type);
+
+                            let invitation = Invitation {
+                                id: invitation_id.to_string(),
+                                invitation_type: app_signal_projection::map_invitation_type(
+                                    &invitation_type,
+                                ),
+                                status: InvitationStatus::Pending,
+                                direction,
+                                from_id: sender_id,
+                                from_name: app_signal_projection::invitation_sender_name(
+                                    &invitation_type,
+                                ),
+                                to_id: (direction == InvitationDirection::Sent
+                                    && !is_generic_sent_contact_invitation)
+                                    .then_some(receiver_id),
+                                to_name: if direction == InvitationDirection::Sent {
+                                    if is_generic_sent_contact_invitation {
+                                        receiver_nickname
+                                            .as_deref()
+                                            .map(str::trim)
+                                            .filter(|value| !value.is_empty())
+                                            .map(ToOwned::to_owned)
+                                            .or_else(|| {
+                                                state
+                                                    .invitation(invitation_id.as_str())
+                                                    .and_then(|existing| existing.to_name.clone())
+                                            })
+                                    } else {
+                                        Some("Unknown".to_string())
+                                    }
+                                } else {
+                                    None
+                                },
+                                created_at: sent_at.ts_ms,
+                                expires_at: expires_at.map(|t| t.ts_ms),
+                                message,
+                                home_id,
+                                home_name,
+                            };
+
+                            state.add_invitation(invitation);
+                            changed = true;
+                        }
+                        InvitationFact::Accepted { invitation_id, .. } => {
+                            let _ = state.accept_invitation(invitation_id.as_str());
+                            changed = true;
+                        }
+                        InvitationFact::Declined { invitation_id, .. } => {
+                            let _ = state.reject_invitation(invitation_id.as_str());
+                            changed = true;
+                        }
+                        InvitationFact::Cancelled { invitation_id, .. } => {
+                            let _ = state.revoke_invitation(invitation_id.as_str());
+                            changed = true;
+                        }
+                        InvitationFact::CeremonyInitiated {
+                            ceremony_id,
+                            sender,
+                            timestamp_ms,
+                            ..
+                        } => {
+                            // Invitation ceremony events don't map to InvitationsState.
+                            // They track the consensus-based invitation exchange protocol.
+                            // For RecoveryState updates, use RecoveryFacts or the ceremony tracker.
+                            tracing::debug!(
+                                ceremony_id = %ceremony_id,
+                                sender = %sender,
+                                timestamp_ms,
+                                "Invitation ceremony initiated"
+                            );
+                        }
+                        InvitationFact::CeremonyAcceptanceReceived {
+                            ceremony_id,
+                            timestamp_ms,
+                            ..
+                        } => {
+                            tracing::debug!(
+                                ceremony_id = %ceremony_id,
+                                timestamp_ms,
+                                "Invitation ceremony acceptance received"
+                            );
+                        }
+                        InvitationFact::CeremonyCommitted {
+                            ceremony_id,
+                            relationship_id,
+                            timestamp_ms,
+                            ..
+                        } => {
+                            tracing::info!(
+                                ceremony_id = %ceremony_id,
+                                relationship_id = %relationship_id,
+                                timestamp_ms,
+                                "Invitation ceremony committed - relationship established"
+                            );
+                        }
+                        InvitationFact::CeremonyAborted {
+                            ceremony_id,
+                            reason,
+                            timestamp_ms,
+                            ..
+                        } => {
+                            tracing::warn!(
+                                ceremony_id = %ceremony_id,
+                                reason,
+                                timestamp_ms,
+                                "Invitation ceremony aborted"
+                            );
+                        }
+                        InvitationFact::CeremonySuperseded {
+                            superseded_ceremony_id,
+                            superseding_ceremony_id,
+                            reason,
+                            timestamp_ms,
+                            ..
+                        } => {
+                            tracing::warn!(
+                                superseded_ceremony_id = %superseded_ceremony_id,
+                                superseding_ceremony_id = %superseding_ceremony_id,
+                                reason,
+                                timestamp_ms,
+                                "Invitation ceremony superseded"
+                            );
+                        }
+                    }
+                }
+
+                if !changed {
                     return;
                 }
-            };
-            let mut changed = false;
 
-            for fact in facts {
-                let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
-                    &fact.content
-                else {
-                    continue;
-                };
-
-                if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
-                    continue;
-                }
-
-                let Some(inv) = InvitationFact::from_envelope(envelope) else {
-                    emit_internal_error(
-                        &self.reactive,
-                        format!(
-                            "Failed to decode InvitationFact envelope (payload len={})",
-                            envelope.payload.len()
-                        ),
-                    )
-                    .await;
-                    continue;
-                };
-
-                match inv {
-                    InvitationFact::Sent {
-                        invitation_id,
-                        sender_id,
-                        receiver_id,
-                        invitation_type,
-                        sent_at,
-                        expires_at,
-                        receiver_nickname,
-                        message,
-                        ..
-                    } => {
-                        let direction = if sender_id == self.own_authority {
-                            InvitationDirection::Sent
-                        } else {
-                            InvitationDirection::Received
-                        };
-                        let is_generic_sent_contact_invitation = direction
-                            == InvitationDirection::Sent
-                            && matches!(invitation_type, DomainInvitationType::Contact { .. })
-                            && sender_id == receiver_id;
-                        let (home_id, home_name) =
-                            app_signal_projection::map_channel_metadata(&invitation_type);
-
-                        let invitation = Invitation {
-                            id: invitation_id.to_string(),
-                            invitation_type: app_signal_projection::map_invitation_type(
-                                &invitation_type,
-                            ),
-                            status: InvitationStatus::Pending,
-                            direction,
-                            from_id: sender_id,
-                            from_name: app_signal_projection::invitation_sender_name(
-                                &invitation_type,
-                            ),
-                            to_id: (direction == InvitationDirection::Sent
-                                && !is_generic_sent_contact_invitation)
-                                .then_some(receiver_id),
-                            to_name: if direction == InvitationDirection::Sent {
-                                if is_generic_sent_contact_invitation {
-                                    receiver_nickname
-                                        .as_deref()
-                                        .map(str::trim)
-                                        .filter(|value| !value.is_empty())
-                                        .map(ToOwned::to_owned)
-                                        .or_else(|| {
-                                            state
-                                                .invitation(invitation_id.as_str())
-                                                .and_then(|existing| existing.to_name.clone())
-                                        })
-                                } else {
-                                    Some("Unknown".to_string())
-                                }
-                            } else {
-                                None
-                            },
-                            created_at: sent_at.ts_ms,
-                            expires_at: expires_at.map(|t| t.ts_ms),
-                            message,
-                            home_id,
-                            home_name,
-                        };
-
-                        state.add_invitation(invitation);
-                        changed = true;
-                    }
-                    InvitationFact::Accepted { invitation_id, .. } => {
-                        let _ = state.accept_invitation(invitation_id.as_str());
-                        changed = true;
-                    }
-                    InvitationFact::Declined { invitation_id, .. } => {
-                        let _ = state.reject_invitation(invitation_id.as_str());
-                        changed = true;
-                    }
-                    InvitationFact::Cancelled { invitation_id, .. } => {
-                        let _ = state.revoke_invitation(invitation_id.as_str());
-                        changed = true;
-                    }
-                    InvitationFact::CeremonyInitiated {
-                        ceremony_id,
-                        sender,
-                        timestamp_ms,
-                        ..
-                    } => {
-                        // Invitation ceremony events don't map to InvitationsState.
-                        // They track the consensus-based invitation exchange protocol.
-                        // For RecoveryState updates, use RecoveryFacts or the ceremony tracker.
-                        tracing::debug!(
-                            ceremony_id = %ceremony_id,
-                            sender = %sender,
-                            timestamp_ms,
-                            "Invitation ceremony initiated"
-                        );
-                    }
-                    InvitationFact::CeremonyAcceptanceReceived {
-                        ceremony_id,
-                        timestamp_ms,
-                        ..
-                    } => {
-                        tracing::debug!(
-                            ceremony_id = %ceremony_id,
-                            timestamp_ms,
-                            "Invitation ceremony acceptance received"
-                        );
-                    }
-                    InvitationFact::CeremonyCommitted {
-                        ceremony_id,
-                        relationship_id,
-                        timestamp_ms,
-                        ..
-                    } => {
-                        tracing::info!(
-                            ceremony_id = %ceremony_id,
-                            relationship_id = %relationship_id,
-                            timestamp_ms,
-                            "Invitation ceremony committed - relationship established"
-                        );
-                    }
-                    InvitationFact::CeremonyAborted {
-                        ceremony_id,
-                        reason,
-                        timestamp_ms,
-                        ..
-                    } => {
-                        tracing::warn!(
-                            ceremony_id = %ceremony_id,
-                            reason,
-                            timestamp_ms,
-                            "Invitation ceremony aborted"
-                        );
-                    }
-                    InvitationFact::CeremonySuperseded {
-                        superseded_ceremony_id,
-                        superseding_ceremony_id,
-                        reason,
-                        timestamp_ms,
-                        ..
-                    } => {
-                        tracing::warn!(
-                            superseded_ceremony_id = %superseded_ceremony_id,
-                            superseding_ceremony_id = %superseding_ceremony_id,
-                            reason,
-                            timestamp_ms,
-                            "Invitation ceremony superseded"
-                        );
+                match owner
+                    .replace_if_current(ProjectionSlot::invitations(), current.revision, state)
+                    .await
+                {
+                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Stale { .. }) => continue,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to publish INVITATIONS_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
                     }
                 }
             }
-
-            if !changed {
-                return;
-            }
-
-            let snapshot = state.clone();
-
-            emit_signal_or_internal_error(
-                &self.reactive,
-                &*INVITATIONS_SIGNAL,
-                snapshot,
-                "INVITATIONS_SIGNAL",
-            )
-            .await;
         })
     }
 
@@ -601,188 +584,216 @@ impl ContactsSignalView {
 impl ReactiveView for ContactsSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
-            let mut changed = false;
+            let owner = ProjectionOwner::new(self.reactive.clone());
+            loop {
+                let current = match owner.snapshot(ProjectionSlot::contacts()).await {
+                    Ok(current) => current,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to read CONTACTS_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let mut state = self.state.lock().await;
+                *state = current.value;
+                let mut changed = false;
 
-            for fact in facts {
-                match &fact.content {
-                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                        if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
-                    {
-                        let Some(contact_fact) = ContactFact::from_envelope(envelope) else {
-                            emit_internal_error(
-                                &self.reactive,
-                                format!(
-                                    "Failed to decode ContactFact envelope (payload len={})",
-                                    envelope.payload.len()
-                                ),
-                            )
-                            .await;
-                            continue;
-                        };
+                for fact in facts {
+                    match &fact.content {
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                            if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
+                        {
+                            let Some(contact_fact) = ContactFact::from_envelope(envelope) else {
+                                emit_internal_error(
+                                    &self.reactive,
+                                    format!(
+                                        "Failed to decode ContactFact envelope (payload len={})",
+                                        envelope.payload.len()
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            };
 
-                        match contact_fact {
-                            ContactFact::Added {
-                                contact_id,
-                                nickname,
-                                added_at,
-                                invitation_code,
-                                ..
-                            } => {
-                                tracing::info!(
-                                    contact_id = %contact_id,
-                                    nickname = %nickname,
-                                    added_at = added_at.ts_ms,
-                                    "ContactsSignalView: Processing ContactFact::Added"
-                                );
-
-                                let suggested_name = if nickname.trim().is_empty()
-                                    || nickname == contact_id.to_string()
-                                {
-                                    None
-                                } else {
-                                    Some(nickname.clone())
-                                };
-
-                                if let Some(contact) = state.contact_mut(&contact_id) {
-                                    // Preserve user-set local nickname and keep any existing
-                                    // human-friendly suggestion when incoming facts only carry
-                                    // fallback identity strings.
-                                    if let Some(suggested_name) = suggested_name {
-                                        contact.nickname_suggestion = Some(suggested_name);
-                                    }
-                                    contact.last_interaction = Some(added_at.ts_ms);
-                                    // Only overwrite the invitation code if the incoming
-                                    // fact carries one — later plain contact updates (e.g.
-                                    // nickname changes) should preserve the code that was
-                                    // recorded at establishment time.
-                                    if invitation_code.is_some() {
-                                        contact.invitation_code = invitation_code;
-                                    }
-                                } else {
-                                    // Contact invitations carry an optional nickname, which we treat as
-                                    // a nickname_suggestion. The user's nickname is a separate local label.
+                            match contact_fact {
+                                ContactFact::Added {
+                                    contact_id,
+                                    nickname,
+                                    added_at,
+                                    invitation_code,
+                                    ..
+                                } => {
                                     tracing::info!(
                                         contact_id = %contact_id,
-                                        "ContactsSignalView: Creating new contact entry"
+                                        nickname = %nickname,
+                                        added_at = added_at.ts_ms,
+                                        "ContactsSignalView: Processing ContactFact::Added"
                                     );
-                                    state.apply_contact(Contact {
-                                        id: contact_id,
-                                        nickname: String::new(),
-                                        nickname_suggestion: suggested_name,
-                                        is_guardian: false,
-                                        is_member: false,
-                                        last_interaction: Some(added_at.ts_ms),
-                                        is_online: false,
-                                        read_receipt_policy: ReadReceiptPolicy::default(),
-                                        relationship_state: ContactRelationshipState::Contact,
-                                        invitation_code,
-                                    });
+
+                                    let suggested_name = if nickname.trim().is_empty()
+                                        || nickname == contact_id.to_string()
+                                    {
+                                        None
+                                    } else {
+                                        Some(nickname.clone())
+                                    };
+
+                                    if let Some(contact) = state.contact_mut(&contact_id) {
+                                        // Preserve user-set local nickname and keep any existing
+                                        // human-friendly suggestion when incoming facts only carry
+                                        // fallback identity strings.
+                                        if let Some(suggested_name) = suggested_name {
+                                            contact.nickname_suggestion = Some(suggested_name);
+                                        }
+                                        contact.last_interaction = Some(added_at.ts_ms);
+                                        // Only overwrite the invitation code if the incoming
+                                        // fact carries one — later plain contact updates (e.g.
+                                        // nickname changes) should preserve the code that was
+                                        // recorded at establishment time.
+                                        if invitation_code.is_some() {
+                                            contact.invitation_code = invitation_code;
+                                        }
+                                    } else {
+                                        // Contact invitations carry an optional nickname, which we treat as
+                                        // a nickname_suggestion. The user's nickname is a separate local label.
+                                        tracing::info!(
+                                            contact_id = %contact_id,
+                                            "ContactsSignalView: Creating new contact entry"
+                                        );
+                                        state.apply_contact(Contact {
+                                            id: contact_id,
+                                            nickname: String::new(),
+                                            nickname_suggestion: suggested_name,
+                                            is_guardian: false,
+                                            is_member: false,
+                                            last_interaction: Some(added_at.ts_ms),
+                                            is_online: false,
+                                            read_receipt_policy: ReadReceiptPolicy::default(),
+                                            relationship_state: ContactRelationshipState::Contact,
+                                            invitation_code,
+                                        });
+                                    }
+                                    changed = true;
                                 }
-                                changed = true;
+                                ContactFact::Removed { contact_id, .. } => {
+                                    state.remove_contact(&contact_id);
+                                    changed = true;
+                                }
+                                ContactFact::Renamed {
+                                    contact_id,
+                                    new_nickname,
+                                    renamed_at,
+                                    ..
+                                } => {
+                                    state.set_nickname(contact_id, new_nickname);
+                                    if let Some(contact) = state.contact_mut(&contact_id) {
+                                        contact.last_interaction = Some(renamed_at.ts_ms);
+                                    }
+                                    changed = true;
+                                }
+                                ContactFact::ReadReceiptPolicyUpdated {
+                                    contact_id,
+                                    policy,
+                                    ..
+                                } => {
+                                    state.set_read_receipt_policy(&contact_id, policy);
+                                    changed = true;
+                                }
                             }
-                            ContactFact::Removed { contact_id, .. } => {
-                                state.remove_contact(&contact_id);
-                                changed = true;
-                            }
-                            ContactFact::Renamed {
-                                contact_id,
-                                new_nickname,
-                                renamed_at,
+                        }
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                            if envelope.type_id.as_str() == FRIENDSHIP_FACT_TYPE_ID =>
+                        {
+                            let Some(friendship_fact) = FriendshipFact::from_envelope(envelope)
+                            else {
+                                emit_internal_error(
+                                    &self.reactive,
+                                    format!(
+                                        "Failed to decode FriendshipFact envelope (payload len={})",
+                                        envelope.payload.len()
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            };
+                            changed |= self.apply_friendship_fact(&mut state, &friendship_fact);
+                        }
+                        FactContent::Relational(RelationalFact::Protocol(
+                            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                                guardian_id,
                                 ..
-                            } => {
-                                state.set_nickname(contact_id, new_nickname);
-                                if let Some(contact) = state.contact_mut(&contact_id) {
-                                    contact.last_interaction = Some(renamed_at.ts_ms);
+                            },
+                        )) => {
+                            // Reflect guardian status into contacts for details screens.
+                            // Collect contact IDs first for diagnostic logging.
+                            let contact_ids: Vec<AuthorityId> =
+                                state.contact_ids().cloned().collect();
+                            tracing::info!(
+                                guardian_id = %guardian_id,
+                                existing_contacts = ?contact_ids,
+                                "ContactsSignalView: Processing GuardianBinding"
+                            );
+                            match state.set_guardian_status(guardian_id, true) {
+                                Ok(()) => {
+                                    tracing::info!(
+                                        guardian_id = %guardian_id,
+                                        "ContactsSignalView: Successfully set guardian status"
+                                    );
+                                    changed = true;
                                 }
-                                changed = true;
-                            }
-                            ContactFact::ReadReceiptPolicyUpdated {
-                                contact_id, policy, ..
-                            } => {
-                                state.set_read_receipt_policy(&contact_id, policy);
-                                changed = true;
-                            }
-                        }
-                    }
-                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                        if envelope.type_id.as_str() == FRIENDSHIP_FACT_TYPE_ID =>
-                    {
-                        let Some(friendship_fact) = FriendshipFact::from_envelope(envelope) else {
-                            emit_internal_error(
-                                &self.reactive,
-                                format!(
-                                    "Failed to decode FriendshipFact envelope (payload len={})",
-                                    envelope.payload.len()
-                                ),
-                            )
-                            .await;
-                            continue;
-                        };
-                        changed |= self.apply_friendship_fact(&mut state, &friendship_fact);
-                    }
-                    FactContent::Relational(RelationalFact::Protocol(
-                        aura_journal::ProtocolRelationalFact::GuardianBinding {
-                            guardian_id, ..
-                        },
-                    )) => {
-                        // Reflect guardian status into contacts for details screens.
-                        // Collect contact IDs first for diagnostic logging.
-                        let contact_ids: Vec<AuthorityId> = state.contact_ids().cloned().collect();
-                        tracing::info!(
-                            guardian_id = %guardian_id,
-                            existing_contacts = ?contact_ids,
-                            "ContactsSignalView: Processing GuardianBinding"
-                        );
-                        match state.set_guardian_status(guardian_id, true) {
-                            Ok(()) => {
-                                tracing::info!(
-                                    guardian_id = %guardian_id,
-                                    "ContactsSignalView: Successfully set guardian status"
-                                );
-                                changed = true;
-                            }
-                            Err(ContactError::NotFound(id)) => {
-                                tracing::warn!(
-                                    guardian_id = %id,
-                                    existing_contacts = ?contact_ids,
-                                    "GuardianBinding received but contact not found - \
-                                     contact should be added before guardian ceremony completes"
-                                );
+                                Err(ContactError::NotFound(id)) => {
+                                    tracing::warn!(
+                                        guardian_id = %id,
+                                        existing_contacts = ?contact_ids,
+                                        "GuardianBinding received but contact not found - \
+                                         contact should be added before guardian ceremony completes"
+                                    );
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
+                }
+
+                if !changed {
+                    return;
+                }
+
+                let snapshot = state.clone();
+                let contact_count = snapshot.contact_count();
+                let guardian_contacts: Vec<_> = snapshot
+                    .all_contacts()
+                    .filter(|c| c.is_guardian)
+                    .map(|c| c.id)
+                    .collect();
+                let all_contact_ids: Vec<_> = snapshot.all_contacts().map(|c| c.id).collect();
+                tracing::info!(
+                    contact_count,
+                    all_contacts = ?all_contact_ids,
+                    guardians = ?guardian_contacts,
+                    "ContactsSignalView: Emitting updated contacts"
+                );
+                drop(state);
+
+                match owner
+                    .replace_if_current(ProjectionSlot::contacts(), current.revision, snapshot)
+                    .await
+                {
+                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Stale { .. }) => continue,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to publish CONTACTS_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
-
-            if !changed {
-                return;
-            }
-
-            let snapshot = state.clone();
-            let contact_count = snapshot.contact_count();
-            let guardian_contacts: Vec<_> = snapshot
-                .all_contacts()
-                .filter(|c| c.is_guardian)
-                .map(|c| c.id)
-                .collect();
-            let all_contact_ids: Vec<_> = snapshot.all_contacts().map(|c| c.id).collect();
-            tracing::info!(
-                contact_count,
-                all_contacts = ?all_contact_ids,
-                guardians = ?guardian_contacts,
-                "ContactsSignalView: Emitting updated contacts"
-            );
-            drop(state);
-
-            emit_signal_or_internal_error(
-                &self.reactive,
-                &*CONTACTS_SIGNAL,
-                snapshot,
-                "CONTACTS_SIGNAL",
-            )
-            .await;
         })
     }
 
@@ -827,142 +838,167 @@ impl RecoverySignalView {
 impl ReactiveView for RecoverySignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
-            let mut changed = false;
-
-            for fact in facts {
-                match &fact.content {
-                    FactContent::Relational(RelationalFact::Protocol(
-                        aura_journal::ProtocolRelationalFact::GuardianBinding {
-                            guardian_id, ..
-                        },
-                    )) => {
-                        Self::ensure_guardian(&mut state, *guardian_id);
-                        changed = true;
+            let owner = ProjectionOwner::new(self.reactive.clone());
+            loop {
+                let current = match owner.snapshot(ProjectionSlot::recovery()).await {
+                    Ok(current) => current,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to read RECOVERY_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
                     }
-                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                        if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
-                    {
-                        let Some(recovery_fact) = RecoveryFact::from_envelope(envelope) else {
-                            emit_internal_error(
-                                &self.reactive,
-                                format!(
-                                    "Failed to decode RecoveryFact envelope (payload len={})",
-                                    envelope.payload.len()
-                                ),
-                            )
-                            .await;
-                            continue;
-                        };
+                };
+                let mut state = self.state.lock().await;
+                *state = current.value;
+                let mut changed = false;
 
-                        match recovery_fact {
-                            RecoveryFact::GuardianSetupInitiated {
-                                initiator_id,
-                                trace_id,
-                                guardian_ids,
-                                threshold,
-                                initiated_at,
+                for fact in facts {
+                    match &fact.content {
+                        FactContent::Relational(RelationalFact::Protocol(
+                            aura_journal::ProtocolRelationalFact::GuardianBinding {
+                                guardian_id,
                                 ..
-                            } if initiator_id != self.own_authority => {
-                                // Another authority asks us to be one of its
-                                // guardians: surface it as a pending approval.
-                                if let Some(ceremony_id) =
-                                    trace_id.filter(|_| guardian_ids.contains(&self.own_authority))
-                                {
-                                    let id =
-                                        aura_core::types::identifiers::CeremonyId::new(ceremony_id);
-                                    let requests = state.pending_requests_mut();
-                                    if !requests.iter().any(|request| request.id == id) {
-                                        requests.push(RecoveryProcess {
-                                            id,
-                                            account_id: initiator_id,
-                                            status: RecoveryProcessStatus::WaitingForApprovals,
-                                            approvals_received: 0,
-                                            approvals_required: u32::from(threshold),
-                                            approved_by: Vec::new(),
-                                            approvals: Vec::new(),
-                                            initiated_at: initiated_at.ts_ms,
-                                            expires_at: None,
-                                            progress: 0,
-                                        });
-                                        changed = true;
+                            },
+                        )) => {
+                            Self::ensure_guardian(&mut state, *guardian_id);
+                            changed = true;
+                        }
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                            if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
+                        {
+                            let Some(recovery_fact) = RecoveryFact::from_envelope(envelope) else {
+                                emit_internal_error(
+                                    &self.reactive,
+                                    format!(
+                                        "Failed to decode RecoveryFact envelope (payload len={})",
+                                        envelope.payload.len()
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            };
+
+                            match recovery_fact {
+                                RecoveryFact::GuardianSetupInitiated {
+                                    initiator_id,
+                                    trace_id,
+                                    guardian_ids,
+                                    threshold,
+                                    initiated_at,
+                                    ..
+                                } if initiator_id != self.own_authority => {
+                                    // Another authority asks us to be one of its
+                                    // guardians: surface it as a pending approval.
+                                    if let Some(ceremony_id) = trace_id
+                                        .filter(|_| guardian_ids.contains(&self.own_authority))
+                                    {
+                                        let id = aura_core::types::identifiers::CeremonyId::new(
+                                            ceremony_id,
+                                        );
+                                        let requests = state.pending_requests_mut();
+                                        if !requests.iter().any(|request| request.id == id) {
+                                            requests.push(RecoveryProcess {
+                                                id,
+                                                account_id: initiator_id,
+                                                status: RecoveryProcessStatus::WaitingForApprovals,
+                                                approvals_received: 0,
+                                                approvals_required: u32::from(threshold),
+                                                approved_by: Vec::new(),
+                                                approvals: Vec::new(),
+                                                initiated_at: initiated_at.ts_ms,
+                                                expires_at: None,
+                                                progress: 0,
+                                            });
+                                            changed = true;
+                                        }
                                     }
                                 }
-                            }
-                            RecoveryFact::GuardianSetupInitiated {
-                                guardian_ids,
-                                threshold,
-                                ..
-                            } => {
-                                for guardian_id in guardian_ids {
-                                    Self::ensure_guardian(&mut state, guardian_id);
+                                RecoveryFact::GuardianSetupInitiated {
+                                    guardian_ids,
+                                    threshold,
+                                    ..
+                                } => {
+                                    for guardian_id in guardian_ids {
+                                        Self::ensure_guardian(&mut state, guardian_id);
+                                    }
+                                    state.set_threshold(threshold as u32);
+                                    changed = true;
                                 }
-                                state.set_threshold(threshold as u32);
-                                changed = true;
-                            }
-                            RecoveryFact::GuardianAccepted {
-                                guardian_id,
-                                trace_id: Some(ceremony_id),
-                                ..
-                            }
-                            | RecoveryFact::GuardianDeclined {
-                                guardian_id,
-                                trace_id: Some(ceremony_id),
-                                ..
-                            } if guardian_id == self.own_authority => {
-                                // Our response resolves the pending request.
-                                let requests = state.pending_requests_mut();
-                                let before = requests.len();
-                                requests.retain(|request| request.id.as_str() != ceremony_id);
-                                changed |= requests.len() != before;
-                            }
-                            RecoveryFact::GuardianSetupCompleted {
-                                guardian_ids,
-                                threshold,
-                                ..
-                            } => {
-                                // Replace guardian set with the ceremony-completed list.
-                                state.retain_guardians(&guardian_ids);
-                                for guardian_id in guardian_ids {
-                                    Self::ensure_guardian(&mut state, guardian_id);
+                                RecoveryFact::GuardianAccepted {
+                                    guardian_id,
+                                    trace_id: Some(ceremony_id),
+                                    ..
                                 }
-                                state.set_threshold(threshold as u32);
-                                changed = true;
-                            }
-                            RecoveryFact::MembershipChangeCompleted {
-                                new_guardian_ids,
-                                new_threshold,
-                                ..
-                            } => {
-                                state.set_threshold(new_threshold as u32);
-                                // Update guardian set to match membership change
-                                state.retain_guardians(&new_guardian_ids);
-                                for guardian_id in new_guardian_ids {
-                                    Self::ensure_guardian(&mut state, guardian_id);
+                                | RecoveryFact::GuardianDeclined {
+                                    guardian_id,
+                                    trace_id: Some(ceremony_id),
+                                    ..
+                                } if guardian_id == self.own_authority => {
+                                    // Our response resolves the pending request.
+                                    let requests = state.pending_requests_mut();
+                                    let before = requests.len();
+                                    requests.retain(|request| request.id.as_str() != ceremony_id);
+                                    changed |= requests.len() != before;
                                 }
-                                changed = true;
+                                RecoveryFact::GuardianSetupCompleted {
+                                    guardian_ids,
+                                    threshold,
+                                    ..
+                                } => {
+                                    // Replace guardian set with the ceremony-completed list.
+                                    state.retain_guardians(&guardian_ids);
+                                    for guardian_id in guardian_ids {
+                                        Self::ensure_guardian(&mut state, guardian_id);
+                                    }
+                                    state.set_threshold(threshold as u32);
+                                    changed = true;
+                                }
+                                RecoveryFact::MembershipChangeCompleted {
+                                    new_guardian_ids,
+                                    new_threshold,
+                                    ..
+                                } => {
+                                    state.set_threshold(new_threshold as u32);
+                                    // Update guardian set to match membership change
+                                    state.retain_guardians(&new_guardian_ids);
+                                    for guardian_id in new_guardian_ids {
+                                        Self::ensure_guardian(&mut state, guardian_id);
+                                    }
+                                    changed = true;
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        _ => {}
                     }
-                    _ => {}
+                }
+
+                if !changed {
+                    return;
+                }
+
+                let snapshot = state.clone();
+                drop(state);
+
+                match owner
+                    .replace_if_current(ProjectionSlot::recovery(), current.revision, snapshot)
+                    .await
+                {
+                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Stale { .. }) => continue,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to publish RECOVERY_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
-
-            if !changed {
-                return;
-            }
-
-            let snapshot = state.clone();
-            drop(state);
-
-            emit_signal_or_internal_error(
-                &self.reactive,
-                &*RECOVERY_SIGNAL,
-                snapshot,
-                "RECOVERY_SIGNAL",
-            )
-            .await;
         })
     }
 
@@ -1063,165 +1099,179 @@ impl HomeSignalView {
 impl ReactiveView for HomeSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
-            let mut homes = match self.reactive.read(&*HOMES_SIGNAL).await {
-                Ok(state) => state,
-                Err(e) => {
-                    tracing::warn!(error = %e, facts = facts.len(), "home view could not read HOMES_SIGNAL; facts not applied");
-                    emit_internal_error(
-                        &self.reactive,
-                        format!("Failed to read HOMES_SIGNAL: {e}"),
-                    )
-                    .await;
+            let owner = ProjectionOwner::new(self.reactive.clone());
+            loop {
+                let current = match owner.snapshot(ProjectionSlot::homes()).await {
+                    Ok(current) => current,
+                    Err(e) => {
+                        tracing::warn!(error = %e, facts = facts.len(), "home view could not read HOMES_SIGNAL; facts not applied");
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to read HOMES_SIGNAL: {e}"),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let mut homes = current.value;
+
+                let mut changed = false;
+
+                for fact in facts {
+                    let FactContent::Relational(RelationalFact::Generic {
+                        context_id,
+                        envelope,
+                    }) = &fact.content
+                    else {
+                        continue;
+                    };
+
+                    if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
+                        if let Some(social) = SocialFact::from_envelope(envelope) {
+                            changed |= Self::apply_social_fact(&mut homes, social);
+                        }
+                        continue;
+                    }
+                    let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id)
+                    else {
+                        continue;
+                    };
+
+                    match envelope.type_id.as_str() {
+                        HOME_BAN_FACT_TYPE_ID => {
+                            if let Some(ban) = HomeBanFact::from_envelope(envelope) {
+                                let record = BanRecord {
+                                    authority_id: ban.banned_authority,
+                                    reason: ban.reason,
+                                    actor: ban.actor_authority,
+                                    banned_at: ban.banned_at.ts_ms,
+                                };
+                                home_state.add_ban(record);
+                                let _ = home_state.remove_member(&ban.banned_authority);
+                                changed = true;
+                            }
+                        }
+                        HOME_UNBAN_FACT_TYPE_ID => {
+                            if let Some(unban) = HomeUnbanFact::from_envelope(envelope) {
+                                if home_state.remove_ban(&unban.unbanned_authority).is_some() {
+                                    changed = true;
+                                }
+                            }
+                        }
+                        HOME_MUTE_FACT_TYPE_ID => {
+                            if let Some(mute) = HomeMuteFact::from_envelope(envelope) {
+                                let record = MuteRecord {
+                                    authority_id: mute.muted_authority,
+                                    duration_secs: mute.duration_secs,
+                                    muted_at: mute.muted_at.ts_ms,
+                                    expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
+                                    actor: mute.actor_authority,
+                                };
+                                home_state.add_mute(record);
+                                changed = true;
+                            }
+                        }
+                        HOME_UNMUTE_FACT_TYPE_ID => {
+                            if let Some(unmute) = HomeUnmuteFact::from_envelope(envelope) {
+                                if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
+                                    changed = true;
+                                }
+                            }
+                        }
+                        HOME_KICK_FACT_TYPE_ID => {
+                            if let Some(kick) = HomeKickFact::from_envelope(envelope) {
+                                let record = KickRecord {
+                                    authority_id: kick.kicked_authority,
+                                    channel: kick.channel_id,
+                                    reason: kick.reason,
+                                    actor: kick.actor_authority,
+                                    kicked_at: kick.kicked_at.ts_ms,
+                                };
+                                home_state.add_kick(record);
+                                let _ = home_state.remove_member(&kick.kicked_authority);
+                                changed = true;
+                            }
+                        }
+                        HOME_PIN_FACT_TYPE_ID => {
+                            if let Some(pin) = HomePinFact::from_envelope(envelope) {
+                                home_state.pin_message_with_meta(PinnedMessageMeta {
+                                    message_id: pin.message_id,
+                                    pinned_by: pin.actor_authority,
+                                    pinned_at: pin.pinned_at.ts_ms,
+                                });
+                                changed = true;
+                            }
+                        }
+                        HOME_UNPIN_FACT_TYPE_ID => {
+                            if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
+                                if home_state.unpin_message(&unpin.message_id) {
+                                    changed = true;
+                                }
+                            }
+                        }
+                        HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
+                            if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
+                                if let Some(member) = home_state.member_mut(&grant.target_authority)
+                                {
+                                    if matches!(member.role, HomeRole::Member | HomeRole::Moderator)
+                                    {
+                                        member.role = HomeRole::Moderator;
+                                        changed = true;
+                                    }
+                                }
+                                if grant.target_authority == self.own_authority
+                                    && matches!(
+                                        home_state.my_role,
+                                        HomeRole::Member | HomeRole::Moderator
+                                    )
+                                {
+                                    home_state.my_role = HomeRole::Moderator;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
+                            if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
+                                if let Some(member) =
+                                    home_state.member_mut(&revoke.target_authority)
+                                {
+                                    if matches!(member.role, HomeRole::Moderator) {
+                                        member.role = HomeRole::Member;
+                                        changed = true;
+                                    }
+                                }
+                                if revoke.target_authority == self.own_authority
+                                    && matches!(home_state.my_role, HomeRole::Moderator)
+                                {
+                                    home_state.my_role = HomeRole::Member;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !changed {
                     return;
                 }
-            };
 
-            let mut changed = false;
-
-            for fact in facts {
-                let FactContent::Relational(RelationalFact::Generic {
-                    context_id,
-                    envelope,
-                }) = &fact.content
-                else {
-                    continue;
-                };
-
-                if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
-                    if let Some(social) = SocialFact::from_envelope(envelope) {
-                        changed |= Self::apply_social_fact(&mut homes, social);
+                match owner
+                    .replace_if_current(ProjectionSlot::homes(), current.revision, homes)
+                    .await
+                {
+                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Stale { .. }) => continue,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to publish HOMES_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
                     }
-                    continue;
-                }
-                let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id) else {
-                    continue;
-                };
-
-                match envelope.type_id.as_str() {
-                    HOME_BAN_FACT_TYPE_ID => {
-                        if let Some(ban) = HomeBanFact::from_envelope(envelope) {
-                            let record = BanRecord {
-                                authority_id: ban.banned_authority,
-                                reason: ban.reason,
-                                actor: ban.actor_authority,
-                                banned_at: ban.banned_at.ts_ms,
-                            };
-                            home_state.add_ban(record);
-                            let _ = home_state.remove_member(&ban.banned_authority);
-                            changed = true;
-                        }
-                    }
-                    HOME_UNBAN_FACT_TYPE_ID => {
-                        if let Some(unban) = HomeUnbanFact::from_envelope(envelope) {
-                            if home_state.remove_ban(&unban.unbanned_authority).is_some() {
-                                changed = true;
-                            }
-                        }
-                    }
-                    HOME_MUTE_FACT_TYPE_ID => {
-                        if let Some(mute) = HomeMuteFact::from_envelope(envelope) {
-                            let record = MuteRecord {
-                                authority_id: mute.muted_authority,
-                                duration_secs: mute.duration_secs,
-                                muted_at: mute.muted_at.ts_ms,
-                                expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
-                                actor: mute.actor_authority,
-                            };
-                            home_state.add_mute(record);
-                            changed = true;
-                        }
-                    }
-                    HOME_UNMUTE_FACT_TYPE_ID => {
-                        if let Some(unmute) = HomeUnmuteFact::from_envelope(envelope) {
-                            if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
-                                changed = true;
-                            }
-                        }
-                    }
-                    HOME_KICK_FACT_TYPE_ID => {
-                        if let Some(kick) = HomeKickFact::from_envelope(envelope) {
-                            let record = KickRecord {
-                                authority_id: kick.kicked_authority,
-                                channel: kick.channel_id,
-                                reason: kick.reason,
-                                actor: kick.actor_authority,
-                                kicked_at: kick.kicked_at.ts_ms,
-                            };
-                            home_state.add_kick(record);
-                            let _ = home_state.remove_member(&kick.kicked_authority);
-                            changed = true;
-                        }
-                    }
-                    HOME_PIN_FACT_TYPE_ID => {
-                        if let Some(pin) = HomePinFact::from_envelope(envelope) {
-                            home_state.pin_message_with_meta(PinnedMessageMeta {
-                                message_id: pin.message_id,
-                                pinned_by: pin.actor_authority,
-                                pinned_at: pin.pinned_at.ts_ms,
-                            });
-                            changed = true;
-                        }
-                    }
-                    HOME_UNPIN_FACT_TYPE_ID => {
-                        if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
-                            if home_state.unpin_message(&unpin.message_id) {
-                                changed = true;
-                            }
-                        }
-                    }
-                    HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
-                        if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
-                            if let Some(member) = home_state.member_mut(&grant.target_authority) {
-                                if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
-                                    member.role = HomeRole::Moderator;
-                                    changed = true;
-                                }
-                            }
-                            if grant.target_authority == self.own_authority
-                                && matches!(
-                                    home_state.my_role,
-                                    HomeRole::Member | HomeRole::Moderator
-                                )
-                            {
-                                home_state.my_role = HomeRole::Moderator;
-                                changed = true;
-                            }
-                        }
-                    }
-                    HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
-                        if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
-                            if let Some(member) = home_state.member_mut(&revoke.target_authority) {
-                                if matches!(member.role, HomeRole::Moderator) {
-                                    member.role = HomeRole::Member;
-                                    changed = true;
-                                }
-                            }
-                            if revoke.target_authority == self.own_authority
-                                && matches!(home_state.my_role, HomeRole::Moderator)
-                            {
-                                home_state.my_role = HomeRole::Member;
-                                changed = true;
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
-
-            if !changed {
-                return;
-            }
-
-            let snapshot = homes.clone();
-            drop(homes);
-
-            emit_signal_or_internal_error(
-                &self.reactive,
-                &*HOMES_SIGNAL,
-                snapshot.clone(),
-                "HOMES_SIGNAL",
-            )
-            .await;
         })
     }
 
@@ -1237,6 +1287,7 @@ impl ReactiveView for HomeSignalView {
 pub struct ChatSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
+    update_gate: Mutex<()>,
     state: Mutex<ChatState>,
     hidden_channels_after_leave: Mutex<BTreeSet<ChannelId>>,
     effects: Arc<AuraEffectSystem>,
@@ -1251,6 +1302,7 @@ impl ChatSignalView {
         Self {
             own_authority,
             reactive,
+            update_gate: Mutex::new(()),
             state: Mutex::new(ChatState::default()),
             hidden_channels_after_leave: Mutex::new(BTreeSet::new()),
             effects,
@@ -1426,496 +1478,528 @@ impl ChatSignalView {
 impl ReactiveView for ChatSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
-            let mut state = self.state.lock().await;
-            let mut changed = false;
-
-            // Apply channel creation before messages in the same batch (journal
-            // replay after a restart), so senders are known channel members.
-            let mut ordered: Vec<&Fact> = facts.iter().collect();
-            ordered.sort_by_key(|fact| u8::from(!is_chat_channel_created(fact)));
-            for fact in ordered {
-                match &fact.content {
-                    // Handle consensus finalization: mark messages as finalized when epoch is committed
-                    FactContent::Relational(RelationalFact::Protocol(
-                        ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump),
-                    )) => {
-                        // When a channel epoch is committed, all messages with epoch_hint <= parent_epoch are finalized
-                        let count = state
-                            .mark_finalized_up_to_epoch(&bump.channel, bump.parent_epoch as u32)
-                            .unwrap_or(0);
-                        if count > 0 {
-                            tracing::debug!(
-                                channel_id = %bump.channel,
-                                parent_epoch = bump.parent_epoch,
-                                new_epoch = bump.new_epoch,
-                                finalized_count = count,
-                                "Finalized messages up to epoch"
-                            );
-                            changed = true;
-                        }
-                        continue;
+            let _update_gate = self.update_gate.lock().await;
+            let owner = ProjectionOwner::new(self.reactive.clone());
+            loop {
+                let source = match owner.snapshot(ProjectionSlot::chat()).await {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to read CHAT_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
                     }
+                };
+                let mut state = self.state.lock().await;
+                *state = source.value;
+                let mut changed = false;
 
-                    // Handle generic chat facts
-                    FactContent::Relational(RelationalFact::Generic { envelope, .. })
-                        if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID =>
-                    {
-                        let Some(chat_fact) = ChatFact::from_envelope(envelope) else {
-                            emit_internal_error(
-                                &self.reactive,
-                                format!(
-                                    "Failed to decode ChatFact envelope (payload len={})",
-                                    envelope.payload.len()
-                                ),
-                            )
-                            .await;
-                            continue;
-                        };
-
-                        match chat_fact {
-                            ChatFact::ChannelCreated {
-                                channel_id,
-                                context_id,
-                                name,
-                                topic,
-                                is_dm,
-                                created_at,
-                                creator_id,
-                                ..
-                            } => {
+                // Apply channel creation before messages in the same batch (journal
+                // replay after a restart), so senders are known channel members.
+                let mut ordered: Vec<&Fact> = facts.iter().collect();
+                ordered.sort_by_key(|fact| u8::from(!is_chat_channel_created(fact)));
+                for fact in ordered {
+                    match &fact.content {
+                        // Handle consensus finalization: mark messages as finalized when epoch is committed
+                        FactContent::Relational(RelationalFact::Protocol(
+                            ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump),
+                        )) => {
+                            // When a channel epoch is committed, all messages with epoch_hint <= parent_epoch are finalized
+                            let count = state
+                                .mark_finalized_up_to_epoch(&bump.channel, bump.parent_epoch as u32)
+                                .unwrap_or(0);
+                            if count > 0 {
                                 tracing::debug!(
-                                    channel_id = %channel_id,
-                                    %creator_id,
-                                    is_dm,
-                                    "ChatSignalView: ChannelCreated"
+                                    channel_id = %bump.channel,
+                                    parent_epoch = bump.parent_epoch,
+                                    new_epoch = bump.new_epoch,
+                                    finalized_count = count,
+                                    "Finalized messages up to epoch"
                                 );
-                                let hidden_after_leave = {
-                                    self.hidden_channels_after_leave
-                                        .lock()
-                                        .await
-                                        .contains(&channel_id)
-                                };
-                                if hidden_after_leave {
-                                    tracing::debug!(channel_id = %channel_id, "ChatSignalView: channel hidden after leave");
-                                    continue;
-                                }
+                                changed = true;
+                            }
+                            continue;
+                        }
 
-                                drop(state);
-                                self.ensure_amp_channel_state(context_id, channel_id, creator_id)
-                                    .await;
-                                state = self.state.lock().await;
+                        // Handle generic chat facts
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                            if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID =>
+                        {
+                            let Some(chat_fact) = ChatFact::from_envelope(envelope) else {
+                                emit_internal_error(
+                                    &self.reactive,
+                                    format!(
+                                        "Failed to decode ChatFact envelope (payload len={})",
+                                        envelope.payload.len()
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            };
 
-                                // Seed membership from inbound channel facts so reply routing
-                                // has at least one deterministic peer even before richer
-                                // membership reductions are available.
-                                let (member_ids, member_count) = if is_dm {
-                                    let mut members = vec![self.own_authority];
-                                    if creator_id != self.own_authority {
-                                        members.push(creator_id);
-                                    }
-                                    let count = members.len().max(2) as u32;
-                                    (members, count)
-                                } else if creator_id != self.own_authority {
-                                    // For group channels we may not know the full roster yet.
-                                    // Seed the creator as an initial peer so recipients can reply.
-                                    (vec![creator_id], 2)
-                                } else {
-                                    (Vec::new(), 0)
-                                };
-
-                                let channel = Channel {
-                                    id: channel_id,
-                                    context_id: Some(context_id),
+                            match chat_fact {
+                                ChatFact::ChannelCreated {
+                                    channel_id,
+                                    context_id,
                                     name,
                                     topic,
-                                    channel_type: if is_dm {
-                                        ChannelType::DirectMessage
-                                    } else {
-                                        ChannelType::Home
-                                    },
-                                    unread_count: 0,
                                     is_dm,
-                                    member_ids,
-                                    member_count,
-                                    last_message: None,
-                                    last_message_time: None,
-                                    last_activity: created_at.ts_ms,
-                                    last_finalized_epoch: 0,
-                                };
-                                // An update may have created the entry first; the creation
-                                // fact is authoritative for DM-ness and seeded members.
-                                if let Some(existing) = state.channel_mut(&channel.id) {
-                                    if channel.is_dm {
-                                        existing.is_dm = true;
-                                        existing.channel_type = ChannelType::DirectMessage;
-                                    }
-                                    for member in channel.member_ids {
-                                        if !existing.member_ids.contains(&member) {
-                                            existing.member_ids.push(member);
-                                        }
-                                    }
-                                    existing.member_count =
-                                        existing.member_count.max(channel.member_count);
-                                } else {
-                                    state.add_channel(channel);
-                                }
-                                changed = true;
-                            }
-                            ChatFact::ChannelClosed { channel_id, .. } => {
-                                state.remove_channel(&channel_id);
-                                changed = true;
-                            }
-                            ChatFact::ChannelUpdated {
-                                context_id,
-                                channel_id,
-                                name,
-                                topic,
-                                member_count,
-                                member_ids,
-                                updated_at,
-                                ..
-                            } => {
-                                // A channel we left stays gone; updates must not re-create it.
-                                if self
-                                    .hidden_channels_after_leave
-                                    .lock()
-                                    .await
-                                    .contains(&channel_id)
-                                {
-                                    continue;
-                                }
-                                if let Some(channel) = state.channel_mut(&channel_id) {
-                                    channel.context_id = Some(context_id);
-                                    if let Some(name) = name {
-                                        channel.name = name;
-                                    }
-                                    if topic.is_some() {
-                                        channel.topic = topic;
-                                    }
-                                    if let Some(member_count) = member_count {
-                                        channel.member_count = member_count;
-                                    }
-                                    if let Some(member_ids) = member_ids {
-                                        channel.member_ids = member_ids;
-                                    }
-                                    channel.last_activity = updated_at.ts_ms;
-                                } else {
-                                    let Some(name) = name else {
-                                        tracing::debug!(
-                                            channel_id = %channel_id,
-                                            context_id = %context_id,
-                                            "ignoring ChannelUpdated without canonical name for unknown channel"
-                                        );
-                                        continue;
+                                    created_at,
+                                    creator_id,
+                                    ..
+                                } => {
+                                    tracing::debug!(
+                                        channel_id = %channel_id,
+                                        %creator_id,
+                                        is_dm,
+                                        "ChatSignalView: ChannelCreated"
+                                    );
+                                    let hidden_after_leave = {
+                                        self.hidden_channels_after_leave
+                                            .lock()
+                                            .await
+                                            .contains(&channel_id)
                                     };
-                                    state.upsert_channel(Channel {
+                                    if hidden_after_leave {
+                                        tracing::debug!(channel_id = %channel_id, "ChatSignalView: channel hidden after leave");
+                                        continue;
+                                    }
+
+                                    drop(state);
+                                    self.ensure_amp_channel_state(
+                                        context_id, channel_id, creator_id,
+                                    )
+                                    .await;
+                                    state = self.state.lock().await;
+
+                                    // Seed membership from inbound channel facts so reply routing
+                                    // has at least one deterministic peer even before richer
+                                    // membership reductions are available.
+                                    let (member_ids, member_count) = if is_dm {
+                                        let mut members = vec![self.own_authority];
+                                        if creator_id != self.own_authority {
+                                            members.push(creator_id);
+                                        }
+                                        let count = members.len().max(2) as u32;
+                                        (members, count)
+                                    } else if creator_id != self.own_authority {
+                                        // For group channels we may not know the full roster yet.
+                                        // Seed the creator as an initial peer so recipients can reply.
+                                        (vec![creator_id], 2)
+                                    } else {
+                                        (Vec::new(), 0)
+                                    };
+
+                                    let channel = Channel {
                                         id: channel_id,
                                         context_id: Some(context_id),
                                         name,
                                         topic,
-                                        channel_type: ChannelType::Home,
+                                        channel_type: if is_dm {
+                                            ChannelType::DirectMessage
+                                        } else {
+                                            ChannelType::Home
+                                        },
                                         unread_count: 0,
-                                        is_dm: false,
-                                        member_ids: member_ids.unwrap_or_default(),
-                                        member_count: member_count.unwrap_or(1),
+                                        is_dm,
+                                        member_ids,
+                                        member_count,
                                         last_message: None,
                                         last_message_time: None,
-                                        last_activity: updated_at.ts_ms,
+                                        last_activity: created_at.ts_ms,
                                         last_finalized_epoch: 0,
-                                    });
-                                }
-                                changed = true;
-                            }
-                            ChatFact::MessageSentSealed {
-                                context_id,
-                                channel_id,
-                                message_id,
-                                sender_id,
-                                sender_name,
-                                payload,
-                                sent_at,
-                                reply_to,
-                                epoch_hint,
-                            } => {
-                                let sealed_len = payload.len();
-                                let payload_bytes = payload.clone();
-                                let context = context_id;
-                                let note_to_self_channel =
-                                    note_to_self_channel_id(self.own_authority);
-                                let known_member = state
-                                    .channel(&channel_id)
-                                    .is_some_and(|channel| channel.member_ids.contains(&sender_id));
-                                drop(state);
-                                if !self
-                                    .sender_allowed_for_context(
-                                        context,
-                                        channel_id,
-                                        sender_id,
-                                        sent_at.ts_ms,
-                                        known_member,
-                                    )
-                                    .await
-                                {
-                                    tracing::debug!(
-                                        context_id = %context,
-                                        channel_id = %channel_id,
-                                        message_id = %message_id,
-                                        sender_id = %sender_id,
-                                        "Dropping message due to moderation policy"
-                                    );
-                                    state = self.state.lock().await;
-                                    continue;
-                                }
-                                let content = if channel_id == note_to_self_channel {
-                                    String::from_utf8(payload_bytes.clone()).unwrap_or_else(|_| {
-                                        format!("[sealed: {} bytes]", sealed_len)
-                                    })
-                                } else {
-                                    match amp_open_committed(
-                                        self.effects.as_ref(),
-                                        context,
-                                        sender_id,
-                                        payload_bytes,
-                                    )
-                                    .await
-                                    {
-                                        Ok(msg) => {
-                                            String::from_utf8(msg.payload).unwrap_or_else(|_| {
-                                                format!("[sealed: {} bytes]", sealed_len)
-                                            })
+                                    };
+                                    // An update may have created the entry first; the creation
+                                    // fact is authoritative for DM-ness and seeded members.
+                                    if let Some(existing) = state.channel_mut(&channel.id) {
+                                        if channel.is_dm {
+                                            existing.is_dm = true;
+                                            existing.channel_type = ChannelType::DirectMessage;
                                         }
-                                        Err(err) => {
+                                        for member in channel.member_ids {
+                                            if !existing.member_ids.contains(&member) {
+                                                existing.member_ids.push(member);
+                                            }
+                                        }
+                                        existing.member_count =
+                                            existing.member_count.max(channel.member_count);
+                                    } else {
+                                        state.add_channel(channel);
+                                    }
+                                    changed = true;
+                                }
+                                ChatFact::ChannelClosed { channel_id, .. } => {
+                                    state.remove_channel(&channel_id);
+                                    changed = true;
+                                }
+                                ChatFact::ChannelUpdated {
+                                    context_id,
+                                    channel_id,
+                                    name,
+                                    topic,
+                                    member_count,
+                                    member_ids,
+                                    updated_at,
+                                    ..
+                                } => {
+                                    // A channel we left stays gone; updates must not re-create it.
+                                    if self
+                                        .hidden_channels_after_leave
+                                        .lock()
+                                        .await
+                                        .contains(&channel_id)
+                                    {
+                                        continue;
+                                    }
+                                    if let Some(channel) = state.channel_mut(&channel_id) {
+                                        channel.context_id = Some(context_id);
+                                        if let Some(name) = name {
+                                            channel.name = name;
+                                        }
+                                        if topic.is_some() {
+                                            channel.topic = topic;
+                                        }
+                                        if let Some(member_count) = member_count {
+                                            channel.member_count = member_count;
+                                        }
+                                        if let Some(member_ids) = member_ids {
+                                            channel.member_ids = member_ids;
+                                        }
+                                        channel.last_activity = updated_at.ts_ms;
+                                    } else {
+                                        let Some(name) = name else {
                                             tracing::debug!(
                                                 channel_id = %channel_id,
-                                                message_id = %message_id,
-                                                error = %err,
-                                                "AMP decrypt failed; rendering sealed payload"
+                                                context_id = %context_id,
+                                                "ignoring ChannelUpdated without canonical name for unknown channel"
                                             );
-                                            format!("[sealed: {} bytes]", sealed_len)
-                                        }
+                                            continue;
+                                        };
+                                        state.upsert_channel(Channel {
+                                            id: channel_id,
+                                            context_id: Some(context_id),
+                                            name,
+                                            topic,
+                                            channel_type: ChannelType::Home,
+                                            unread_count: 0,
+                                            is_dm: false,
+                                            member_ids: member_ids.unwrap_or_default(),
+                                            member_count: member_count.unwrap_or(1),
+                                            last_message: None,
+                                            last_message_time: None,
+                                            last_activity: updated_at.ts_ms,
+                                            last_finalized_epoch: 0,
+                                        });
                                     }
-                                };
-                                state = self.state.lock().await;
-                                tracing::info!(
-                                    channel_id = %channel_id,
-                                    sender_id = %sender_id,
-                                    own_authority = %self.own_authority,
-                                    is_own = sender_id == self.own_authority,
-                                    message_id = %message_id,
-                                    "ChatSignalView applying MessageSentSealed"
-                                );
-                                let is_own = sender_id == self.own_authority;
-
-                                // Derive delivery status from fact's consistency metadata
-                                let delivery_status = if is_own {
-                                    // For messages we sent, derive status from agreement level
-                                    // Finalized (A3) messages have consensus confirmation = Delivered
-                                    // Ack-tracked messages will transition based on acknowledgments
-                                    if fact.is_finalized() {
-                                        MessageDeliveryStatus::Delivered
-                                    } else {
-                                        MessageDeliveryStatus::Sent
-                                    }
-                                } else {
-                                    // Messages we received are already delivered to us
-                                    MessageDeliveryStatus::Delivered
-                                };
-
-                                let message = Message {
-                                    id: message_id,
+                                    changed = true;
+                                }
+                                ChatFact::MessageSentSealed {
+                                    context_id,
                                     channel_id,
+                                    message_id,
                                     sender_id,
                                     sender_name,
-                                    content,
-                                    timestamp: sent_at.ts_ms,
+                                    payload,
+                                    sent_at,
                                     reply_to,
-                                    is_own,
-                                    is_read: is_own,
-                                    delivery_status,
                                     epoch_hint,
-                                    is_finalized: fact.is_finalized(),
-                                };
-                                state.apply_message(channel_id, message);
-                                changed = true;
-                            }
-                            ChatFact::MessageRead {
-                                channel_id,
-                                message_id,
-                                reader_id,
-                                read_at,
-                                ..
-                            } => {
-                                // Two cases:
-                                // 1. Reader is us - mark message as read in our local state
-                                // 2. Reader is someone else - update our message's delivery_status to Read
-                                if reader_id == self.own_authority {
-                                    // We read someone else's message
-                                    if state.mark_message_read(&channel_id, &message_id) {
-                                        state.decrement_unread(&channel_id);
-                                        changed = true;
+                                } => {
+                                    let sealed_len = payload.len();
+                                    let payload_bytes = payload.clone();
+                                    let context = context_id;
+                                    let note_to_self_channel =
+                                        note_to_self_channel_id(self.own_authority);
+                                    let known_member =
+                                        state.channel(&channel_id).is_some_and(|channel| {
+                                            channel.member_ids.contains(&sender_id)
+                                        });
+                                    drop(state);
+                                    if !self
+                                        .sender_allowed_for_context(
+                                            context,
+                                            channel_id,
+                                            sender_id,
+                                            sent_at.ts_ms,
+                                            known_member,
+                                        )
+                                        .await
+                                    {
+                                        tracing::debug!(
+                                            context_id = %context,
+                                            channel_id = %channel_id,
+                                            message_id = %message_id,
+                                            sender_id = %sender_id,
+                                            "Dropping message due to moderation policy"
+                                        );
+                                        state = self.state.lock().await;
+                                        continue;
+                                    }
+                                    let content = if channel_id == note_to_self_channel {
+                                        String::from_utf8(payload_bytes.clone()).unwrap_or_else(
+                                            |_| format!("[sealed: {} bytes]", sealed_len),
+                                        )
+                                    } else {
+                                        match amp_open_committed(
+                                            self.effects.as_ref(),
+                                            context,
+                                            sender_id,
+                                            payload_bytes,
+                                        )
+                                        .await
+                                        {
+                                            Ok(msg) => String::from_utf8(msg.payload)
+                                                .unwrap_or_else(|_| {
+                                                    format!("[sealed: {} bytes]", sealed_len)
+                                                }),
+                                            Err(err) => {
+                                                tracing::debug!(
+                                                    channel_id = %channel_id,
+                                                    message_id = %message_id,
+                                                    error = %err,
+                                                    "AMP decrypt failed; rendering sealed payload"
+                                                );
+                                                format!("[sealed: {} bytes]", sealed_len)
+                                            }
+                                        }
+                                    };
+                                    state = self.state.lock().await;
+                                    tracing::info!(
+                                        channel_id = %channel_id,
+                                        sender_id = %sender_id,
+                                        own_authority = %self.own_authority,
+                                        is_own = sender_id == self.own_authority,
+                                        message_id = %message_id,
+                                        "ChatSignalView applying MessageSentSealed"
+                                    );
+                                    let is_own = sender_id == self.own_authority;
+
+                                    // Derive delivery status from fact's consistency metadata
+                                    let delivery_status = if is_own {
+                                        // For messages we sent, derive status from agreement level
+                                        // Finalized (A3) messages have consensus confirmation = Delivered
+                                        // Ack-tracked messages will transition based on acknowledgments
+                                        if fact.is_finalized() {
+                                            MessageDeliveryStatus::Delivered
+                                        } else {
+                                            MessageDeliveryStatus::Sent
+                                        }
+                                    } else {
+                                        // Messages we received are already delivered to us
+                                        MessageDeliveryStatus::Delivered
+                                    };
+
+                                    let message = Message {
+                                        id: message_id,
+                                        channel_id,
+                                        sender_id,
+                                        sender_name,
+                                        content,
+                                        timestamp: sent_at.ts_ms,
+                                        reply_to,
+                                        is_own,
+                                        is_read: is_own,
+                                        delivery_status,
+                                        epoch_hint,
+                                        is_finalized: fact.is_finalized(),
+                                    };
+                                    state.apply_message(channel_id, message);
+                                    changed = true;
+                                }
+                                ChatFact::MessageRead {
+                                    channel_id,
+                                    message_id,
+                                    reader_id,
+                                    read_at,
+                                    ..
+                                } => {
+                                    // Two cases:
+                                    // 1. Reader is us - mark message as read in our local state
+                                    // 2. Reader is someone else - update our message's delivery_status to Read
+                                    if reader_id == self.own_authority {
+                                        // We read someone else's message
+                                        if state.mark_message_read(&channel_id, &message_id) {
+                                            state.decrement_unread(&channel_id);
+                                            changed = true;
+                                        }
+                                        tracing::debug!(
+                                            channel_id = %channel_id,
+                                            message_id,
+                                            read_at = read_at.ts_ms,
+                                            "Message marked as read by us"
+                                        );
+                                    } else {
+                                        // Someone else read our message - update delivery status
+                                        if state.mark_read_by_recipient(&message_id) {
+                                            tracing::debug!(
+                                                channel_id = %channel_id,
+                                                message_id,
+                                                reader_id = %reader_id,
+                                                read_at = read_at.ts_ms,
+                                                "Message delivery status updated to Read"
+                                            );
+                                            changed = true;
+                                        }
+                                    }
+                                }
+                                ChatFact::MessageDeliveryUpdated {
+                                    channel_id,
+                                    message_id,
+                                    delivery_status,
+                                    ..
+                                } => {
+                                    let updated = match delivery_status {
+                                        aura_chat::ChatMessageDeliveryStatus::Sent => false,
+                                        aura_chat::ChatMessageDeliveryStatus::Delivered => {
+                                            state.mark_delivered(&message_id)
+                                        }
+                                        aura_chat::ChatMessageDeliveryStatus::Read => {
+                                            state.mark_read_by_recipient(&message_id)
+                                        }
+                                        aura_chat::ChatMessageDeliveryStatus::Failed => {
+                                            state.mark_failed(&message_id)
+                                        }
+                                    };
+                                    tracing::debug!(
+                                        channel_id = %channel_id,
+                                        message_id,
+                                        ?delivery_status,
+                                        "Message delivery status updated"
+                                    );
+                                    changed |= updated;
+                                }
+                                ChatFact::MessageEdited {
+                                    channel_id,
+                                    message_id,
+                                    editor_id,
+                                    new_payload,
+                                    edited_at,
+                                    ..
+                                } => {
+                                    // Update the message content in local state
+                                    let new_content =
+                                        String::from_utf8_lossy(&new_payload).to_string();
+                                    if let Some(msg) = state.message_mut(&channel_id, &message_id) {
+                                        msg.content = new_content;
                                     }
                                     tracing::debug!(
                                         channel_id = %channel_id,
                                         message_id,
-                                        read_at = read_at.ts_ms,
-                                        "Message marked as read by us"
+                                        editor_id = %editor_id,
+                                        edited_at = edited_at.ts_ms,
+                                        "Message edited"
                                     );
-                                } else {
-                                    // Someone else read our message - update delivery status
-                                    if state.mark_read_by_recipient(&message_id) {
-                                        tracing::debug!(
-                                            channel_id = %channel_id,
-                                            message_id,
-                                            reader_id = %reader_id,
-                                            read_at = read_at.ts_ms,
-                                            "Message delivery status updated to Read"
-                                        );
-                                        changed = true;
-                                    }
+                                    changed = true;
                                 }
-                            }
-                            ChatFact::MessageDeliveryUpdated {
-                                channel_id,
-                                message_id,
-                                delivery_status,
-                                ..
-                            } => {
-                                let updated = match delivery_status {
-                                    aura_chat::ChatMessageDeliveryStatus::Sent => false,
-                                    aura_chat::ChatMessageDeliveryStatus::Delivered => {
-                                        state.mark_delivered(&message_id)
-                                    }
-                                    aura_chat::ChatMessageDeliveryStatus::Read => {
-                                        state.mark_read_by_recipient(&message_id)
-                                    }
-                                    aura_chat::ChatMessageDeliveryStatus::Failed => {
-                                        state.mark_failed(&message_id)
-                                    }
-                                };
-                                tracing::debug!(
-                                    channel_id = %channel_id,
+                                ChatFact::MessageDeleted {
+                                    channel_id,
                                     message_id,
-                                    ?delivery_status,
-                                    "Message delivery status updated"
-                                );
-                                changed |= updated;
-                            }
-                            ChatFact::MessageEdited {
-                                channel_id,
-                                message_id,
-                                editor_id,
-                                new_payload,
-                                edited_at,
-                                ..
-                            } => {
-                                // Update the message content in local state
-                                let new_content = String::from_utf8_lossy(&new_payload).to_string();
-                                if let Some(msg) = state.message_mut(&channel_id, &message_id) {
-                                    msg.content = new_content;
-                                }
-                                tracing::debug!(
-                                    channel_id = %channel_id,
-                                    message_id,
-                                    editor_id = %editor_id,
-                                    edited_at = edited_at.ts_ms,
-                                    "Message edited"
-                                );
-                                changed = true;
-                            }
-                            ChatFact::MessageDeleted {
-                                channel_id,
-                                message_id,
-                                deleter_id,
-                                deleted_at,
-                                ..
-                            } => {
-                                // Remove the message from local state
-                                state.remove_message(&channel_id, &message_id);
-                                tracing::debug!(
-                                    channel_id = %channel_id,
-                                    message_id,
-                                    deleter_id = %deleter_id,
-                                    deleted_at = deleted_at.ts_ms,
-                                    "Message deleted"
-                                );
-                                changed = true;
-                            }
-                        }
-                    }
-                    FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
-                        let Some(membership) = ChannelMembershipFact::from_envelope(envelope)
-                        else {
-                            continue;
-                        };
-
-                        let channel_id = membership.channel();
-                        let participant = membership.participant();
-                        match membership.event() {
-                            ChannelParticipantEvent::Joined => {
-                                if participant == self.own_authority {
-                                    self.hidden_channels_after_leave
-                                        .lock()
-                                        .await
-                                        .remove(&channel_id);
-                                }
-                                if state.channel(&channel_id).is_none() {
+                                    deleter_id,
+                                    deleted_at,
+                                    ..
+                                } => {
+                                    // Remove the message from local state
+                                    state.remove_message(&channel_id, &message_id);
                                     tracing::debug!(
                                         channel_id = %channel_id,
-                                        participant = %participant,
-                                        "ignoring ChannelParticipantEvent::Joined without canonical channel metadata"
+                                        message_id,
+                                        deleter_id = %deleter_id,
+                                        deleted_at = deleted_at.ts_ms,
+                                        "Message deleted"
                                     );
-                                    continue;
-                                }
-                                if let Some(channel) = state.channel_mut(&channel_id) {
-                                    if participant != self.own_authority
-                                        && !channel.member_ids.contains(&participant)
-                                    {
-                                        channel.member_ids.push(participant);
-                                    }
-                                    let known_members =
-                                        channel.member_ids.len().saturating_add(1) as u32;
-                                    if known_members > channel.member_count {
-                                        channel.member_count = known_members;
-                                    }
                                     changed = true;
                                 }
                             }
-                            ChannelParticipantEvent::Left => {
-                                if participant == self.own_authority {
-                                    self.hidden_channels_after_leave
-                                        .lock()
-                                        .await
-                                        .insert(channel_id);
-                                    if state.remove_channel(&channel_id).is_some() {
+                        }
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
+                            let Some(membership) = ChannelMembershipFact::from_envelope(envelope)
+                            else {
+                                continue;
+                            };
+
+                            let channel_id = membership.channel();
+                            let participant = membership.participant();
+                            match membership.event() {
+                                ChannelParticipantEvent::Joined => {
+                                    if participant == self.own_authority {
+                                        self.hidden_channels_after_leave
+                                            .lock()
+                                            .await
+                                            .remove(&channel_id);
+                                    }
+                                    if state.channel(&channel_id).is_none() {
+                                        tracing::debug!(
+                                            channel_id = %channel_id,
+                                            participant = %participant,
+                                            "ignoring ChannelParticipantEvent::Joined without canonical channel metadata"
+                                        );
+                                        continue;
+                                    }
+                                    if let Some(channel) = state.channel_mut(&channel_id) {
+                                        if participant != self.own_authority
+                                            && !channel.member_ids.contains(&participant)
+                                        {
+                                            channel.member_ids.push(participant);
+                                        }
+                                        let known_members =
+                                            channel.member_ids.len().saturating_add(1) as u32;
+                                        if known_members > channel.member_count {
+                                            channel.member_count = known_members;
+                                        }
                                         changed = true;
                                     }
-                                } else if let Some(channel) = state.channel_mut(&channel_id) {
-                                    let before = channel.member_ids.len();
-                                    channel.member_ids.retain(|member| *member != participant);
-                                    if channel.member_ids.len() != before {
-                                        channel.member_count =
-                                            channel.member_count.saturating_sub(1);
-                                        changed = true;
+                                }
+                                ChannelParticipantEvent::Left => {
+                                    if participant == self.own_authority {
+                                        self.hidden_channels_after_leave
+                                            .lock()
+                                            .await
+                                            .insert(channel_id);
+                                        if state.remove_channel(&channel_id).is_some() {
+                                            changed = true;
+                                        }
+                                    } else if let Some(channel) = state.channel_mut(&channel_id) {
+                                        let before = channel.member_ids.len();
+                                        channel.member_ids.retain(|member| *member != participant);
+                                        if channel.member_ids.len() != before {
+                                            channel.member_count =
+                                                channel.member_count.saturating_sub(1);
+                                            changed = true;
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    // Ignore other fact types in ChatSignalView
-                    _ => {}
+                        // Ignore other fact types in ChatSignalView
+                        _ => {}
+                    }
+                }
+
+                if !changed {
+                    return;
+                }
+
+                let snapshot = state.clone();
+                drop(state);
+
+                match owner
+                    .replace_if_current(ProjectionSlot::chat(), source.revision, snapshot)
+                    .await
+                {
+                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Stale { .. }) => continue,
+                    Err(error) => {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!("Failed to publish CHAT_SIGNAL: {error}"),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
-
-            if !changed {
-                return;
-            }
-
-            let snapshot = state.clone();
-            drop(state);
-
-            emit_signal_or_internal_error(&self.reactive, &*CHAT_SIGNAL, snapshot, "CHAT_SIGNAL")
-                .await;
         })
     }
 
@@ -1943,6 +2027,7 @@ mod tests {
     use crate::AgentConfig;
     use aura_app::signal_defs::{
         register_app_signals, CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL,
+        RECOVERY_SIGNAL,
     };
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
@@ -1954,6 +2039,26 @@ mod tests {
         HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
     };
     use aura_social::moderation::HomeBanFact;
+
+    #[test]
+    fn runtime_projection_publications_use_the_versioned_owner() {
+        let production = include_str!("app_signal_views.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production section");
+        for signal in [
+            "CHAT_SIGNAL",
+            "CONTACTS_SIGNAL",
+            "HOMES_SIGNAL",
+            "INVITATIONS_SIGNAL",
+            "RECOVERY_SIGNAL",
+        ] {
+            assert!(
+                !production.contains(&format!(".emit(&*{signal}")),
+                "{signal} bypasses ProjectionOwner"
+            );
+        }
+    }
 
     async fn setup_homes(reactive: &ReactiveHandler, context: ContextId) -> HomesState {
         register_app_signals(reactive).await.unwrap();
@@ -2117,6 +2222,107 @@ mod tests {
         );
         assert_eq!(invitation.to_id, None);
         assert_eq!(invitation.to_name, None);
+    }
+
+    #[tokio::test]
+    async fn concurrent_home_materializers_preserve_both_entities_and_revisions() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own = AuthorityId::new_from_entropy([61u8; 32]);
+        let sender = AuthorityId::new_from_entropy([62u8; 32]);
+        let first = ChannelId::from_bytes([63u8; 32]);
+        let second = ChannelId::from_bytes([64u8; 32]);
+        let before = ProjectionOwner::new(reactive.clone())
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .unwrap();
+
+        let (a, b) = tokio::join!(
+            materialize_home_signal_for_channel_invitation(
+                &reactive,
+                own,
+                first,
+                "First",
+                sender,
+                ContextId::new_from_entropy([65u8; 32]),
+                1,
+            ),
+            materialize_home_signal_for_channel_invitation(
+                &reactive,
+                own,
+                second,
+                "Second",
+                sender,
+                ContextId::new_from_entropy([66u8; 32]),
+                2,
+            )
+        );
+        a.unwrap();
+        b.unwrap();
+
+        let after = ProjectionOwner::new(reactive)
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .unwrap();
+        assert!(after.value.has_home(&first));
+        assert!(after.value.has_home(&second));
+        assert_eq!(after.revision, before.revision + 2);
+    }
+
+    #[tokio::test]
+    async fn replayed_sent_fact_does_not_resurrect_accepted_invitation() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own = AuthorityId::new_from_entropy([71u8; 32]);
+        let peer = AuthorityId::new_from_entropy([72u8; 32]);
+        let invitation_id = aura_core::types::identifiers::InvitationId::new("accepted-invite");
+        let invitation_type = DomainInvitationType::Contact { nickname: None };
+        materialize_pending_invitation_signal(
+            &reactive,
+            own,
+            invitation_id.as_str(),
+            peer,
+            own,
+            &invitation_type,
+            None,
+            1,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let owner = ProjectionOwner::new(reactive.clone());
+        owner
+            .update(ProjectionSlot::invitations(), |state| -> Result<(), ()> {
+                state.accept_invitation(invitation_id.as_str()).unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let before = owner.snapshot(ProjectionSlot::invitations()).await.unwrap();
+
+        let fact = InvitationFact::sent_ms(
+            ContextId::new_from_entropy([73u8; 32]),
+            invitation_id,
+            peer,
+            own,
+            invitation_type,
+            1,
+            None,
+            None,
+        );
+        InvitationsSignalView::new(own, reactive)
+            .update(&[fact_from_relational(fact.to_generic())])
+            .await;
+
+        let after = owner.snapshot(ProjectionSlot::invitations()).await.unwrap();
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.value.open_invitations().count(), 0);
+        assert_eq!(
+            after.value.invitation("accepted-invite").unwrap().status,
+            InvitationStatus::Accepted
+        );
     }
 
     #[tokio::test]
@@ -2606,6 +2812,71 @@ mod tests {
             Some("aura:v1:REISSUED".to_string()),
             "absent invitation_code must preserve previously recorded code"
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_contact_removal_rejects_delayed_observed_enrichment() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([81u8; 32]);
+        let peer = AuthorityId::new_from_entropy([82u8; 32]);
+        let context_id = ContextId::new_from_entropy([83u8; 32]);
+        let view = ContactsSignalView::new(own_authority, reactive.clone());
+        let owner = ProjectionOwner::new(reactive.clone());
+
+        view.update(&[fact_from_relational(
+            ContactFact::Added {
+                context_id,
+                owner_id: own_authority,
+                contact_id: peer,
+                nickname: "Peer".to_string(),
+                added_at: PhysicalTime {
+                    ts_ms: 1,
+                    uncertainty: None,
+                },
+                invitation_code: None,
+            }
+            .to_generic(),
+        )])
+        .await;
+
+        owner
+            .update(ProjectionSlot::contacts(), |contacts| {
+                contacts
+                    .contact_mut(&peer)
+                    .expect("created contact")
+                    .is_online = true;
+                Ok::<(), ()>(())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let delayed = owner.snapshot(ProjectionSlot::contacts()).await.unwrap();
+
+        view.update(&[fact_from_relational(
+            ContactFact::Removed {
+                context_id,
+                owner_id: own_authority,
+                contact_id: peer,
+                removed_at: PhysicalTime {
+                    ts_ms: 2,
+                    uncertainty: None,
+                },
+            }
+            .to_generic(),
+        )])
+        .await;
+
+        assert!(matches!(
+            owner
+                .replace_if_current(ProjectionSlot::contacts(), delayed.revision, delayed.value,)
+                .await
+                .unwrap(),
+            ConditionalEmit::Stale { .. }
+        ));
+        let current = owner.snapshot(ProjectionSlot::contacts()).await.unwrap();
+        assert!(current.value.contact(&peer).is_none());
+        assert!(current.revision > delayed.revision);
     }
 
     #[tokio::test]

@@ -10,6 +10,7 @@ use aura_core::{
 use aura_journal::DomainFact;
 
 use crate::{
+    projection_owner::ProjectionSlot,
     ui_contract::{
         OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
         SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
@@ -20,8 +21,8 @@ use crate::{
     },
     workflows::channel_ref::HomeSelector,
     workflows::observed_projection::{
-        replace_homes_projection_observed, update_homes_projection_observed,
-        update_neighborhood_projection_observed,
+        try_update_neighborhood_projection_observed, update_homes_projection_observed,
+        update_homes_projection_with_revision, update_neighborhood_projection_observed,
     },
     workflows::semantic_facts::{prove_home_created, SemanticWorkflowOwner},
     AppCore,
@@ -63,35 +64,6 @@ fn resolve_home_name(
         .unwrap_or_else(|| home_id.to_string())
 }
 
-async fn publish_homes_projection(
-    app_core: &Arc<RwLock<AppCore>>,
-    homes_state: HomesState,
-) -> Result<(), AuraError> {
-    update_homes_projection_observed(app_core, move |state| {
-        *state = homes_state;
-    })
-    .await
-}
-
-async fn publish_neighborhood_projection(
-    app_core: &Arc<RwLock<AppCore>>,
-    neighborhood_state: NeighborhoodState,
-) -> Result<(), AuraError> {
-    update_neighborhood_projection_observed(app_core, move |state| {
-        *state = neighborhood_state;
-    })
-    .await
-}
-
-async fn publish_homes_and_neighborhood_projection(
-    app_core: &Arc<RwLock<AppCore>>,
-    homes_state: HomesState,
-    neighborhood_state: NeighborhoodState,
-) -> Result<(), AuraError> {
-    publish_homes_projection(app_core, homes_state).await?;
-    publish_neighborhood_projection(app_core, neighborhood_state).await
-}
-
 /// Move position in neighborhood view.
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
@@ -105,45 +77,48 @@ pub async fn move_position(
         _ => 1,
     };
 
-    let mut homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
-    let mut publish_homes = false;
-    let neighborhood = {
-        let mut core = app_core.write().await;
-        let mut neighborhood = core.views().get_neighborhood();
-        let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
-
-        let home_name = neighborhood
-            .neighbor(&target_home_id)
-            .map(|neighbor| neighbor.name.clone())
-            .unwrap_or_else(|| {
-                if target_home_id == neighborhood.home_home_id {
-                    neighborhood.home_name.clone()
-                } else {
-                    target_home_id.to_string()
-                }
+    let selector = HomeSelector::parse(home_id)?;
+    let gate = app_core.read().await.navigation_projection_gate();
+    let _navigation = gate.lock().await;
+    let target_home_id =
+        try_update_neighborhood_projection_observed(app_core, move |neighborhood| {
+            let target_home_id = resolve_target_home_id(neighborhood, selector)?;
+            let home_name = neighborhood
+                .neighbor(&target_home_id)
+                .map(|neighbor| neighbor.name.clone())
+                .unwrap_or_else(|| {
+                    if target_home_id == neighborhood.home_home_id {
+                        neighborhood.home_name.clone()
+                    } else {
+                        target_home_id.to_string()
+                    }
+                });
+            neighborhood.position = Some(TraversalPosition {
+                current_home_id: target_home_id,
+                current_home_name: home_name,
+                depth: depth_value,
+                path: vec![target_home_id],
             });
-
-        neighborhood.position = Some(TraversalPosition {
-            current_home_id: target_home_id,
-            current_home_name: home_name,
-            depth: depth_value,
-            path: vec![target_home_id],
-        });
-
+            Ok(target_home_id)
+        })
+        .await?;
+    let (selected, revision) = update_homes_projection_with_revision(app_core, move |homes| {
         if homes.has_home(&target_home_id) {
             homes.select_home(Some(target_home_id));
-            core.set_active_home_selection(Some(target_home_id));
-            publish_homes = true;
+            true
+        } else {
+            false
         }
-
-        neighborhood
-    };
-
-    if publish_homes {
-        publish_homes_projection(app_core, homes).await?;
+    })
+    .await?;
+    if selected {
+        app_core
+            .write()
+            .await
+            .set_active_home_selection_if_projection_current(revision, target_home_id);
     }
-
-    publish_neighborhood_projection(app_core, neighborhood).await
+    crate::workflows::observed_projection::mirror_homes_signal_into_view_locked(app_core).await?;
+    Ok(())
 }
 
 /// Create or select the active neighborhood.
@@ -173,15 +148,12 @@ pub async fn create_neighborhood(
     ))
     .to_string();
 
-    let neighborhood_state = {
-        let core = app_core.read().await;
-        let mut neighborhood = core.views().get_neighborhood();
-        neighborhood.neighborhood_id = Some(neighborhood_id.clone());
+    let publication_id = neighborhood_id.clone();
+    update_neighborhood_projection_observed(app_core, move |neighborhood| {
+        neighborhood.neighborhood_id = Some(publication_id);
         neighborhood.neighborhood_name = Some(neighborhood_name);
-        neighborhood
-    };
-
-    publish_neighborhood_projection(app_core, neighborhood_state).await?;
+    })
+    .await?;
     Ok(neighborhood_id)
 }
 
@@ -190,17 +162,38 @@ pub async fn add_home_to_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
 ) -> Result<(), AuraError> {
-    let (homes_state, neighborhood_state) = {
-        let core = app_core.read().await;
-        let mut homes = core.views().get_homes();
-        let mut neighborhood = core.views().get_neighborhood();
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let owner = app_core.read().await.projection_owner();
+    let neighborhood = owner
+        .snapshot(ProjectionSlot::neighborhood())
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?
+        .value;
+    let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
+    if neighborhood.is_member_home(&target_home_id) {
+        return Ok(());
+    }
+    let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
+    let target_member_count = homes
+        .home_state(&target_home_id)
+        .map(|home| home.member_count);
 
-        let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
-        let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
-        let target_member_count = homes
-            .home_state(&target_home_id)
-            .map(|home| home.member_count);
-
+    // Reserve the fallible storage allocation before publishing membership.
+    let reserved = crate::workflows::observed_projection::try_update_homes_projection_observed(
+        app_core,
+        move |homes| {
+            if let Some(home) = homes.home_mut(&target_home_id) {
+                home.storage
+                    .join_neighborhood()
+                    .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        },
+    )
+    .await?;
+    let inserted = update_neighborhood_projection_observed(app_core, move |neighborhood| {
         if target_home_id != neighborhood.home_home_id
             && neighborhood.neighbor(&target_home_id).is_none()
         {
@@ -213,20 +206,27 @@ pub async fn add_home_to_neighborhood(
                 can_traverse: true,
             });
         }
-
-        let newly_joined = neighborhood.add_member_home(target_home_id);
-        if newly_joined {
-            if let Some(home) = homes.home_mut(&target_home_id) {
-                home.storage
-                    .join_neighborhood()
-                    .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
-            }
-        }
-
-        (homes, neighborhood)
-    };
-
-    publish_homes_and_neighborhood_projection(app_core, homes_state, neighborhood_state).await
+        neighborhood.add_member_home(target_home_id)
+    })
+    .await;
+    if reserved && (inserted.is_err() || inserted.as_ref().is_ok_and(|inserted| !inserted)) {
+        // Publication failed or another writer joined while storage was being
+        // reserved. Remove only this attempt's allocation.
+        crate::workflows::observed_projection::try_update_homes_projection_observed(
+            app_core,
+            move |homes| {
+                if let Some(home) = homes.home_mut(&target_home_id) {
+                    home.storage
+                        .leave_neighborhood()
+                        .map_err(|error| AuraError::internal(error.to_string()))?;
+                }
+                Ok(())
+            },
+        )
+        .await?;
+    }
+    let _ = inserted?;
+    Ok(())
 }
 
 /// Force direct one_hop_link between local home and the target home in the active neighborhood.
@@ -234,23 +234,19 @@ pub async fn link_home_one_hop_link(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
 ) -> Result<(), AuraError> {
-    let neighborhood_state = {
-        let core = app_core.read().await;
-        let homes = core.views().get_homes();
-        let mut neighborhood = core.views().get_neighborhood();
-
-        let target_home_id = resolve_target_home_id(&neighborhood, HomeSelector::parse(home_id)?)?;
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let selector = HomeSelector::parse(home_id)?;
+    try_update_neighborhood_projection_observed(app_core, move |neighborhood| {
+        let target_home_id = resolve_target_home_id(neighborhood, selector)?;
         if target_home_id == neighborhood.home_home_id {
             return Err(AuraError::invalid(
                 "Cannot create one_hop_link from home to itself",
             ));
         }
-
-        let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
+        let target_home_name = resolve_home_name(&homes, neighborhood, target_home_id);
         let target_member_count = homes
             .home_state(&target_home_id)
             .map(|home| home.member_count);
-
         neighborhood.add_neighbor(NeighborHome {
             id: target_home_id,
             name: target_home_name,
@@ -259,10 +255,9 @@ pub async fn link_home_one_hop_link(
             member_count: target_member_count,
             can_traverse: true,
         });
-        neighborhood
-    };
-
-    publish_neighborhood_projection(app_core, neighborhood_state).await
+        Ok(())
+    })
+    .await
 }
 
 async fn create_home_with_creator(
@@ -287,7 +282,7 @@ async fn create_home_with_creator(
     let context_id =
         ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
 
-    let mut home = HomeState::new(
+    let home = HomeState::new(
         home_id,
         Some(home_name.clone()),
         creator,
@@ -295,22 +290,40 @@ async fn create_home_with_creator(
         context_id,
     );
 
-    let (homes, neighborhood) = {
-        let mut core = app_core.write().await;
-        let mut homes = core.views().get_homes();
-        let should_promote_to_primary = homes.is_empty()
-            || homes
-                .current_home()
-                .map(|current| current.id == ChannelId::default())
-                .unwrap_or(true);
-        if should_promote_to_primary {
-            home.is_primary = true;
-        }
-        let result = homes.add_home(home);
-        homes.select_home(Some(result.home_id));
-        core.set_active_home_selection(Some(result.home_id));
+    persist_created_home(
+        app_core,
+        home_id,
+        context_id,
+        &home_name,
+        creator,
+        timestamp_ms,
+    )
+    .await?;
 
-        let mut neighborhood = core.views().get_neighborhood();
+    let gate = app_core.read().await.navigation_projection_gate();
+    let _navigation = gate.lock().await;
+    let (should_promote_to_primary, revision) =
+        update_homes_projection_with_revision(app_core, move |homes| {
+            let should_promote_to_primary = homes.is_empty()
+                || homes
+                    .current_home()
+                    .map(|current| current.id == ChannelId::default())
+                    .unwrap_or(true);
+            let mut home = home;
+            if should_promote_to_primary {
+                home.is_primary = true;
+            }
+            let result = homes.add_home(home);
+            homes.select_home(Some(result.home_id));
+            should_promote_to_primary
+        })
+        .await?;
+    app_core
+        .write()
+        .await
+        .set_active_home_selection_if_projection_current(revision, home_id);
+
+    update_neighborhood_projection_observed(app_core, move |neighborhood| {
         if neighborhood.home_name.is_empty() || neighborhood.home_home_id == ChannelId::default() {
             neighborhood.home_home_id = home_id;
             neighborhood.home_name = home_name.clone();
@@ -331,27 +344,16 @@ async fn create_home_with_creator(
         {
             neighborhood.add_neighbor(NeighborHome {
                 id: home_id,
-                name: home_name.clone(),
+                name: home_name,
                 one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
                 member_count: Some(1),
                 can_traverse: true,
             });
         }
-
-        (homes, neighborhood)
-    };
-
-    persist_created_home(
-        app_core,
-        home_id,
-        context_id,
-        &home_name,
-        creator,
-        timestamp_ms,
-    )
+    })
     .await?;
-    publish_homes_and_neighborhood_projection(app_core, homes, neighborhood).await?;
+    crate::workflows::observed_projection::mirror_homes_signal_into_view_locked(app_core).await?;
 
     let _ = description;
     Ok(home_id)
@@ -548,13 +550,64 @@ pub async fn initialize_test_home(
         context_id,
     );
 
-    let homes = {
-        let core = app_core.read().await;
-        let mut homes = core.views().get_homes();
+    update_homes_projection_observed(app_core, move |homes| {
         homes.add_home(home_state);
-        homes
-    };
-
-    replace_homes_projection_observed(app_core, homes).await?;
+    })
+    .await?;
     Ok(home_id)
+}
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use crate::workflows::observed_projection::mirror_homes_signal_into_view;
+    use futures::FutureExt;
+
+    #[tokio::test]
+    async fn queued_moves_keep_homes_selection_and_traversal_position_paired() {
+        let app_core = crate::testing::default_test_app_core();
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let first_id = ChannelId::from_bytes(hash(b"navigation-two-moves-first"));
+        let second_id = ChannelId::from_bytes(hash(b"navigation-two-moves-second"));
+        update_homes_projection_observed(&app_core, |homes| {
+            for (home_id, name) in [(first_id, "First"), (second_id, "Second")] {
+                homes.add_home(HomeState::new(
+                    home_id,
+                    Some(name.to_string()),
+                    AuthorityId::new_from_entropy([51u8; 32]),
+                    1,
+                    ContextId::new_from_entropy([52u8; 32]),
+                ));
+            }
+            homes.select_home(Some(first_id));
+        })
+        .await
+        .unwrap();
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+
+        let gate = app_core.read().await.navigation_projection_gate();
+        let held = gate.lock().await;
+        let first_target = second_id.to_string();
+        let second_target = first_id.to_string();
+        let first = move_position(&app_core, &first_target, "full");
+        let second = move_position(&app_core, &second_target, "full");
+        futures::pin_mut!(first, second);
+        assert!((&mut first).now_or_never().is_none());
+        assert!((&mut second).now_or_never().is_none());
+        drop(held);
+        let (first_result, second_result) = futures::join!(first, second);
+        first_result.unwrap();
+        second_result.unwrap();
+
+        let core = app_core.read().await;
+        let selected = core.views().get_homes().current_home_id().copied();
+        let position = core
+            .views()
+            .get_neighborhood()
+            .position
+            .as_ref()
+            .map(|position| position.current_home_id);
+        assert!(matches!(selected, Some(id) if id == first_id || id == second_id));
+        assert_eq!(position, selected);
+        assert_eq!(core.active_home_selection(), selected);
+    }
 }

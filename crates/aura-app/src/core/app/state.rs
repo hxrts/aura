@@ -7,9 +7,11 @@ use crate::runtime_bridge::RuntimeBridge;
 use crate::ui_contract::AuthoritativeSemanticFact;
 use crate::views::ViewState;
 use crate::ReactiveHandler;
+use aura_core::effects::reactive::SignalId;
 use aura_core::hash;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use aura_core::AccountId;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,9 +27,14 @@ pub struct AppCore {
     pub(super) authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
     pub(super) runtime: Option<Arc<dyn RuntimeBridge>>,
     pub(super) reactive: ReactiveHandler,
+    /// Last reactive revision copied into each observed view cell.
+    pub(super) projection_revisions: HashMap<SignalId, u64>,
     #[cfg(feature = "callbacks")]
     pub(super) observer_registry: crate::bridge::callback::ObserverRegistry,
     pub(super) hook_install_gate: Arc<async_lock::Mutex<()>>,
+    /// Serializes workflow transitions that jointly change home selection and
+    /// neighborhood traversal with runtime homes mirroring.
+    pub(super) navigation_projection_gate: Arc<async_lock::Mutex<()>>,
     pub(super) hook_install_state: HookInstallState,
 }
 
@@ -51,9 +58,11 @@ impl AppCore {
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
             reactive,
+            projection_revisions: HashMap::new(),
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             hook_install_gate: Arc::new(async_lock::Mutex::new(())),
+            navigation_projection_gate: Arc::new(async_lock::Mutex::new(())),
             hook_install_state: HookInstallState::Stopped,
         })
     }
@@ -88,9 +97,11 @@ impl AppCore {
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
             reactive,
+            projection_revisions: HashMap::new(),
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
             hook_install_gate: Arc::new(async_lock::Mutex::new(())),
+            navigation_projection_gate: Arc::new(async_lock::Mutex::new(())),
             hook_install_state: HookInstallState::Stopped,
         })
     }

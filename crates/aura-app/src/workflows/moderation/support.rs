@@ -1,8 +1,6 @@
 use super::scope::ModerationScope;
 use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
-use crate::workflows::observed_projection::{
-    homes_signal_snapshot, replace_homes_projection_observed,
-};
+use crate::workflows::observed_projection::try_update_homes_projection_observed;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, timeout_runtime_call,
     workflow_retry_policy,
@@ -178,20 +176,22 @@ pub(super) async fn apply_local_home_projection<F>(
 where
     F: FnOnce(&mut crate::views::home::HomeState),
 {
-    let mut homes = homes_signal_snapshot(app_core).await?;
-    if homes.home_state(&scope.home_id).is_none() {
-        homes.add_home(crate::views::home::HomeState::new(
-            scope.home_id,
-            None,
-            actor,
-            timestamp_ms,
-            scope.context_id,
-        ));
-    }
+    try_update_homes_projection_observed(app_core, move |homes| {
+        if homes.home_state(&scope.home_id).is_none() {
+            homes.add_home(crate::views::home::HomeState::new(
+                scope.home_id,
+                None,
+                actor,
+                timestamp_ms,
+                scope.context_id,
+            ));
+        }
 
-    let Some(home) = homes.home_mut(&scope.home_id) else {
-        return Err(AuraError::not_found(scope.home_id.to_string()));
-    };
-    update(home);
-    replace_homes_projection_observed(app_core, homes).await
+        let home = homes
+            .home_mut(&scope.home_id)
+            .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
+        update(home);
+        Ok(())
+    })
+    .await
 }

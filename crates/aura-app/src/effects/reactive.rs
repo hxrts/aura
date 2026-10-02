@@ -1,3 +1,5 @@
 //! Reactive effect handler re-exports.
 
-pub use aura_effects::reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
+pub use aura_effects::reactive::{
+    ConditionalEmit, ReactiveHandler, SignalGraph, SignalGraphStats, SignalSnapshot,
+};

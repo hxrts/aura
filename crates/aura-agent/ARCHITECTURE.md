@@ -298,6 +298,14 @@ canonical channel or invitation metadata from weaker facts such as membership
 events or raw identifiers. If runtime acceptance or reconciliation needs to
 materialize canonical metadata, one explicit owned handler path must do that
 end to end before reactive views are allowed to enrich the projection.
+The runtime's reactive views and invitation materializers publish through
+`aura-app::projection_owner::ProjectionOwner`, which serializes each signal
+commit and assigns a source revision. Pure materializer deltas update the
+current signal in one transaction. Views that await decoding or effects must
+recompute against a fresh snapshot and conditionally publish at its revision;
+a stale batch retries until committed so canonical facts are not dropped. They must never emit
+a whole snapshot derived from an older read. The source revision is distinct
+from the frontend's render and semantic revision.
 Fact commit is the completion boundary for converted runtime-owned invitation
 acceptance and inbound transport materialization paths; those paths must not
 wait for an uncorrelated "next reactive view update" before returning success.

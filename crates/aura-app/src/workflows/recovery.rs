@@ -8,7 +8,8 @@ use crate::workflows::ceremonies::{
     CeremonyLifecycle, CeremonyLifecycleState, CeremonyPollPolicy, CeremonyStatusLike,
 };
 use crate::workflows::observed_projection::{
-    update_contacts_projection_observed, update_recovery_projection_observed,
+    try_update_recovery_projection_observed, update_contacts_projection_observed,
+    update_recovery_projection_observed,
 };
 use crate::workflows::observed_snapshot::observed_recovery_snapshot;
 use crate::workflows::parse::parse_authority_id;
@@ -220,7 +221,7 @@ pub async fn toggle_guardian_contact(
     }
 
     // OWNERSHIP: observed-display-update
-    update_recovery_projection_observed(app_core, |state| -> Result<(), AuraError> {
+    try_update_recovery_projection_observed(app_core, |state| -> Result<(), AuraError> {
         if was_guardian {
             let _ = state.revoke_guardian(&contact);
         } else if let Some(existing) = state.guardian_mut(&contact) {
@@ -255,7 +256,7 @@ pub async fn toggle_guardian_contact(
 
         Ok(())
     })
-    .await??;
+    .await?;
 
     // OWNERSHIP: observed-display-update
     update_contacts_projection_observed(app_core, |state| {

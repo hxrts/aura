@@ -7,7 +7,7 @@
 use crate::workflows::home_scope::best_home_for_context_by;
 use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
 use crate::workflows::observed_projection::{
-    homes_signal_snapshot, replace_homes_projection_observed,
+    homes_signal_snapshot, try_update_homes_projection_observed,
 };
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
@@ -300,38 +300,38 @@ pub async fn grant_moderator_resolved(
     }
 
     // Observed UI mirror.
-    let mut homes = homes_signal_snapshot(app_core).await?;
-    if !homes.has_home(&scope.home_id) {
-        let result = homes.add_home(scope.home_state.clone());
-        if result.was_first {
-            homes.select_home(Some(result.home_id));
+    try_update_homes_projection_observed(app_core, |homes| {
+        if !homes.has_home(&scope.home_id) {
+            let result = homes.add_home(scope.home_state.clone());
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
         }
-    }
-    let home_state = homes
-        .home_mut(&scope.home_id)
-        .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
+        let home_state = homes
+            .home_mut(&scope.home_id)
+            .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
+        let member = home_state
+            .member_mut(&target_id)
+            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
 
-    let member = home_state
-        .member_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
+        if matches!(member.role, HomeRole::Moderator) {
+            return Err(AuraError::invalid(
+                "Target already has moderator designation",
+            ));
+        }
+        if !matches!(member.role, HomeRole::Member) {
+            return Err(AuraError::invalid(
+                "Only members can be designated as moderators",
+            ));
+        }
 
-    if matches!(member.role, HomeRole::Moderator) {
-        return Err(AuraError::invalid(
-            "Target already has moderator designation",
-        ));
-    }
-    if !matches!(member.role, HomeRole::Member) {
-        return Err(AuraError::invalid(
-            "Only members can be designated as moderators",
-        ));
-    }
-
-    member.role = HomeRole::Moderator;
-    if actor == target_id {
-        home_state.my_role = HomeRole::Moderator;
-    }
-
-    replace_homes_projection_observed(app_core, homes).await
+        member.role = HomeRole::Moderator;
+        if actor == target_id {
+            home_state.my_role = HomeRole::Moderator;
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Revoke moderator designation from a home member.
@@ -425,31 +425,31 @@ pub async fn revoke_moderator_resolved(
             .map_err(|e| super::error::runtime_call("Send moderator revoke fact", e))?;
     }
 
-    let mut homes = homes_signal_snapshot(app_core).await?;
-    if !homes.has_home(&scope.home_id) {
-        let result = homes.add_home(scope.home_state.clone());
-        if result.was_first {
-            homes.select_home(Some(result.home_id));
+    try_update_homes_projection_observed(app_core, |homes| {
+        if !homes.has_home(&scope.home_id) {
+            let result = homes.add_home(scope.home_state.clone());
+            if result.was_first {
+                homes.select_home(Some(result.home_id));
+            }
         }
-    }
-    let home_state = homes
-        .home_mut(&scope.home_id)
-        .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
+        let home_state = homes
+            .home_mut(&scope.home_id)
+            .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
+        let member = home_state
+            .member_mut(&target_id)
+            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
 
-    let member = home_state
-        .member_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
+        if !matches!(member.role, HomeRole::Moderator) {
+            return Err(AuraError::invalid("Target is not a moderator"));
+        }
 
-    if !matches!(member.role, HomeRole::Moderator) {
-        return Err(AuraError::invalid("Target is not a moderator"));
-    }
-
-    member.role = HomeRole::Member;
-    if actor == target_id {
-        home_state.my_role = HomeRole::Member;
-    }
-
-    replace_homes_projection_observed(app_core, homes).await
+        member.role = HomeRole::Member;
+        if actor == target_id {
+            home_state.my_role = HomeRole::Member;
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Check if current user is admin in current home.
