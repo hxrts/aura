@@ -462,6 +462,7 @@ pub async fn emit_read_receipts(
 
     let mut facts = Vec::new();
     let mut count = 0u32;
+    let mut recipients = Vec::new();
 
     for (message_id, sender_id) in unread_messages {
         // Skip own messages
@@ -480,6 +481,7 @@ pub async fn emit_read_receipts(
             ChatFact::message_read_ms(context_id, channel_id, message_id, reader_id, timestamp_ms)
                 .to_generic();
 
+        recipients.push((sender_id, fact.clone()));
         facts.push(fact);
         count += 1;
     }
@@ -496,5 +498,52 @@ pub async fn emit_read_receipts(
         .map_err(|e| runtime_call("emit read receipts", e))?;
     }
 
+    // The sender learns its message was read from the receipt itself; delivery
+    // is best effort, like delivery receipts.
+    for (sender_id, fact) in &recipients {
+        let _ = timeout_runtime_call(
+            &runtime,
+            "emit_read_receipts",
+            "send_chat_fact",
+            CONTACTS_RUNTIME_TIMEOUT,
+            || runtime.send_chat_fact(*sender_id, context_id, fact),
+        )
+        .await;
+    }
+
     Ok(count)
+}
+
+/// Send read receipts for the received messages of a channel the user is
+/// viewing that have not been marked read yet. Returns how many were sent.
+///
+/// OWNERSHIP: observed
+pub async fn mark_channel_viewed(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<u32, AuraError> {
+    let chat = crate::workflows::signals::read_signal(
+        app_core,
+        &*crate::signal_defs::CHAT_SIGNAL,
+        crate::signal_defs::CHAT_SIGNAL_NAME,
+    )
+    .await?;
+    let Some(context_id) = chat
+        .all_channels()
+        .find(|channel| channel.id == channel_id)
+        .and_then(|channel| channel.context_id)
+    else {
+        return Ok(0);
+    };
+    let unread: Vec<_> = chat
+        .messages_for_channel(&channel_id)
+        .iter()
+        .filter(|message| !message.is_own && !message.is_read)
+        .map(|message| (message.id.clone(), message.sender_id))
+        .collect();
+    if unread.is_empty() {
+        return Ok(0);
+    }
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
+    emit_read_receipts(app_core, context_id, channel_id, unread, timestamp_ms).await
 }

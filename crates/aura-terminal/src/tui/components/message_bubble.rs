@@ -40,17 +40,7 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
     };
 
     // Status icon for own messages based on delivery status
-    let status_icon = if props.is_own {
-        match props.delivery_status {
-            DeliveryStatus::Sending => Some((Icons::PENDING, Theme::TEXT_MUTED)),
-            DeliveryStatus::Sent => Some((Icons::CHECK, Theme::TEXT_MUTED)),
-            DeliveryStatus::Delivered => Some((Icons::CHECK_DOUBLE, Theme::TEXT_MUTED)), // Gray double check
-            DeliveryStatus::Read => Some((Icons::CHECK_DOUBLE, Theme::INFO)), // Blue double check
-            DeliveryStatus::Failed => Some((Icons::CROSS, Theme::ERROR)),
-        }
-    } else {
-        None
-    };
+    let status_icon = delivery_status_icon(props.is_own, props.delivery_status);
 
     // Finalization indicator (for consensus-confirmed messages)
     let finalized_icon = if props.is_finalized {
@@ -206,5 +196,54 @@ pub fn MessageGroupHeader(props: &MessageGroupHeaderProps) -> impl Into<AnyEleme
         ) {
             Text(content: sender, weight: Weight::Bold, color: Theme::TEXT_HIGHLIGHT)
         }
+    }
+}
+
+/// Delivery indicator for a message: own messages show sending ◐ / sent ✓ /
+/// delivered gray ✓✓ / read blue ✓✓ / failed ✗; received messages show none.
+fn delivery_status_icon(is_own: bool, status: DeliveryStatus) -> Option<(&'static str, Color)> {
+    if !is_own {
+        return None;
+    }
+    Some(match status {
+        DeliveryStatus::Sending => (Icons::PENDING, Theme::TEXT_MUTED),
+        DeliveryStatus::Sent => (Icons::CHECK, Theme::TEXT_MUTED),
+        DeliveryStatus::Delivered => (Icons::CHECK_DOUBLE, Theme::TEXT_MUTED),
+        DeliveryStatus::Read => (Icons::CHECK_DOUBLE, Theme::INFO),
+        DeliveryStatus::Failed => (Icons::CROSS, Theme::ERROR),
+    })
+}
+
+#[cfg(test)]
+mod delivery_status_tests {
+    use super::*;
+
+    #[test]
+    fn own_messages_render_each_delivery_status() {
+        assert_eq!(
+            delivery_status_icon(true, DeliveryStatus::Sending),
+            Some((Icons::PENDING, Theme::TEXT_MUTED))
+        );
+        assert_eq!(
+            delivery_status_icon(true, DeliveryStatus::Sent),
+            Some((Icons::CHECK, Theme::TEXT_MUTED))
+        );
+        assert_eq!(
+            delivery_status_icon(true, DeliveryStatus::Delivered),
+            Some((Icons::CHECK_DOUBLE, Theme::TEXT_MUTED))
+        );
+        assert_eq!(
+            delivery_status_icon(true, DeliveryStatus::Read),
+            Some((Icons::CHECK_DOUBLE, Theme::INFO))
+        );
+        assert_eq!(
+            delivery_status_icon(true, DeliveryStatus::Failed),
+            Some((Icons::CROSS, Theme::ERROR))
+        );
+    }
+
+    #[test]
+    fn received_messages_render_no_delivery_status() {
+        assert_eq!(delivery_status_icon(false, DeliveryStatus::Read), None);
     }
 }
