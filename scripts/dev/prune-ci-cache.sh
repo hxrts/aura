@@ -51,6 +51,18 @@ consumers() {
         printf "%s(%s) ", name, $1
     }'
 }
+target_has_open_files() {
+  local open_files
+  if ! command -v lsof >/dev/null; then
+    echo 'CI cache: lsof unavailable; treating target as in use' >&2
+    return 0
+  fi
+  if ! open_files="$(lsof -n -P 2>/dev/null)"; then
+    echo 'CI cache: open-file scan failed; treating target as in use' >&2
+    return 0
+  fi
+  rg -F -q "$root/target/" <<< "$open_files"
+}
 printf 'CI cache: mode=%s root=%s cap=%s GiB; free=%s KiB target=%s KiB\n' \
   "$mode" "$root" "$cap_gib" "$(free_kib)" "$(target_kib)"
 
@@ -86,8 +98,8 @@ if [[ -n "$found" ]]; then
   echo "prune-ci-cache: builder or harness consumer started: $found" >&2
   exit 1
 fi
-if (( release_candidates > 0 )); then
-  echo 'CI cache: global sweep would evict production or web release; using idle whole lanes'
+if (( release_candidates > 0 )) || target_has_open_files; then
+  echo 'CI cache: global sweep could evict release artifacts or open files; using idle whole lanes'
   for lane in wasm-debug dylint debug; do
     if ! bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" \
       --lane "$lane" --apply --lock-owned-by "$$"; then

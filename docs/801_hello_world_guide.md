@@ -85,6 +85,10 @@ script; it never prunes the other host remotely.
 When only an unused debug lane can be released, inspect it with
 `just prune-inactive-lane wasm-debug --dry-run` and then use `--apply`.
 The cleanup checks for active compilers and open files in that lane.
+Global Cargo sweeping also skips a target with open files, such as proc-macro
+libraries loaded by `rust-analyzer`; it then considers only fully inactive
+whole lanes. The 24 GiB target is a soft between-build goal, so a lane held
+open by another process may remain above it until that process exits.
 
 ## Creating an Agent
 

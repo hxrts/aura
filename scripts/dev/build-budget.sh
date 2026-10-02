@@ -78,6 +78,18 @@ require_idle() {
     return 1
   fi
 }
+target_has_open_files() {
+  local open_files
+  if ! command -v lsof >/dev/null; then
+    echo 'build-budget: lsof unavailable; treating target as in use' >&2
+    return 0
+  fi
+  if ! open_files="$(lsof -n -P 2>/dev/null)"; then
+    echo 'build-budget: open-file scan failed; treating target as in use' >&2
+    return 0
+  fi
+  rg -F -q "$root/target/" <<< "$open_files"
+}
 sweep() {
   local mode="$1" preview release_count rc
   preview="$(mktemp "${TMPDIR:-/tmp}/aura-sweep-preview.XXXXXX")"
@@ -100,6 +112,10 @@ sweep() {
     return 3
   fi
   require_idle || return $?
+  if target_has_open_files; then
+    echo 'build-budget: target has open files; skipping global sweep' >&2
+    return 3
+  fi
   printf 'Sweep: cargo sweep --maxsize %sGiB .\n' "$cap_gib"
   (cd "$root" && cargo sweep --maxsize "${cap_gib}GiB" .)
 }

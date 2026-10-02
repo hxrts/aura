@@ -14,6 +14,7 @@ ln -s "$test_root/outside" "$project/target/outside-link"
 export CALLS_FILE="$test_root/calls"
 export ACTIVE_FILE="$test_root/active"
 export PROTECTED_FILE="$test_root/protected-release"
+export OPEN_TARGET_FILE="$test_root/open-target"
 export PATH="$fakebin:$PATH"
 : > "$CALLS_FILE"
 
@@ -27,6 +28,10 @@ EOF
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
 [[ ! -f "$ACTIVE_FILE" ]] || printf '123 %s\n' "$(cat "$ACTIVE_FILE")"
+EOF
+cat > "$fakebin/lsof" <<'EOF'
+#!/usr/bin/env bash
+[[ ! -f "$OPEN_TARGET_FILE" ]] || cat "$OPEN_TARGET_FILE"
 EOF
 chmod +x "$fakebin"/*
 
@@ -62,6 +67,19 @@ fi
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 [[ -f "$project/.tmp/e2e/run/failed/events.json" ]]
 rm "$PROTECTED_FILE"
+
+: > "$CALLS_FILE"
+mkdir -p "$project/target/wasm32-unknown-unknown/debug"
+printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
+printf 'fake 123 %s\n' "$project/target/release/production" > "$OPEN_TARGET_FILE"
+expect_status 0 run_prune --apply
+if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
+  echo 'CI prune swept a target containing an open file' >&2
+  exit 1
+fi
+[[ -f "$project/target/release/production" ]]
+[[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
+rm "$OPEN_TARGET_FILE"
 
 : > "$CALLS_FILE"
 expect_status 0 run_prune --apply

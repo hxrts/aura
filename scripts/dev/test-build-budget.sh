@@ -17,6 +17,7 @@ export FAIL_SWEEP_FILE="$test_root/fail-sweep"
 export PROTECTED_FILE="$test_root/protected-release"
 export PROTECTED_WEB_FILE="$test_root/protected-web"
 export RACE_ON_PREVIEW_FILE="$test_root/race-on-preview"
+export OPEN_TARGET_FILE="$test_root/open-target"
 export AURA_BUILD_TARGET_CAP_GIB=8
 export PATH="$fakebin:$PATH"
 
@@ -32,6 +33,10 @@ EOF
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
 [[ ! -f "$ACTIVE_FILE" ]] || printf '999 %s\n' "$(cat "$ACTIVE_FILE")"
+EOF
+cat > "$fakebin/lsof" <<'EOF'
+#!/usr/bin/env bash
+[[ ! -f "$OPEN_TARGET_FILE" ]] || cat "$OPEN_TARGET_FILE"
 EOF
 cat > "$fakebin/cargo" <<'EOF'
 #!/usr/bin/env bash
@@ -53,7 +58,7 @@ reset_case() {
   printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
   printf '%s\n' $((6 * 1024 * 1024)) > "$SIZE_FILE"
   : > "$CALLS_FILE"
-  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE"
+  rm -f "$ACTIVE_FILE" "$FAIL_SWEEP_FILE" "$PROTECTED_FILE" "$PROTECTED_WEB_FILE" "$RACE_ON_PREVIEW_FILE" "$OPEN_TARGET_FILE"
   rm -rf "$project/target/.aura-build-budget.lock"
 }
 
@@ -100,6 +105,20 @@ expect_status 1 run_budget -- sh -c 'touch "$FREE_FILE.build-ran"'
 [[ "$(wc -l < "$CALLS_FILE")" -eq 1 ]]
 rg -q -- '--dry-run' "$CALLS_FILE"
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
+
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+mkdir -p "$project/target/release" "$project/target/wasm32-unknown-unknown/debug"
+printf 'loaded\n' > "$project/target/release/loaded"
+printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
+printf 'fake 123 %s\n' "$project/target/release/loaded" > "$OPEN_TARGET_FILE"
+expect_status 0 run_budget -- sh -c 'exit 0'
+if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
+  echo 'open target file was swept' >&2
+  exit 1
+fi
+[[ -f "$project/target/release/loaded" ]]
+[[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
