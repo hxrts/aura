@@ -148,6 +148,10 @@ impl ReactivePipelineService {
                 ));
             }
         };
+        tracing::info!(
+            count = existing.len(),
+            "replaying committed facts at pipeline startup"
+        );
         if !existing.is_empty() {
             if let Err(error) = pipeline.publish_journal_facts(existing).await {
                 let _ = pipeline.shutdown().await;

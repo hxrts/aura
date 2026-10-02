@@ -1066,6 +1066,7 @@ impl ReactiveView for HomeSignalView {
             let mut homes = match self.reactive.read(&*HOMES_SIGNAL).await {
                 Ok(state) => state,
                 Err(e) => {
+                    tracing::warn!(error = %e, facts = facts.len(), "home view could not read HOMES_SIGNAL; facts not applied");
                     emit_internal_error(
                         &self.reactive,
                         format!("Failed to read HOMES_SIGNAL: {e}"),
