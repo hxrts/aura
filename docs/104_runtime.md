@@ -443,11 +443,13 @@ Reactive subscription policy is explicit:
 - application signal setup ensures every required signal individually; retry after partial setup preserves registered values and subscriptions
 - query-bound signal setup registers the same required signal set; a failed query binding leaves no partial binding and a later retry can attach it without resetting the signal
 - runtime refresh hooks attach one receiver per required signal and acknowledge every listener's startup before reporting readiness; failure rolls back the group and permits retry with a typed reactive failure
+- each attached signal has one owned refresh loop: it receives an update, completes one refresh pass, then receives again; a second task cannot race that signal's refresh or clear its pending work
 - detaching an `AppCore` runtime cancels its hook group before another generation attaches
 - subscribing to an unregistered signal fails fast with `ReactiveError::SignalNotFound`
 - there is no implicit wait-for-registration or dead-stream fallback
 - subscriber delivery is eventually consistent rather than lossless
 - if a subscriber lags behind the bounded broadcast buffer, intermediate values may be dropped and the subscriber resumes from a newer snapshot after a lag warning is logged
+- a refresh pass reads current authoritative state after its trigger; updates that arrive during the pass remain in the bounded stream, and the next receive runs another pass against current state even if intermediate snapshots were dropped
 
 Production code obtains the registry via `effect_system.fact_registry()`. Tests may use `build_fact_registry()` for isolation. The registry assembly stays in Layer 6 rather than Layer 1.
 

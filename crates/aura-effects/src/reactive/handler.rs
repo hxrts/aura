@@ -12,6 +12,8 @@ use aura_core::effects::reactive::{
 use aura_core::query::{FactPredicate, Query};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+#[cfg(feature = "test-support")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tokio::sync::watch;
@@ -28,6 +30,69 @@ const REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY: usize = 256;
 #[cfg(feature = "test-support")]
 #[derive(Debug)]
 pub struct TestTaskSpawner;
+
+/// Counts task allocations while running them with the test runtime.
+#[cfg(feature = "test-support")]
+#[derive(Debug, Default)]
+pub struct CountingTestTaskSpawner {
+    spawned: AtomicUsize,
+}
+
+#[cfg(feature = "test-support")]
+impl CountingTestTaskSpawner {
+    /// Number of owned tasks allocated through this spawner.
+    pub fn spawned_count(&self) -> usize {
+        self.spawned.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg(feature = "test-support")]
+impl aura_core::effects::task::TaskSpawner for CountingTestTaskSpawner {
+    fn spawn(&self, fut: futures::future::BoxFuture<'static, ()>) {
+        self.spawned.fetch_add(1, Ordering::SeqCst);
+        <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::spawn(&TestTaskSpawner, fut);
+    }
+
+    fn spawn_cancellable(
+        &self,
+        fut: futures::future::BoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        self.spawned.fetch_add(1, Ordering::SeqCst);
+        <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::spawn_cancellable(
+            &TestTaskSpawner,
+            fut,
+            token,
+        );
+    }
+
+    fn spawn_local(&self, fut: futures::future::LocalBoxFuture<'static, ()>) {
+        self.spawned.fetch_add(1, Ordering::SeqCst);
+        <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::spawn_local(
+            &TestTaskSpawner,
+            fut,
+        );
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: futures::future::LocalBoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        self.spawned.fetch_add(1, Ordering::SeqCst);
+        <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::spawn_local_cancellable(
+            &TestTaskSpawner,
+            fut,
+            token,
+        );
+    }
+
+    fn cancellation_token(&self) -> Arc<dyn aura_core::effects::task::CancellationToken> {
+        <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::cancellation_token(
+            &TestTaskSpawner,
+        )
+    }
+}
 
 #[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
 impl aura_core::effects::task::TaskSpawner for TestTaskSpawner {

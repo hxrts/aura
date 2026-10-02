@@ -54,4 +54,4 @@ pub mod handler;
 pub use graph::{SignalGraph, SignalGraphStats, TypedSignalReceiver};
 pub use handler::ReactiveHandler;
 #[cfg(feature = "test-support")]
-pub use handler::TestTaskSpawner;
+pub use handler::{CountingTestTaskSpawner, TestTaskSpawner};

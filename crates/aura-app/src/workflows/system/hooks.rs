@@ -167,7 +167,7 @@ async fn refresh_authoritative_channel_and_recipient_readiness_hook(
     best_effort.finish()
 }
 
-async fn spawn_coalesced_signal_refresh<T>(
+async fn spawn_owned_signal_refresh<T>(
     mut stream: SignalStream<T>,
     spawner: OwnedTaskSpawner,
     runtime: Arc<dyn RuntimeBridge>,
@@ -179,9 +179,6 @@ async fn spawn_coalesced_signal_refresh<T>(
 where
     T: Clone + Send + Sync + 'static,
 {
-    let refresh_in_flight = Arc::new(AtomicBool::new(false));
-    let refresh_pending = Arc::new(AtomicBool::new(false));
-    let refresh_spawner = spawner.clone();
     let (started_tx, started_rx) = oneshot::channel();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
@@ -195,34 +192,16 @@ where
                 break;
             };
 
-            if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                refresh_pending.store(true, Ordering::SeqCst);
-                continue;
+            // This task is the sole refresh owner. Updates received while the
+            // refresh awaits remain in the bounded signal stream; after a lag,
+            // recv resumes with a newer snapshot and refresh reads current state.
+            let outcome = futures::select! {
+                _ = cancel.clone().fuse() => break,
+                outcome = refresh(app_core.clone()).fuse() => outcome,
+            };
+            if let Err(error) = outcome {
+                log_refresh_hook_error(refresh_name, &error);
             }
-
-            let refresh_app_core = app_core.clone();
-            let refresh_in_flight = refresh_in_flight.clone();
-            let refresh_pending = refresh_pending.clone();
-            let refresh = refresh.clone();
-            let refresh_cancel = cancel.clone();
-            spawn_runtime_refresh_task(&refresh_spawner, async move {
-                loop {
-                    let outcome = futures::select! {
-                        _ = refresh_cancel.clone().fuse() => break,
-                        outcome = refresh(refresh_app_core.clone()).fuse() => outcome,
-                    };
-                    if let Err(error) = outcome {
-                        log_refresh_hook_error(refresh_name, &error);
-                    }
-
-                    if refresh_pending.swap(false, Ordering::SeqCst) {
-                        continue;
-                    }
-
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                    break;
-                }
-            });
         }
     });
     crate::workflows::runtime::timeout_runtime_call(
@@ -244,22 +223,6 @@ where
             source: Some(Arc::new(source)),
         },
     })
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn spawn_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
-where
-    F: Future<Output = ()> + Send + 'static,
-{
-    spawner.spawn(Box::pin(fut));
-}
-
-#[cfg(target_arch = "wasm32")]
-fn spawn_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
-where
-    F: Future<Output = ()> + 'static,
-{
-    spawner.spawn_local(Box::pin(fut));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -382,7 +345,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         cancellation: cancel_rx.clone(),
         shutdown: spawner.shutdown_token().clone(),
     };
-    spawn_coalesced_signal_refresh(
+    spawn_owned_signal_refresh(
         contacts,
         spawner.clone(),
         runtime.clone(),
@@ -394,7 +357,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         cancel_rx.clone(),
     )
     .await?;
-    spawn_coalesced_signal_refresh(
+    spawn_owned_signal_refresh(
         chat,
         spawner.clone(),
         runtime.clone(),
@@ -408,7 +371,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
     .await?;
     #[cfg(feature = "signals")]
     {
-        spawn_coalesced_signal_refresh(
+        spawn_owned_signal_refresh(
             chat_readiness,
             spawner.clone(),
             runtime.clone(),
@@ -422,7 +385,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             cancel_rx.clone(),
         )
         .await?;
-        spawn_coalesced_signal_refresh(
+        spawn_owned_signal_refresh(
             homes_readiness,
             spawner.clone(),
             runtime.clone(),
@@ -436,7 +399,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             cancel_rx.clone(),
         )
         .await?;
-        spawn_coalesced_signal_refresh(
+        spawn_owned_signal_refresh(
             peers_readiness,
             spawner.clone(),
             runtime.clone(),
@@ -450,7 +413,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             cancel_rx.clone(),
         )
         .await?;
-        spawn_coalesced_signal_refresh(
+        spawn_owned_signal_refresh(
             invitation_readiness,
             spawner,
             runtime,
@@ -480,4 +443,265 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
     }
 
     Ok(group)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AppConfig;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
+    use aura_core::{AuthorityId, OwnedShutdownToken};
+    use aura_effects::reactive::CountingTestTaskSpawner;
+    use std::sync::atomic::AtomicUsize;
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn blocked_refresh_replays_latest_snapshot_after_burst_and_lag() {
+        const FINAL_REVISION: usize = 1024;
+        let counting_spawner = Arc::new(CountingTestTaskSpawner::default());
+        let mut runtime = OfflineRuntimeBridge::new(AuthorityId::new_from_entropy([71; 32]));
+        runtime.use_test_task_spawner(OwnedTaskSpawner::new(
+            counting_spawner.clone(),
+            OwnedShutdownToken::detached(),
+        ));
+        let runtime = Arc::new(runtime);
+        let app_core =
+            crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime.clone());
+        let reactive = { app_core.read().await.reactive().clone() };
+        let signal = Signal::<u32>::new("test:owned-refresh-burst");
+        reactive
+            .graph()
+            .ensure_registered(signal.id().clone(), 0u32)
+            .await
+            .unwrap();
+        let stream = reactive.subscribe_attached(&signal).await.unwrap();
+        let latest_source = Arc::new(AtomicUsize::new(0));
+        let latest_seen = Arc::new(AtomicUsize::new(0));
+        let passes = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let first_entered = Arc::new(Notify::new());
+        let release_first = Arc::new(Notify::new());
+        let final_seen = Arc::new(Notify::new());
+
+        let refresh: RefreshHook = {
+            let latest_source = latest_source.clone();
+            let latest_seen = latest_seen.clone();
+            let passes = passes.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            let first_entered = first_entered.clone();
+            let release_first = release_first.clone();
+            let final_seen = final_seen.clone();
+            Arc::new(move |_| {
+                let latest_source = latest_source.clone();
+                let latest_seen = latest_seen.clone();
+                let passes = passes.clone();
+                let active = active.clone();
+                let max_active = max_active.clone();
+                let first_entered = first_entered.clone();
+                let release_first = release_first.clone();
+                let final_seen = final_seen.clone();
+                Box::pin(async move {
+                    let pass = passes.fetch_add(1, Ordering::SeqCst) + 1;
+                    let current_active = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(current_active, Ordering::SeqCst);
+                    let snapshot = latest_source.load(Ordering::SeqCst);
+                    if pass == 1 {
+                        first_entered.notify_one();
+                        release_first.notified().await;
+                    }
+                    latest_seen.store(snapshot, Ordering::SeqCst);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    if snapshot == FINAL_REVISION {
+                        final_seen.notify_one();
+                    }
+                    Ok(())
+                })
+            })
+        };
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let cancel = cancel_rx.map(|_| ()).boxed().shared();
+        let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        spawn_owned_signal_refresh(
+            stream,
+            runtime.task_spawner(),
+            runtime_bridge,
+            app_core,
+            "test_owned_refresh",
+            refresh,
+            cancel,
+        )
+        .await
+        .unwrap();
+        assert_eq!(counting_spawner.spawned_count(), 1);
+
+        latest_source.store(1, Ordering::SeqCst);
+        reactive.graph().emit(signal.id(), 1u32).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), first_entered.notified())
+            .await
+            .unwrap();
+        for value in 2..=FINAL_REVISION {
+            latest_source.store(value, Ordering::SeqCst);
+            reactive
+                .graph()
+                .emit(signal.id(), value as u32)
+                .await
+                .unwrap();
+        }
+        assert_eq!(passes.load(Ordering::SeqCst), 1);
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+        release_first.notify_one();
+        tokio::time::timeout(std::time::Duration::from_secs(2), final_seen.notified())
+            .await
+            .unwrap();
+        assert_eq!(latest_seen.load(Ordering::SeqCst), FINAL_REVISION);
+        assert!(passes.load(Ordering::SeqCst) >= 2);
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+        assert_eq!(counting_spawner.spawned_count(), 1);
+
+        cancel_tx.send(()).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while reactive.graph().subscriber_count(signal.id()).await != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn installed_hooks_converge_contacts_chat_invitation_and_readiness() {
+        use crate::signal_defs::{
+            SyncStatus, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, SYNC_STATUS_SIGNAL,
+        };
+        use crate::ui_contract::AuthoritativeSemanticFact;
+        use crate::views::contacts::{
+            Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
+        };
+        use crate::views::invitations::{
+            Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
+        };
+        use crate::views::ChatState;
+
+        let runtime =
+            crate::testing::running_offline_runtime(AuthorityId::new_from_entropy([72; 32]));
+        runtime.set_pending_invitations(Vec::new());
+        let app_core = crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime);
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let reactive = { app_core.read().await.reactive().clone() };
+        let contact_id = AuthorityId::new_from_entropy([73; 32]);
+
+        for revision in 1..=8 {
+            let contact = Contact {
+                id: contact_id,
+                nickname: format!("contact-{revision}"),
+                nickname_suggestion: None,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::default(),
+                invitation_code: None,
+            };
+            reactive
+                .graph()
+                .emit(
+                    CONTACTS_SIGNAL.id(),
+                    ContactsState::from_contacts([contact]),
+                )
+                .await
+                .unwrap();
+            reactive
+                .graph()
+                .emit(
+                    CHAT_SIGNAL.id(),
+                    ChatState {
+                        total_unread: revision,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
+            reactive
+                .graph()
+                .emit(
+                    SYNC_STATUS_SIGNAL.id(),
+                    SyncStatus::Syncing {
+                        progress: revision as u8,
+                    },
+                )
+                .await
+                .unwrap();
+            let invitation = Invitation {
+                id: format!("home-invitation-{revision}"),
+                invitation_type: InvitationType::Home,
+                status: InvitationStatus::Pending,
+                direction: InvitationDirection::Received,
+                from_id: contact_id,
+                from_name: "Contact".to_owned(),
+                to_id: None,
+                to_name: None,
+                created_at: revision as u64,
+                expires_at: None,
+                message: None,
+                home_id: Some(aura_core::ChannelId::from_bytes([74; 32])),
+                home_name: Some("Shared Home".to_owned()),
+            };
+            reactive
+                .graph()
+                .emit(
+                    INVITATIONS_SIGNAL.id(),
+                    InvitationsState::from_parts(vec![invitation], Vec::new(), Vec::new()),
+                )
+                .await
+                .unwrap();
+        }
+
+        let convergence = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let core = app_core.read().await;
+                let snapshot = core.snapshot();
+                let converged = snapshot
+                    .contacts
+                    .contact(&contact_id)
+                    .is_some_and(|contact| contact.nickname == "contact-8")
+                    && snapshot.chat.total_unread == 8
+                    && snapshot
+                        .invitations
+                        .all_pending()
+                        .iter()
+                        .any(|invitation| invitation.id == "home-invitation-8")
+                    && core
+                        .authoritative_semantic_facts()
+                        .contains(&AuthoritativeSemanticFact::PendingHomeInvitationReady);
+                drop(core);
+                if converged {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        if convergence.is_err() {
+            let core = app_core.read().await;
+            let snapshot = core.snapshot();
+            let chat_signal = core
+                .reactive()
+                .graph()
+                .read::<ChatState>(CHAT_SIGNAL.id())
+                .await
+                .ok();
+            panic!(
+                "installed hooks did not converge: contact={:?}, unread={}, chat_signal_unread={:?}, invitations={:?}, facts={:?}",
+                snapshot.contacts.contact(&contact_id).map(|contact| &contact.nickname),
+                snapshot.chat.total_unread,
+                chat_signal.map(|chat| chat.total_unread),
+                snapshot.invitations.all_pending().iter().map(|invitation| &invitation.id).collect::<Vec<_>>(),
+                core.authoritative_semantic_facts(),
+            );
+        }
+    }
 }

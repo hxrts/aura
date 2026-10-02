@@ -46,6 +46,7 @@ The crate uses explicit concern-owned submodules.
 - **Push-based reactive flow**: Intent -> Journal -> Reduce -> ViewState -> Signal -> UI.
 - **Complete signal initialization**: each required app signal is ensured independently without resetting an existing value. A single registered signal never proves that the full set is ready; partial initialization is retryable.
 - **Runtime hook ownership**: one `AppCore` hook group owns one subscription per required signal for one runtime attachment. Installation is serialized, enters `Installing`, and reaches `Ready` only after every receiver attaches and listener startup is acknowledged. Failure returns to `Stopped` with a typed reactive cause; detach drops the group and cancels its listeners.
+- **Owned refresh loops**: each signal listener is the sole owner of its refresh pass. It receives the next update only after the current pass ends, so updates during a pass remain in the bounded stream. Lag may discard intermediate snapshots; the next pass reads current authoritative state and must converge without relying on every event being delivered.
 - **Frontend agnostic**: works with multiple platform frontends.
 - **Shared frontend task-root exception is narrow**: `frontend_primitives::FrontendTaskManager` may own cancellation/spawn state for Layer 7 shells, but `aura-app` must not grow general runtime service ownership.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
@@ -194,6 +195,10 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - app-owned system refresh hooks may coalesce repeated events, but they must
   not silently drop refresh/publication failures inside a pass; hook-owned
   diagnostics must retain the first failure explicitly
+- each signal's refresh loop must remain serialized within its hook group;
+  an update received during an in-progress pass must still lead to a later
+  pass, while lagged intermediate values may be skipped in favor of current
+  authoritative state
 - converted ceremony-processing convergence in invitation/device-enrollment
   workflows must fail immediately on runtime processing errors; owner code may
   not log those errors and continue into later polling/count-based success tests
