@@ -115,8 +115,16 @@ e2e-build-terminal-dev:
 e2e-build-web:
     AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production -- bash scripts/dev/build-web-release.sh
 
+# Web build during an approved live LAN run; preserve live release/web caches
+e2e-build-web-live:
+    AURA_BUILD_PROFILE=release AURA_BUILD_TARGET_TRIPLE=wasm32-unknown-unknown AURA_BUILD_FEATURES=web,harness nice -n 10 bash scripts/dev/build-budget.sh --lane web-production --allow-live-harness -- bash scripts/dev/build-web-release.sh
+
 e2e-build-harness:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=default nice -n 10 bash scripts/dev/build-budget.sh --lane harness-tools -- cargo build -p aura-harness --release --bin tool_repl
+
+# Harness-tool build during an approved live LAN run; preserve live release/web caches
+e2e-build-harness-live:
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=default nice -n 10 bash scripts/dev/build-budget.sh --lane harness-tools --allow-live-harness -- cargo build -p aura-harness --release --bin tool_repl
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Web App

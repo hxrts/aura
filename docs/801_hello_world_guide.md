@@ -96,7 +96,10 @@ the completed first-scope measurements and stops. Rerun with
 no-builder window; it verifies the fixed commit and skips successful scopes.
 
 The tracked LAN entry point is `scripts/harness/lan/build.sh`; its lane is
-`terminal`, `terminal-live`, `terminal-dev`, `web`, or `harness`.
+`terminal`, `terminal-live`, `terminal-dev`, `web`, `web-live`, `harness`,
+or `harness-live`. Use the live variants during an approved active LAN run;
+they preserve release and web caches and only collect an idle WASM debug
+lane when the budget requires cleanup.
 It prints the host and commit before building, enters `nix develop` when
 needed, and accepts `AURA_EXPECT_COMMIT=<full-hash>` to reject a host on a
 different revision or a checkout with uncommitted changes. Use its

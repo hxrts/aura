@@ -10,8 +10,10 @@ case "$lane" in
   terminal-live) recipe=e2e-build-terminal-live ;;
   terminal-dev) recipe=e2e-build-terminal-dev ;;
   web) recipe=e2e-build-web ;;
+  web-live) recipe=e2e-build-web-live ;;
   harness) recipe=e2e-build-harness ;;
-  *) echo 'usage: scripts/harness/lan/build.sh terminal|terminal-live|terminal-dev|web|harness [--dry-run]' >&2; exit 2 ;;
+  harness-live) recipe=e2e-build-harness-live ;;
+  *) echo 'usage: scripts/harness/lan/build.sh terminal|terminal-live|terminal-dev|web|web-live|harness|harness-live [--dry-run]' >&2; exit 2 ;;
 esac
 [[ -z "$mode" || "$mode" == --dry-run ]] || { echo 'only --dry-run is accepted after the lane' >&2; exit 2; }
 
