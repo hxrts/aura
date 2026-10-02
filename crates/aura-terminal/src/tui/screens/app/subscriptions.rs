@@ -641,7 +641,9 @@ pub fn use_notifications_subscription(
                 app_core,
                 &*INVITATIONS_SIGNAL,
                 move |state| {
-                    invite_count.store(state.pending_received_count(), Ordering::Relaxed);
+                    // Matches the rows the notifications screen lists: received and
+                    // sent invitations still awaiting a response.
+                    invite_count.store(state.open_invitations().count(), Ordering::Relaxed);
                     send_total(
                         &tasks,
                         &update_tx,
