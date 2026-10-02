@@ -353,6 +353,15 @@ Runtime bridge lookup follows the same strong-ref rule:
   `prestate_hash` bindings end to end; the tracker/runner may not admit
   optional prestate or compatibility wrappers that weaken supersession
   semantics
+- contact invitation acceptance completes only on the inviter's signed
+  response (`handlers/invitation/contact_confirmation.rs`): the invitee
+  materializes `ContactFact::Added` and marks the invitation accepted only on
+  a confirmation that verifies against the imported code's sender-proof key
+  and answers the digest of the acceptance it sent; a revoked, expired or
+  settled invitation yields a typed rejection and no contact, and no response
+  within the bounded wait is a typed failure that leaves it pending. The
+  inviter authenticates an acceptance before answering, and re-confirms a
+  duplicate from the same acceptor
 - imported channel invitations and channel-acceptance notification must require
   the authoritative invitation context end to end; they may not default to the
   sender's home context when importing, loading, or establishing the sender

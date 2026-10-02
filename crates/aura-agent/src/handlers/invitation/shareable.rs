@@ -163,6 +163,13 @@ pub(super) struct StoredImportedInvitation {
     pub(super) created_at: u64,
     #[serde(default = "default_imported_sender_trust")]
     pub(super) sender_trust: ImportedSenderTrust,
+    /// Key that signed the imported code's sender proof; the inviter's
+    /// response to our acceptance must verify against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) sender_proof_key: Option<Vec<u8>>,
+    /// Digest of the acceptance we sent and await the inviter's response to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) pending_acceptance_digest: Option<[u8; 32]>,
 }
 
 impl StoredImportedInvitation {
@@ -176,6 +183,8 @@ impl StoredImportedInvitation {
             status: InvitationStatus::Pending,
             created_at,
             sender_trust,
+            sender_proof_key: None,
+            pending_acceptance_digest: None,
         }
     }
 }

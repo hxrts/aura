@@ -1,3 +1,6 @@
+use super::contact_confirmation::{
+    contact_acceptance_digest, ContactInvitationDecision, CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
+};
 use super::*;
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
@@ -241,26 +244,29 @@ impl<'a> InvitationContactHandler<'a> {
         })
     }
 
-    pub(super) async fn notify_contact_invitation_acceptance(
+    /// Signs this authority's acceptance of a contact invitation. Returns
+    /// `None` when the invitation is unknown, not a contact invitation, or our
+    /// own.
+    pub(super) async fn build_contact_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
-    ) -> AgentResult<()> {
+    ) -> AgentResult<Option<(Invitation, Vec<u8>)>> {
         let Some(invitation) = self
             .handler
             .load_invitation_for_choreography(effects, invitation_id)
             .await
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-            return Ok(());
+            return Ok(None);
         }
 
         let acceptor_id = self.handler.context.authority.authority_id();
         if invitation.sender_id == acceptor_id {
-            return Ok(());
+            return Ok(None);
         }
         if let Err(error) = self
             .ensure_sender_peer_channel(effects, invitation.sender_id)
@@ -294,6 +300,17 @@ impl<'a> InvitationContactHandler<'a> {
         };
         let payload =
             serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
+        Ok(Some((invitation, payload)))
+    }
+
+    /// Sends a signed acceptance to the inviter.
+    pub(super) async fn send_contact_invitation_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation: &Invitation,
+        payload: Vec<u8>,
+    ) -> AgentResult<()> {
+        let acceptor_id = self.handler.context.authority.authority_id();
         let delivery_context = default_context_id_for_authority(invitation.sender_id);
         let flow_receipt = execute_charge_flow_budget(
             FlowCost::new(1),
@@ -408,6 +425,23 @@ impl<'a> InvitationContactHandler<'a> {
                     continue;
                 };
 
+                if content_type == CONTACT_INVITATION_RESPONSE_CONTENT_TYPE {
+                    // An inviter's answer to an acceptance whose wait already ended.
+                    if let Some(envelope) = in_flight_envelope.take() {
+                        if let Err(error) = self
+                            .handler
+                            .apply_contact_invitation_response(effects.as_ref(), &envelope)
+                            .await
+                        {
+                            tracing::warn!(
+                                error = %error,
+                                "Failed to apply contact invitation response"
+                            );
+                        }
+                    }
+                    continue;
+                }
+
                 if content_type == CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
                     let acceptance: ContactInvitationAcceptance = match in_flight_envelope
                         .as_ref()
@@ -467,27 +501,6 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
-                    // A revoked (or otherwise settled) invitation's code no longer
-                    // creates a contact.
-                    if invitation.status != InvitationStatus::Pending {
-                        tracing::debug!(
-                            invitation_id = %acceptance.invitation_id,
-                            status = ?invitation.status,
-                            "Ignoring acceptance for an invitation that is no longer pending"
-                        );
-                        in_flight_envelope = None;
-                        continue;
-                    }
-
-                    let now_ms =
-                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
-                    if invitation.is_expired(now_ms)
-                        || invitation.status == InvitationStatus::Accepted
-                    {
-                        in_flight_envelope = None;
-                        continue;
-                    }
-
                     let Some(envelope) = in_flight_envelope.as_ref() else {
                         continue;
                     };
@@ -524,14 +537,67 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
+                    // The acceptance is authenticated: answer it, binding the
+                    // response to this exact acceptance.
+                    let acceptance_digest = in_flight_envelope
+                        .as_ref()
+                        .map(|envelope| contact_acceptance_digest(&envelope.payload))
+                        .unwrap_or_default();
+                    let acceptor_device_id: Option<aura_core::DeviceId> = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-device-id"))
+                        .and_then(|value| value.parse().ok());
+                    let now_ms =
+                        InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    let decision = match invitation.status {
+                        InvitationStatus::Pending if invitation.is_expired(now_ms) => {
+                            Some(ContactInvitationDecision::Expired)
+                        }
+                        InvitationStatus::Pending => None,
+                        InvitationStatus::Accepted
+                            if invitation.receiver_id == acceptance.acceptor_id =>
+                        {
+                            Some(ContactInvitationDecision::Confirmed)
+                        }
+                        InvitationStatus::Cancelled => Some(ContactInvitationDecision::Revoked),
+                        InvitationStatus::Expired => Some(ContactInvitationDecision::Expired),
+                        InvitationStatus::Accepted | InvitationStatus::Declined => {
+                            Some(ContactInvitationDecision::AlreadySettled)
+                        }
+                    };
+                    if let Some(decision) = decision {
+                        tracing::debug!(
+                            invitation_id = %acceptance.invitation_id,
+                            status = ?invitation.status,
+                            decision = ?decision,
+                            "Answering acceptance for an invitation that is no longer pending"
+                        );
+                        if let Err(error) = self
+                            .handler
+                            .send_contact_invitation_response(
+                                effects.as_ref(),
+                                &acceptance.invitation_id,
+                                acceptance.acceptor_id,
+                                acceptor_device_id,
+                                acceptance_digest,
+                                decision,
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                invitation_id = %acceptance.invitation_id,
+                                error = %error,
+                                "Failed to send contact invitation response"
+                            );
+                        }
+                        in_flight_envelope = None;
+                        continue;
+                    }
+
                     let acceptor_addr = in_flight_envelope
                         .as_ref()
                         .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
                         .map(String::as_str);
-                    let acceptor_device_id = in_flight_envelope
-                        .as_ref()
-                        .and_then(|envelope| envelope.metadata.get("acceptor-device-id"))
-                        .and_then(|value| value.parse().ok());
                     if acceptor_addr.is_some() || acceptor_device_id.is_some() {
                         let now_ms =
                             InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
@@ -633,6 +699,24 @@ impl<'a> InvitationContactHandler<'a> {
                         .invitation_cache
                         .cache_invitation(updated)
                         .await;
+                    if let Err(error) = self
+                        .handler
+                        .send_contact_invitation_response(
+                            effects.as_ref(),
+                            &acceptance.invitation_id,
+                            acceptance.acceptor_id,
+                            acceptor_device_id,
+                            acceptance_digest,
+                            ContactInvitationDecision::Confirmed,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            invitation_id = %acceptance.invitation_id,
+                            error = %error,
+                            "Failed to send contact invitation confirmation; the acceptor may resend"
+                        );
+                    }
                     if let Err(error) = self
                         .ensure_sender_peer_channel(effects.as_ref(), acceptance.acceptor_id)
                         .await

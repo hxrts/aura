@@ -267,37 +267,6 @@ impl InvitationServiceApi {
         }
     }
 
-    fn spawn_contact_acceptance_notification(&self, invitation_id: InvitationId) {
-        let handler = self.handler.clone();
-        let effects = self.effects.clone();
-        let tasks = self.tasks.group(format!(
-            "invitation_service.contact_acceptance.{}",
-            invitation_id
-        ));
-        let task_name = format!("notify.{}", invitation_id);
-        let invitation_id_for_log = invitation_id.clone();
-        let fut = async move {
-            if let Err(error) = handler
-                .notify_contact_invitation_acceptance(effects.as_ref(), &invitation_id)
-                .await
-            {
-                tracing::warn!(
-                    invitation_id = %invitation_id_for_log,
-                    error = %error,
-                    "Contact acceptance notification failed; continuing"
-                );
-            }
-        };
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _task_handle = tasks.spawn_local_named(task_name, fut);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _task_handle = tasks.spawn_named(task_name, fut);
-        }
-    }
-
     fn spawn_channel_acceptance_notification(&self, invitation_id: InvitationId) {
         let handler = self.handler.clone();
         let effects = self.effects.clone();
@@ -689,9 +658,6 @@ impl InvitationServiceApi {
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
         {
-            if matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-                self.spawn_contact_acceptance_notification(invitation.invitation_id.clone());
-            }
             if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                 self.spawn_channel_acceptance_notification(invitation.invitation_id.clone());
             }
@@ -1305,13 +1271,17 @@ mod tests {
     #[test]
     fn test_accept_decline_flow() {
         run_async_test_on_large_stack(async move {
-            let sender_context = create_test_authority(117);
-            let sender_effects = effects_for(&sender_context);
-            let sender_service = service_for(sender_context, sender_effects);
-            let receiver_context = create_test_authority(118);
-            let receiver_effects = effects_for(&receiver_context);
-            let receiver_service = service_for(receiver_context.clone(), receiver_effects);
-            let receiver_id = receiver_context.authority_id();
+            // Contact acceptance needs an inviter that confirms it.
+            let pair = crate::handlers::invitation::tests::contact_pair(117).await;
+            let sender_service = service_for(
+                AuthorityContext::new(pair.sender_id),
+                pair.sender_effects.clone(),
+            );
+            let receiver_service = service_for(
+                AuthorityContext::new(pair.receiver_id),
+                pair.receiver_effects.clone(),
+            );
+            let receiver_id = pair.receiver_id;
 
             // Create two invitations
             let inv1 = sender_service
@@ -1342,8 +1312,8 @@ mod tests {
                 .unwrap();
 
             // Accept one
-            let accept_result = receiver_service
-                .accept(&imported1.invitation_id)
+            let accept_result = pair
+                .respond_while(Box::pin(receiver_service.accept(&imported1.invitation_id)))
                 .await
                 .unwrap();
             assert_eq!(accept_result.new_status, InvitationStatus::Accepted);
@@ -1364,13 +1334,17 @@ mod tests {
     #[test]
     fn test_is_pending() {
         run_async_test_on_large_stack(async move {
-            let sender_context = create_test_authority(120);
-            let sender_effects = effects_for(&sender_context);
-            let sender_service = service_for(sender_context, sender_effects);
-            let receiver_context = create_test_authority(121);
-            let receiver_effects = effects_for(&receiver_context);
-            let receiver_id = receiver_context.authority_id();
-            let receiver_service = service_for(receiver_context, receiver_effects);
+            // Contact acceptance needs an inviter that confirms it.
+            let pair = crate::handlers::invitation::tests::contact_pair(234).await;
+            let sender_service = service_for(
+                AuthorityContext::new(pair.sender_id),
+                pair.sender_effects.clone(),
+            );
+            let receiver_service = service_for(
+                AuthorityContext::new(pair.receiver_id),
+                pair.receiver_effects.clone(),
+            );
+            let receiver_id = pair.receiver_id;
 
             let invitation = sender_service
                 .invite_as_contact(receiver_id, None, None, None, None)
@@ -1388,8 +1362,7 @@ mod tests {
 
             assert!(receiver_service.is_pending(&imported.invitation_id).await);
 
-            receiver_service
-                .accept(&imported.invitation_id)
+            pair.respond_while(Box::pin(receiver_service.accept(&imported.invitation_id)))
                 .await
                 .unwrap();
 

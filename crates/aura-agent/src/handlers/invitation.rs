@@ -110,6 +110,7 @@ use telltale_machine::StepResult;
 mod cache;
 mod channel;
 mod contact;
+mod contact_confirmation;
 mod device_enrollment;
 mod exchange;
 mod execution;
@@ -1246,6 +1247,21 @@ impl InvitationHandler {
         )
         .await?;
 
+        // A contact link exists only once the inviter confirms our acceptance;
+        // confirmation materializes the contact and settles the invitation.
+        if self
+            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+            .await
+            .is_some_and(|invitation| {
+                matches!(invitation.invitation_type, InvitationType::Contact { .. })
+                    && invitation.sender_id != self.context.authority.authority_id()
+            })
+        {
+            return self
+                .confirm_contact_invitation_acceptance(effects, invitation_id)
+                .await;
+        }
+
         timeout_invitation_stage_with_budget(
             effects.as_ref(),
             &operation_budget,
@@ -1637,16 +1653,6 @@ impl InvitationHandler {
         Ok(())
     }
 
-    pub(crate) async fn notify_contact_invitation_acceptance(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<()> {
-        InvitationContactHandler::new(self)
-            .notify_contact_invitation_acceptance(effects, invitation_id)
-            .await
-    }
-
     pub(crate) async fn notify_channel_invitation_acceptance(
         &self,
         effects: &AuraEffectSystem,
@@ -1828,12 +1834,10 @@ impl InvitationHandler {
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         // Persist the imported invitation with local status so later
         // storage-backed reads do not downgrade accepted/declined state.
-        Self::persist_imported_invitation(
-            effects,
-            self.context.authority.authority_id(),
-            &StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust),
-        )
-        .await?;
+        let mut stored = StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust);
+        stored.sender_proof_key = sender_proof.as_ref().map(|proof| proof.public_key.clone());
+        Self::persist_imported_invitation(effects, self.context.authority.authority_id(), &stored)
+            .await?;
         if let Some(addr) = sender_hint_addr.as_deref() {
             self.cache_verified_peer_descriptor_for_peer(
                 effects,
@@ -3093,6 +3097,6 @@ async fn execute_record_receipt(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     include!("invitation/tests.rs");
 }

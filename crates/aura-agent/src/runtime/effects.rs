@@ -1890,6 +1890,25 @@ impl AuraEffectSystem {
         )
     }
 
+    /// Deterministic shared-transport constructor with an explicit test
+    /// identity, for helpers that build several instances from one callsite.
+    #[track_caller]
+    #[allow(clippy::disallowed_methods)]
+    pub fn simulation_for_named_test_with_shared_transport_for_authority(
+        config: &AgentConfig,
+        test_identity: &str,
+        authority_id: AuthorityId,
+        shared_transport: SharedTransport,
+    ) -> Result<Self, crate::core::AgentError> {
+        let seed = Self::allocate_test_seed_with_identity(test_identity, 0)?;
+        Self::simulation_with_shared_transport_for_authority(
+            config,
+            seed,
+            authority_id,
+            shared_transport,
+        )
+    }
+
     /// Create effect system for testing with default configuration.
     ///
     /// Prefer `simulation_for_test(...)` for deterministic per-test seeding.

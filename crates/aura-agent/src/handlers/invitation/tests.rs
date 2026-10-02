@@ -303,6 +303,189 @@ fn unsigned_test_code_for_invitation(invitation: &Invitation) -> String {
     .expect("test shareable invitation should serialize")
 }
 
+/// An inviter and an invitee on one shared transport, each with signing
+/// keys and a descriptor for the other, as a contact link needs.
+pub(crate) struct ContactPair {
+    transport: crate::runtime::SharedTransport,
+    pub(crate) sender_id: AuthorityId,
+    pub(crate) receiver_id: AuthorityId,
+    pub(crate) sender_effects: Arc<AuraEffectSystem>,
+    pub(crate) receiver_effects: Arc<AuraEffectSystem>,
+    pub(crate) sender_handler: InvitationHandler,
+    pub(crate) receiver_handler: InvitationHandler,
+    _tasks: (Arc<TaskSupervisor>, Arc<TaskSupervisor>),
+}
+
+/// Effects for one side of a contact pair. Every pair is built here, so the
+/// authority names the test seed (registered, so reused seeds fail fast).
+#[track_caller]
+fn contact_pair_effects(
+    authority_id: AuthorityId,
+    transport: crate::runtime::SharedTransport,
+) -> Arc<AuraEffectSystem> {
+    Arc::new(
+        AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+            &AgentConfig::default(),
+            &format!("contact-pair:{authority_id}"),
+            authority_id,
+            transport,
+        )
+        .expect("contact pair effects should build"),
+    )
+}
+
+pub(crate) async fn contact_pair(seed: u8) -> ContactPair {
+    let shared_transport = crate::runtime::SharedTransport::new();
+    let sender_id = AuthorityId::new_from_entropy([seed; 32]);
+    let receiver_id = AuthorityId::new_from_entropy([seed.wrapping_add(1); 32]);
+    let transport = shared_transport.clone();
+    let sender_effects = contact_pair_effects(sender_id, shared_transport.clone());
+    let receiver_effects = contact_pair_effects(receiver_id, shared_transport);
+    let sender_tasks = attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+    let receiver_tasks =
+        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
+    let now_ms = 1_700_000_000_000;
+    cache_test_peer_descriptor(
+        sender_effects.as_ref(),
+        sender_id,
+        receiver_id,
+        "tcp://receiver.test:1",
+        now_ms,
+    )
+    .await;
+    cache_test_peer_descriptor(
+        receiver_effects.as_ref(),
+        receiver_id,
+        sender_id,
+        "tcp://sender.test:1",
+        now_ms,
+    )
+    .await;
+    bootstrap_test_signing_authority(&sender_effects, sender_id).await;
+    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
+    ContactPair {
+        transport,
+        sender_id,
+        receiver_id,
+        sender_effects,
+        receiver_effects,
+        sender_handler: handler_for_id(sender_id),
+        receiver_handler: handler_for_id(receiver_id),
+        _tasks: (sender_tasks, receiver_tasks),
+    }
+}
+
+impl ContactPair {
+    /// Another inviter, on the same transport, for the same invitee.
+    async fn with_new_inviter(&self, seed: u8) -> ContactPair {
+        let sender_id = AuthorityId::new_from_entropy([seed; 32]);
+        let sender_effects = contact_pair_effects(sender_id, self.transport.clone());
+        let sender_tasks =
+            attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+        let now_ms = 1_700_000_000_000;
+        cache_test_peer_descriptor(
+            sender_effects.as_ref(),
+            sender_id,
+            self.receiver_id,
+            "tcp://receiver.test:1",
+            now_ms,
+        )
+        .await;
+        cache_test_peer_descriptor(
+            self.receiver_effects.as_ref(),
+            self.receiver_id,
+            sender_id,
+            "tcp://sender.test:2",
+            now_ms,
+        )
+        .await;
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
+        ContactPair {
+            transport: self.transport.clone(),
+            sender_id,
+            receiver_id: self.receiver_id,
+            sender_effects,
+            receiver_effects: self.receiver_effects.clone(),
+            sender_handler: handler_for_id(sender_id),
+            receiver_handler: self.receiver_handler.clone(),
+            _tasks: (sender_tasks, self._tasks.1.clone()),
+        }
+    }
+
+    async fn create_contact_invitation(&self) -> Invitation {
+        self.sender_handler
+            .create_invitation(
+                self.sender_effects.clone(),
+                self.receiver_id,
+                InvitationType::Contact { nickname: None },
+                None,
+                None,
+            )
+            .await
+            .expect("contact invitation should be created")
+    }
+
+    /// A code signed by the inviter, so the invitee can authenticate the
+    /// inviter's response.
+    async fn signed_code(&self, invitation: &Invitation) -> String {
+        crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
+            self.sender_effects.as_ref(),
+            invitation,
+            &ShareableInvitationTransportMetadata::default(),
+            false,
+        )
+        .await
+        .expect("signed invitation code should export")
+    }
+
+    async fn import(&self, code: &str) -> Invitation {
+        self.receiver_handler
+            .import_invitation_code(&self.receiver_effects, code)
+            .await
+            .expect("invitation code should import")
+    }
+
+    /// Accepts while the inviter processes acceptances, as its runtime would.
+    async fn accept_with_responding_inviter(
+        &self,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<InvitationResult> {
+        self.accept_via(&self.receiver_handler, invitation_id).await
+    }
+
+    /// Accepts through `handler` (a receiver handler instance) while the
+    /// inviter responds.
+    async fn accept_via(
+        &self,
+        handler: &InvitationHandler,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<InvitationResult> {
+        self.respond_while(Box::pin(
+            handler.accept_invitation(self.receiver_effects.clone(), invitation_id),
+        ))
+            .await
+    }
+
+    /// Runs `work` while the inviter processes acceptances, as its runtime
+    /// would.
+    /// Callers box large futures so test futures stay small.
+    pub(crate) async fn respond_while<F: Future>(&self, work: F) -> F::Output {
+        let respond = async {
+            loop {
+                let _ = self
+                    .sender_handler
+                    .process_contact_invitation_acceptances(self.sender_effects.clone())
+                    .await;
+                sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            result = work => result,
+            () = respond => unreachable!("the inviter loop never ends"),
+        }
+    }
+}
+
 #[track_caller]
 fn run_async_test_on_large_stack<F>(future: F)
 where
@@ -693,35 +876,12 @@ async fn invitation_can_be_created() {
 }
 
 large_stack_async_test!(invitation_can_be_accepted, {
-    let sender_context = create_test_authority(93);
-    let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
-    let receiver_context = AuthorityContext::new(receiver_id);
+    let pair = contact_pair(93).await;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
-    let sender_effects = effects_for(&sender_context);
-    let receiver_effects = effects_for(&receiver_context);
-    let sender_handler = handler_for(sender_context);
-    let receiver_handler = handler_for(receiver_context);
-
-    let invitation = sender_handler
-        .create_invitation(
-            sender_effects,
-            receiver_id,
-            InvitationType::Contact {
-                nickname: Some("receiver".to_string()),
-            },
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
-        .await
-        .unwrap();
-
-    let result = receiver_handler
-        .accept_invitation(receiver_effects, &imported.invitation_id)
+    let result = pair
+        .accept_with_responding_inviter(&imported.invitation_id)
         .await
         .unwrap();
 
@@ -1058,42 +1218,23 @@ fn malformed_home_id_rejected_at_string_boundary() {
 }
 
 large_stack_async_test!(importing_and_accepting_contact_invitation_commits_contact_fact, {
-    let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
-    let config = AgentConfig::default();
-    let effects =
-        crate::testing::simulation_effect_system_for_authority_arc(&config, own_authority);
-
-    let authority_context = AuthorityContext::new(own_authority);
-
-    let handler = InvitationHandler::new(authority_context).unwrap();
-
-    let sender_id = AuthorityId::new_from_entropy([121u8; 32]);
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-demo-contact-1"),
-        sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("Alice".to_string()),
-        },
-        expires_at: None,
-        message: Some("Contact invitation from Alice (demo)".to_string()),
-    };
-    let code = shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
-
-    let imported = handler
-        .import_invitation_code(&effects, &code)
-        .await
-        .unwrap();
+    let pair = contact_pair(120).await;
+    let own_authority = pair.receiver_id;
+    let sender_id = pair.sender_id;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
     assert_eq!(imported.sender_id, sender_id);
     assert_eq!(imported.receiver_id, own_authority);
 
-    accept_invitation_without_notification(&handler, effects.clone(), &imported.invitation_id)
-        .await;
+    pair.accept_with_responding_inviter(&imported.invitation_id)
+        .await
+        .unwrap();
 
-    let committed = effects.load_committed_facts(own_authority).await.unwrap();
+    let committed = pair
+        .receiver_effects
+        .load_committed_facts(own_authority)
+        .await
+        .unwrap();
 
     let mut found = None::<ContactFact>;
     let mut seen_binding_types: Vec<String> = Vec::new();
@@ -1132,89 +1273,17 @@ large_stack_async_test!(importing_and_accepting_contact_invitation_commits_conta
 });
 
 large_stack_async_test!(accepting_contact_invitation_notifies_sender_and_adds_contact, {
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let config = AgentConfig::default();
+    let pair = contact_pair(124).await;
+    let (sender_id, receiver_id) = (pair.sender_id, pair.receiver_id);
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
-    let sender_id = AuthorityId::new_from_entropy([124u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
-
-    let sender_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        );
-    let receiver_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            receiver_id,
-            shared_transport.clone(),
-        );
-
-    let sender_handler = handler_for_id(sender_id);
-    let receiver_handler = handler_for_id(receiver_id);
-    let now_ms = 1_700_000_000_000;
-
-    let _sender_rendezvous_tasks =
-        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
-    let _receiver_rendezvous_tasks =
-        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        sender_effects.as_ref(),
-        sender_id,
-        receiver_id,
-        "tcp://127.0.0.1:55031",
-        now_ms,
-    )
-    .await;
-    cache_test_peer_descriptor(
-        receiver_effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55032",
-        now_ms,
-    )
-    .await;
-
-    let invitation = sender_handler
-        .create_invitation(
-            sender_effects.clone(),
-            receiver_id,
-            InvitationType::Contact { nickname: None },
-            Some("Contact invitation from sender".to_string()),
-            None,
-        )
+    pair.accept_with_responding_inviter(&imported.invitation_id)
         .await
         .unwrap();
 
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
-        .await
-        .unwrap();
-
-    receiver_handler
-        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
-    receiver_handler
-        .notify_contact_invitation_acceptance(
-            receiver_effects.as_ref(),
-            &imported.invitation_id,
-        )
-        .await
-        .unwrap();
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .unwrap();
-    assert!(
-        processed >= 1,
-        "expected at least one transported acceptance envelope to be processed"
-    );
-
-    let committed = sender_effects
+    let committed = pair
+        .sender_effects
         .load_committed_facts(sender_id)
         .await
         .unwrap();
@@ -1305,68 +1374,13 @@ async fn creating_contact_invitation_materializes_sender_contact() {
 }
 
 large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes, {
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let config = AgentConfig::default();
+    let pair = contact_pair(126).await;
+    let (sender_id, receiver_id) = (pair.sender_id, pair.receiver_id);
+    let invitation = pair.create_contact_invitation().await;
 
-    let sender_id = AuthorityId::new_from_entropy([126u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([127u8; 32]);
-
-    let sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let receiver_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-
-    let sender_handler = handler_for_id(sender_id);
-    let receiver_handler = handler_for_id(receiver_id);
-    let now_ms = 1_700_000_000_000;
-
-    let _sender_rendezvous_tasks =
-        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
-    let _receiver_rendezvous_tasks =
-        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        sender_effects.as_ref(),
-        sender_id,
-        receiver_id,
-        "tcp://127.0.0.1:55033",
-        now_ms,
-    )
-    .await;
-    cache_test_peer_descriptor(
-        receiver_effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55034",
-        now_ms,
-    )
-    .await;
-
-    let invitation = sender_handler
-        .create_invitation(
-            sender_effects.clone(),
-            receiver_id,
-            InvitationType::Contact { nickname: None },
-            Some("Contact invitation".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-
-    // Queue a large unrelated backlog ahead of the acceptance notification.
-    // This guards against starvation when inbox scanning encounters many
-    // unknown content-types before actionable invitation/chat envelopes.
+    // Queue a large unrelated backlog ahead of the acceptance. This guards
+    // against starvation when inbox scanning encounters many unknown
+    // content-types before actionable invitation envelopes.
     for _ in 0..300 {
         let mut metadata = HashMap::new();
         metadata.insert(
@@ -1374,7 +1388,7 @@ large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes,
             "application/aura-unrelated".to_string(),
         );
         send_invitation_test_raw_envelope(
-            &receiver_effects,
+            &pair.receiver_effects,
             TransportEnvelope {
                 destination: sender_id,
                 source: receiver_id,
@@ -1388,29 +1402,12 @@ large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes,
         .unwrap();
     }
 
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+    let result = pair
+        .accept_with_responding_inviter(&imported.invitation_id)
         .await
         .unwrap();
-    receiver_handler
-        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
-    receiver_handler
-        .notify_contact_invitation_acceptance(
-            receiver_effects.as_ref(),
-            &imported.invitation_id,
-        )
-        .await
-        .unwrap();
-
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .unwrap();
-    assert!(processed >= 1);
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
 });
 
 large_stack_async_test!(contact_acceptance_processing_seeds_peer_default_descriptor_from_local_context, {
@@ -3014,47 +3011,22 @@ large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when
     assert_eq!(home.context_id, Some(custom_context));
 });
 
-#[tokio::test]
-async fn imported_invitation_is_resolvable_across_handler_instances() {
-    let own_authority = AuthorityId::new_from_entropy([122u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
-    );
-
-    let authority_context = AuthorityContext::new(own_authority);
-
-    let handler_import = handler_for(authority_context.clone());
-    let handler_accept = handler_for(authority_context);
-
-    let sender_id = AuthorityId::new_from_entropy([123u8; 32]);
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-demo-contact-2"),
-        sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("Alice".to_string()),
-        },
-        expires_at: None,
-        message: Some("Contact invitation from Alice (demo)".to_string()),
-    };
-    let code = shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
-
-    let imported = handler_import
-        .import_invitation_code(&effects, &code)
-        .await
-        .unwrap();
+large_stack_async_test!(imported_invitation_is_resolvable_across_handler_instances, {
+    let pair = contact_pair(122).await;
+    let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
     // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
-    handler_accept
-        .accept_invitation(effects.clone(), &imported.invitation_id)
+    pair.accept_via(&handler_for_id(own_authority), &imported.invitation_id)
         .await
         .unwrap();
 
-    let committed = effects.load_committed_facts(own_authority).await.unwrap();
+    let committed = pair
+        .receiver_effects
+        .load_committed_facts(own_authority)
+        .await
+        .unwrap();
 
     let mut found = None::<ContactFact>;
     for fact in committed {
@@ -3077,7 +3049,7 @@ async fn imported_invitation_is_resolvable_across_handler_instances() {
         }
         other => panic!("Expected ContactFact::Added, got {:?}", other),
     }
-}
+});
 
 #[tokio::test]
 async fn imported_channel_invitation_preserves_authoritative_context_for_choreography() {
@@ -3173,43 +3145,16 @@ async fn created_invitation_is_retrievable_across_handler_instances() {
 }
 
 large_stack_async_test!(accepted_imported_invitation_persists_status_across_handler_instances, {
-    let own_authority = AuthorityId::new_from_entropy([126u8; 32]);
-    let sender_id = AuthorityId::new_from_entropy([127u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
-    );
-    let authority_context = AuthorityContext::new(own_authority);
-    let handler = InvitationHandler::new(authority_context.clone()).unwrap();
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("imported-contact-persists-accepted"),
-        sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("Alice".to_string()),
-        },
-        expires_at: None,
-        message: Some("hello".to_string()),
-    };
-
-    let imported = handler
-        .import_invitation_code(
-            effects.as_ref(),
-            &shareable
-                .to_code()
-                .expect("shareable invitation should serialize"),
-        )
+    let pair = contact_pair(252).await;
+    let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+    pair.accept_with_responding_inviter(&imported.invitation_id)
         .await
-        .expect("contact invitation import should succeed");
-    handler
-        .accept_invitation(effects.clone(), &imported.invitation_id)
-        .await
-        .expect("contact invitation accept should persist imported status");
+        .expect("confirmed contact invitation accept should persist imported status");
 
-    let retrieved = InvitationHandler::new(authority_context)
-        .unwrap()
-        .get_invitation_with_storage(effects.as_ref(), &imported.invitation_id)
+    let retrieved = handler_for_id(own_authority)
+        .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
         .await
         .expect("accepted imported invitation should remain available");
     assert_eq!(retrieved.status, InvitationStatus::Accepted);
@@ -4749,84 +4694,37 @@ fn shareable_invitation_from_invitation() {
 // imported and accepted before Carol's, and both should succeed without
 // interfering with each other.
 large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
-    let own_authority = AuthorityId::new_from_entropy([150u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
-    );
-
-    let authority_context = AuthorityContext::new(own_authority);
-    let handler = InvitationHandler::new(authority_context).unwrap();
-
-    // Create Alice's invitation (matching DemoHints pattern)
-    let alice_sender_id = AuthorityId::new_from_entropy([151u8; 32]);
-    let alice_shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-demo-alice-sequential"),
-        sender_id: alice_sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("Alice".to_string()),
-        },
-        expires_at: None,
-        message: Some("Contact invitation from Alice (demo)".to_string()),
-    };
-    let alice_code = alice_shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
-
-    // Create Carol's invitation (matching DemoHints pattern - different seed)
-    let carol_sender_id = AuthorityId::new_from_entropy([152u8; 32]);
-    let carol_shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-demo-carol-sequential"),
-        sender_id: carol_sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Contact {
-            nickname: Some("Carol".to_string()),
-        },
-        expires_at: None,
-        message: Some("Contact invitation from Carol (demo)".to_string()),
-    };
-    let carol_code = carol_shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
+    let alice = contact_pair(150).await;
+    let carol = alice.with_new_inviter(152).await;
+    let own_authority = alice.receiver_id;
+    let (alice_sender_id, carol_sender_id) = (alice.sender_id, carol.sender_id);
 
     // Import and accept Alice's invitation
-    let alice_imported = handler
-        .import_invitation_code(&effects, &alice_code)
-        .await
-        .expect("Alice import should succeed");
+    let alice_invitation = alice.create_contact_invitation().await;
+    let alice_imported = alice.import(&alice.signed_code(&alice_invitation).await).await;
     assert_eq!(alice_imported.sender_id, alice_sender_id);
-    assert_eq!(
-        alice_imported.invitation_id.as_str(),
-        "inv-demo-alice-sequential"
-    );
-
-    handler
-        .accept_invitation(effects.clone(), &alice_imported.invitation_id)
+    alice
+        .accept_with_responding_inviter(&alice_imported.invitation_id)
         .await
         .expect("Alice accept should succeed");
 
     // Import and accept Carol's invitation (this is the step that was failing in TUI)
-    let carol_imported = handler
-        .import_invitation_code(&effects, &carol_code)
-        .await
-        .expect("Carol import should succeed");
+    let carol_invitation = carol.create_contact_invitation().await;
+    let carol_imported = carol.import(&carol.signed_code(&carol_invitation).await).await;
     assert_eq!(carol_imported.sender_id, carol_sender_id);
-    assert_eq!(
-        carol_imported.invitation_id.as_str(),
-        "inv-demo-carol-sequential"
-    );
 
     // This is the critical assertion - Carol's accept should work after Alice's
-    handler
-        .accept_invitation(effects.clone(), &carol_imported.invitation_id)
+    carol
+        .accept_with_responding_inviter(&carol_imported.invitation_id)
         .await
         .expect("Carol accept should succeed after Alice");
 
     // Verify both contacts were added
-    let committed = effects.load_committed_facts(own_authority).await.unwrap();
+    let committed = alice
+        .receiver_effects
+        .load_committed_facts(own_authority)
+        .await
+        .unwrap();
 
     let mut contact_facts: Vec<ContactFact> = Vec::new();
     for fact in committed {
@@ -5120,87 +5018,14 @@ large_stack_async_test!(listing_restores_device_enrollment_payload_before_cachin
 // Regression (work/8.md task 20, D10): a revoked contact invitation's code no
 // longer creates a contact when the invitee accepts it.
 large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let config = AgentConfig::default();
+    let pair = contact_pair(130).await;
+    let (sender_id, receiver_id) = (pair.sender_id, pair.receiver_id);
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
-    let sender_id = AuthorityId::new_from_entropy([126u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([127u8; 32]);
-
-    let sender_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        );
-    let receiver_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            receiver_id,
-            shared_transport.clone(),
-        );
-
-    let sender_handler = handler_for_id(sender_id);
-    let receiver_handler = handler_for_id(receiver_id);
-    let now_ms = 1_700_000_000_000;
-
-    let _sender_rendezvous_tasks =
-        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
-    let _receiver_rendezvous_tasks =
-        attach_test_rendezvous_manager(receiver_effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        sender_effects.as_ref(),
-        sender_id,
-        receiver_id,
-        "tcp://127.0.0.1:55033",
-        now_ms,
-    )
-    .await;
-    cache_test_peer_descriptor(
-        receiver_effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55034",
-        now_ms,
-    )
-    .await;
-
-    let invitation = sender_handler
-        .create_invitation(
-            sender_effects.clone(),
-            receiver_id,
-            InvitationType::Contact { nickname: None },
-            Some("Contact invitation from sender".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
-        .await
-        .unwrap();
-
-    // The sender revokes before the acceptance reaches it.
-    sender_handler
-        .cancel_invitation(sender_effects.clone(), &invitation.invitation_id)
-        .await
-        .unwrap();
-    receiver_handler
-        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
-    receiver_handler
-        .notify_contact_invitation_acceptance(
-            receiver_effects.as_ref(),
-            &imported.invitation_id,
-        )
-        .await
-        .unwrap();
-    // Simulation storage persists across runs, so compare against what the
-    // sender already held before processing this acceptance.
-    let sender_contacts_added = |facts: &[aura_journal::fact::Fact]| {
+    // Simulation storage persists across runs, so compare against what each
+    // side already held before this acceptance.
+    let contacts_added = |facts: &[aura_journal::fact::Fact], owner: AuthorityId| {
         facts
             .iter()
             .filter(|fact| {
@@ -5212,22 +5037,195 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
                 envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID
                     && matches!(
                         ContactFact::from_envelope(envelope),
-                        Some(ContactFact::Added { owner_id, .. }) if owner_id == sender_id
+                        Some(ContactFact::Added { owner_id, .. }) if owner_id == owner
                     )
             })
             .count()
     };
-    let before = sender_contacts_added(
-        &sender_effects.load_committed_facts(sender_id).await.unwrap(),
+    let sender_before = contacts_added(
+        &pair.sender_effects.load_committed_facts(sender_id).await.unwrap(),
+        sender_id,
     );
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
+    let receiver_before = contacts_added(
+        &pair.receiver_effects.load_committed_facts(receiver_id).await.unwrap(),
+        receiver_id,
+    );
+
+    // The sender revokes before the acceptance reaches it.
+    pair.sender_handler
+        .cancel_invitation(pair.sender_effects.clone(), &invitation.invitation_id)
         .await
         .unwrap();
-
-    let _ = processed;
-    let after = sender_contacts_added(
-        &sender_effects.load_committed_facts(sender_id).await.unwrap(),
+    let error = pair
+        .accept_with_responding_inviter(&imported.invitation_id)
+        .await
+        .expect_err("accepting a revoked invitation must fail");
+    assert!(
+        error.to_string().contains("Revoked"),
+        "expected a typed revocation failure, got: {error}"
     );
-    assert_eq!(after, before, "a revoked invitation must not add a contact for the sender");
+
+    let sender_after = contacts_added(
+        &pair.sender_effects.load_committed_facts(sender_id).await.unwrap(),
+        sender_id,
+    );
+    let receiver_after = contacts_added(
+        &pair.receiver_effects.load_committed_facts(receiver_id).await.unwrap(),
+        receiver_id,
+    );
+    assert_eq!(sender_after, sender_before, "a revoked invitation must not add a contact for the sender");
+    assert_eq!(receiver_after, receiver_before, "a revoked invitation must not add a contact for the invitee");
+    let settled = pair
+        .receiver_handler
+        .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
+        .await
+        .expect("imported invitation should remain readable");
+    assert_eq!(settled.status, InvitationStatus::Cancelled);
+});
+
+large_stack_async_test!(unanswered_contact_acceptance_fails_typed_and_stays_pending, {
+    let pair = contact_pair(54).await;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+    // No inviter processes the acceptance.
+    let error = timeout(
+        Duration::from_secs(90),
+        Box::pin(
+            pair.receiver_handler
+                .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
+        ),
+    )
+    .await
+    .expect("the confirmation wait must be bounded")
+    .expect_err("an unanswered acceptance must not succeed");
+    assert!(
+        error.to_string().contains("did not confirm"),
+        "expected a typed unconfirmed failure, got: {error}"
+    );
+
+    let stored = pair
+        .receiver_handler
+        .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
+        .await
+        .expect("imported invitation should remain readable");
+    assert_eq!(stored.status, InvitationStatus::Pending);
+});
+
+large_stack_async_test!(invitee_applies_only_authentic_responses_to_its_pending_acceptance, {
+    use super::contact_confirmation::{
+        contact_acceptance_digest, ContactInvitationDecision, ContactInvitationResponse,
+        ContactInvitationResponseTranscript, CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
+    };
+
+    let pair = contact_pair(56).await;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+    // The invitee is awaiting a response to this acceptance.
+    let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
+    let mut stored = InvitationHandler::load_imported_invitation(
+        pair.receiver_effects.as_ref(),
+        pair.receiver_id,
+        &imported.invitation_id,
+        None,
+    )
+    .await
+    .expect("imported invitation should be stored");
+    stored.pending_acceptance_digest = Some(acceptance_digest);
+    InvitationHandler::persist_imported_invitation(
+        pair.receiver_effects.as_ref(),
+        pair.receiver_id,
+        &stored,
+    )
+    .await
+    .unwrap();
+
+    let (inviter_key, _) = crate::handlers::rendezvous_identity::retrieve_identity_keys(
+        pair.sender_effects.as_ref(),
+        &pair.sender_id,
+    )
+    .await
+    .expect("inviter identity keys should exist");
+    let (forger_key, _) = pair.sender_effects.ed25519_generate_keypair().await.unwrap();
+    let respond = |digest: [u8; 32], invitation_id: InvitationId, key: Vec<u8>, source| {
+        let effects = pair.sender_effects.clone();
+        let (inviter_id, acceptor_id) = (pair.sender_id, pair.receiver_id);
+        async move {
+            let mut response = ContactInvitationResponse {
+                invitation_id: invitation_id.clone(),
+                inviter_id,
+                acceptor_id,
+                decision: ContactInvitationDecision::Confirmed,
+                acceptance_digest: digest,
+                signature: Vec::new(),
+            };
+            response.signature = aura_signature::sign_ed25519_transcript(
+                effects.as_ref(),
+                &ContactInvitationResponseTranscript(&response),
+                &key,
+            )
+            .await
+            .unwrap();
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                CONTACT_INVITATION_RESPONSE_CONTENT_TYPE.to_string(),
+            );
+            metadata.insert("invitation-id".to_string(), invitation_id.to_string());
+            TransportEnvelope {
+                destination: acceptor_id,
+                source,
+                context: default_context_id_for_authority(acceptor_id),
+                payload: serde_json::to_vec(&response).unwrap(),
+                metadata,
+                receipt: None,
+            }
+        }
+    };
+    let apply = |envelope: TransportEnvelope| {
+        let handler = &pair.receiver_handler;
+        let effects = pair.receiver_effects.clone();
+        async move {
+            handler
+                .apply_contact_invitation_response(effects.as_ref(), &envelope)
+                .await
+                .unwrap()
+        }
+    };
+    let status = || async {
+        pair.receiver_handler
+            .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
+            .await
+            .unwrap()
+            .status
+    };
+    let id = imported.invitation_id.clone();
+
+    // Forged: signed by a key other than the code's sender proof key.
+    let forged = respond(acceptance_digest, id.clone(), forger_key.clone(), pair.sender_id).await;
+    assert_eq!(apply(forged).await, None);
+    // Replayed: authentic, but answering a different acceptance.
+    let replayed = respond([9; 32], id.clone(), inviter_key.to_vec(), pair.sender_id).await;
+    assert_eq!(apply(replayed).await, None);
+    // Wrong source: an authentic response relayed by another authority.
+    let relayed = respond(acceptance_digest, id.clone(), inviter_key.to_vec(), pair.receiver_id).await;
+    assert_eq!(apply(relayed).await, None);
+    // Unrelated invitation id.
+    let unrelated = respond(
+        acceptance_digest,
+        InvitationId::new("not-our-invitation"),
+        inviter_key.to_vec(),
+        pair.sender_id,
+    )
+    .await;
+    assert_eq!(apply(unrelated).await, None);
+    assert_eq!(status().await, InvitationStatus::Pending);
+
+    // Authentic and answering our acceptance: applied once.
+    let authentic = respond(acceptance_digest, id.clone(), inviter_key.to_vec(), pair.sender_id).await;
+    assert_eq!(apply(authentic.clone()).await, Some(ContactInvitationDecision::Confirmed));
+    assert_eq!(status().await, InvitationStatus::Accepted);
+    // A duplicate of it is ignored (idempotent).
+    assert_eq!(apply(authentic).await, None);
 });
