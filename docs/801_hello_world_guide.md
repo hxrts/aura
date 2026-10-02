@@ -71,6 +71,10 @@ count with `AURA_COMPARE_CARGO_JOBS` when the host needs a lower limit.
 The comparison uses the budget wrapper's `--no-prune` mode because each
 temporary target is removed after measurement; its free-space admission and
 emergency stop remain active.
+If a separate builder starts before the second scope, the script preserves
+the completed first-scope measurements and stops. Rerun with
+`--resume artifacts/disk-budget/comparisons/<run-directory>` from a later
+no-builder window; it verifies the fixed commit and skips successful scopes.
 
 The tracked LAN entry point is `scripts/harness/lan/build.sh`; its lane is
 `terminal`, `terminal-live`, `terminal-dev`, `web`, or `harness`.
