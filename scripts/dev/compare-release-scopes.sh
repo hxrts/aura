@@ -69,6 +69,7 @@ build_one() {
   fi
   printf '%s\n' "$(du -sk "$worktree/target" | awk '{print $1}')" > "$results/$label-target-kib"
   printf '%s\n' "$(du -sk "$worktree/target/release" | awk '{print $1}')" > "$results/$label-release-kib"
+  printf '%s\n' "$(du -sk "$worktree" | awk '{print $1}')" > "$results/$label-checkout-kib"
   compiling_count="$(rg -c '^   Compiling ' "$log" || true)"
   printf '%s\n' "${compiling_count:-0}" > "$results/$label-compiling-count"
   git -C "$repo_root" worktree remove --force "$worktree"
@@ -78,9 +79,14 @@ build_one() {
 
 build_one terminal cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
 build_one workspace cargo build --workspace --release
-terminal_kib="$(cat "$results/terminal-target-kib")"
-workspace_kib="$(cat "$results/workspace-target-kib")"
-awk -v terminal="$terminal_kib" -v workspace="$workspace_kib" \
-  'BEGIN {delta=workspace-terminal; percent=workspace>0?100*delta/workspace:0;
-          printf "Clean target: terminal=%d KiB workspace=%d KiB saving=%d KiB (%.1f%%)\n", terminal, workspace, delta, percent}'
+for scope in checkout target release; do
+  terminal_kib="$(cat "$results/terminal-$scope-kib")"
+  workspace_kib="$(cat "$results/workspace-$scope-kib")"
+  awk -v scope="$scope" -v terminal="$terminal_kib" -v workspace="$workspace_kib" \
+    'BEGIN {delta=workspace-terminal; percent=workspace>0?100*delta/workspace:0;
+            printf "Clean %s: terminal=%d KiB workspace=%d KiB saving=%d KiB (%.1f%%)\n", scope, terminal, workspace, delta, percent}'
+done
+printf 'Compiled packages: terminal=%s workspace=%s\n' \
+  "$(cat "$results/terminal-compiling-count")" \
+  "$(cat "$results/workspace-compiling-count")"
 printf 'Evidence: %s\n' "$results"
