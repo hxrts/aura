@@ -775,7 +775,7 @@ mod tests {
         );
         assert_eq!(
             InvitationRoleValue::Contact.to_invitation_type(),
-            InvitationType::Home
+            InvitationType::Contact
         );
     }
 

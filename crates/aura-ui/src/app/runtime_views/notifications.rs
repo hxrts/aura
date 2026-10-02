@@ -81,10 +81,26 @@ fn build_notifications_runtime_view(
                 ),
                 (
                     aura_app::ui::types::InvitationDirection::Received,
-                    aura_app::ui::types::InvitationType::Chat,
+                    aura_app::ui::types::InvitationType::Contact,
                 ) => (
                     "Contact Request",
                     format!("Contact Request from {}", invitation.from_name),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Pending response".to_string()),
+                    invitation
+                        .home_name
+                        .clone()
+                        .unwrap_or_else(|| invitation.from_id.to_string()),
+                    NotificationRuntimeAction::ReceivedInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Received,
+                    aura_app::ui::types::InvitationType::Chat,
+                ) => (
+                    "Channel Invite",
+                    format!("Channel Invite from {}", invitation.from_name),
                     invitation
                         .message
                         .clone()
@@ -137,11 +153,33 @@ fn build_notifications_runtime_view(
                 ),
                 (
                     aura_app::ui::types::InvitationDirection::Sent,
-                    aura_app::ui::types::InvitationType::Chat,
+                    aura_app::ui::types::InvitationType::Contact,
                 ) => (
                     "Sent Contact Invite",
                     format!(
                         "Contact invite to {}",
+                        invitation
+                            .to_name
+                            .clone()
+                            .unwrap_or_else(|| "anyone with the code".to_string())
+                    ),
+                    invitation
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Waiting for recipient".to_string()),
+                    invitation
+                        .to_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|| "anyone with the code".to_string()),
+                    NotificationRuntimeAction::SentInvitation,
+                ),
+                (
+                    aura_app::ui::types::InvitationDirection::Sent,
+                    aura_app::ui::types::InvitationType::Chat,
+                ) => (
+                    "Sent Channel Invite",
+                    format!(
+                        "Channel invite to {}",
                         invitation
                             .to_name
                             .clone()
@@ -739,7 +777,7 @@ mod tests {
         let mut invitations = InvitationsState::default();
         invitations.add_invitation(Invitation {
             id: "sent-1".to_string(),
-            invitation_type: InvitationType::Chat,
+            invitation_type: InvitationType::Contact,
             status: InvitationStatus::Pending,
             direction: InvitationDirection::Sent,
             from_id: AuthorityId::new_from_entropy([6u8; 32]),

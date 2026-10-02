@@ -15,8 +15,10 @@ pub enum InvitationType {
     Home,
     /// Guardian invitation
     Guardian,
-    /// Chat/DM invitation
+    /// Channel invitation
     Chat,
+    /// Contact (relationship) invitation
+    Contact,
 }
 
 /// Invitation status

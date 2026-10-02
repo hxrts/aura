@@ -94,7 +94,8 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
     let accept_peer = accepted_invitation
         .as_ref()
         .and_then(|invitation| match invitation.invitation_type {
-            crate::views::invitations::InvitationType::Home
+            crate::views::invitations::InvitationType::Contact
+            | crate::views::invitations::InvitationType::Home
             | crate::views::invitations::InvitationType::Chat => Some(invitation.from_id),
             _ => None,
         })
@@ -302,7 +303,7 @@ pub async fn accept_invitation_with_instance(
             )
         })
         || accepted_invitation.as_ref().is_some_and(|invitation| {
-            invitation.invitation_type == crate::views::invitations::InvitationType::Home
+            invitation.invitation_type == crate::views::invitations::InvitationType::Contact
         }) {
         SemanticOperationKind::AcceptContactInvitation
     } else {

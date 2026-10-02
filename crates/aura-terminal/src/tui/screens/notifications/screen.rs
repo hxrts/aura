@@ -119,7 +119,8 @@ fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &
 fn sent_invitation_item(inv: &aura_app::ui::types::Invitation) -> NotificationItem {
     let kind_label = match inv.invitation_type {
         InvitationType::Guardian => "Guardian",
-        InvitationType::Chat => "Contact",
+        InvitationType::Chat => "Channel",
+        InvitationType::Contact => "Contact",
         InvitationType::Home => "Home",
     };
     let recipient = inv
@@ -306,6 +307,10 @@ pub fn NotificationsScreen(
                         InvitationType::Guardian => (
                             NotificationKind::GuardianInvite,
                             format!("Guardian request from {}", inv.from_name),
+                        ),
+                        InvitationType::Contact => (
+                            NotificationKind::ContactInvite,
+                            format!("Contact request from {}", inv.from_name),
                         ),
                         InvitationType::Chat => (
                             NotificationKind::ContactInvite,
@@ -524,7 +529,7 @@ mod tests {
     fn sent_invitations_become_revocable_notification_items() {
         let invitation = Invitation {
             id: "sent-1".to_string(),
-            invitation_type: InvitationType::Chat,
+            invitation_type: InvitationType::Contact,
             status: InvitationStatus::Pending,
             direction: InvitationDirection::Sent,
             from_id: AuthorityId::new_from_entropy([1u8; 32]),

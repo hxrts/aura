@@ -103,6 +103,7 @@ impl Query for InvitationsQuery {
                     "guardian" => InvitationType::Guardian,
                     "chat" => InvitationType::Chat,
                     "home" => InvitationType::Home,
+                    "contact" => InvitationType::Contact,
                     _ => InvitationType::Home,
                 };
                 let status = match get_string(&row, "status").as_str() {

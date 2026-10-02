@@ -159,7 +159,7 @@ impl From<AppInvitationType> for InvitationType {
         match invitation_type {
             AppInvitationType::Guardian => Self::Guardian,
             AppInvitationType::Chat => Self::Channel,
-            AppInvitationType::Home => Self::Contact,
+            AppInvitationType::Home | AppInvitationType::Contact => Self::Contact,
         }
     }
 }

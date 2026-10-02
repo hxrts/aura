@@ -110,7 +110,7 @@ impl InvitationRoleValue {
     #[must_use]
     pub fn to_invitation_type(&self) -> InvitationType {
         match self {
-            Self::Contact => InvitationType::Home,
+            Self::Contact => InvitationType::Contact,
             Self::Guardian => InvitationType::Guardian,
             Self::Channel => InvitationType::Chat,
         }
@@ -172,6 +172,7 @@ pub fn format_invitation_type(inv_type: InvitationType) -> &'static str {
         InvitationType::Home => "Home",
         InvitationType::Guardian => "Guardian",
         InvitationType::Chat => "Channel",
+        InvitationType::Contact => "Contact",
     }
 }
 
@@ -184,5 +185,7 @@ pub fn format_invitation_type_detailed(inv_type: InvitationType, context: Option
         (InvitationType::Guardian, Some(ctx)) => format!("Guardian (for: {ctx})"),
         (InvitationType::Chat, None) => "Channel".to_string(),
         (InvitationType::Chat, Some(ctx)) => format!("Channel ({ctx})"),
+        (InvitationType::Contact, None) => "Contact".to_string(),
+        (InvitationType::Contact, Some(ctx)) => format!("Contact ({ctx})"),
     }
 }
