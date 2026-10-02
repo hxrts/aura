@@ -1059,17 +1059,11 @@ pub(super) async fn process_ui_update_match(
         // Contacts
         // =========================================================================
         UiUpdate::ContactCountChanged(count) => {
-            let needs_update = {
-                let state = tui.read_clone();
-                state.contacts.contact_count != count
-                    || state.contacts.selected_index
-                        != clamp_list_index(state.contacts.selected_index, count)
-            };
+            let mut contacts = tui.read_clone().contacts;
+            let needs_update = contacts.set_contact_count(count);
             if needs_update {
                 tui.with_mut(|state| {
-                    state.contacts.contact_count = count;
-                    state.contacts.selected_index =
-                        clamp_list_index(state.contacts.selected_index, count);
+                    state.contacts.set_contact_count(count);
                 });
             }
         }
