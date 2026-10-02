@@ -825,6 +825,94 @@ mod tests {
         assert_eq!(bob_gen, 1);
     }
 
+    /// Regression (work/8.md task 4): one sender's consecutive messages use
+    /// fresh generations end to end, and the recipient opens them in order
+    /// while rejecting a replay.
+    #[tokio::test]
+    async fn consecutive_sends_from_one_sender_are_received_in_order() {
+        let storage = ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+            test_paths("in-order"),
+        );
+        let crypto = RealCryptoHandler::for_simulation_seed([0xB7; 32]);
+        let context = ContextId::new_from_entropy([21; 32]);
+        let channel = ChannelId::from_bytes([22; 32]);
+        let sender = AuthorityId::new_from_entropy([23; 32]);
+        let recipient = AuthorityId::new_from_entropy([24; 32]);
+        let bootstrap_key = [25u8; 32];
+        let bootstrap_id = aura_core::Hash32::from_bytes(&bootstrap_key);
+        let state = bootstrap_state(context, channel, sender, vec![recipient], bootstrap_id);
+        storage
+            .secure_store(
+                &SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id),
+                &bootstrap_key,
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .unwrap();
+        let ratchet = send_ratchet_from_epoch_state(&state);
+
+        let mut sent = Vec::new();
+        for index in 0..5u8 {
+            let gen = next_send_generation(&storage, &state, &ratchet, context, channel, sender)
+                .await
+                .unwrap();
+            let deriv = derive_for_send(context, channel, &ratchet, gen).unwrap();
+            advance_send_generation(&storage, &ratchet, context, channel, sender, deriv.next_gen)
+                .await
+                .unwrap();
+            let header = AmpHeader {
+                context,
+                channel,
+                chan_epoch: state.chan_epoch,
+                ratchet_gen: gen,
+            };
+            let key =
+                derive_channel_message_key(&storage, context, channel, &state, &header, sender)
+                    .await
+                    .unwrap();
+            let plaintext = vec![index; 4];
+            let ciphertext = crypto
+                .aes_gcm_encrypt_with_aad(
+                    &plaintext,
+                    &key.0,
+                    &nonce_from_header(&header),
+                    &amp_additional_data(&header, sender),
+                )
+                .await
+                .unwrap();
+            sent.push((header, ciphertext));
+        }
+
+        let mut received = Vec::new();
+        for (header, ciphertext) in &sent {
+            validate_header(&state, *header).unwrap();
+            record_amp_replay_marker(&storage, "amp_recv_replay_markers", header, sender)
+                .await
+                .unwrap();
+            let key =
+                derive_channel_message_key(&storage, context, channel, &state, header, sender)
+                    .await
+                    .unwrap();
+            let opened = crypto
+                .aes_gcm_decrypt_with_aad(
+                    ciphertext,
+                    &key.0,
+                    &nonce_from_header(header),
+                    &amp_additional_data(header, sender),
+                )
+                .await
+                .unwrap();
+            received.push(opened[0]);
+        }
+        assert_eq!(received, vec![0, 1, 2, 3, 4]);
+        assert!(
+            record_amp_replay_marker(&storage, "amp_recv_replay_markers", &sent[2].0, sender)
+                .await
+                .is_err(),
+            "a replayed message must be rejected"
+        );
+    }
+
     #[tokio::test]
     async fn amp_ciphertext_requires_channel_key_and_aad_integrity() {
         let storage_dir = test_paths("aead");
