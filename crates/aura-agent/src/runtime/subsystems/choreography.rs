@@ -671,7 +671,6 @@ mod tests {
         assert_eq!(runtime_session_id.into_aura_session_id(), aura_session_id);
     }
 
-    #[test]
     // Regression (work/8.md task 7, L9): a device that only participates in a
     // rotation never opens its session first; its proposal waits in the
     // session buffer and must be claimable, but not once a session is open.
@@ -715,6 +714,7 @@ mod tests {
         assert_eq!(state.session_inbox_len(open), 1);
     }
 
+    #[test]
     fn session_notifier_tracks_session_lifecycle() {
         let authority_id = DeviceId::from_uuid(Uuid::from_bytes([4; 16]));
         let role = ChoreographicRole::new(
