@@ -549,6 +549,23 @@ impl<'a> InvitationContactHandler<'a> {
                         .and_then(|value| value.parse().ok());
                     let now_ms =
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref()).await;
+                    // Learn the authenticated acceptor's route first: any answer,
+                    // confirmation or rejection, is sent back over it.
+                    let acceptor_addr = in_flight_envelope
+                        .as_ref()
+                        .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
+                        .map(String::as_str);
+                    if acceptor_addr.is_some() || acceptor_device_id.is_some() {
+                        self.handler
+                            .cache_verified_peer_descriptor_for_peer(
+                                effects.as_ref(),
+                                acceptance.acceptor_id,
+                                acceptor_device_id,
+                                acceptor_addr,
+                                now_ms,
+                            )
+                            .await;
+                    }
                     let decision = match invitation.status {
                         InvitationStatus::Pending if invitation.is_expired(now_ms) => {
                             Some(ContactInvitationDecision::Expired)
@@ -594,24 +611,6 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
 
-                    let acceptor_addr = in_flight_envelope
-                        .as_ref()
-                        .and_then(|envelope| envelope.metadata.get("acceptor-addr"))
-                        .map(String::as_str);
-                    if acceptor_addr.is_some() || acceptor_device_id.is_some() {
-                        let now_ms =
-                            InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
-                                .await;
-                        self.handler
-                            .cache_verified_peer_descriptor_for_peer(
-                                effects.as_ref(),
-                                acceptance.acceptor_id,
-                                acceptor_device_id,
-                                acceptor_addr,
-                                now_ms,
-                            )
-                            .await;
-                    }
                     let context_id = self.handler.context.authority.default_context_id();
 
                     let fact = InvitationFact::accepted_ms(

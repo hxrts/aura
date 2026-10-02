@@ -124,7 +124,9 @@ pub use utils::{
 };
 
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
-const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 8_000;
+/// Contact accepts wait for the inviter's signed response (up to 30s in the
+/// runtime) and must outlast that wait to see its typed outcome.
+const CONTACT_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 40_000;
 const CHANNEL_INVITATION_ACCEPT_RUNTIME_STAGE_TIMEOUT_MS: u64 = 30_000;
 /// Guardian and device-enrollment accepts run a full signed choreography with
 /// the inviter (request, signed acceptance, confirm).
