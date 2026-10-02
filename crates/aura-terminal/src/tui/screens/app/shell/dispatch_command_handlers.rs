@@ -2,6 +2,7 @@ use super::dispatch::*;
 use super::dispatch_handlers_neighborhood::handle_neighborhood_dispatch;
 use super::*;
 
+use crate::tui::types::ReadReceiptPolicy;
 use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
@@ -1054,6 +1055,34 @@ pub(super) fn handle_dispatch_command_match(
                 SemanticOperationKind::CreateGuardianInvitation,
             );
             (cb.recovery.on_select_guardian)(contact.id, operation);
+        }
+        DispatchCommand::ToggleSelectedContactReadReceipts => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let policy = match contact.read_receipt_policy {
+                ReadReceiptPolicy::Enabled => ReadReceiptPolicy::Disabled,
+                ReadReceiptPolicy::Disabled => ReadReceiptPolicy::Enabled,
+            };
+            new_state.toast_info(match policy {
+                ReadReceiptPolicy::Enabled => "Read receipts on for this contact",
+                ReadReceiptPolicy::Disabled => "Read receipts off for this contact",
+            });
+            let app_core = app_core_for_events;
+            tasks_for_events.spawn(async move {
+                let _ = aura_app::ui::workflows::contacts::set_read_receipt_policy(
+                    &app_core,
+                    &contact.id,
+                    policy,
+                )
+                .await;
+            });
         }
         DispatchCommand::SendSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;

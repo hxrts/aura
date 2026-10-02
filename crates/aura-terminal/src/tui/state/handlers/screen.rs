@@ -206,6 +206,11 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::AddSelectedContactAsGuardian,
             ));
         }
+        KeyCode::Char('R') => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::ToggleSelectedContactReadReceipts,
+            ));
+        }
         KeyCode::Char('y') => {
             commands.push(TuiCommand::Dispatch(
                 DispatchCommand::AcceptSelectedFriendRequest,

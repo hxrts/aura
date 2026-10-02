@@ -280,7 +280,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             ),
             "Authority: User/Home/Neighborhood".to_string(),
             format!("Guardian: {guardian}"),
-            format!("Read Receipts: {read_receipts}"),
+            format!("Read Receipts: {read_receipts} (R toggles)"),
         ];
         if let Some(friend_actions) = contact_friend_action_hint(c.relationship_state) {
             lines.push(format!("Friend Actions: {friend_actions}"));

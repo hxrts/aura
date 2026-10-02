@@ -405,9 +405,11 @@ pub async fn set_read_receipt_policy(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: &str,
     policy: ReadReceiptPolicy,
-    timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
 
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();

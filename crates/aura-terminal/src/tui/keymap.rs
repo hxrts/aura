@@ -162,6 +162,14 @@ const CONTACTS_BINDINGS: &[KeyBinding] = &[
         "Contacts",
         false,
     ),
+    KeyBinding::new(
+        "R",
+        "R",
+        "Receipts",
+        "Toggle read receipts for the selected contact",
+        "Contacts",
+        false,
+    ),
     KeyBinding::new("e", "e", "Edit", "Edit contact nickname", "Contacts", true),
     KeyBinding::new(
         "g",

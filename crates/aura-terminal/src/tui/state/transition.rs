@@ -213,6 +213,19 @@ mod tests {
     }
 
     #[test]
+    fn test_contacts_shift_r_toggles_read_receipts() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Contacts);
+
+        let (_, commands) = transition(&state, events::char('R'));
+
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            TuiCommand::Dispatch(DispatchCommand::ToggleSelectedContactReadReceipts)
+        )));
+    }
+
+    #[test]
     fn test_contacts_i_opens_create_invitation_modal() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Contacts);
