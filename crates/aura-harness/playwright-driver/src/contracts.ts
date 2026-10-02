@@ -190,6 +190,7 @@ export interface DriverSession {
   pendingSemanticPayload?: string | null;
   semanticResultCache?: Record<string, unknown>;
   lastMutationReason?: string | null;
+  lastActionSettleOutcome?: string | null;
   tracePath?: string | null;
   lastUiStateSource?: string;
   logPath?: string | null;

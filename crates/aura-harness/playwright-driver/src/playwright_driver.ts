@@ -51,6 +51,7 @@ import {
   uiSnapshotRenderRevision,
   uiSnapshotRevision,
   uiStateStalenessReason,
+  classifyPostActionObservation,
 } from "./observation.js";
 import {
   buildRuntimeStageQueuePayloadJson,
@@ -1382,6 +1383,47 @@ function runSelfTest() {
       revision: { semantic_seq: 11, render_seq: 11 },
     }) === "required_revision_not_reached:12",
     "post-action polling must reject a snapshot that is not newer than the pre-action baseline",
+  );
+  const settled = { state: "settled", reason_codes: [] };
+  const seq = (n) => ({ semantic_seq: n, render_seq: n });
+  assert(
+    classifyPostActionObservation(4, { revision: seq(3), quiescence: settled }, "a", "a") ===
+      "confirmed_noop",
+    "settled unchanged semantic snapshot with unchanged DOM is a confirmed no-op",
+  );
+  assert(
+    classifyPostActionObservation(4, { revision: seq(3), quiescence: settled }, "a", "b") ===
+      "dom_only",
+    "settled unchanged semantic snapshot with changed DOM is DOM-only navigation",
+  );
+  assert(
+    classifyPostActionObservation(4, { revision: seq(4), quiescence: settled }, "a", "a") ===
+      "semantic_published",
+    "snapshot at the floor satisfies the action",
+  );
+  assert(
+    classifyPostActionObservation(
+      4,
+      {
+        revision: seq(3),
+        quiescence: { state: "busy", reason_codes: ["operation_submitting:x"] },
+      },
+      "a",
+      "a",
+    ) === "semantic_pending",
+    "reported in-flight semantic work must keep the floor raised",
+  );
+  assert(
+    classifyPostActionObservation(4, { revision: seq(3) }, "a", "a") === "unproven" &&
+      classifyPostActionObservation(4, null, "a", "a") === "unproven" &&
+      classifyPostActionObservation(4, { revision: seq(3), quiescence: settled }, null, "a") ===
+        "unproven",
+    "a successful action without settled quiescence/DOM evidence is not a proven no-op",
+  );
+  assert(
+    String(dispatch).includes("settleActionMutationFloor(") &&
+      ACTION_SETTLE_EXEMPT_METHODS.has("submit_semantic_command"),
+    "successful actions must settle the mutation floor; semantic submit keeps its own publication contract",
   );
   console.error("[driver] selftest ok");
 }
@@ -5224,6 +5266,95 @@ async function shutdownAll() {
   }
 }
 
+// `submit_semantic_command` owns its own publication contract (typed operation
+// result + semantic waiters), so it keeps the raised floor unconditionally.
+const ACTION_SETTLE_EXEMPT_METHODS: ReadonlySet<DriverMethod> = new Set([
+  "submit_semantic_command",
+]);
+const ACTION_SETTLE_WINDOW_MS = 400;
+const ACTION_SETTLE_POLL_MS = 50;
+
+async function readActionDomFingerprint(session) {
+  try {
+    return await withOperationTimeout(
+      "action_dom_fingerprint",
+      session.page.evaluate(() => {
+        const root = document.getElementById("aura-app-root") ?? document.body;
+        return root ? root.innerHTML : "";
+      }),
+      500,
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function readActionSettleSnapshot(session, instanceId) {
+  try {
+    return await readStructuredUiState(
+      session,
+      instanceId,
+      "action_settle",
+      500,
+      { storeResult: false, afterVersion: null, skipPushWait: true },
+    );
+  } catch {
+    return null;
+  }
+}
+
+// A successful action is not proof that it was a no-op. Observe the page for
+// a bounded window: a semantic publication satisfies the floor, reported
+// in-flight semantic work (or missing quiescence evidence) keeps it raised,
+// and only a settled, unchanged semantic snapshot (confirmed no-op, or
+// DOM-only navigation once the DOM has stopped changing) restores the
+// pre-action floor so later `ui_state` reads are not stranded.
+async function settleActionMutationFloor(
+  session,
+  instanceId,
+  method,
+  floorBefore,
+  domBefore,
+) {
+  const deadlineMs = Date.now() + ACTION_SETTLE_WINDOW_MS;
+  let outcome = "unproven";
+  let previousDom = null;
+  let domStable = false;
+  let snapshot = null;
+  while (true) {
+    snapshot = await readActionSettleSnapshot(session, instanceId);
+    const domAfter = await readActionDomFingerprint(session);
+    domStable = previousDom != null && domAfter === previousDom;
+    previousDom = domAfter;
+    outcome = classifyPostActionObservation(
+      session.requiredUiStateRevision,
+      snapshot,
+      domBefore,
+      domAfter,
+    );
+    if (outcome === "semantic_published") {
+      break;
+    }
+    if (Date.now() >= deadlineMs) {
+      break;
+    }
+    await delay(ACTION_SETTLE_POLL_MS);
+  }
+  if (outcome === "semantic_published") {
+    storeUiState(session, snapshot, `action_settle:${method}`);
+  } else if (
+    outcome === "confirmed_noop" ||
+    (outcome === "dom_only" && domStable)
+  ) {
+    restoreObservationMutationFloor(session, floorBefore);
+  }
+  console.error(
+    `[driver] action_settle instance=${instanceId} method=${method} outcome=${outcome} dom_stable=${domStable} required_revision=${session.requiredUiStateRevision ?? "none"}`,
+  );
+  session.lastActionSettleOutcome = outcome;
+  return outcome;
+}
+
 async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
   const instanceId =
     params &&
@@ -5238,11 +5369,29 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
   const mutationFloorBeforeAction = shouldMarkActionMutation
     ? captureObservationMutationFloor(getSession(instanceId))
     : null;
+  const settleAfterAction =
+    mutationFloorBeforeAction && !ACTION_SETTLE_EXEMPT_METHODS.has(method);
+  const domBeforeAction = settleAfterAction
+    ? await readActionDomFingerprint(getSession(instanceId))
+    : null;
   if (shouldMarkActionMutation) {
     markObservationMutation(getSession(instanceId), method);
   }
   try {
-    return await dispatchMethod(method, params, instanceId);
+    const result = await dispatchMethod(method, params, instanceId);
+    if (settleAfterAction && sessions.has(instanceId)) {
+      const observation = await settleActionMutationFloor(
+        getSession(instanceId),
+        instanceId,
+        method,
+        mutationFloorBeforeAction,
+        domBeforeAction,
+      );
+      if (result && typeof result === "object") {
+        result.post_action_observation = observation;
+      }
+    }
+    return result;
   } catch (error) {
     // A failed action (absent/hidden/disabled control, exhausted click
     // retries) did not mutate the page, so the page never publishes the newer

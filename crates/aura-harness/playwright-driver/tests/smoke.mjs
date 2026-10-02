@@ -12,6 +12,10 @@ const fixtureHtml = `<!doctype html>
   <body>
     <main id="main">
       <div id="aura-app-root">Neighborhood Chat Contacts Notifications Settings</div>
+      <button id="noop-button" type="button">Noop</button>
+      <button id="dom-nav-button" type="button">Panel</button>
+      <button id="delayed-button" type="button">Delayed</button>
+      <button id="pending-button" type="button">Pending</button>
     </main>
     <script>
       (() => {
@@ -93,10 +97,47 @@ const fixtureHtml = `<!doctype html>
           }
         };
 
-        window.__AURA_UI_STATE_JSON__ = JSON.stringify({
+        const ui = {
           screen: "contacts",
           open_modal: null,
-          revision: { semantic_seq: 3, render_seq: 3 }
+          revision: { semantic_seq: 3, render_seq: 3 },
+          quiescence: { state: "settled", reason_codes: [] },
+          operations: []
+        };
+        const publishUi = (patch) => {
+          Object.assign(ui, patch);
+          window.__AURA_UI_STATE_JSON__ = JSON.stringify(ui);
+        };
+        const bumpRevision = () => ({
+          semantic_seq: ui.revision.semantic_seq + 1,
+          render_seq: ui.revision.render_seq + 1
+        });
+        publishUi({});
+
+        // Confirmed no-op: nothing semantic or rendered changes.
+        document.getElementById("noop-button").addEventListener("click", () => {});
+        // DOM-only navigation: rendered DOM changes, semantic snapshot does not.
+        document.getElementById("dom-nav-button").addEventListener("click", () => {
+          state.screen += "\\nPanel";
+          syncRoot();
+        });
+        // Delayed semantic action: publication lands inside the settle window.
+        document.getElementById("delayed-button").addEventListener("click", () => {
+          setTimeout(() => publishUi({ screen: "chat", revision: bumpRevision() }), 150);
+        });
+        // In-flight semantic action: the page reports submitting work without a
+        // new revision, then publishes well after the settle window.
+        document.getElementById("pending-button").addEventListener("click", () => {
+          publishUi({
+            quiescence: { state: "busy", reason_codes: ["operation_submitting:fixture"] },
+            operations: [{ id: "fixture", state: "submitting" }]
+          });
+          setTimeout(() => publishUi({
+            screen: "notifications",
+            quiescence: { state: "settled", reason_codes: [] },
+            operations: [],
+            revision: bumpRevision()
+          }), 1200);
         });
 
         window.__AURA_UI_ACTIVE_GENERATION__ = 1;
@@ -233,6 +274,57 @@ async function main() {
     const after = await driver.call('ui_state', { instance_id: 'smoke-a' });
     assert.equal(after.screen, 'contacts');
     assert.equal(after.revision.semantic_seq, 3);
+
+    // Task 36: a successful click with no semantic publication must not
+    // strand ui_state behind the pre-action revision floor.
+    const noop = await driver.call('click_button', {
+      instance_id: 'smoke-a',
+      selector: '#noop-button'
+    });
+    assert.equal(noop.post_action_observation, 'confirmed_noop');
+    const afterNoop = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(afterNoop.revision.semantic_seq, 3);
+
+    // DOM-only navigation: the floor is released once the DOM settles.
+    const domNav = await driver.call('click_button', {
+      instance_id: 'smoke-a',
+      selector: '#dom-nav-button'
+    });
+    assert.equal(domNav.post_action_observation, 'dom_only');
+    const afterDomNav = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(afterDomNav.revision.semantic_seq, 3);
+    const domNavSnapshot = await driver.call('snapshot', { instance_id: 'smoke-a', screenshot: false });
+    assert.match(domNavSnapshot.screen, /Panel/);
+
+    // Delayed semantic action inside the settle window: ui_state must return
+    // the post-action publication, never the pre-action snapshot.
+    const delayed = await driver.call('click_button', {
+      instance_id: 'smoke-a',
+      selector: '#delayed-button'
+    });
+    assert.equal(delayed.post_action_observation, 'semantic_published');
+    const afterDelayed = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(afterDelayed.screen, 'chat');
+    assert.equal(afterDelayed.revision.semantic_seq, 4);
+
+    // In-flight semantic action published after the settle window: the floor
+    // stays raised, so ui_state can only fail or return the later
+    // publication; it must never return the pre-action snapshot.
+    const pending = await driver.call('click_button', {
+      instance_id: 'smoke-a',
+      selector: '#pending-button'
+    });
+    assert.equal(pending.post_action_observation, 'semantic_pending');
+    const duringPending = await driver
+      .call('ui_state', { instance_id: 'smoke-a' })
+      .catch((error) => ({ error }));
+    if (!duringPending.error) {
+      assert.equal(duringPending.revision.semantic_seq, 5);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const afterPending = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(afterPending.screen, 'notifications');
+    assert.equal(afterPending.revision.semantic_seq, 5);
 
     const stop = await driver.call('stop', { instance_id: 'smoke-a' });
     assert.equal(stop.status, 'stopped');
