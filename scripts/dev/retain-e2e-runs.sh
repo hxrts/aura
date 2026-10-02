@@ -48,7 +48,9 @@ if [[ "$action" != prune && ! "$run_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || 
   echo 'invalid run id' >&2; exit 2
 fi
 command -v jq >/dev/null || { echo 'jq is required' >&2; exit 2; }
-[[ "$root" == */artifacts/runs ]] || { echo 'run root must end in /artifacts/runs' >&2; exit 2; }
+[[ "$root" == .tmp/e2e/run/*/artifacts/runs || "$root" == */.tmp/e2e/run/*/artifacts/runs ]] || {
+  echo 'run root must be a .tmp/e2e/run/<host>/artifacts/runs directory' >&2; exit 2;
+}
 [[ ! -L "$root" ]] || { echo 'run root is a symlink' >&2; exit 1; }
 if [[ "$action" == prune && ! -d "$root" ]]; then
   echo "Retention: no run root at $root"
@@ -56,6 +58,9 @@ if [[ "$action" == prune && ! -d "$root" ]]; then
 fi
 [[ -d "$root" ]] || { echo "missing run root: $root" >&2; exit 1; }
 root="$(cd "$root" && pwd -P)"
+[[ "$root" =~ /\.tmp/e2e/run/[A-Za-z0-9_-]+/artifacts/runs$ ]] || {
+  echo 'run root resolves outside an owned host run tree' >&2; exit 1;
+}
 lock_dir="$root/.aura-retention.lock"
 acquire_lock() {
   mkdir "$lock_dir" 2>/dev/null || { echo 'retention: another manifest update or prune holds the lock' >&2; exit 1; }
@@ -105,6 +110,12 @@ fi
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-run-retention.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
+if [[ "$mode" == apply ]]; then
+  active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
+  [[ -z "$active" ]] || { echo "retention: harness consumer active: $active" >&2; exit 1; }
+  acquire_lock
+  trap 'rmdir "$lock_dir" 2>/dev/null || true; rm -rf "$scratch"' EXIT
+fi
 : > "$scratch/eligible"
 : > "$scratch/legacy"
 for path in "$root"/*; do
@@ -154,11 +165,10 @@ printf 'Prune candidates (estimated allocated KiB):\n'
 awk -F '\t' -v root="$root" '{total += $1; printf "%s KiB  %s/%s\n", $1, root, $2} END {printf "Total candidate: %s KiB\n", total + 0}' "$scratch/candidates"
 [[ "$mode" == apply ]] || exit 0
 
-# A running harness may still read a completed bundle. Require an idle host.
+# A running harness may still read a completed bundle. Recheck after
+# candidate selection while the manifest lock is held.
 active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
 [[ -z "$active" ]] || { echo "retention: harness consumer active: $active" >&2; exit 1; }
-acquire_lock
-trap 'rmdir "$lock_dir" 2>/dev/null || true; rm -rf "$scratch"' EXIT
 while IFS=$'\t' read -r size_kib name; do
   [[ -n "$name" ]] || continue
   path="$root/$name"
