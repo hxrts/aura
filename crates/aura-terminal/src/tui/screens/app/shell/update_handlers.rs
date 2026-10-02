@@ -798,6 +798,12 @@ pub(super) async fn process_ui_update_match(
                         .detail
                         .clone()
                         .unwrap_or_else(|| format!("{:?}", error.code));
+                    tracing::warn!(
+                        kind = ?status.kind,
+                        code = ?error.code,
+                        detail = %detail,
+                        "semantic operation failed"
+                    );
                     match status.kind {
                         SemanticOperationKind::InviteActorToChannel => {
                             format!("Invite to channel failed: {detail}")
