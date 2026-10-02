@@ -14,8 +14,29 @@ const HARNESS_RELAY_ADDR_QUERY_KEY: &str = "__aura_harness_relay_addr";
 pub(crate) fn harness_relay_addr(query: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (key, value) = pair.split_once('=')?;
-        (key == HARNESS_RELAY_ADDR_QUERY_KEY && !value.is_empty()).then(|| value.to_string())
+        if key != HARNESS_RELAY_ADDR_QUERY_KEY {
+            return None;
+        }
+        percent_decode(value).filter(|value| !value.is_empty())
     })
+}
+
+/// Decodes `%XX` escapes in a query value (`URLSearchParams` escapes `:`).
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            decoded.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 cfg_if! {

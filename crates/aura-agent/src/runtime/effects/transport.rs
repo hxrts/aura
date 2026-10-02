@@ -1054,6 +1054,10 @@ mod tests {
             harness_relay_addr("__aura_harness_instance=x&__aura_harness_relay_addr=relay:1"),
             Some("relay:1".to_string())
         );
+        assert_eq!(
+            harness_relay_addr("__aura_harness_relay_addr=relay%3A1"),
+            Some("relay:1".to_string())
+        );
         assert_eq!(harness_relay_addr("__aura_harness_relay_addr="), None);
         assert_eq!(harness_relay_addr("__aura_harness_instance=x"), None);
     }
