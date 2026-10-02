@@ -14,14 +14,15 @@ while [[ $# -gt 0 ]]; do
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|wasm-debug|dylint [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane debug|wasm-debug|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
 case "$lane" in
   debug) relative=target/debug ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
   dylint) relative=target/dylint ;;
-  *) echo 'lane must be debug, wasm-debug or dylint' >&2; exit 2 ;;
+  release) relative=target/release ;;
+  *) echo 'lane must be debug, wasm-debug, dylint or release' >&2; exit 2 ;;
 esac
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo 'no Cargo.toml in root' >&2; exit 2; }
@@ -48,6 +49,10 @@ else
 fi
 builders="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep)$/)printf "%s(%s) ",n,$1}')"
 [[ -z "$builders" ]] || { echo "builder active: $builders" >&2; exit 1; }
+if [[ "$lane" == release ]]; then
+  consumers="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
+  [[ -z "$consumers" ]] || { echo "harness consumer active: $consumers" >&2; exit 1; }
+fi
 open_files="$(lsof -n -P 2>/dev/null)" || { echo 'cannot inspect open files' >&2; exit 1; }
 if printf '%s\n' "$open_files" | rg -F "$path"; then
   echo "lane has open files: $path" >&2

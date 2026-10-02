@@ -57,6 +57,11 @@ Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
 have stopped. Its startup and per-step preflight refuses active consumers,
 checks free space, and can collect only idle compiler caches. It preserves
 `.tmp/e2e` and current CI logs.
+If stale native release variants dominate after the LAN run ends, preview
+`bash scripts/dev/prune-inactive-lane.sh --lane release --dry-run` and then
+use `--apply` to reset that whole idle cache. The command refuses active
+builders, harness processes and open release files. It leaves the installed
+`bin/aura` alone; the next release build recompiles its dependencies.
 
 The normal guarded build sequence on each host is:
 

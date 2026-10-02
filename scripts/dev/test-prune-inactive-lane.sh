@@ -50,4 +50,15 @@ rm -rf "$project/target/debug"
 ln -s "$test_root" "$project/target/debug"
 expect_status 1 prune --lane debug --apply
 [[ -d "$test_root" && -f "$project/target/release/keep" ]]
+
+expect_status 0 prune --lane release --dry-run
+[[ -f "$project/target/release/keep" ]]
+printf 'tool_repl\n' > "$ACTIVE_FILE"
+expect_status 1 prune --lane release --apply
+rm "$ACTIVE_FILE"
+printf '%s\n' "$project/target/release/keep" > "$OPEN_FILE"
+expect_status 1 prune --lane release --apply
+rm "$OPEN_FILE"
+expect_status 0 prune --lane release --apply
+[[ ! -e "$project/target/release" && -L "$project/target/debug" && -d "$test_root" ]]
 echo 'prune-inactive-lane safety tests passed'
