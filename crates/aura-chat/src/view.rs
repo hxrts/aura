@@ -22,7 +22,7 @@
 //! ```
 
 use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
-use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::DomainFact;
 
 use crate::{ChatFact, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
@@ -33,25 +33,8 @@ use crate::{ChatFact, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
 /// derived from journal facts during view reduction.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatDelta {
-    /// A new channel was created or discovered
-    ChannelAdded {
-        /// Identifier of the channel (debug-friendly string).
-        channel_id: String,
-        /// Relational context identifier when authoritative context is known.
-        context_id: Option<String>,
-        /// Human-friendly channel name.
-        name: String,
-        /// Optional description/topic for the channel.
-        topic: Option<String>,
-        /// Indicates whether this channel is a direct message.
-        is_dm: bool,
-        /// Number of members currently in the channel.
-        member_count: u32,
-        /// Unix epoch milliseconds when the channel was created.
-        created_at: u64,
-        /// AuthorityId string of the creator.
-        creator_id: String,
-    },
+    /// A channel backed by a canonical `ChannelCreated` fact.
+    ChannelAdded(CanonicalChannelCreation),
     /// A channel was removed
     ChannelRemoved {
         /// Identifier of the removed channel.
@@ -71,6 +54,8 @@ pub enum ChatDelta {
         member_count: Option<u32>,
         /// Updated known non-self participant identifiers.
         member_ids: Option<Vec<String>>,
+        /// Fact timestamp used to order updates arriving before creation.
+        updated_at: u64,
     },
     /// A new message was sent
     MessageAdded {
@@ -136,6 +121,86 @@ pub enum ChatDelta {
     },
 }
 
+/// Evidence that a channel was established by a `ChannelCreated` fact.
+///
+/// Fields are private so an observed projection cannot manufacture a channel
+/// from a metadata update, membership event, or raw identifier.
+///
+/// ```compile_fail
+/// use aura_chat::view::CanonicalChannelCreation;
+/// use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
+/// let _forged = CanonicalChannelCreation {
+///     channel_id: ChannelId::from_bytes([1; 32]),
+///     context_id: ContextId::new_from_entropy([2; 32]),
+///     name: "made up".into(),
+///     topic: None,
+///     is_dm: false,
+///     member_count: 1,
+///     created_at: 0,
+///     creator_id: AuthorityId::new_from_entropy([3; 32]),
+/// };
+/// ```
+///
+/// ```compile_fail
+/// use aura_chat::{view::CanonicalChannelCreation, ChatFact};
+/// let fact: ChatFact = unreachable!();
+/// let _forged = CanonicalChannelCreation::from_fact(&fact);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalChannelCreation {
+    channel_id: ChannelId,
+    context_id: ContextId,
+    name: String,
+    topic: Option<String>,
+    is_dm: bool,
+    member_count: u32,
+    created_at: u64,
+    creator_id: AuthorityId,
+}
+
+impl CanonicalChannelCreation {
+    /// Channel identity established by the creation fact.
+    #[must_use]
+    pub fn channel_id(&self) -> ChannelId {
+        self.channel_id
+    }
+    /// Relational context established by the creation fact.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+    /// Canonical channel name from the creation fact.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    /// Canonical channel topic from the creation fact.
+    #[must_use]
+    pub fn topic(&self) -> Option<&str> {
+        self.topic.as_deref()
+    }
+    /// Whether creation established a direct-message channel.
+    #[must_use]
+    pub fn is_dm(&self) -> bool {
+        self.is_dm
+    }
+    /// Initial member count hint from the creation fact.
+    #[must_use]
+    pub fn member_count(&self) -> u32 {
+        self.member_count
+    }
+    /// Creation timestamp in milliseconds.
+    #[must_use]
+    pub fn created_at(&self) -> u64 {
+        self.created_at
+    }
+    /// Authority that created the channel.
+    #[must_use]
+    pub fn creator_id(&self) -> AuthorityId {
+        self.creator_id
+    }
+}
+
 /// Keys for chat delta composition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ChatDeltaKey {
@@ -148,37 +213,11 @@ pub enum ChatDeltaKey {
 }
 
 impl ChatDelta {
-    fn replace_if_some<T>(slot: &mut Option<T>, incoming: Option<T>) {
-        if incoming.is_some() {
-            *slot = incoming;
-        }
-    }
-
     fn apply_if_newer(current_ts: &mut u64, incoming_ts: u64, update: impl FnOnce()) -> bool {
         if incoming_ts >= *current_ts {
             *current_ts = incoming_ts;
             update();
         }
-        true
-    }
-
-    fn merge_channel_update_fields(
-        context_id: &mut Option<String>,
-        name: &mut Option<String>,
-        topic: &mut Option<String>,
-        member_count: &mut Option<u32>,
-        member_ids: &mut Option<Vec<String>>,
-        new_context_id: Option<String>,
-        new_name: Option<String>,
-        new_topic: Option<String>,
-        new_count: Option<u32>,
-        new_member_ids: Option<Vec<String>>,
-    ) -> bool {
-        Self::replace_if_some(context_id, new_context_id);
-        Self::replace_if_some(name, new_name);
-        Self::replace_if_some(topic, new_topic);
-        Self::replace_if_some(member_count, new_count);
-        Self::replace_if_some(member_ids, new_member_ids);
         true
     }
 }
@@ -188,8 +227,10 @@ impl ComposableDelta for ChatDelta {
 
     fn key(&self) -> Self::Key {
         match self {
-            ChatDelta::ChannelAdded { channel_id, .. }
-            | ChatDelta::ChannelRemoved { channel_id }
+            ChatDelta::ChannelAdded(creation) => {
+                ChatDeltaKey::Channel(creation.channel_id.to_string())
+            }
+            ChatDelta::ChannelRemoved { channel_id }
             | ChatDelta::ChannelUpdated { channel_id, .. } => {
                 ChatDeltaKey::Channel(channel_id.clone())
             }
@@ -225,64 +266,9 @@ impl ComposableDelta for ChatDelta {
 
     fn try_merge(&mut self, other: Self) -> bool {
         match (self, other) {
-            (
-                ChatDelta::ChannelAdded {
-                    context_id,
-                    name,
-                    topic,
-                    member_count,
-                    ..
-                },
-                ChatDelta::ChannelUpdated {
-                    context_id: new_context_id,
-                    name: new_name,
-                    topic: new_topic,
-                    member_count: new_count,
-                    member_ids: _new_member_ids,
-                    ..
-                },
-            ) => {
-                Self::replace_if_some(context_id, new_context_id);
-                if let Some(new_name) = new_name {
-                    *name = new_name;
-                }
-                if let Some(new_topic) = new_topic {
-                    *topic = Some(new_topic);
-                }
-                if let Some(new_count) = new_count {
-                    *member_count = new_count;
-                }
-                true
-            }
-            (
-                ChatDelta::ChannelUpdated {
-                    context_id,
-                    name,
-                    topic,
-                    member_count,
-                    member_ids,
-                    ..
-                },
-                ChatDelta::ChannelUpdated {
-                    context_id: new_context_id,
-                    name: new_name,
-                    topic: new_topic,
-                    member_count: new_count,
-                    member_ids: new_member_ids,
-                    ..
-                },
-            ) => Self::merge_channel_update_fields(
-                context_id,
-                name,
-                topic,
-                member_count,
-                member_ids,
-                new_context_id,
-                new_name,
-                new_topic,
-                new_count,
-                new_member_ids,
-            ),
+            // Keep channel creation and updates as distinct deltas. A metadata
+            // update cannot become creation evidence during compaction, and
+            // preserving timestamps lets the projection replay updates in order.
             (ChatDelta::ChannelRemoved { .. }, ChatDelta::ChannelRemoved { .. }) => true,
             (
                 ChatDelta::MessageAdded {
@@ -391,23 +377,23 @@ impl ViewDeltaReducer for ChatViewReducer {
 
         let delta = match chat_fact {
             ChatFact::ChannelCreated {
-                context_id,
                 channel_id,
+                context_id,
                 name,
                 topic,
                 is_dm,
                 created_at,
                 creator_id,
-            } => ChatDelta::ChannelAdded {
-                channel_id: channel_id.to_string(),
-                context_id: Some(context_id.to_string()),
+            } => ChatDelta::ChannelAdded(CanonicalChannelCreation {
+                channel_id,
+                context_id,
                 name,
                 topic,
                 is_dm,
                 member_count: 1,
                 created_at: created_at.ts_ms,
-                creator_id: creator_id.to_string(),
-            },
+                creator_id,
+            }),
             ChatFact::ChannelClosed { channel_id, .. } => ChatDelta::ChannelRemoved {
                 channel_id: channel_id.to_string(),
             },
@@ -418,6 +404,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 topic,
                 member_count,
                 member_ids,
+                updated_at,
                 ..
             } => ChatDelta::ChannelUpdated {
                 channel_id: channel_id.to_string(),
@@ -426,6 +413,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 topic,
                 member_count,
                 member_ids: member_ids.map(Self::stringify_authority_ids),
+                updated_at: updated_at.ts_ms,
             },
             ChatFact::MessageSentSealed {
                 channel_id,
@@ -524,17 +512,11 @@ mod tests {
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<ChatDelta>(&deltas[0]).unwrap();
         match delta {
-            ChatDelta::ChannelAdded {
-                name,
-                topic,
-                is_dm,
-                created_at,
-                ..
-            } => {
-                assert_eq!(name, "test-channel");
-                assert_eq!(topic, &Some("A test topic".to_string()));
-                assert!(!is_dm);
-                assert_eq!(*created_at, 1234567890);
+            ChatDelta::ChannelAdded(creation) => {
+                assert_eq!(creation.name(), "test-channel");
+                assert_eq!(creation.topic(), Some("A test topic"));
+                assert!(!creation.is_dm());
+                assert_eq!(creation.created_at(), 1234567890);
             }
             _ => panic!("Expected ChannelAdded delta"),
         }
@@ -563,16 +545,32 @@ mod tests {
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<ChatDelta>(&deltas[0]).unwrap();
         match delta {
-            ChatDelta::ChannelAdded {
-                channel_id: id,
-                creator_id: creator_id_str,
-                ..
-            } => {
-                assert_eq!(id, &channel_id.to_string());
-                assert_eq!(creator_id_str, &creator.to_string());
+            ChatDelta::ChannelAdded(creation) => {
+                assert_eq!(creation.channel_id(), channel_id);
+                assert_eq!(creation.creator_id(), creator);
             }
             _ => panic!("Expected ChannelAdded delta"),
         }
+    }
+
+    #[test]
+    fn metadata_update_cannot_supply_creation_witness() {
+        let update = ChatFact::channel_updated_ms(
+            test_context_id(1),
+            test_channel_id(1),
+            Some("forged".to_string()),
+            None,
+            Some(3),
+            None,
+            20,
+            test_authority_id(1),
+        );
+        let deltas = ChatViewReducer.reduce_fact(CHAT_FACT_TYPE_ID, &update.to_bytes(), None);
+        assert_eq!(deltas.len(), 1);
+        assert!(matches!(
+            downcast_delta::<ChatDelta>(&deltas[0]),
+            Some(ChatDelta::ChannelUpdated { .. })
+        ));
     }
 
     #[test]
@@ -625,45 +623,52 @@ mod tests {
         assert!(deltas.is_empty());
     }
 
-    /// Delta compaction merges ChannelAdded + ChannelUpdated into one delta
-    /// with the latest name/topic/member_count.
+    /// Compaction preserves creation evidence and metadata updates separately.
     #[test]
-    fn test_compact_deltas_merges_channel_updates() {
+    fn test_compact_deltas_preserves_channel_creation_and_updates() {
+        let channel_id = test_channel_id(1);
+        let context_id = test_context_id(1);
+        let created = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "general".to_string(),
+            None,
+            false,
+            10,
+            test_authority_id(1),
+        );
+        let creation_deltas =
+            ChatViewReducer.reduce_fact(CHAT_FACT_TYPE_ID, &created.to_bytes(), None);
+        let Some(ChatDelta::ChannelAdded(creation)) =
+            downcast_delta::<ChatDelta>(&creation_deltas[0])
+        else {
+            panic!("ChannelCreated must reduce to ChannelAdded")
+        };
         let deltas = vec![
-            ChatDelta::ChannelAdded {
-                channel_id: "chan-1".to_string(),
-                context_id: Some("ctx-1".to_string()),
-                name: "general".to_string(),
-                topic: None,
-                is_dm: false,
-                member_count: 2,
-                created_at: 10,
-                creator_id: "creator".to_string(),
-            },
+            ChatDelta::ChannelAdded(creation.clone()),
             ChatDelta::ChannelUpdated {
-                channel_id: "chan-1".to_string(),
-                context_id: Some("ctx-2".to_string()),
+                channel_id: channel_id.to_string(),
+                context_id: Some(context_id.to_string()),
                 name: Some("general-chat".to_string()),
                 topic: Some("new topic".to_string()),
                 member_count: Some(3),
                 member_ids: None,
+                updated_at: 20,
             },
         ];
 
         let compacted = compact_deltas(deltas);
-        assert_eq!(compacted.len(), 1);
+        assert_eq!(compacted.len(), 2);
         match &compacted[0] {
-            ChatDelta::ChannelAdded {
-                name,
-                topic,
-                member_count,
-                ..
-            } => {
-                assert_eq!(name, "general-chat");
-                assert_eq!(topic, &Some("new topic".to_string()));
-                assert_eq!(*member_count, 3);
+            ChatDelta::ChannelAdded(creation) => {
+                assert_eq!(creation.name(), "general");
+                assert_eq!(creation.topic(), None);
+                assert_eq!(creation.member_count(), 1);
             }
             _ => panic!("Expected ChannelAdded after compaction"),
         }
+        assert!(
+            matches!(&compacted[1], ChatDelta::ChannelUpdated { name: Some(name), .. } if name == "general-chat")
+        );
     }
 }

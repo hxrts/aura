@@ -17,8 +17,7 @@ use async_lock::RwLock;
 use aura_core::AuraError;
 pub use neighborhood::{
     add_home_to_neighborhood, create_home, create_home_for_authority, create_neighborhood,
-    get_current_position, get_neighborhood_state, initialize_test_home, link_home_one_hop_link,
-    move_position,
+    get_current_position, get_neighborhood_state, link_home_one_hop_link, move_position,
 };
 use std::sync::Arc;
 

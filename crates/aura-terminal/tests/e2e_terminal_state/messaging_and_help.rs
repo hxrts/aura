@@ -147,7 +147,7 @@ async fn test_channel_mode_operations() {
         );
         home.my_role = HomeRole::Member;
         let mut homes = aura_app::views::home::HomesState::default();
-        homes.add_home(home);
+        super::add_fixture_home(&mut homes, home);
         homes.select_home(Some(home_id));
         core.views().set_homes(homes.clone());
         core.emit(&*HOMES_SIGNAL, homes)

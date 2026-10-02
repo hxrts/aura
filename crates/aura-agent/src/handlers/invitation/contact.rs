@@ -658,7 +658,6 @@ impl<'a> InvitationContactHandler<'a> {
                         ..
                     } = &updated.invitation_type
                     {
-                        let reactive = effects.reactive_handler();
                         let now_ms =
                             InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
                                 .await;
@@ -674,15 +673,14 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await?;
                         if *home {
+                            let evidence = crate::reactive::app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
+                                &updated, &home_name, now_ms,
+                            )
+                            .map_err(AgentError::runtime)?;
                             crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                            &reactive,
-                            *home_id,
-                            &home_name,
-                            updated.sender_id,
-                            updated.receiver_id,
-                            updated.context_id,
-                            now_ms,
-                        )
+                                effects.as_ref(),
+                                evidence,
+                            )
                         .await
                         .map_err(AgentError::runtime)?;
                         }
@@ -876,7 +874,6 @@ impl<'a> InvitationContactHandler<'a> {
                         .map_err(|e| AgentError::effects(e.to_string()))?;
                     effects.await_next_view_update().await;
 
-                    let reactive = effects.reactive_handler();
                     let now_ms =
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
                             .await;
@@ -924,14 +921,13 @@ impl<'a> InvitationContactHandler<'a> {
                     )
                     .await?;
                     if *home {
+                        let evidence = crate::reactive::app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
+                            &updated, &home_name, now_ms,
+                        )
+                        .map_err(AgentError::runtime)?;
                         crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                            &reactive,
-                            *home_id,
-                            &home_name,
-                            updated.sender_id,
-                            updated.receiver_id,
-                            updated.context_id,
-                            now_ms,
+                            effects.as_ref(),
+                            evidence,
                         )
                         .await
                         .map_err(AgentError::runtime)?;

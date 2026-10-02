@@ -1421,6 +1421,15 @@ mod tests {
         let instance_id = OperationInstanceId("invitation-accept-reconcile-1".to_string());
 
         runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_canonical_channel_created_fact(aura_chat::ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            1,
+            sender_id,
+        ));
         runtime.set_amp_channel_participants(
             context_id,
             channel_id,
@@ -1534,6 +1543,15 @@ mod tests {
 
         let channel_id = ChannelId::from_bytes([89u8; 32]);
         let context_id = ContextId::new_from_entropy([90u8; 32]);
+        runtime.set_canonical_channel_created_fact(aura_chat::ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            1,
+            our_authority,
+        ));
         runtime.set_amp_channel_state_exists_without_resolution(context_id, channel_id, true);
         runtime.set_amp_channel_participants_without_resolution(
             context_id,
@@ -1631,6 +1649,15 @@ mod tests {
             receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_canonical_channel_created_fact(aura_chat::ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-room".to_string(),
+            None,
+            false,
+            1,
+            sender_id,
+        ));
         runtime.set_amp_channel_participants(
             context_id,
             channel_id,
@@ -1949,6 +1976,15 @@ mod tests {
             receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_canonical_channel_created_fact(aura_chat::ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            1,
+            sender_id,
+        ));
         runtime.set_amp_channel_participants(
             context_id,
             channel_id,
@@ -2030,6 +2066,15 @@ mod tests {
             receiver_nickname: None,
         }]);
         runtime.set_amp_channel_context(channel_id, context_id);
+        runtime.set_canonical_channel_created_fact(aura_chat::ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            1,
+            sender_id,
+        ));
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
         let app_core = Arc::new(RwLock::new(

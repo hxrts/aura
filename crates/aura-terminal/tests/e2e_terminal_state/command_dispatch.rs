@@ -330,7 +330,7 @@ async fn test_moderator_role_flow() {
         home.my_role = HomeRole::Moderator;
 
         let mut homes = aura_app::views::home::HomesState::default();
-        homes.add_home(home);
+        super::add_fixture_home(&mut homes, home);
         homes.select_home(Some(home_id));
         core.views().set_homes(homes.clone());
         core.set_active_home_selection(Some(home_id));

@@ -103,6 +103,7 @@ android = []
 web = []
 
 [dev-dependencies]
+aura-invitation = { package = "hxrts-aura-invitation", path = "../aura-invitation", version = "=0.2.0", features = ["test-support"] }
 aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 anyhow = { workspace = true }
 async-lock = { workspace = true }

@@ -17,6 +17,9 @@ use crate::core::IntentError;
 use crate::ReactiveHandler;
 use async_lock::Mutex;
 use async_trait::async_trait;
+use aura_chat::view::CanonicalChannelCreation;
+use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};
+use aura_composition::{downcast_delta_owned, ViewDeltaReducer};
 use aura_core::effects::amp::{
     AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
@@ -28,6 +31,7 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextI
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::RelationalFact;
+use aura_journal::DomainFact;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -37,6 +41,7 @@ pub struct OfflineRuntimeBridge {
     task_spawner: OwnedTaskSpawner,
     pending_invitations: PendingInvitationsState,
     amp_channel_contexts: AmpChannelContexts,
+    canonical_channel_creations: Arc<Mutex<HashMap<(ContextId, ChannelId), ChatFact>>>,
     materialized_channel_name_matches: MaterializedChannelNameMatches,
     amp_channel_states: AmpChannelStates,
     amp_channel_participants: AmpChannelParticipants,
@@ -66,6 +71,7 @@ impl OfflineRuntimeBridge {
             ),
             pending_invitations: Arc::new(Mutex::new(None)),
             amp_channel_contexts: Arc::new(Mutex::new(HashMap::new())),
+            canonical_channel_creations: Arc::new(Mutex::new(HashMap::new())),
             materialized_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_states: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_participants: Arc::new(Mutex::new(HashMap::new())),
@@ -111,6 +117,23 @@ impl OfflineRuntimeBridge {
             .try_lock()
             .unwrap_or_else(|| panic!("amp channel contexts mutex already locked"))
             .insert(channel_id, context_id);
+    }
+
+    #[cfg(test)]
+    /// Seed a committed channel creation fact for offline join tests.
+    pub fn set_canonical_channel_created_fact(&self, fact: ChatFact) {
+        let ChatFact::ChannelCreated {
+            context_id,
+            channel_id,
+            ..
+        } = fact
+        else {
+            panic!("offline canonical channel creation requires ChannelCreated");
+        };
+        self.canonical_channel_creations
+            .try_lock()
+            .unwrap_or_else(|| panic!("canonical channel creations mutex already locked"))
+            .insert((context_id, channel_id), fact);
     }
 
     #[cfg(test)]
@@ -396,6 +419,28 @@ impl RuntimeBridge for OfflineRuntimeBridge {
                     "authoritative AMP context unavailable in offline mode for channel {channel}"
                 ))
             })
+    }
+
+    async fn canonical_channel_creation(
+        &self,
+        binding: super::AuthoritativeChannelBinding,
+    ) -> Result<Option<CanonicalChannelCreation>, IntentError> {
+        let fact = self
+            .canonical_channel_creations
+            .lock()
+            .await
+            .get(&(binding.context_id, binding.channel_id))
+            .cloned();
+        Ok(fact.and_then(|fact| {
+            ChatViewReducer
+                .reduce_fact(CHAT_FACT_TYPE_ID, &fact.to_bytes(), None)
+                .into_iter()
+                .filter_map(downcast_delta_owned::<ChatDelta>)
+                .find_map(|delta| match delta {
+                    ChatDelta::ChannelAdded(creation) => Some(creation),
+                    _ => None,
+                })
+        }))
     }
 
     async fn identify_materialized_channel_ids_by_name(

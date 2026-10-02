@@ -148,7 +148,7 @@ pub async fn create_channel_with_authoritative_binding(
             .map_err(|e| error::runtime_call("join channel", e))?
             .map_err(|e| error::runtime_call("join channel", e))?;
 
-            let fact = ChatFact::channel_created_ms(
+            let chat_fact = ChatFact::channel_created_ms(
                 context_id,
                 channel_id,
                 name.to_string(),
@@ -156,8 +156,8 @@ pub async fn create_channel_with_authoritative_binding(
                 false,
                 timestamp_ms,
                 runtime.authority_id(),
-            )
-            .to_generic();
+            );
+            let fact = chat_fact.to_generic();
 
             timeout_runtime_call(
                 &runtime,
@@ -169,6 +169,10 @@ pub async fn create_channel_with_authoritative_binding(
             .await
             .map_err(|e| error::runtime_call("persist channel", e))?
             .map_err(|e| error::runtime_call("persist channel", e))?;
+
+            // The committed creation fact is the only local projection
+            // materializer. Membership/name hints may enrich it afterward.
+            reduce_chat_fact_observed(app_core, &chat_fact).await?;
 
             let mut attempted_fanout = 0usize;
             let mut failed_fanout = Vec::new();
@@ -200,26 +204,24 @@ pub async fn create_channel_with_authoritative_binding(
         }
 
         if backend != MessagingBackend::Runtime {
-            update_chat_projection_observed(app_core, |chat_state| {
-                let channel = Channel {
-                    id: channel_id,
-                    context_id: channel_context,
-                    name: name.to_string(),
-                    topic,
-                    channel_type: ChannelType::Home,
-                    unread_count: 0,
-                    is_dm: false,
-                    member_ids: member_ids.clone(),
-                    member_count: (member_ids.len() as u32).saturating_add(1),
-                    last_message: None,
-                    last_message_time: None,
-                    last_activity: timestamp_ms,
-                    last_finalized_epoch: 0,
-                };
-
-                chat_state.upsert_channel(channel);
-            })
-            .await?;
+            let local_context = ContextId::new_from_entropy(hash(
+                format!("local-channel-context:{channel_id}").as_bytes(),
+            ));
+            let local_owner = {
+                app_core.read().await.authority().cloned()
+            }.unwrap_or_else(|| AuthorityId::new_from_entropy(hash(
+                format!("local-channel-owner:{channel_id}").as_bytes(),
+            )));
+            channel_context = Some(local_context);
+            reduce_chat_fact_observed(app_core, &ChatFact::channel_created_ms(
+                local_context, channel_id, name.to_string(), topic, false,
+                timestamp_ms, local_owner,
+            )).await?;
+            reduce_chat_fact_observed(app_core, &ChatFact::channel_updated_ms(
+                local_context, channel_id, None, None,
+                Some((member_ids.len() as u32).saturating_add(1)),
+                Some(member_ids.clone()), timestamp_ms, local_owner,
+            )).await?;
         }
 
         if backend == MessagingBackend::Runtime {

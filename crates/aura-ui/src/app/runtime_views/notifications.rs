@@ -774,22 +774,25 @@ mod tests {
             Invitation, InvitationDirection, InvitationStatus, InvitationType,
         };
         let bob = AuthorityId::new_from_entropy([7u8; 32]);
-        let mut invitations = InvitationsState::default();
-        invitations.add_invitation(Invitation {
-            id: "sent-1".to_string(),
-            invitation_type: InvitationType::Contact,
-            status: InvitationStatus::Pending,
-            direction: InvitationDirection::Sent,
-            from_id: AuthorityId::new_from_entropy([6u8; 32]),
-            from_name: "Alex".to_string(),
-            to_id: Some(bob),
-            to_name: Some("Bob".to_string()),
-            created_at: 10,
-            expires_at: None,
-            message: None,
-            home_id: None,
-            home_name: None,
-        });
+        let invitations = InvitationsState::from_parts(
+            Vec::new(),
+            vec![Invitation {
+                id: "sent-1".to_string(),
+                invitation_type: InvitationType::Contact,
+                status: InvitationStatus::Pending,
+                direction: InvitationDirection::Sent,
+                from_id: AuthorityId::new_from_entropy([6u8; 32]),
+                from_name: "Alex".to_string(),
+                to_id: Some(bob),
+                to_name: Some("Bob".to_string()),
+                created_at: 10,
+                expires_at: None,
+                message: None,
+                home_id: None,
+                home_name: None,
+            }],
+            Vec::new(),
+        );
 
         let runtime = build_notifications_runtime_view(
             invitations,

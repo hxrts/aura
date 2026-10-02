@@ -34,6 +34,8 @@ Invitation protocol for establishing relationships between authorities, includin
 - Facts with known context must reduce under their matching `ContextId`.
 - Invitation identifiers are treated as stable binding keys.
 - Invitation redemption creates mutual relational context.
+- The `shareable` module owns code decoding, sender-proof verification, expiry and channel-context validation. Only the signature-verifying `verify_code` method mints `ValidatedImportedInvitation`; its private fields prevent a caller from promoting an arbitrary cache record into creation evidence. The optional `test-support` feature exposes unsigned codec fixtures for agent unit tests but cannot mint a validated-import token.
+- Invitation projections are created through an app-owned `InvitationCreationWitness` from a sealed validated-import token or `InvitationFact::Sent`; acceptance, decline, and cancellation facts settle existing invitations or wait for their creation evidence rather than inventing missing metadata.
 - Invitation choreographies remain theorem-pack-free until they move onto a
   Telltale-native authority/evidence path with a concrete runtime consumer.
 

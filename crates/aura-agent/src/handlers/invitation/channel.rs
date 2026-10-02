@@ -914,16 +914,30 @@ impl<'a> InvitationChannelHandler<'a> {
                 .await;
         }
 
+        if !invite.home {
+            return Ok(());
+        }
+
         let reactive = effects.reactive_handler();
         let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
+        let verified = crate::reactive::app_signal_views::VerifiedJoinedHome::verify(
+            effects, invite, own_id, now_ms,
+        )
+        .await
+        .map_err(AgentError::runtime)?;
+        let created = self
+            .handler
+            .commit_home_membership(effects, invite, own_id, true)
+            .await?
+            .ok_or_else(|| AgentError::runtime("home creation fact was not committed"))?;
+        let evidence = verified
+            .bind_committed_creation(
+                &aura_app::projection_owner::ProjectionOwner::new(reactive.clone()),
+                &created,
+            )
+            .map_err(AgentError::runtime)?;
         crate::reactive::app_signal_views::materialize_home_signal_for_channel_invitation(
-            &reactive,
-            own_id,
-            invite.channel_id,
-            &invite.home_name,
-            invite.sender_id,
-            invite.context_id,
-            now_ms,
+            &reactive, evidence,
         )
         .await
         .map_err(AgentError::runtime)?;

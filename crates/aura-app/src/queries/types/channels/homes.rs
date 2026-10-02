@@ -2,10 +2,38 @@ use super::super::common::{
     get_bool, get_channel_id, get_int, get_optional_context_id, get_optional_string, get_string,
 };
 use aura_core::query::{
-    DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate, Query,
-    QueryAccessPolicy, QueryCapability, QueryParseError,
+    DatalogBindings, DatalogFact, DatalogProgram, DatalogRow, DatalogRule, DatalogValue,
+    FactPredicate, Query, QueryAccessPolicy, QueryCapability, QueryParseError,
 };
 use serde::{Deserialize, Serialize};
+
+fn required_count(row: &DatalogRow, field: &str) -> Result<u32, QueryParseError> {
+    let value = row
+        .get(field)
+        .ok_or_else(|| QueryParseError::MissingField {
+            field: field.to_string(),
+        })?;
+    match value {
+        DatalogValue::Integer(value) => {
+            u32::try_from(*value).map_err(|_| QueryParseError::InvalidValue {
+                field: field.to_string(),
+                reason: "count must be a nonnegative u32".into(),
+            })
+        }
+        DatalogValue::String(value) => {
+            value
+                .parse::<u32>()
+                .map_err(|_| QueryParseError::InvalidValue {
+                    field: field.to_string(),
+                    reason: "count must be a nonnegative u32".into(),
+                })
+        }
+        _ => Err(QueryParseError::InvalidValue {
+            field: field.to_string(),
+            reason: "count must be a nonnegative u32".into(),
+        }),
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -96,14 +124,23 @@ impl Query for HomesQuery {
                     _ => HomeRole::Participant,
                 };
 
+                let member_count = required_count(&row, "member_count")?;
+                let online_count = required_count(&row, "online_count")?;
+                if online_count > member_count {
+                    return Err(QueryParseError::InvalidValue {
+                        field: "online_count".into(),
+                        reason: "online count exceeds member count".into(),
+                    });
+                }
+
                 Ok(HomeState {
                     id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     members: Vec::new(),
                     my_role,
                     storage: HomeFlowBudget::default(),
-                    online_count: get_int(&row, "online_count") as u32,
-                    member_count: get_int(&row, "member_count") as u32,
+                    online_count,
+                    member_count,
                     is_primary: get_bool(&row, "is_primary"),
                     topic: get_optional_string(&row, "topic"),
                     pinned_messages: Vec::new(),
@@ -135,5 +172,59 @@ impl Query for HomesQuery {
         }
 
         Ok(HomesState::from_parts(homes, current_home_id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::query::DatalogRow;
+    use aura_core::types::identifiers::ChannelId;
+
+    fn row(member_count: DatalogValue, online_count: DatalogValue) -> DatalogRow {
+        DatalogRow::new()
+            .with_binding(
+                "id",
+                DatalogValue::String(ChannelId::from_bytes([1; 32]).to_string()),
+            )
+            .with_binding("name", DatalogValue::String("Den".into()))
+            .with_binding("my_role", DatalogValue::String("owner".into()))
+            .with_binding("member_count", member_count)
+            .with_binding("online_count", online_count)
+            .with_binding("created_at", DatalogValue::Integer(1))
+    }
+
+    #[test]
+    fn home_query_rejects_missing_or_invalid_counts_without_fabricating_defaults() {
+        let valid = HomesQuery::parse(
+            DatalogBindings::new()
+                .with_row(row(DatalogValue::Integer(2), DatalogValue::Integer(1))),
+        )
+        .unwrap();
+        let home = valid.all_homes().next().unwrap();
+        assert_eq!((home.member_count, home.online_count), (2, 1));
+
+        for invalid in [
+            row(DatalogValue::Integer(-1), DatalogValue::Integer(0)),
+            row(DatalogValue::Integer(1), DatalogValue::Integer(2)),
+            row(
+                DatalogValue::String("unknown".into()),
+                DatalogValue::Integer(0),
+            ),
+            row(
+                DatalogValue::Integer(u32::MAX as i64 + 1),
+                DatalogValue::Integer(0),
+            ),
+        ] {
+            assert!(HomesQuery::parse(DatalogBindings::new().with_row(invalid)).is_err());
+        }
+        let missing = DatalogRow::new().with_binding(
+            "id",
+            DatalogValue::String(ChannelId::from_bytes([2; 32]).to_string()),
+        );
+        assert!(matches!(
+            HomesQuery::parse(DatalogBindings::new().with_row(missing)),
+            Err(QueryParseError::MissingField { field }) if field == "member_count"
+        ));
     }
 }

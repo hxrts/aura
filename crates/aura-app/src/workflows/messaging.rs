@@ -10,6 +10,8 @@ use crate::ui_contract::{
     OperationInstanceId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
     SemanticOperationKind, SemanticOperationPhase,
 };
+#[cfg(test)]
+use crate::views::chat::ChannelType;
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::chat_commands::normalize_channel_name;
 #[allow(unused_imports)]
@@ -49,7 +51,7 @@ use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     views::chat::{
         is_note_to_self_channel_name, note_to_self_channel_id, note_to_self_context_id, Channel,
-        ChannelType, ChatState, Message, MessageDeliveryStatus, NOTE_TO_SELF_CHANNEL_NAME,
+        ChatState, Message, MessageDeliveryStatus, NOTE_TO_SELF_CHANNEL_NAME,
         NOTE_TO_SELF_CHANNEL_TOPIC,
     },
     AppCore,

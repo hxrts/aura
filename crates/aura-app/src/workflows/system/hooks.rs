@@ -503,15 +503,11 @@ mod tests {
         crate::signal_defs::register_app_signals(&reactive)
             .await
             .unwrap();
+        let mut replayed_chat = ChatState::default();
+        replayed_chat.total_unread = 3;
         reactive
             .graph()
-            .emit(
-                CHAT_SIGNAL.id(),
-                ChatState {
-                    total_unread: 3,
-                    ..Default::default()
-                },
-            )
+            .emit(CHAT_SIGNAL.id(), replayed_chat)
             .await
             .unwrap();
         reactive
@@ -738,15 +734,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            let mut revised_chat = ChatState::default();
+            revised_chat.total_unread = revision;
             reactive
                 .graph()
-                .emit(
-                    CHAT_SIGNAL.id(),
-                    ChatState {
-                        total_unread: revision,
-                        ..Default::default()
-                    },
-                )
+                .emit(CHAT_SIGNAL.id(), revised_chat)
                 .await
                 .unwrap();
             reactive

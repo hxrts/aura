@@ -60,6 +60,7 @@ use aura_invitation::capabilities::evaluation_candidates_for_invitation_guard;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_invitation::shareable::ValidatedImportedInvitation;
 #[cfg(not(feature = "choreo-backend-telltale-machine"))]
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
 use aura_invitation::protocol::exchange::telltale_session_types_invitation::message_wrappers::{
@@ -80,32 +81,33 @@ use aura_invitation::{
     DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianAccept, GuardianConfirm, GuardianRequest,
     InvitationAck, InvitationOffer, InvitationOperation,
 };
+
+use crate::runtime::services::TrustedKeyResolutionService;
+use crate::runtime::transport_boundary::send_guarded_transport_envelope;
+use aura_core::effects::TransportError;
+use aura_core::util::serialization::{from_slice, to_vec};
+use aura_journal::DomainFact;
+use aura_protocol::amp::AmpJournalEffects;
+use aura_protocol::effects::ChoreographyError;
+#[cfg(feature = "choreo-backend-telltale-machine")]
+use aura_protocol::effects::{ChoreographicRole, RoleIndex};
+use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_signature::{
     threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
 };
-use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::future::Future;
-use std::sync::Arc;
-use std::time::Duration;
-use aura_journal::DomainFact;
-use crate::runtime::transport_boundary::send_guarded_transport_envelope;
-use crate::runtime::services::TrustedKeyResolutionService;
-use aura_protocol::amp::AmpJournalEffects;
-use aura_protocol::effects::ChoreographyError;
-use aura_core::effects::TransportError;
-use aura_core::util::serialization::{from_slice, to_vec};
-use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(test)]
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+#[cfg(feature = "choreo-backend-telltale-machine")]
+use telltale_machine::StepResult;
 use uuid::Uuid;
 use validation::InvitationValidationHandler;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-#[cfg(feature = "choreo-backend-telltale-machine")]
-use aura_protocol::effects::{ChoreographicRole, RoleIndex};
-#[cfg(feature = "choreo-backend-telltale-machine")]
-use telltale_machine::StepResult;
 
 mod cache;
 mod channel;
@@ -332,14 +334,14 @@ pub(crate) struct PreparedInvitation {
     pub(crate) deferred_network_effects: DeferredInvitationNetworkEffects,
 }
 
-struct ChannelInviteDetails {
-    context_id: ContextId,
-    channel_id: ChannelId,
-    home_name: String,
-    sender_id: AuthorityId,
+pub(crate) struct ChannelInviteDetails {
+    pub(crate) context_id: ContextId,
+    pub(crate) channel_id: ChannelId,
+    pub(crate) home_name: String,
+    pub(crate) sender_id: AuthorityId,
     bootstrap: Option<ChannelBootstrapPackage>,
     /// A home invitation: accepting joins the inviter's home.
-    home: bool,
+    pub(crate) home: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -611,56 +613,6 @@ impl InvitationHandler {
         };
         invitation.status = status;
         Self::persist_created_invitation(effects, own_id, &invitation).await
-    }
-
-    async fn validate_importable_shareable_invitation(
-        &self,
-        effects: &AuraEffectSystem,
-        shareable: &ShareableInvitation,
-        sender_proof: Option<&ShareableInvitationSenderProof>,
-        transport: &ShareableInvitationTransportMetadata,
-    ) -> AgentResult<()> {
-        // `from_code` already guarantees a well-formed `sender_id` and a
-        // recognized `InvitationType`. Validate the remaining authoritative
-        // invariants before persisting any imported payload.
-        if matches!(shareable.invitation_type, InvitationType::Channel { .. }) {
-            let _ = require_channel_invitation_context(
-                &shareable.invitation_id,
-                shareable.sender_id,
-                shareable.context_id,
-            )?;
-        }
-
-        if let Some(expires_at) = shareable.expires_at {
-            let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
-            if now_ms > expires_at {
-                return Err(AgentError::invalid("invite code expired"));
-            }
-        }
-
-        if !effects.is_testing() {
-            let proof = sender_proof.ok_or_else(|| {
-                AgentError::invalid(ShareableInvitationError::MissingSenderProof.to_string())
-            })?;
-            let self_certified_sender_key = proof.public_key.as_slice();
-            let verified = verify_ed25519_transcript(
-                effects,
-                &shareable.signing_transcript_with_transport(transport),
-                &proof.signature,
-                self_certified_sender_key,
-            )
-            .await
-            .map_err(|error| {
-                AgentError::effects(format!("verify invitation sender proof: {error}"))
-            })?;
-            if !verified {
-                return Err(AgentError::invalid(
-                    ShareableInvitationError::InvalidSenderProof.to_string(),
-                ));
-            }
-        }
-
-        Ok(())
     }
 
     /// Whether `key` signed a contact invitation from `sender` that this
@@ -1536,15 +1488,6 @@ impl InvitationHandler {
 
             self.materialize_channel_invitation_acceptance(effects, &channel_invite)
                 .await?;
-            if channel_invite.home {
-                self.commit_home_membership(
-                    effects,
-                    &channel_invite,
-                    self.context.authority.authority_id(),
-                    true,
-                )
-                .await?;
-            }
         }
 
         Ok(())
@@ -1559,18 +1502,21 @@ impl InvitationHandler {
         invite: &ChannelInviteDetails,
         member: AuthorityId,
         include_home: bool,
-    ) -> AgentResult<()> {
+    ) -> AgentResult<Option<aura_social::SocialFact>> {
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         let home_id = aura_social::HomeId::from_bytes(*invite.channel_id.as_bytes());
         let mut facts = Vec::new();
-        if include_home {
-            facts.push(aura_social::SocialFact::home_created_ms(
+        let creation = include_home.then(|| {
+            aura_social::SocialFact::home_created_ms(
                 home_id,
                 invite.context_id,
                 now_ms,
                 invite.sender_id,
                 invite.home_name.clone(),
-            ));
+            )
+        });
+        if let Some(created) = creation.clone() {
+            facts.push(created);
         }
         facts.push(aura_social::SocialFact::member_joined_ms(
             member,
@@ -1589,7 +1535,7 @@ impl InvitationHandler {
                 .await
                 .map_err(|error| AgentError::effects(format!("commit home membership: {error}")))?;
         }
-        Ok(())
+        Ok(creation)
     }
 
     async fn materialize_device_enrollment_acceptance_if_needed(
@@ -1924,18 +1870,46 @@ impl InvitationHandler {
             return Ok(existing);
         }
 
-        self.validate_importable_shareable_invitation(
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        let own_id = self.context.authority.authority_id();
+        let default_context_id = self.context.effect_context.context_id();
+        #[cfg(test)]
+        let validated_import = if effects.is_testing() {
+            None
+        } else {
+            Some(
+                ValidatedImportedInvitation::verify_code(
+                    effects,
+                    code,
+                    own_id,
+                    default_context_id,
+                    now_ms,
+                )
+                .await
+                .map_err(|error| AgentError::invalid(error.to_string()))?,
+            )
+        };
+        #[cfg(not(test))]
+        let validated_import = ValidatedImportedInvitation::verify_code(
             effects,
-            &shareable,
-            sender_proof.as_ref(),
-            &transport_metadata,
+            code,
+            own_id,
+            default_context_id,
+            now_ms,
         )
-        .await?;
+        .await
+        .map_err(|error| AgentError::invalid(error.to_string()))?;
+        #[cfg(test)]
+        let invitation = match &validated_import {
+            Some(validated) => validated.invitation().clone(),
+            None => unverified_test_invitation(&shareable, own_id, default_context_id, now_ms)?,
+        };
+        #[cfg(not(test))]
+        let invitation = validated_import.invitation().clone();
         let sender_trust = self
             .classify_imported_sender_trust(effects, &shareable, sender_proof.as_ref())
             .await?;
 
-        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
         // Persist the imported invitation with local status so later
         // storage-backed reads do not downgrade accepted/declined state.
         let mut stored = StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust);
@@ -2003,54 +1977,39 @@ impl InvitationHandler {
                 );
             }
         }
-        let context_id = match &shareable.invitation_type {
-            InvitationType::Channel { .. } => require_channel_invitation_context(
-                &shareable.invitation_id,
-                shareable.sender_id,
-                shareable.context_id,
-            )?,
-            _ => self.context.effect_context.context_id(),
-        };
-
-        // Imported invitations are "received" by the current authority, except a
-        // device enrollment, which names the authority it invited: the new device
-        // re-imports the code after its runtime switches to the subject authority.
-        let receiver_id = imported_invitation_receiver(
-            &shareable.invitation_type,
-            self.context.authority.authority_id(),
-        );
-        let invitation = Invitation {
-            invitation_id: invitation_id.clone(),
-            context_id,
-            sender_id: shareable.sender_id,
-            receiver_id,
-            invitation_type: shareable.invitation_type,
-            status: InvitationStatus::Pending,
-            created_at: now_ms,
-            expires_at: shareable.expires_at,
-            message: shareable.message,
-            receiver_nickname: None,
-        };
-
         // Known limitation: imported invitations are cached eagerly and the
         // cache is currently unbounded until a proper TTL/LRU policy lands.
         self.invitation_cache
             .cache_invitation(invitation.clone())
             .await;
-        crate::reactive::app_signal_views::materialize_pending_invitation_signal(
-            &effects.reactive_handler(),
-            self.context.authority.authority_id(),
-            invitation.invitation_id.as_str(),
-            invitation.sender_id,
-            invitation.receiver_id,
-            &invitation.invitation_type,
-            invitation.receiver_nickname.as_deref(),
-            invitation.created_at,
-            invitation.expires_at,
-            invitation.message.clone(),
-        )
-        .await
-        .map_err(AgentError::runtime)?;
+        #[cfg(test)]
+        let materialization = match validated_import {
+            Some(validated) => {
+                crate::reactive::app_signal_views::materialize_pending_invitation_signal(
+                    &effects.reactive_handler(),
+                    own_id,
+                    validated,
+                )
+                .await
+            }
+            None => {
+                crate::reactive::app_signal_views::materialize_unverified_invitation_fixture_signal(
+                    &effects.reactive_handler(),
+                    own_id,
+                    &invitation,
+                )
+                .await
+            }
+        };
+        #[cfg(not(test))]
+        let materialization =
+            crate::reactive::app_signal_views::materialize_pending_invitation_signal(
+                &effects.reactive_handler(),
+                own_id,
+                validated_import,
+            )
+            .await;
+        materialization.map_err(AgentError::runtime)?;
 
         Ok(invitation)
     }
@@ -3035,6 +2994,44 @@ pub(super) fn imported_invitation_receiver(
         } => *invitee,
         _ => own_id,
     }
+}
+
+/// Unit-fixture conversion for unsigned codes. This is compiled only into the
+/// agent's own tests and cannot mint the domain validated-import token.
+#[cfg(test)]
+fn unverified_test_invitation(
+    shareable: &ShareableInvitation,
+    own_id: AuthorityId,
+    default_context_id: ContextId,
+    now_ms: u64,
+) -> AgentResult<Invitation> {
+    if shareable
+        .expires_at
+        .is_some_and(|expires_at| now_ms > expires_at)
+    {
+        return Err(AgentError::invalid("invite code expired"));
+    }
+    let context_id = if matches!(shareable.invitation_type, InvitationType::Channel { .. }) {
+        require_channel_invitation_context(
+            &shareable.invitation_id,
+            shareable.sender_id,
+            shareable.context_id,
+        )?
+    } else {
+        default_context_id
+    };
+    Ok(Invitation {
+        invitation_id: shareable.invitation_id.clone(),
+        context_id,
+        sender_id: shareable.sender_id,
+        receiver_id: imported_invitation_receiver(&shareable.invitation_type, own_id),
+        invitation_type: shareable.invitation_type.clone(),
+        status: InvitationStatus::Pending,
+        created_at: now_ms,
+        expires_at: shareable.expires_at,
+        message: shareable.message.clone(),
+        receiver_nickname: None,
+    })
 }
 async fn sign_invitation_acceptance_transcript<T>(
     effects: &AuraEffectSystem,

@@ -26,6 +26,46 @@ const MODERATOR_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const MODERATOR_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const MODERATOR_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
+fn apply_moderator_role_to_materialized_home(
+    homes: &mut crate::views::home::HomesState,
+    home_id: ChannelId,
+    target_id: AuthorityId,
+    actor: AuthorityId,
+    grant: bool,
+) -> Result<(), AuraError> {
+    let home_state = homes
+        .home_mut(&home_id)
+        .ok_or_else(|| AuraError::not_found(home_id.to_string()))?;
+    let member = home_state
+        .member_mut(&target_id)
+        .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
+    if grant {
+        if matches!(member.role, HomeRole::Moderator) {
+            return Err(AuraError::invalid(
+                "Target already has moderator designation",
+            ));
+        }
+        if !matches!(member.role, HomeRole::Member) {
+            return Err(AuraError::invalid(
+                "Only members can be designated as moderators",
+            ));
+        }
+        member.role = HomeRole::Moderator;
+        if actor == target_id {
+            home_state.my_role = HomeRole::Moderator;
+        }
+    } else {
+        if !matches!(member.role, HomeRole::Moderator) {
+            return Err(AuraError::invalid("Target is not a moderator"));
+        }
+        member.role = HomeRole::Member;
+        if actor == target_id {
+            home_state.my_role = HomeRole::Member;
+        }
+    }
+    Ok(())
+}
+
 async fn send_moderator_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     peer: AuthorityId,
@@ -301,35 +341,7 @@ pub async fn grant_moderator_resolved(
 
     // Observed UI mirror.
     try_update_homes_projection_observed(app_core, |homes| {
-        if !homes.has_home(&scope.home_id) {
-            let result = homes.add_home(scope.home_state.clone());
-            if result.was_first {
-                homes.select_home(Some(result.home_id));
-            }
-        }
-        let home_state = homes
-            .home_mut(&scope.home_id)
-            .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
-        let member = home_state
-            .member_mut(&target_id)
-            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
-
-        if matches!(member.role, HomeRole::Moderator) {
-            return Err(AuraError::invalid(
-                "Target already has moderator designation",
-            ));
-        }
-        if !matches!(member.role, HomeRole::Member) {
-            return Err(AuraError::invalid(
-                "Only members can be designated as moderators",
-            ));
-        }
-
-        member.role = HomeRole::Moderator;
-        if actor == target_id {
-            home_state.my_role = HomeRole::Moderator;
-        }
-        Ok(())
+        apply_moderator_role_to_materialized_home(homes, scope.home_id, target_id, actor, true)
     })
     .await
 }
@@ -426,28 +438,7 @@ pub async fn revoke_moderator_resolved(
     }
 
     try_update_homes_projection_observed(app_core, |homes| {
-        if !homes.has_home(&scope.home_id) {
-            let result = homes.add_home(scope.home_state.clone());
-            if result.was_first {
-                homes.select_home(Some(result.home_id));
-            }
-        }
-        let home_state = homes
-            .home_mut(&scope.home_id)
-            .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
-        let member = home_state
-            .member_mut(&target_id)
-            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
-
-        if !matches!(member.role, HomeRole::Moderator) {
-            return Err(AuraError::invalid("Target is not a moderator"));
-        }
-
-        member.role = HomeRole::Member;
-        if actor == target_id {
-            home_state.my_role = HomeRole::Member;
-        }
-        Ok(())
+        apply_moderator_role_to_materialized_home(homes, scope.home_id, target_id, actor, false)
     })
     .await
 }
@@ -477,6 +468,20 @@ mod tests {
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
     use aura_core::crypto::hash::hash;
+
+    #[test]
+    fn moderator_enrichment_cannot_resurrect_removed_home() {
+        let mut homes = HomesState::new();
+        let home_id = ChannelId::from_bytes([91u8; 32]);
+        let member = AuthorityId::new_from_entropy([92u8; 32]);
+        for grant in [true, false] {
+            let result = apply_moderator_role_to_materialized_home(
+                &mut homes, home_id, member, member, grant,
+            );
+            assert!(matches!(result, Err(AuraError::NotFound { .. })));
+            assert!(homes.is_empty());
+        }
+    }
 
     #[tokio::test]
     async fn test_is_admin_no_home() {
@@ -572,8 +577,7 @@ mod tests {
 
         {
             let mut core = app_core.write().await;
-            let mut contacts = ContactsState::new();
-            contacts.apply_contact(Contact {
+            let contacts = ContactsState::from_contacts([Contact {
                 id: bob_id,
                 nickname: "Bob".to_string(),
                 nickname_suggestion: Some("Bobby".to_string()),
@@ -584,7 +588,7 @@ mod tests {
                 read_receipt_policy: Default::default(),
                 relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
                 invitation_code: None,
-            });
+            }]);
             core.views_mut().set_contacts(contacts);
         }
 

@@ -11,9 +11,7 @@ use aura_core::AuthorityId;
 use super::contracts::subscribe_observed_projection_signal;
 use super::{bump_projection_version, SharedAuthorityId, ShellSignalFanout};
 use crate::tui::channel_selection::{CommittedChannelSelection, SharedCommittedChannelSelection};
-use crate::tui::chat_scope::{
-    active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
-};
+use crate::tui::chat_scope::{active_home_scope_id, effective_home_scope_id, scoped_channels};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{Channel, Message};
@@ -32,46 +30,6 @@ pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 /// Used to map selected channel index -> channel ID for send operations.
 pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
-fn is_dm_like_shared_channel(channel: &Channel) -> bool {
-    channel.name.to_ascii_lowercase().starts_with("dm:")
-        || channel
-            .topic
-            .as_deref()
-            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
-            .unwrap_or(false)
-}
-
-fn merge_transient_channels(
-    incoming: &ChatState,
-    previous: &ChatState,
-    _selected_channel_id: Option<&str>,
-) -> ChatState {
-    if incoming.channel_count() == 0 && previous.channel_count() > 0 {
-        let had_dm_like = previous.all_channels().any(is_dm_like_channel);
-        if had_dm_like {
-            // Runtime reductions may briefly publish an empty snapshot during convergence.
-            // Preserve DM-like channels in that transient case, but still allow explicit
-            // non-DM channel leaves to converge to an empty channel list.
-            return previous.clone();
-        }
-    }
-
-    let mut merged = incoming.clone();
-
-    for channel in previous.all_channels() {
-        if !is_dm_like_channel(channel) || merged.has_channel(&channel.id) {
-            continue;
-        }
-
-        merged.upsert_channel(channel.clone());
-        for message in previous.messages_for_channel(&channel.id) {
-            merged.apply_message(channel.id, message.clone());
-        }
-    }
-
-    merged
-}
-
 #[derive(Clone, Debug)]
 struct ScopedChannelProjection {
     channels: Vec<Channel>,
@@ -79,39 +37,10 @@ struct ScopedChannelProjection {
     channel_signature: String,
 }
 
-fn smooth_scoped_channels_for_render(
-    mut channels: Vec<Channel>,
-    selected_channel_id: Option<&str>,
-    previous_rendered_channels: &[Channel],
-) -> Vec<Channel> {
-    let Some(selected_channel_id) = selected_channel_id else {
-        return channels;
-    };
-
-    let already_present = channels
-        .iter()
-        .any(|channel| channel.id == selected_channel_id);
-    if already_present {
-        return channels;
-    }
-
-    let preserved = previous_rendered_channels
-        .iter()
-        .find(|channel| channel.id == selected_channel_id && is_dm_like_shared_channel(channel))
-        .cloned();
-    if let Some(channel) = preserved {
-        channels.push(channel);
-        channels.sort_by(|left, right| left.name.cmp(&right.name));
-    }
-
-    channels
-}
-
 fn compute_scoped_channel_projection(
     chat_state: &ChatState,
     active_scope: Option<&str>,
     selected_channel_id: Option<&str>,
-    previous_rendered_channels: &[Channel],
 ) -> ScopedChannelProjection {
     let effective_scope = effective_home_scope_id(chat_state, active_scope, selected_channel_id);
     let scoped = scoped_channels(chat_state, effective_scope.as_deref());
@@ -119,11 +48,11 @@ fn compute_scoped_channel_projection(
         .iter()
         .map(|channel| chat_state.messages_for_channel(&channel.id).len())
         .sum();
-    let channel_list = smooth_scoped_channels_for_render(
-        scoped.iter().copied().map(Channel::from).collect(),
-        selected_channel_id,
-        previous_rendered_channels,
-    );
+    let channel_list = scoped
+        .iter()
+        .copied()
+        .map(Channel::from)
+        .collect::<Vec<_>>();
     let channel_signature = channel_list
         .iter()
         .map(|channel| channel.id.as_str())
@@ -142,7 +71,7 @@ fn scoped_channel_snapshot(
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) -> (Vec<Channel>, usize) {
-    let projection = compute_scoped_channel_projection(chat_state, active_scope, None, &[]);
+    let projection = compute_scoped_channel_projection(chat_state, active_scope, None);
     (projection.channels, projection.message_count)
 }
 
@@ -166,14 +95,12 @@ impl ChannelProjectionCoordinator {
         let chat_state = self.latest_chat_state.read().clone();
         let scope = self.active_scope.read().clone();
         let selected_channel = self.selected_channel_id.read().clone();
-        let previous_rendered_channels = self.channels.read().clone();
         let projection = compute_scoped_channel_projection(
             &chat_state,
             scope.as_deref(),
             selected_channel
                 .as_ref()
                 .map(CommittedChannelSelection::channel_id),
-            &previous_rendered_channels,
         );
         let channel_count = projection.channels.len();
         let message_count = projection.message_count;
@@ -215,23 +142,11 @@ impl ChannelProjectionCoordinator {
     }
 
     fn update_chat_state(&self, chat_state: ChatState) {
-        let stabilized = {
-            let previous = self.latest_chat_state.read();
-            let selected_channel = self.selected_channel_id.read().clone();
-            merge_transient_channels(
-                &chat_state,
-                &previous,
-                selected_channel
-                    .as_ref()
-                    .map(CommittedChannelSelection::channel_id),
-            )
-        };
         tracing::debug!(
-            "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
+            "CHAT_SIGNAL_UPDATE: incoming={}",
             chat_state.channel_count(),
-            stabilized.channel_count()
         );
-        let channel_summary = stabilized
+        let channel_summary = chat_state
             .all_channels()
             .map(|channel| {
                 format!(
@@ -246,7 +161,7 @@ impl ChannelProjectionCoordinator {
             .join(" ; ");
         tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
 
-        *self.latest_chat_state.write() = stabilized;
+        *self.latest_chat_state.write() = chat_state;
         self.publish_current_projection();
     }
 
@@ -361,10 +276,7 @@ pub fn use_channels_subscription(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        compute_scoped_channel_projection, merge_transient_channels, scoped_channel_snapshot,
-    };
-    use crate::tui::types::Channel as UiChannel;
+    use super::{compute_scoped_channel_projection, scoped_channel_snapshot};
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
@@ -391,21 +303,6 @@ mod tests {
             last_activity: 0,
             last_finalized_epoch: 0,
         }
-    }
-
-    fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
-        let mut merged = incoming.clone();
-        for channel in previous.all_channels() {
-            if crate::tui::chat_scope::is_dm_like_channel(channel)
-                && !merged.has_channel(&channel.id)
-            {
-                merged.add_channel(channel.clone());
-                for message in previous.messages_for_channel(&channel.id) {
-                    merged.apply_message(channel.id, message.clone());
-                }
-            }
-        }
-        merged
     }
 
     fn test_dm_channel(id: ChannelId, name: &str) -> AppChannel {
@@ -493,22 +390,15 @@ mod tests {
     }
 
     #[test]
-    fn scoped_channel_projection_orders_smoothed_channels_deterministically() {
+    fn scoped_channel_projection_excludes_removed_selected_dm() {
         let alpha = test_channel_id("alpha");
         let zulu = test_channel_id("zulu");
         let dm_like = test_channel_id("dm-like-contact");
         let state =
             ChatState::from_channels([test_channel(zulu, "Zulu"), test_channel(alpha, "Alpha")]);
-        let previous_dm_like = test_dm_like_channel(dm_like, "DM: Contact");
-        let previous_rendered = vec![UiChannel::from(&previous_dm_like)];
         let selected = dm_like.to_string();
 
-        let projection = compute_scoped_channel_projection(
-            &state,
-            None,
-            Some(selected.as_str()),
-            &previous_rendered,
-        );
+        let projection = compute_scoped_channel_projection(&state, None, Some(selected.as_str()));
 
         assert_eq!(
             projection
@@ -516,62 +406,24 @@ mod tests {
                 .iter()
                 .map(|channel| channel.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["Alpha", "DM: Contact", "Zulu"]
+            vec!["Alpha", "Zulu"]
         );
     }
 
     #[test]
-    fn render_smoothing_cannot_fabricate_missing_shared_channel_metadata() {
+    fn scoped_projection_cannot_fabricate_missing_shared_channel_metadata() {
         let home = test_channel_id("home");
         let missing_shared = test_channel_id("missing-shared");
         let state = ChatState::from_channels([test_channel(home, "Home")]);
-        let previous_shared = test_channel(missing_shared, "Shared");
-        let previous_rendered = vec![UiChannel::from(&previous_shared)];
         let selected = missing_shared.to_string();
 
-        let projection = compute_scoped_channel_projection(
-            &state,
-            None,
-            Some(selected.as_str()),
-            &previous_rendered,
-        );
+        let projection = compute_scoped_channel_projection(&state, None, Some(selected.as_str()));
 
         assert_eq!(projection.channels.len(), 1);
         assert!(projection
             .channels
             .iter()
             .all(|channel| channel.id != selected));
-    }
-
-    #[test]
-    fn merge_transient_channels_does_not_preserve_selected_shared_channel() {
-        let previous_channel = test_channel(test_channel_id("shared"), "Shared");
-        let previous = ChatState::from_channels([previous_channel.clone()]);
-        let incoming = ChatState::default();
-
-        let merged = merge_transient_channels(
-            &incoming,
-            &previous,
-            Some(previous_channel.id.to_string().as_str()),
-        );
-
-        assert_eq!(merged.channel_count(), 0);
-    }
-
-    #[test]
-    fn merge_transient_channels_preserves_selected_dm_like_channel() {
-        let previous_channel = test_dm_channel(test_channel_id("dm"), "dm:peer");
-        let previous = ChatState::from_channels([previous_channel.clone()]);
-        let incoming = ChatState::default();
-
-        let merged = merge_transient_channels(
-            &incoming,
-            &previous,
-            Some(previous_channel.id.to_string().as_str()),
-        );
-
-        assert_eq!(merged.channel_count(), 1);
-        assert!(merged.has_channel(&previous_channel.id));
     }
 
     #[test]
@@ -640,17 +492,12 @@ mod tests {
     }
 
     #[test]
-    fn merge_preserves_dm_like_channels_from_previous_state() {
+    fn removed_dm_like_channel_disappears_from_authoritative_projection() {
         let dm_like = test_channel_id("dm-like-contact");
-
-        let mut previous = ChatState::from_channels([test_dm_like_channel(dm_like, "DM: Contact")]);
-        previous.apply_message(dm_like, test_message(dm_like, "m1", 1));
-
         let incoming = ChatState::default();
-        let merged = merge_dm_like_channels(&incoming, &previous);
-
-        assert!(merged.has_channel(&dm_like));
-        assert_eq!(merged.messages_for_channel(&dm_like).len(), 1);
+        let selected = dm_like.to_string();
+        let projection = compute_scoped_channel_projection(&incoming, None, Some(&selected));
+        assert!(projection.channels.is_empty());
     }
 
     #[test]

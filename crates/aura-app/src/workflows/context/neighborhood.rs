@@ -16,13 +16,13 @@ use crate::{
         SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
     },
     views::{
-        home::{HomeState, HomesState},
+        home::HomesState,
         neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     workflows::channel_ref::HomeSelector,
     workflows::observed_projection::{
-        try_update_neighborhood_projection_observed, update_homes_projection_observed,
-        update_homes_projection_with_revision, update_neighborhood_projection_observed,
+        try_update_neighborhood_projection_observed, update_homes_projection_with_revision,
+        update_neighborhood_projection_observed,
     },
     workflows::semantic_facts::{prove_home_created, SemanticWorkflowOwner},
     AppCore,
@@ -282,15 +282,7 @@ async fn create_home_with_creator(
     let context_id =
         ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
 
-    let home = HomeState::new(
-        home_id,
-        Some(home_name.clone()),
-        creator,
-        timestamp_ms,
-        context_id,
-    );
-
-    persist_created_home(
+    let created = persist_created_home(
         app_core,
         home_id,
         context_id,
@@ -299,6 +291,12 @@ async fn create_home_with_creator(
         timestamp_ms,
     )
     .await?;
+    let witness = app_core
+        .read()
+        .await
+        .projection_owner()
+        .home_created_witness(&created)
+        .ok_or_else(|| AuraError::internal("created home fact has invalid shape"))?;
 
     let gate = app_core.read().await.navigation_projection_gate();
     let _navigation = gate.lock().await;
@@ -309,11 +307,12 @@ async fn create_home_with_creator(
                     .current_home()
                     .map(|current| current.id == ChannelId::default())
                     .unwrap_or(true);
-            let mut home = home;
+            let result = homes.materialize_created_home(witness, creator);
             if should_promote_to_primary {
-                home.is_primary = true;
+                if let Some(home) = homes.home_mut(&result.home_id) {
+                    home.is_primary = true;
+                }
             }
-            let result = homes.add_home(home);
             homes.select_home(Some(result.home_id));
             should_promote_to_primary
         })
@@ -370,13 +369,21 @@ async fn persist_created_home(
     home_name: &str,
     creator: AuthorityId,
     timestamp_ms: u64,
-) -> Result<(), AuraError> {
+) -> Result<aura_social::SocialFact, AuraError> {
+    let social_home_id = aura_social::HomeId::from_bytes(*home_id.as_bytes());
+    let created = aura_social::SocialFact::home_created_ms(
+        social_home_id,
+        context_id,
+        timestamp_ms,
+        creator,
+        home_name.to_string(),
+    );
     let runtime = {
         let core = app_core.read().await;
         core.runtime().cloned()
     };
     let Some(runtime) = runtime else {
-        return Ok(());
+        return Ok(created);
     };
     runtime
         .amp_create_channel(ChannelCreateParams {
@@ -401,16 +408,8 @@ async fn persist_created_home(
             message: "join home channel".to_owned(),
             source: Some(Arc::new(error)),
         })?;
-    let social_home_id = aura_social::HomeId::from_bytes(*home_id.as_bytes());
     let facts = [
-        aura_social::SocialFact::home_created_ms(
-            social_home_id,
-            context_id,
-            timestamp_ms,
-            creator,
-            home_name.to_string(),
-        )
-        .to_generic(),
+        created.to_generic(),
         aura_social::SocialFact::member_joined_ms(
             creator,
             social_home_id,
@@ -426,7 +425,8 @@ async fn persist_created_home(
         .map_err(|error| AuraError::Storage {
             message: "persist home".to_owned(),
             source: Some(Arc::new(error)),
-        })
+        })?;
+    Ok(created)
 }
 
 async fn fail_create_home<T>(
@@ -532,34 +532,13 @@ pub async fn get_current_position(app_core: &Arc<RwLock<AppCore>>) -> Option<Tra
     neighborhood.position
 }
 
-/// Initialize HOMES_SIGNAL with a default test home.
-pub async fn initialize_test_home(
-    app_core: &Arc<RwLock<AppCore>>,
-    name: &str,
-    authority_id: AuthorityId,
-    timestamp_ms: u64,
-) -> Result<ChannelId, AuraError> {
-    let home_id = ChannelId::from_bytes(hash(format!("test-home:{name}").as_bytes()));
-    let context_id = ContextId::new_from_entropy(hash(format!("test-context:{name}").as_bytes()));
-
-    let home_state = HomeState::new(
-        home_id,
-        Some(name.to_string()),
-        authority_id,
-        timestamp_ms,
-        context_id,
-    );
-
-    update_homes_projection_observed(app_core, move |homes| {
-        homes.add_home(home_state);
-    })
-    .await?;
-    Ok(home_id)
-}
 #[cfg(test)]
 mod navigation_tests {
     use super::*;
-    use crate::workflows::observed_projection::mirror_homes_signal_into_view;
+    use crate::views::home::HomeCreationWitness;
+    use crate::workflows::observed_projection::{
+        mirror_homes_signal_into_view, update_homes_projection_observed,
+    };
     use futures::FutureExt;
 
     #[tokio::test]
@@ -569,14 +548,18 @@ mod navigation_tests {
         let first_id = ChannelId::from_bytes(hash(b"navigation-two-moves-first"));
         let second_id = ChannelId::from_bytes(hash(b"navigation-two-moves-second"));
         update_homes_projection_observed(&app_core, |homes| {
+            let creator = AuthorityId::new_from_entropy([51u8; 32]);
+            let context = ContextId::new_from_entropy([52u8; 32]);
             for (home_id, name) in [(first_id, "First"), (second_id, "Second")] {
-                homes.add_home(HomeState::new(
-                    home_id,
-                    Some(name.to_string()),
-                    AuthorityId::new_from_entropy([51u8; 32]),
+                let created = aura_social::SocialFact::home_created_ms(
+                    aura_social::HomeId::from_bytes(*home_id.as_bytes()),
+                    context,
                     1,
-                    ContextId::new_from_entropy([52u8; 32]),
-                ));
+                    creator,
+                    name.to_string(),
+                );
+                let witness = HomeCreationWitness::from_created_fact(&created).unwrap();
+                homes.materialize_created_home(witness, creator);
             }
             homes.select_home(Some(first_id));
         })

@@ -169,24 +169,12 @@ pub(super) async fn commit_and_fanout(
 pub(super) async fn apply_local_home_projection<F>(
     app_core: &Arc<RwLock<AppCore>>,
     scope: &ModerationScope,
-    actor: AuthorityId,
-    timestamp_ms: u64,
     update: F,
 ) -> Result<(), AuraError>
 where
     F: FnOnce(&mut crate::views::home::HomeState),
 {
     try_update_homes_projection_observed(app_core, move |homes| {
-        if homes.home_state(&scope.home_id).is_none() {
-            homes.add_home(crate::views::home::HomeState::new(
-                scope.home_id,
-                None,
-                actor,
-                timestamp_ms,
-                scope.context_id,
-            ));
-        }
-
         let home = homes
             .home_mut(&scope.home_id)
             .ok_or_else(|| AuraError::not_found(scope.home_id.to_string()))?;
@@ -194,4 +182,37 @@ where
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::signal_defs::register_app_signals;
+    use aura_core::types::identifiers::ContextId;
+
+    #[tokio::test]
+    async fn moderation_enrichment_does_not_create_a_missing_home() {
+        let app_core = crate::testing::default_test_app_core();
+        {
+            let core = app_core.read().await;
+            register_app_signals(core.reactive()).await.unwrap();
+        }
+        let scope = ModerationScope {
+            context_id: ContextId::new_from_entropy([71u8; 32]),
+            home_id: ChannelId::from_bytes([72u8; 32]),
+            can_moderate: true,
+            peers: Vec::new(),
+        };
+        let result = apply_local_home_projection(&app_core, &scope, |home| {
+            home.set_name("fabricated".into());
+        })
+        .await;
+        assert!(matches!(result, Err(AuraError::NotFound { .. })));
+        assert!(
+            crate::workflows::observed_projection::homes_signal_snapshot(&app_core)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }

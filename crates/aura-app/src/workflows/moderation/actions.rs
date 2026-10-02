@@ -112,20 +112,14 @@ pub async fn ban_user_resolved(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
-    apply_local_home_projection(
-        app_core,
-        &scope,
-        runtime.authority_id(),
-        banned_at_ms,
-        |home| {
-            home.add_ban(crate::views::home::BanRecord {
-                authority_id: target_id,
-                reason: reason.map_or_else(String::new, str::to_string),
-                actor: runtime.authority_id(),
-                banned_at: banned_at_ms,
-            });
-        },
-    )
+    apply_local_home_projection(app_core, &scope, |home| {
+        home.add_ban(crate::views::home::BanRecord {
+            authority_id: target_id,
+            reason: reason.map_or_else(String::new, str::to_string),
+            actor: runtime.authority_id(),
+            banned_at: banned_at_ms,
+        });
+    })
     .await?;
 
     Ok(())
@@ -157,7 +151,7 @@ pub async fn unban_user_resolved(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
-    apply_local_home_projection(app_core, &scope, runtime.authority_id(), now_ms, |home| {
+    apply_local_home_projection(app_core, &scope, |home| {
         home.remove_ban(&target_id);
     })
     .await?;
@@ -200,21 +194,15 @@ pub async fn mute_user_resolved(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
-    apply_local_home_projection(
-        app_core,
-        &scope,
-        runtime.authority_id(),
-        muted_at_ms,
-        |home| {
-            home.add_mute(crate::views::home::MuteRecord {
-                authority_id: target_id,
-                duration_secs,
-                muted_at: muted_at_ms,
-                expires_at: expires_at_ms,
-                actor: runtime.authority_id(),
-            });
-        },
-    )
+    apply_local_home_projection(app_core, &scope, |home| {
+        home.add_mute(crate::views::home::MuteRecord {
+            authority_id: target_id,
+            duration_secs,
+            muted_at: muted_at_ms,
+            expires_at: expires_at_ms,
+            actor: runtime.authority_id(),
+        });
+    })
     .await?;
 
     Ok(())
@@ -250,7 +238,7 @@ pub async fn unmute_user_resolved(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
-    apply_local_home_projection(app_core, &scope, runtime.authority_id(), now_ms, |home| {
+    apply_local_home_projection(app_core, &scope, |home| {
         home.remove_mute(&target_id);
     })
     .await?;

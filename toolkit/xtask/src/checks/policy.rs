@@ -1376,6 +1376,7 @@ pub fn run_harness_ownership_policy() -> Result<()> {
 
 pub fn run_ownership_policy() -> Result<()> {
     let repo_root = repo_root()?;
+    run_canonical_channel_witness_boundary()?;
     run_ownership_category_declarations()?;
     run_ok(
         "cargo",
@@ -1474,6 +1475,77 @@ pub fn run_ownership_policy() -> Result<()> {
     run_browser_restart_boundary()?;
     run_testing_exception_boundary()?;
     println!("ownership policy: clean");
+    Ok(())
+}
+
+fn canonical_channel_reducer_owner_path(rel: &str) -> bool {
+    matches!(
+        rel,
+        "crates/aura-chat/src/lib.rs" // Public re-export; no reduction call.
+            | "crates/aura-chat/src/view.rs"
+            | "crates/aura-agent/src/reactive/app_signal_views.rs"
+            | "crates/aura-agent/src/reactive/reductions/chat.rs"
+            | "crates/aura-agent/src/runtime_bridge/mod.rs"
+            | "crates/aura-app/src/runtime_bridge/offline.rs"
+            | "crates/aura-app/src/workflows/observed_projection.rs"
+    )
+}
+
+fn canonical_channel_witness_boundary_violation(rel: &str, contents: &str) -> Option<&'static str> {
+    if rel != "crates/aura-chat/src/view.rs"
+        && contents.contains("CanonicalChannelCreation::from_fact")
+    {
+        return Some("channel creation witness construction must remain private to aura-chat");
+    }
+    if !canonical_channel_reducer_owner_path(rel) && contents.contains("ChatViewReducer") {
+        return Some("chat view reduction may mint a channel witness only in an owned reducer path");
+    }
+    None
+}
+
+fn run_canonical_channel_witness_boundary() -> Result<()> {
+    let repo_root = repo_root()?;
+    // Negative fixture: an observed module may import the public reducer, but
+    // the owner-path gate must reject it before it can mint a ChannelAdded delta.
+    if canonical_channel_witness_boundary_violation(
+        "crates/aura-app/src/views/chat/forged.rs",
+        "use aura_chat::ChatViewReducer;",
+    )
+    .is_none()
+    {
+        bail!("canonical-channel-witness-boundary: negative reducer fixture escaped");
+    }
+    if canonical_channel_witness_boundary_violation(
+        "crates/aura-agent/src/reactive/forged.rs",
+        "CanonicalChannelCreation::from_fact(&fact)",
+    )
+    .is_none()
+    {
+        bail!("canonical-channel-witness-boundary: negative constructor fixture escaped");
+    }
+    let mut violations = Vec::new();
+    for crate_name in [
+        "aura-chat",
+        "aura-agent",
+        "aura-app",
+        "aura-terminal",
+        "aura-ui",
+        "aura-web",
+        "aura-harness",
+    ] {
+        for file in rust_files_under(repo_root.join("crates").join(crate_name).join("src")) {
+            let rel = repo_relative(file.strip_prefix(&repo_root)?);
+            if let Some(reason) =
+                canonical_channel_witness_boundary_violation(&rel, &read(&file)?)
+            {
+                violations.push(format!("{rel}: {reason}"));
+            }
+        }
+    }
+    if !violations.is_empty() {
+        bail!("canonical-channel-witness-boundary:\n{}", violations.join("\n"));
+    }
+    println!("canonical channel witness boundary: clean");
     Ok(())
 }
 
@@ -4048,8 +4120,6 @@ fn completeness_violations(repo_root: &Path, mode: &str) -> Result<Vec<String>> 
                 "crates/aura-agent/src/runtime_bridge/sync.rs:process_ceremony_messages",
                 "crates/aura-agent/src/runtime_bridge/sync.rs:sync_with_peer",
                 "crates/aura-agent/src/runtime_bridge/sync.rs:ensure_peer_channel",
-                "crates/aura-agent/src/reactive/app_signal_projection.rs:map_invitation_type",
-                "crates/aura-agent/src/reactive/app_signal_projection.rs:map_channel_metadata",
                 "crates/aura-agent/src/reactive/app_signal_projection.rs:collect_moderation_homes",
                 "crates/aura-chat/src/guards.rs:plan_local_commit_execution",
                 "crates/aura-invitation/src/guards.rs:plan_accept_execution",
@@ -4139,7 +4209,7 @@ fn candidate_requires_attr(mode: &str, current_file: &str, added: &str) -> bool 
                 || current_file.starts_with("crates/aura-invitation/src/")
                 || current_file.starts_with("crates/aura-recovery/src/"))
                 && Regex::new(
-                    r".*fn\s+(issue_[A-Za-z0-9_]+_(proof|context)|[A-Za-z0-9_]*capability|authorize_[A-Za-z0-9_]+|secure_storage_[A-Za-z0-9_]+|plan_[A-Za-z0-9_]+|validate_setup_inputs|build_setup_completion|map_invitation_type|map_channel_metadata|collect_moderation_homes|get_settings|list_devices|list_authorities|set_nickname_suggestion|set_mfa_policy|current_time_ms|sleep_ms|authentication_status|get_sync_status|is_peer_online|get_sync_peers|trigger_sync|process_ceremony_messages|sync_with_peer|ensure_peer_channel)\(",
+                    r".*fn\s+(issue_[A-Za-z0-9_]+_(proof|context)|[A-Za-z0-9_]*capability|authorize_[A-Za-z0-9_]+|secure_storage_[A-Za-z0-9_]+|plan_[A-Za-z0-9_]+|validate_setup_inputs|build_setup_completion|collect_moderation_homes|get_settings|list_devices|list_authorities|set_nickname_suggestion|set_mfa_policy|current_time_ms|sleep_ms|authentication_status|get_sync_status|is_peer_online|get_sync_peers|trigger_sync|process_ceremony_messages|sync_with_peer|ensure_peer_channel)\(",
                 )
                 .unwrap()
                 .is_match(added)

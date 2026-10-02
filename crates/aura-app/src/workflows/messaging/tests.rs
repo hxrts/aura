@@ -1232,6 +1232,9 @@ async fn join_channel_succeeds_when_runtime_already_has_self_membership() {
 
     let channel_id = ChannelId::from_bytes(hash(b"join-channel-existing-runtime-membership"));
     let context_id = ContextId::new_from_entropy([132u8; 32]);
+    runtime.set_canonical_channel_created_fact(ChatFact::channel_created_ms(
+        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 1, peer,
+    ));
     runtime.set_amp_channel_context(channel_id, context_id);
     runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
     runtime.set_amp_channel_state_exists(context_id, channel_id, true);
@@ -1310,6 +1313,9 @@ async fn join_channel_via_pending_invitation_stabilizes_membership_and_recipient
 
     let channel_id = ChannelId::from_bytes(hash(b"join-channel-pending-invitation"));
     let context_id = ContextId::new_from_entropy([142u8; 32]);
+    runtime.set_canonical_channel_created_fact(ChatFact::channel_created_ms(
+        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 1, peer,
+    ));
     runtime.set_amp_channel_context(channel_id, context_id);
     runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
     runtime.set_amp_channel_state_exists(context_id, channel_id, true);
@@ -1693,6 +1699,7 @@ async fn test_mark_message_delivery_failed_reduces_delivery_status() {
         .await
         .unwrap();
 
+    // OWNERSHIP: test-only-helper. Inspect the already materialized channel.
     let chat = observed_chat_snapshot(&app_core).await;
     let message = chat
         .channel(&channel_id)
@@ -1707,7 +1714,7 @@ async fn test_mark_message_delivery_failed_reduces_delivery_status() {
 
 // OWNERSHIP: test-only-helper
 #[tokio::test]
-async fn test_ensure_channel_visible_after_join_inserts_missing_channel() {
+async fn test_ensure_channel_visible_after_join_rejects_missing_creation_fact() {
     let config = AppConfig::default();
     let core = AppCore::new(config).unwrap();
     let app_core = Arc::new(RwLock::new(core));
@@ -1717,19 +1724,54 @@ async fn test_ensure_channel_visible_after_join_inserts_missing_channel() {
     let channel_id = ChannelId::from_bytes(hash(b"join-visible-missing"));
     ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("slash-lab"))
         .await
-        .expect("join visibility should succeed");
+        .expect_err("join hint cannot create a canonical channel");
 
     let chat = observed_chat_snapshot(&app_core).await;
-    let channel = chat
-        .channel(&channel_id)
-        .expect("channel should be inserted");
-    assert_eq!(channel.context_id, Some(context_id));
-    assert_eq!(channel.name, "slash-lab");
+    assert!(chat.channel(&channel_id).is_none());
 }
 
 // OWNERSHIP: test-only-helper
 #[tokio::test]
-async fn test_ensure_channel_visible_after_join_updates_existing_name_with_hint() {
+async fn test_ensure_channel_visible_after_join_recovers_committed_creation_fact() {
+    let local = AuthorityId::new_from_entropy([15u8; 32]);
+    let creator = AuthorityId::new_from_entropy([16u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let context_id = ContextId::new_from_entropy([17u8; 32]);
+    let channel_id = ChannelId::from_bytes(hash(b"join-visible-committed"));
+    runtime.set_canonical_channel_created_fact(ChatFact::channel_created_ms(
+        context_id,
+        channel_id,
+        "canonical".to_string(),
+        Some("creation topic".to_string()),
+        false,
+        10,
+        creator,
+    ));
+
+    ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("untrusted hint"))
+        .await
+        .expect("committed creation fact should close signal ordering gap");
+    let chat = observed_chat_snapshot(&app_core).await;
+    let channel = chat.channel(&channel_id).expect("channel should exist");
+    assert!(chat.has_canonical_channel(&channel_id, context_id));
+    assert_eq!(channel.name, "canonical");
+    assert_eq!(channel.topic.as_deref(), Some("creation topic"));
+    assert!(channel.member_ids.is_empty());
+
+    let wrong_context = ContextId::new_from_entropy([18u8; 32]);
+    ensure_channel_visible_after_join(&app_core, channel_id, wrong_context, Some("canonical"))
+        .await
+        .expect_err("creation fact must match the authoritative context");
+}
+
+// OWNERSHIP: test-only-helper
+#[tokio::test]
+async fn test_ensure_channel_visible_after_join_preserves_canonical_name_against_hint() {
     let config = AppConfig::default();
     let core = AppCore::new(config).unwrap();
     let app_core = Arc::new(RwLock::new(core));
@@ -1737,25 +1779,10 @@ async fn test_ensure_channel_visible_after_join_updates_existing_name_with_hint(
 
     let context_id = ContextId::new_from_entropy([13u8; 32]);
     let channel_id = ChannelId::from_bytes(hash(b"join-visible-existing"));
-    update_chat_projection_observed(&app_core, |chat| {
-        chat.upsert_channel(Channel {
-            id: channel_id,
-            context_id: None,
-            name: channel_id.to_string(),
-            topic: None,
-            channel_type: ChannelType::Home,
-            unread_count: 0,
-            is_dm: false,
-            member_ids: Vec::new(),
-            member_count: 1,
-            last_message: None,
-            last_message_time: None,
-            last_activity: 0,
-            last_finalized_epoch: 0,
-        });
-    })
-    .await
-    .unwrap();
+    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
+        context_id, channel_id, "canonical".to_string(), None, false, 10,
+        AuthorityId::new_from_entropy([1u8; 32]),
+    )).await.unwrap();
 
     ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("#slash-lab"))
         .await
@@ -1764,7 +1791,7 @@ async fn test_ensure_channel_visible_after_join_updates_existing_name_with_hint(
     let chat = observed_chat_snapshot(&app_core).await;
     let channel = chat.channel(&channel_id).expect("channel should exist");
     assert_eq!(channel.context_id, Some(context_id));
-    assert_eq!(channel.name, "slash-lab");
+    assert_eq!(channel.name, "canonical");
 }
 
 // OWNERSHIP: test-only-helper
@@ -1777,25 +1804,10 @@ async fn test_ensure_channel_visible_after_join_preserves_existing_name_without_
 
     let context_id = ContextId::new_from_entropy([14u8; 32]);
     let channel_id = ChannelId::from_bytes(hash(b"join-visible-preserve-name"));
-    update_chat_projection_observed(&app_core, |chat| {
-        chat.upsert_channel(Channel {
-            id: channel_id,
-            context_id: None,
-            name: "shared-parity-lab".to_string(),
-            topic: None,
-            channel_type: ChannelType::Home,
-            unread_count: 0,
-            is_dm: false,
-            member_ids: Vec::new(),
-            member_count: 1,
-            last_message: None,
-            last_message_time: None,
-            last_activity: 0,
-            last_finalized_epoch: 0,
-        });
-    })
-    .await
-    .unwrap();
+    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
+        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 10,
+        AuthorityId::new_from_entropy([1u8; 32]),
+    )).await.unwrap();
 
     ensure_channel_visible_after_join(&app_core, channel_id, context_id, None)
         .await
@@ -1868,7 +1880,7 @@ async fn test_canonical_channel_name_hint_for_invite_rejects_raw_id_without_name
 
 // OWNERSHIP: test-only-helper
 #[tokio::test]
-async fn test_ensure_channel_visible_after_join_rebinds_same_name_placeholder_channel() {
+async fn test_ensure_channel_visible_after_join_does_not_rebind_same_name_placeholder() {
     let config = AppConfig::default();
     let core = AppCore::new(config).unwrap();
     let app_core = Arc::new(RwLock::new(core));
@@ -1915,29 +1927,36 @@ async fn test_ensure_channel_visible_after_join_rebinds_same_name_placeholder_ch
     .await
     .unwrap();
 
-    ensure_channel_visible_after_join(
+    let missing = ensure_channel_visible_after_join(
         &app_core,
         canonical_id,
         context_id,
         Some("shared-parity-lab"),
     )
     .await
-    .expect("join visibility should rebind placeholder channel");
+    .expect_err("name match is not creation evidence");
+    assert!(missing.to_string().contains("canonical channel creation fact"));
+    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
+        context_id, canonical_id, "shared-parity-lab".to_string(), None,
+        false, 10, AuthorityId::new_from_entropy([4u8; 32]),
+    )).await.unwrap();
+    ensure_channel_visible_after_join(
+        &app_core, canonical_id, context_id, Some("shared-parity-lab"),
+    ).await.expect("creation fact should make join visible");
 
+    // OWNERSHIP: test-only-helper. Inspect the canonical channel after replay.
     let chat = observed_chat_snapshot(&app_core).await;
     assert!(
-        chat.channel(&stale_id).is_none(),
-        "stale placeholder must be removed"
+        chat.channel(&stale_id).is_some(),
+        "a display-name match must not transfer another channel's identity"
     );
     let channel = chat
         .channel(&canonical_id)
         .expect("canonical channel should exist");
     assert_eq!(channel.context_id, Some(context_id));
     assert_eq!(channel.name, "shared-parity-lab");
-    let messages = chat.messages_for_channel(&canonical_id);
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].channel_id, canonical_id);
-    assert_eq!(messages[0].content, "hello-from-tu1");
+    assert!(chat.messages_for_channel(&canonical_id).is_empty());
+    assert_eq!(chat.messages_for_channel(&stale_id).len(), 1);
 }
 
 // OWNERSHIP: test-only-helper

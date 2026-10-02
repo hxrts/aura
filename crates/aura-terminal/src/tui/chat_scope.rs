@@ -152,24 +152,25 @@ mod tests {
     fn pinned_selection_does_not_scope_the_channel_list() {
         let note_id = test_channel_id("note");
         let group_id = test_channel_id("group");
-        let mut chat = ChatState::default();
-        chat.add_channel(AppChannel {
-            id: note_id,
-            name: "Note to Self".to_string(),
-            context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
-                [1u8; 32],
-            )),
-            ..AppChannel::default()
-        });
-        chat.add_channel(AppChannel {
-            id: group_id,
-            name: "alpha".to_string(),
-            channel_type: ChannelType::Home,
-            context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
-                [2u8; 32],
-            )),
-            ..AppChannel::default()
-        });
+        let chat = ChatState::from_channels([
+            AppChannel {
+                id: note_id,
+                name: "Note to Self".to_string(),
+                context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                    [1u8; 32],
+                )),
+                ..AppChannel::default()
+            },
+            AppChannel {
+                id: group_id,
+                name: "alpha".to_string(),
+                channel_type: ChannelType::Home,
+                context_id: Some(aura_core::types::identifiers::ContextId::new_from_entropy(
+                    [2u8; 32],
+                )),
+                ..AppChannel::default()
+            },
+        ]);
         let scope = effective_home_scope_id(&chat, None, Some(&note_id.to_string()));
         assert_eq!(scope, None);
         let visible = scoped_channels(&chat, scope.as_deref());

@@ -93,6 +93,8 @@ pub mod view;
 
 /// Descriptors for invitation-based peer connection
 pub mod descriptor;
+/// Shareable invitation code format and validated import provenance.
+pub mod shareable;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum InvitationOperation {

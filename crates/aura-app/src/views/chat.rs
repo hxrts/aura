@@ -12,7 +12,7 @@ pub use helpers::{
     NOTE_TO_SELF_CHANNEL_NAME, NOTE_TO_SELF_CHANNEL_TOPIC,
 };
 pub use models::{Channel, ChannelType, Message};
-pub use state::ChatState;
+pub use state::{ChannelProjectionUpdate, ChatState};
 
 #[cfg(test)]
 mod tests {

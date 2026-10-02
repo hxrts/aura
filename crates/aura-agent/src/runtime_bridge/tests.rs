@@ -685,6 +685,37 @@ async fn identify_materialized_channel_ids_by_name_requires_materialized_runtime
     );
 }
 
+#[test]
+fn channel_name_lookup_requires_matching_creation_fact() {
+    let context = ContextId::new_from_entropy([201u8; 32]);
+    let other_context = ContextId::new_from_entropy([202u8; 32]);
+    let channel = ChannelId::from_bytes(hash(b"created-name-lookup"));
+    let actor = AuthorityId::new_from_entropy([203u8; 32]);
+    let update = ChatFact::channel_updated_ms(
+        context, channel, Some("renamed".to_string()), None,
+        None, None, 30, actor,
+    );
+    assert!(resolve_created_channel_ids_by_name([update.clone()], "renamed").is_empty());
+
+    let creation = ChatFact::channel_created_ms(
+        context, channel, "original".to_string(), None, false, 10, actor,
+    );
+    assert_eq!(
+        resolve_created_channel_ids_by_name([update, creation], "renamed"),
+        vec![channel]
+    );
+    let wrong_context_update = ChatFact::channel_updated_ms(
+        other_context, channel, Some("wrong context".to_string()), None,
+        None, None, 40, actor,
+    );
+    let creation = ChatFact::channel_created_ms(
+        context, channel, "original".to_string(), None, false, 10, actor,
+    );
+    assert!(resolve_created_channel_ids_by_name(
+        [wrong_context_update, creation], "wrong context",
+    ).is_empty());
+}
+
 #[tokio::test]
 async fn try_get_sync_peers_requires_sync_service() {
     let authority = AuthorityId::new_from_entropy([18u8; 32]);

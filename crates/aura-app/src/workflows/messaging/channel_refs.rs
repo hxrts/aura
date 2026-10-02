@@ -103,65 +103,64 @@ pub(crate) async fn ensure_channel_visible_after_join(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     context_id: ContextId,
-    name_hint: Option<&str>,
+    _name_hint: Option<&str>,
 ) -> Result<(), AuraError> {
-    // OWNERSHIP: observed-display-update - this routine repairs the observed
-    // chat projection after an authoritative join succeeds, using observed
-    // names only to preserve display continuity.
-    let existing_name = observed_chat_snapshot(app_core)
+    // A join and a display-name hint are not channel creation evidence. If
+    // signal delivery trails the join, recover only the committed creation
+    // fact bound to the authoritative channel and context.
+    // OWNERSHIP: observed. Read back the projection after the runtime supplied
+    // canonical creation evidence; this check cannot materialize a channel.
+    if observed_chat_snapshot(app_core)
         .await
-        .channel(&channel_id)
-        .map(|channel| channel.name.clone())
-        .filter(|name| !name.trim().is_empty())
-        .filter(|name| name != &channel_id.to_string());
-    let normalized_name = name_hint
-        .map(normalize_channel_name)
-        .filter(|value| !value.is_empty())
-        .or(existing_name)
-        .ok_or_else(|| {
-            AuraError::from(super::super::error::WorkflowError::Precondition(
-                "authoritative join projection missing canonical channel name",
-            ))
-        })?;
-
-    let placeholder_channel = {
-        let chat = observed_chat_snapshot(app_core).await;
-        let existing = chat
-            .all_channels()
-            .find(|channel| {
-                channel.id != channel_id
-                    && channel.name.eq_ignore_ascii_case(normalized_name.as_str())
-            })
-            .cloned();
-        existing
-    };
-    if let Some(placeholder_channel) = placeholder_channel {
-        let canonical_name = normalized_name.clone();
-        update_chat_projection_observed(app_core, |chat| {
-            let mut canonical = placeholder_channel.clone();
-            canonical.id = channel_id;
-            canonical.context_id = Some(context_id);
-            canonical.name = canonical_name.clone();
-            chat.rebind_channel_identity(&placeholder_channel.id, canonical);
-        })
-        .await?;
+        .has_canonical_channel(&channel_id, context_id)
+    {
+        return Ok(());
     }
 
-    let updated_at_ms = next_observed_projection_timestamp_ms(app_core).await;
-    reduce_chat_fact_observed(
-        app_core,
-        &ChatFact::channel_updated_ms(
-            context_id,
+    let runtime = { app_core.read().await.runtime().cloned() };
+    if let Some(runtime) = runtime {
+        let binding = crate::runtime_bridge::AuthoritativeChannelBinding {
             channel_id,
-            Some(normalized_name),
-            None,
-            Some(1),
-            None,
-            updated_at_ms,
-            AuthorityId::new_from_entropy([0u8; 32]),
-        ),
-    )
-    .await
+            context_id,
+        };
+        let creation = timeout_runtime_call(
+            &runtime,
+            "ensure_channel_visible_after_join",
+            "canonical_channel_creation",
+            MESSAGING_RUNTIME_QUERY_TIMEOUT,
+            || runtime.canonical_channel_creation(binding),
+        )
+        .await
+        .map_err(|error| {
+            AuraError::from(super::super::error::runtime_call(
+                "load canonical channel creation",
+                error,
+            ))
+        })?
+        .map_err(|error| {
+            AuraError::from(super::super::error::runtime_call(
+                "load canonical channel creation",
+                error,
+            ))
+        })?;
+        if let Some(creation) = creation {
+            update_chat_projection_observed(app_core, |chat| {
+                chat.materialize_canonical_channel(creation, None);
+            })
+            .await?;
+        }
+    }
+    if observed_chat_snapshot(app_core)
+        .await
+        .has_canonical_channel(&channel_id, context_id)
+    {
+        Ok(())
+    } else {
+        Err(super::super::error::WorkflowError::Precondition(
+            "join projection missing canonical channel creation fact",
+        )
+        .into())
+    }
 }
 
 pub async fn materialize_authoritative_channel_binding_observed(

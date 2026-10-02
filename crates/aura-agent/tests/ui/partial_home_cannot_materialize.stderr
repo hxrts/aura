@@ -1,0 +1,15 @@
+error[E0451]: fields `verified` and `creation` of struct `JoinedHomeEvidence` are private
+  --> tests/ui/partial_home_cannot_materialize.rs:11:9
+   |
+10 |     let _ = JoinedHomeEvidence {
+   |             ------------------ in this type
+11 |         verified: fabricate(),
+   |         ^^^^^^^^ private field
+12 |         creation: fabricate(),
+   |         ^^^^^^^^ private field
+
+error: type `reactive::app_signal_views::VerifiedJoinedHome` is private
+  --> tests/ui/partial_home_cannot_materialize.rs:11:19
+   |
+11 |         verified: fabricate(),
+   |                   ^^^^^^^^^^^ private type

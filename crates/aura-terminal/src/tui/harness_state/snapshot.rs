@@ -661,13 +661,19 @@ mod tests {
 
         let home_id = ChannelId::from_bytes([77u8; 32]);
         let mut app_snapshot = StateSnapshot::default();
-        app_snapshot.homes.add_home(HomeState::new(
+        let home = HomeState::new(
             home_id,
             Some("revision-home".to_string()),
             AuthorityId::new_from_entropy([78u8; 32]),
             0,
             ContextId::new_from_entropy([79u8; 32]),
-        ));
+        );
+        let mut detached = serde_json::to_value(&app_snapshot.homes).unwrap();
+        detached["homes"]
+            .as_object_mut()
+            .unwrap()
+            .insert(home_id.to_string(), serde_json::to_value(home).unwrap());
+        app_snapshot.homes = serde_json::from_value(detached).unwrap();
         app_snapshot.neighborhood.home_home_id = home_id;
         app_snapshot.neighborhood.home_name = "revision-home".to_string();
         app_snapshot.projection_source_revisions.homes = Some(7);

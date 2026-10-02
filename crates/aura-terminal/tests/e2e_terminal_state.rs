@@ -23,3 +23,18 @@ mod command_dispatch;
 mod component_states;
 #[path = "e2e_terminal_state/messaging_and_help.rs"]
 mod messaging_and_help;
+
+fn add_fixture_home(
+    homes: &mut aura_app::views::home::HomesState,
+    home: aura_app::views::home::HomeState,
+) -> aura_app::views::home::AddHomeResult {
+    let home_id = home.id;
+    let was_first = homes.is_empty();
+    let mut detached = serde_json::to_value(&*homes).unwrap();
+    detached["homes"]
+        .as_object_mut()
+        .unwrap()
+        .insert(home_id.to_string(), serde_json::to_value(home).unwrap());
+    *homes = serde_json::from_value(detached).unwrap();
+    aura_app::views::home::AddHomeResult { home_id, was_first }
+}

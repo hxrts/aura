@@ -48,6 +48,8 @@ The crate uses explicit concern-owned submodules.
 - **Runtime hook ownership**: one `AppCore` hook group owns one subscription per required signal for one runtime attachment. Installation is serialized, enters `Installing`, and reaches `Ready` only after every receiver attaches and listener startup is acknowledged. Failure returns to `Stopped` with a typed reactive cause; detach drops the group and cancels its listeners.
 - **Owned refresh loops**: each signal listener is the sole owner of its refresh pass. It receives the next update only after the current pass ends, so updates during a pass remain in the bounded stream. Lag may discard intermediate snapshots; the next pass reads current authoritative state and must converge without relying on every event being delivered.
 - **Observed projection writer**: `ProjectionOwner` admits only the six canonical entity slots. Each delta is one serialized graph update; a replacement derived from an earlier snapshot must compare its source revision. `AppCore` mirrors committed graph values into `ViewState` only when their source revision exceeds the prior mirror. Source revisions in `StateSnapshot` and `UiSnapshot` are separate from frontend semantic/render revisions.
+- **Canonical channel projection**: `ChatState::materialize_canonical_channel` requires the private-field `aura-chat::CanonicalChannelCreation` witness extracted from `ChannelCreated`. Metadata and message facts may be staged before creation but cannot make a channel visible. Duplicate creation replay preserves newer metadata; channel update fields use fact timestamps to reject stale values. Local-only channel/DM workflows issue owner-local creation facts through the same reducer. If join or invitation acceptance outruns signal delivery, the workflow retrieves a committed creation witness through `RuntimeBridge::canonical_channel_creation` using its authoritative channel/context binding; name hints cannot rebind channel identity.
+- **Canonical home projection**: `HomesState::materialize_created_home` requires a private-field `HomeCreationWitness` extracted from `SocialFact::HomeCreated` through `ProjectionOwner`; raw home insertion is app-private. The witness proves the creation fact's shape, while the runtime owner must establish that the fact was committed before projection. Membership facts and invitation hints enrich an existing home but cannot create one. A join staged before creation is reconciled only when both its home ID and context match. Trusted query hydration uses an internal constructor; nonempty home and authority-keyed maps must survive JSON serialization and restart.
 - **Navigation coherence**: app-owned homes selection and neighborhood position transitions share a gate with the homes signal mirror. The mirror rechecks the graph source revision after reconciling selection and position, so runtime publications arriving during a paired transition are applied before its mirror pass completes.
 - **Replay mirrors**: the runtime hook group attaches `RECOVERY_SIGNAL` with the other observed entity signals and mirrors replayed chat and recovery values during installation, then mirrors later revisions through owned listeners. Recovery status and chat snapshots must not remain on older view cells after runtime fact replay.
 - **Frontend agnostic**: works with multiple platform frontends.
@@ -56,6 +58,8 @@ The crate uses explicit concern-owned submodules.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
 - **Shared semantic ownership authority**: parity-critical semantic operation categories, typed terminal lifecycle, and owner-routed handles/tokens are defined here rather than in frontend-local crates.
 - **Contacts relationship authority**: `ContactRelationshipState` and shared friend-management control availability are defined here and derived from runtime-fed projections rather than frontend-local state machines.
+- **Canonical contact creation**: `ContactsState::apply_contact` requires a `ContactAddedWitness` derived from `ContactFact::Added` by the owned projection path. The raw Added-fact witness constructor is app-private; `ProjectionOwner` supplies it to the runtime projector. `set_relationship_state` enriches an existing contact only, so friendship and guardian evidence cannot create a minimal contact. `from_contacts` remains typed query hydration and test-fixture support, not a publication path.
+- **Canonical invitation creation**: `InvitationsState::add_invitation` requires an `InvitationCreationWitness` derived from `InvitationFact::Sent` by the owned projection path or an `aura-invitation::shareable::ValidatedImportedInvitation` token minted after code and sender-proof verification. The raw Sent-fact witness constructor is app-private; `ProjectionOwner` supplies it to the runtime projector. Raw cached invitations and status-only facts cannot create pending rows. `from_parts` remains typed query hydration and test-fixture support, not a publication path.
 - Platform-specific code isolated behind feature flags (`native`, `ios`, `android`, `web-js`).
 
 ### InvariantAppWorkflowPurity
@@ -228,9 +232,9 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - `ChatState` serializes channels only in the canonical `HashMap<ChannelId,
   Channel>` form, and app/workflow callers must iterate messages per channel
   explicitly rather than relying on broad compatibility helpers
-- home insertion/removal APIs in `src/views/home.rs` are explicit about
-  selection policy; callers may add or remove homes, but they must choose any
-  fallback selection themselves instead of depending on implicit wrapper policy
+- home creation in `src/views/home.rs` requires a `HomeCreationWitness`;
+  callers that remove homes choose any fallback selection explicitly instead
+  of depending on implicit wrapper policy
 - parity-critical strong-command and semantic-query paths may not treat
   unverifiable scope/home state as success, and they may not upgrade legacy
   `dm:` descriptors or empty observed membership into canonical participant

@@ -27,7 +27,9 @@ use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
-use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+use aura_chat::view::CanonicalChannelCreation;
+use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};
+use aura_composition::{downcast_delta_owned, ViewDeltaReducer};
 use aura_core::ceremony::SupersessionReason;
 use aura_core::effects::{
     amp::{
@@ -70,7 +72,7 @@ use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use aura_social::{is_user_banned, is_user_muted};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -448,39 +450,58 @@ async fn resolve_channel_ids_from_local_chat_facts(
             )
         })?;
 
-    let mut resolved = Vec::new();
-    let mut seen = HashSet::new();
-    for fact in facts.into_iter().rev() {
+    let chat_facts = facts.into_iter().rev().filter_map(|fact| {
         let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
-            continue;
+            return None;
         };
+        (envelope.type_id.as_str() == CHAT_FACT_TYPE_ID)
+            .then(|| ChatFact::from_envelope(&envelope))
+            .flatten()
+    });
+    Ok(resolve_created_channel_ids_by_name(chat_facts, &normalized))
+}
 
-        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-            continue;
-        }
-
-        match ChatFact::from_envelope(&envelope) {
-            Some(ChatFact::ChannelCreated {
-                channel_id, name, ..
-            }) if seen.insert(channel_id) && name.trim().eq_ignore_ascii_case(&normalized) => {
-                resolved.push(channel_id);
-            }
-            Some(ChatFact::ChannelUpdated {
+fn resolve_created_channel_ids_by_name(
+    facts_newest_first: impl IntoIterator<Item = ChatFact>,
+    normalized: &str,
+) -> Vec<ChannelId> {
+    let mut latest_names = HashMap::new();
+    let mut creations = HashMap::new();
+    for fact in facts_newest_first {
+        match fact {
+            ChatFact::ChannelUpdated {
+                context_id,
                 channel_id,
                 name: Some(name),
                 ..
-            }) if seen.insert(channel_id) && name.trim().eq_ignore_ascii_case(&normalized) => {
-                resolved.push(channel_id);
+            } => {
+                latest_names.entry(channel_id).or_insert((context_id, name));
             }
-            Some(ChatFact::ChannelCreated { channel_id, .. })
-            | Some(ChatFact::ChannelUpdated { channel_id, .. }) => {
-                seen.insert(channel_id);
+            ChatFact::ChannelCreated {
+                context_id,
+                channel_id,
+                name,
+                ..
+            } => {
+                creations.entry(channel_id).or_insert((context_id, name));
             }
             _ => {}
         }
     }
 
-    Ok(resolved)
+    let mut resolved = Vec::new();
+    for (channel_id, (context_id, created_name)) in creations {
+        let name = latest_names
+            .get(&channel_id)
+            .filter(|(seen_context, _)| *seen_context == context_id)
+            .map(|(_, name)| name)
+            .unwrap_or(&created_name);
+        if name.trim().eq_ignore_ascii_case(normalized) {
+            resolved.push(channel_id);
+        }
+    }
+    resolved.sort();
+    resolved
 }
 
 fn service_unavailable(service: &'static str) -> IntentError {
@@ -1080,6 +1101,43 @@ impl RuntimeBridge for AgentRuntimeBridge {
             roster_known,
             is_member,
         })
+    }
+
+    async fn canonical_channel_creation(
+        &self,
+        binding: AuthoritativeChannelBinding,
+    ) -> Result<Option<CanonicalChannelCreation>, IntentError> {
+        let facts = self
+            .agent
+            .runtime()
+            .effects()
+            .load_committed_facts(self.agent.authority_id())
+            .await
+            .map_err(|error| {
+                bridge_internal("Load committed channel creation facts failed", error)
+            })?;
+        Ok(facts.into_iter().rev().find_map(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                return None;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                return None;
+            }
+            ChatViewReducer
+                .reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None)
+                .into_iter()
+                .filter_map(downcast_delta_owned::<ChatDelta>)
+                .find_map(|delta| match delta {
+                    ChatDelta::ChannelAdded(creation)
+                        if creation.channel_id() == binding.channel_id
+                            && creation.context_id() == binding.context_id =>
+                    {
+                        Some(creation)
+                    }
+                    _ => None,
+                })
+        }))
     }
 
     async fn resolve_amp_channel_context(

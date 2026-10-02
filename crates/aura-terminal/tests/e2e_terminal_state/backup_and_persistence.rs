@@ -176,7 +176,7 @@ async fn test_snapshot_data_accuracy() {
     {
         let core = app_core.read().await;
         let mut homes_state = aura_app::views::home::HomesState::default();
-        homes_state.add_home(home_state.clone());
+        super::add_fixture_home(&mut homes_state, home_state.clone());
         core.emit(&*HOMES_SIGNAL, homes_state)
             .await
             .expect("Failed to emit home state");

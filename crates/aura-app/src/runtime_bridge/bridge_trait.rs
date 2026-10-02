@@ -11,6 +11,7 @@ use crate::core::IntentError;
 use crate::ui_contract::AmpChannelTransitionSnapshot;
 use crate::ReactiveHandler;
 use async_trait::async_trait;
+use aura_chat::view::CanonicalChannelCreation;
 use aura_core::effects::amp::{
     AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
@@ -169,6 +170,17 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         channel: ChannelId,
     ) -> Result<Option<ContextId>, IntentError>;
+
+    /// Load creation evidence committed for an authoritative channel binding.
+    /// A metadata update, invitation hint, or AMP checkpoint alone cannot
+    /// supply this witness.
+    async fn canonical_channel_creation(
+        &self,
+        binding: AuthoritativeChannelBinding,
+    ) -> Result<Option<CanonicalChannelCreation>, IntentError> {
+        let _ = binding;
+        Ok(None)
+    }
 
     /// Identify already-materialized channel identifiers by normalized display
     /// name.

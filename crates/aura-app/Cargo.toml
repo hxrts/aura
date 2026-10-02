@@ -56,6 +56,7 @@ aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.
 aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0" }
 aura-composition = { package = "hxrts-aura-composition", path = "../aura-composition", version = "=0.2.0" }
 aura-journal = { package = "hxrts-aura-journal", path = "../aura-journal", version = "=0.2.0" }
+aura-invitation = { package = "hxrts-aura-invitation", path = "../aura-invitation", version = "=0.2.0" }
 aura-relational = { package = "hxrts-aura-relational", path = "../aura-relational", version = "=0.2.0" }
 aura-chat = { package = "hxrts-aura-chat", path = "../aura-chat", version = "=0.2.0" }
 aura-social = { package = "hxrts-aura-social", path = "../aura-social", version = "=0.2.0" }

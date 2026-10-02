@@ -12549,6 +12549,12 @@ as in the AES-GCM authenticated encryption cipher.
             rename = "aura-testkit";
           }
           {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+            features = [ "test-support" ];
+          }
+          {
             name = "criterion";
             packageId = "criterion";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -12909,6 +12915,11 @@ as in the AES-GCM authenticated encryption cipher.
             name = "hxrts-aura-effects";
             packageId = "hxrts-aura-effects";
             rename = "aura-effects";
+          }
+          {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
           }
           {
             name = "hxrts-aura-journal";
@@ -14071,6 +14082,10 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "async-trait";
           }
           {
+            name = "base64";
+            packageId = "base64 0.22.1";
+          }
+          {
             name = "bincode";
             packageId = "bincode";
           }
@@ -14186,6 +14201,9 @@ as in the AES-GCM authenticated encryption cipher.
             features = [ "io-util" "macros" "rt" "sync" "time" ];
           }
         ];
+        features = {
+          "test-support" = [];
+        };
 
       };
       "hxrts-aura-journal" = rec {
@@ -36812,4 +36830,3 @@ even WASM!
   #
   };
 }
-

@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/contact_creation_requires_added_fact.rs:19:28
+   |
+19 |     contacts.apply_contact(raw_contact);
+   |              ------------- ^^^^^^^^^^^ expected `ContactAddedWitness`, found `Contact`
+   |              |
+   |              arguments to this method are incorrect
+   |
+note: method defined here
+  --> src/views/contacts.rs
+   |
+   |     pub fn apply_contact(&mut self, witness: ContactAddedWitness) {
+   |            ^^^^^^^^^^^^^

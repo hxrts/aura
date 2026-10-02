@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/invitation_creation_requires_sent_fact.rs:24:32
+   |
+24 |     invitations.add_invitation(raw_invitation);
+   |                 -------------- ^^^^^^^^^^^^^^ expected `InvitationCreationWitness`, found `Invitation`
+   |                 |
+   |                 arguments to this method are incorrect
+   |
+note: method defined here
+  --> src/views/invitations.rs
+   |
+   |     pub fn add_invitation(&mut self, witness: InvitationCreationWitness) {
+   |            ^^^^^^^^^^^^^^

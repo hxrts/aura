@@ -129,6 +129,28 @@ The reduction pipeline maintains strict determinism:
 
 These properties are verified by `test_reduction_determinism()` which confirms all fact permutations produce identical state.
 
+### 4.3 Canonical Entity Materialization
+
+A channel, home, invitation, or contact exists in a projection only after its
+domain creation fact or an equivalent authenticated creation outcome supplies
+the canonical identity and required metadata. A membership, relationship,
+status, rename, or activity fact may change an existing entity but cannot
+establish one. Raw identifiers identify a candidate; they are not evidence of
+canonical name, context, type, or relationship.
+
+Reduction is independent of delivery order. Enrichment facts that arrive before
+creation remain applicable when matching creation evidence arrives. Facts for a
+different entity or context cannot contribute members, counts, labels, or
+status. Duplicate facts do not create duplicate entities or inflate counts.
+Replaying the same fact set after restart yields the same materialized entities
+and metadata as live reduction.
+
+For homes, an accepted inviter reloads its committed `HomeCreated` fact before
+applying membership enrichment. The app's home creation witness can be derived
+only from that fact shape; acceptance or membership alone cannot create the
+home projection. Nonempty home snapshots round-trip typed home and authority
+identifiers through JSON without changing their identities or counts.
+
 ## 5. Account Journal Reduction
 
 Account journals store attested operations for commitment tree updates. Reduction computes a `TreeStateSummary` (epoch, commitment, threshold, device count) from the fact set. See [Authority and Identity](102_authority_and_identity.md) for structure details. The summary is a lightweight public view that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.

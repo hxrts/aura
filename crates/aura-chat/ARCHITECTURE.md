@@ -31,6 +31,11 @@ Secure messaging domain providing channel management, message facts, and chat st
 - Facts must be reduced under their matching `ContextId`.
 - Message payloads are opaque bytes; decryption is a higher-layer concern.
 - Channel creation and membership changes are journaled as facts.
+- `CanonicalChannelCreation` is a private-field witness extracted only from a
+  `ChannelCreated` fact. `ChatDelta::ChannelAdded` carries that witness, while
+  `ChannelUpdated` remains enrichment and cannot establish a channel. View
+  compaction keeps creation and metadata updates separate so their provenance
+  and update timestamps survive replay.
 
 ### InvariantChatContextReduction
 
@@ -94,7 +99,8 @@ cargo test -p aura-chat
 | Type ID inconsistent across variants | `src/facts.rs` `test_type_id_consistency` | Covered |
 | Capability check bypassed | `src/fact_service.rs` `denied_when_missing_capability` | Covered |
 | Budget not charged before journal append | `src/fact_service.rs` `approved_orders_budget_before_journal_append` | Covered |
-| Channel view delta compaction wrong | `src/view.rs` `test_compact_deltas_merges_channel_updates` | Covered |
+| Channel view delta compaction erases creation provenance | `src/view.rs` `test_compact_deltas_preserves_channel_creation_and_updates` | Covered |
+| Channel creation fabricated from metadata update | `src/view.rs` compile-fail witness example; `aura-app` and `aura-agent` out-of-order projection tests | Covered |
 | Sealed message leaks plaintext in view | `src/view.rs` `test_message_sent_reduction` (verifies `<sealed message>` placeholder) | Covered |
 | Group membership check incorrect | `src/group.rs` `test_group_membership` | Covered |
 | Message lifecycle timestamps wrong | `src/facts.rs` `test_message_lifecycle_facts` | Covered |

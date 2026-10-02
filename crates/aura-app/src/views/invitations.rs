@@ -3,6 +3,8 @@
 //! This module defines the invitations state with computed counts (no sync bugs).
 
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
+use aura_invitation::shareable::ValidatedImportedInvitation;
+use aura_invitation::{InvitationFact, InvitationType as DomainInvitationType};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -81,6 +83,144 @@ pub struct Invitation {
     pub home_name: Option<String>,
 }
 
+/// Complete creation evidence for an observed invitation. Its fields are
+/// private so status-only facts and raw ids cannot create a pending row.
+pub struct InvitationCreationWitness {
+    invitation: Invitation,
+}
+
+impl InvitationCreationWitness {
+    /// Convert a pending imported domain invitation into observed creation evidence.
+    pub fn from_imported(
+        validated: &ValidatedImportedInvitation,
+        own: AuthorityId,
+    ) -> Option<Self> {
+        let record = validated.invitation();
+        (record.status == aura_invitation::InvitationStatus::Pending).then(|| {
+            Self::from_parts(
+                record.invitation_id.to_string(),
+                record.sender_id,
+                record.receiver_id,
+                &record.invitation_type,
+                record.receiver_nickname.as_deref(),
+                record.created_at,
+                record.expires_at,
+                record.message.clone(),
+                own,
+            )
+        })
+    }
+
+    /// Convert a canonical Sent fact into observed creation evidence.
+    pub(crate) fn from_sent_fact(fact: &InvitationFact, own: AuthorityId) -> Option<Self> {
+        let InvitationFact::Sent {
+            invitation_id,
+            sender_id,
+            receiver_id,
+            invitation_type,
+            sent_at,
+            expires_at,
+            receiver_nickname,
+            message,
+            ..
+        } = fact
+        else {
+            return None;
+        };
+        Some(Self::from_parts(
+            invitation_id.to_string(),
+            *sender_id,
+            *receiver_id,
+            invitation_type,
+            receiver_nickname.as_deref(),
+            sent_at.ts_ms,
+            expires_at.as_ref().map(|time| time.ts_ms),
+            message.clone(),
+            own,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts(
+        id: String,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        domain_type: &DomainInvitationType,
+        receiver_nickname: Option<&str>,
+        created_at: u64,
+        expires_at: Option<u64>,
+        message: Option<String>,
+        own: AuthorityId,
+    ) -> Self {
+        let direction = if sender_id == own {
+            InvitationDirection::Sent
+        } else {
+            InvitationDirection::Received
+        };
+        let generic_contact = direction == InvitationDirection::Sent
+            && matches!(domain_type, DomainInvitationType::Contact { .. })
+            && sender_id == receiver_id;
+        let (invitation_type, home_id, home_name) = match domain_type {
+            DomainInvitationType::Contact { .. } => (InvitationType::Contact, None, None),
+            DomainInvitationType::Guardian { .. } => (InvitationType::Guardian, None, None),
+            DomainInvitationType::Channel {
+                home_id,
+                nickname_suggestion,
+                ..
+            } => (
+                InvitationType::Chat,
+                Some(*home_id),
+                nickname_suggestion
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(ToOwned::to_owned),
+            ),
+            DomainInvitationType::DeviceEnrollment { .. } => (InvitationType::Home, None, None),
+        };
+        let from_name = match domain_type {
+            DomainInvitationType::Contact {
+                nickname: Some(name),
+            } if !name.trim().is_empty() => name.trim().to_string(),
+            _ => "Unknown".to_string(),
+        };
+        Self {
+            invitation: Invitation {
+                id,
+                invitation_type,
+                status: InvitationStatus::Pending,
+                direction,
+                from_id: sender_id,
+                from_name,
+                to_id: (direction == InvitationDirection::Sent && !generic_contact)
+                    .then_some(receiver_id),
+                to_name: if direction == InvitationDirection::Sent {
+                    if generic_contact {
+                        receiver_nickname
+                            .map(str::trim)
+                            .filter(|name| !name.is_empty())
+                            .map(ToOwned::to_owned)
+                    } else {
+                        Some("Unknown".to_string())
+                    }
+                } else {
+                    None
+                },
+                created_at,
+                expires_at,
+                message,
+                home_id,
+                home_name,
+            },
+        }
+    }
+
+    /// Return the stable invitation id without exposing the witness payload.
+    pub fn id(&self) -> &str {
+        &self.invitation.id
+    }
+}
+
 /// Error type for invitation operations
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum InvitationError {
@@ -117,8 +257,9 @@ impl InvitationsState {
 
     /// Create a new invitations state from its component parts.
     ///
-    /// This constructor is useful for query results and deserialization.
-    /// Note: counts are computed, not stored.
+    /// Use this for trusted query results and test fixtures. Reactive
+    /// publication must use [`Self::add_invitation`] with creation evidence.
+    /// Counts are computed, not stored.
     pub fn from_parts(
         pending: Vec<Invitation>,
         sent: Vec<Invitation>,
@@ -205,7 +346,8 @@ impl InvitationsState {
     // ─── Mutations (Return Result for Error Handling) ────────
 
     /// Add a new invitation.
-    pub fn add_invitation(&mut self, invitation: Invitation) {
+    pub fn add_invitation(&mut self, witness: InvitationCreationWitness) {
+        let invitation = witness.invitation;
         match invitation.direction {
             InvitationDirection::Sent => {
                 self.sent.push(invitation);
@@ -293,6 +435,23 @@ impl InvitationsState {
         Err(InvitationError::NotFound(invitation_id.to_string()))
     }
 
+    /// Apply a sender-authored cancellation observed from the journal.
+    /// A received invitation can be revoked by its sender even though the
+    /// local receiver cannot initiate revocation.
+    pub fn observe_cancelled_invitation(
+        &mut self,
+        invitation_id: &str,
+    ) -> Result<Invitation, InvitationError> {
+        if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
+            let mut inv = self.pending.remove(idx);
+            inv.status = InvitationStatus::Revoked;
+            self.history.push(inv.clone());
+            self.trim_history();
+            return Ok(inv);
+        }
+        self.revoke_invitation(invitation_id)
+    }
+
     /// Mark an invitation as expired.
     ///
     /// Returns the expired invitation on success, or an error if not found.
@@ -351,15 +510,28 @@ mod tests {
         }
     }
 
+    fn add_fixture(state: &mut InvitationsState, invitation: Invitation) {
+        match invitation.direction {
+            InvitationDirection::Sent => state.sent.push(invitation),
+            InvitationDirection::Received => state.pending.push(invitation),
+        }
+    }
+
     #[test]
     fn test_pending_count_is_computed() {
         let mut state = InvitationsState::default();
         assert_eq!(state.pending_count(), 0);
 
-        state.add_invitation(make_invitation("inv1", InvitationDirection::Received));
+        add_fixture(
+            &mut state,
+            make_invitation("inv1", InvitationDirection::Received),
+        );
         assert_eq!(state.pending_count(), 1);
 
-        state.add_invitation(make_invitation("inv2", InvitationDirection::Received));
+        add_fixture(
+            &mut state,
+            make_invitation("inv2", InvitationDirection::Received),
+        );
         assert_eq!(state.pending_count(), 2);
 
         // Accept removes from pending
@@ -373,7 +545,10 @@ mod tests {
         let mut state = InvitationsState::default();
         assert_eq!(state.sent_count(), 0);
 
-        state.add_invitation(make_invitation("inv1", InvitationDirection::Sent));
+        add_fixture(
+            &mut state,
+            make_invitation("inv1", InvitationDirection::Sent),
+        );
         assert_eq!(state.sent_count(), 1);
         assert_eq!(state.pending_count(), 0); // Sent doesn't affect pending
     }
@@ -388,7 +563,10 @@ mod tests {
     #[test]
     fn test_revoke_prevents_revoking_received() {
         let mut state = InvitationsState::default();
-        state.add_invitation(make_invitation("inv1", InvitationDirection::Received));
+        add_fixture(
+            &mut state,
+            make_invitation("inv1", InvitationDirection::Received),
+        );
 
         let result = state.revoke_invitation("inv1");
         assert!(matches!(
@@ -398,9 +576,24 @@ mod tests {
     }
 
     #[test]
+    fn observed_sender_cancellation_settles_received_invitation() {
+        let mut state = InvitationsState::default();
+        add_fixture(
+            &mut state,
+            make_invitation("received", InvitationDirection::Received),
+        );
+        let settled = state.observe_cancelled_invitation("received").unwrap();
+        assert_eq!(settled.status, InvitationStatus::Revoked);
+        assert_eq!(state.open_invitations().count(), 0);
+    }
+
+    #[test]
     fn test_revoke_sent_works() {
         let mut state = InvitationsState::default();
-        state.add_invitation(make_invitation("inv1", InvitationDirection::Sent));
+        add_fixture(
+            &mut state,
+            make_invitation("inv1", InvitationDirection::Sent),
+        );
 
         let result = state.revoke_invitation("inv1");
         assert!(result.is_ok());
@@ -411,8 +604,14 @@ mod tests {
     #[test]
     fn test_open_invitations_include_sent_until_revoked() {
         let mut state = InvitationsState::default();
-        state.add_invitation(make_invitation("received", InvitationDirection::Received));
-        state.add_invitation(make_invitation("sent", InvitationDirection::Sent));
+        add_fixture(
+            &mut state,
+            make_invitation("received", InvitationDirection::Received),
+        );
+        add_fixture(
+            &mut state,
+            make_invitation("sent", InvitationDirection::Sent),
+        );
 
         let open: Vec<_> = state
             .open_invitations()

@@ -91,23 +91,32 @@ mod tests {
         let test_authority = Some(AuthorityId::new_from_entropy([99u8; 32]));
         let deltas = reduction.reduce(&facts, test_authority);
         assert_eq!(deltas.len(), 1);
-        assert!(matches!(&deltas[0], ChatDelta::ChannelAdded { name, .. } if name == "general"));
+        assert!(
+            matches!(&deltas[0], ChatDelta::ChannelAdded(creation) if creation.name() == "general")
+        );
     }
 
     #[test]
     fn test_downcast_preserves_all_deltas() {
         let view_deltas = vec![
-            ChatDelta::ChannelAdded {
-                channel_id: "chan".to_string(),
-                context_id: None,
-                name: "general".to_string(),
-                topic: None,
-                is_dm: false,
-                member_count: 1,
-                created_at: 1,
-                creator_id: "creator".to_string(),
-            }
-            .into_view_delta(),
+            ChatViewReducer
+                .reduce_fact(
+                    CHAT_FACT_TYPE_ID,
+                    &ChatFact::channel_created_ms(
+                        test_context_id(),
+                        ChannelId::default(),
+                        "general".to_string(),
+                        None,
+                        false,
+                        1,
+                        AuthorityId::new_from_entropy([1u8; 32]),
+                    )
+                    .to_bytes(),
+                    None,
+                )
+                .into_iter()
+                .next()
+                .expect("creation fact should reduce to one delta"),
             ChatDelta::MessageAdded {
                 channel_id: "chan".to_string(),
                 message_id: "msg".to_string(),

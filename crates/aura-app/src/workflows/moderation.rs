@@ -83,8 +83,7 @@ mod tests {
 
         {
             let mut core = app_core.write().await;
-            let mut contacts = ContactsState::new();
-            contacts.apply_contact(Contact {
+            let contacts = ContactsState::from_contacts([Contact {
                 id: bob_id,
                 nickname: "Bob".to_string(),
                 nickname_suggestion: Some("Bobby".to_string()),
@@ -95,7 +94,7 @@ mod tests {
                 read_receipt_policy: Default::default(),
                 relationship_state: crate::views::contacts::ContactRelationshipState::Contact,
                 invitation_code: None,
-            });
+            }]);
             core.views_mut().set_contacts(contacts);
         }
 

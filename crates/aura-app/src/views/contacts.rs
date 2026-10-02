@@ -7,7 +7,47 @@ use std::collections::HashMap;
 use super::naming::{truncate_id_for_display, EffectiveName};
 
 // Re-export ReadReceiptPolicy from aura-relational for convenience
+use aura_relational::ContactFact;
 pub use aura_relational::ReadReceiptPolicy;
+
+/// Journal evidence required to add a canonical contact to an observed view.
+/// Only `ContactFact::Added` can produce this witness.
+pub struct ContactAddedWitness {
+    contact: Contact,
+}
+
+impl ContactAddedWitness {
+    /// Convert a canonical contact-addition fact into creation evidence.
+    pub(crate) fn from_fact(fact: &ContactFact) -> Option<Self> {
+        let ContactFact::Added {
+            contact_id,
+            nickname,
+            added_at,
+            invitation_code,
+            ..
+        } = fact
+        else {
+            return None;
+        };
+        let nickname_suggestion = (!nickname.trim().is_empty()
+            && nickname != &contact_id.to_string())
+            .then(|| nickname.clone());
+        Some(Self {
+            contact: Contact {
+                id: *contact_id,
+                nickname: String::new(),
+                nickname_suggestion,
+                is_guardian: false,
+                is_member: false,
+                last_interaction: Some(added_at.ts_ms),
+                is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: ContactRelationshipState::Contact,
+                invitation_code: invitation_code.clone(),
+            },
+        })
+    }
+}
 
 // =============================================================================
 // Contact Error Types
@@ -194,7 +234,9 @@ impl ContactsState {
         Self::default()
     }
 
-    /// Create from a collection of contacts.
+    /// Hydrate a complete snapshot from trusted query rows or a test fixture.
+    /// Reactive publication must use [`Self::apply_contact`] with an Added-fact
+    /// witness so partial relationship facts cannot create a contact.
     pub fn from_contacts(contacts: impl IntoIterator<Item = Contact>) -> Self {
         Self {
             contacts: contacts.into_iter().map(|c| (c.id, c)).collect(),
@@ -301,8 +343,9 @@ impl ContactsState {
     // Mutation Methods
     // =========================================================================
 
-    /// Apply a contact (upsert semantics).
-    pub fn apply_contact(&mut self, contact: Contact) {
+    /// Add a contact established by a canonical relational fact.
+    pub fn apply_contact(&mut self, witness: ContactAddedWitness) {
+        let contact = witness.contact;
         self.contacts.insert(contact.id, contact);
     }
 
@@ -384,36 +427,35 @@ impl ContactsState {
         self.update_contact(contact_id, |c| c.read_receipt_policy = policy)
     }
 
-    /// Set relationship state for a contact, creating a minimal contact entry if needed.
+    /// Enrich an established contact with its relationship state.
+    ///
+    /// A friendship fact alone does not establish a canonical contact. The
+    /// runtime projection may retry this update after `ContactFact::Added`.
     pub fn set_relationship_state(
         &mut self,
         contact_id: AuthorityId,
         relationship_state: ContactRelationshipState,
-    ) {
-        if let Some(contact) = self.contacts.get_mut(&contact_id) {
+    ) -> bool {
+        self.update_contact(&contact_id, |contact| {
             contact.relationship_state = relationship_state;
-            return;
-        }
-
-        self.contacts.insert(
-            contact_id,
-            Contact {
-                id: contact_id,
-                nickname: String::new(),
-                nickname_suggestion: None,
-                is_guardian: false,
-                is_member: false,
-                last_interaction: None,
-                is_online: false,
-                read_receipt_policy: ReadReceiptPolicy::default(),
-                relationship_state,
-                invitation_code: None,
-            },
-        );
+        })
     }
 
     /// Clear all contacts.
     pub fn clear(&mut self) {
         self.contacts.clear();
+    }
+}
+
+#[cfg(test)]
+mod canonical_creation_tests {
+    use super::*;
+
+    #[test]
+    fn friendship_state_cannot_create_a_contact() {
+        let peer = AuthorityId::new_from_entropy([0x71; 32]);
+        let mut contacts = ContactsState::new();
+        assert!(!contacts.set_relationship_state(peer, ContactRelationshipState::Friend));
+        assert!(contacts.contact(&peer).is_none());
     }
 }

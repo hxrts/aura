@@ -5,16 +5,23 @@
 //! conditionally; a stale replacement is never allowed to erase a newer delta.
 
 use aura_core::effects::reactive::{ReactiveError, Signal};
+use aura_core::types::identifiers::AuthorityId;
+use aura_invitation::InvitationFact;
+use aura_relational::ContactFact;
 
 use crate::effects::reactive::{ConditionalEmit, SignalSnapshot};
 use crate::signal_defs::{
     CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     RECOVERY_SIGNAL,
 };
+use crate::views::contacts::ContactAddedWitness;
+use crate::views::home::HomeCreationWitness;
+use crate::views::invitations::InvitationCreationWitness;
 use crate::views::{
     ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use crate::ReactiveHandler;
+use aura_social::SocialFact;
 
 /// One of the app's observed projection cells. Construction is restricted to
 /// the six canonical slots below so publication cannot silently select an
@@ -99,6 +106,31 @@ impl ProjectionOwner {
     /// Bind a projection owner to the app/runtime reactive graph.
     pub fn new(reactive: ReactiveHandler) -> Self {
         Self { reactive }
+    }
+
+    /// Derive home creation evidence from `SocialFact::HomeCreated` in the
+    /// owned projection path. This proves fact shape; journal ingestion owns
+    /// commitment and authenticity before this conversion.
+    pub fn home_created_witness(&self, fact: &SocialFact) -> Option<HomeCreationWitness> {
+        HomeCreationWitness::from_created_fact(fact)
+    }
+
+    /// Derive contact creation evidence while processing a canonical Added
+    /// fact in the owned projection path. This proves fact shape, not journal
+    /// commitment; scheduler ingestion owns that upstream boundary.
+    pub fn contact_added_witness(&self, fact: &ContactFact) -> Option<ContactAddedWitness> {
+        ContactAddedWitness::from_fact(fact)
+    }
+
+    /// Derive invitation creation evidence while processing a canonical Sent
+    /// fact in the owned projection path. This proves fact shape, not journal
+    /// commitment; scheduler ingestion owns that upstream boundary.
+    pub fn invitation_sent_witness(
+        &self,
+        fact: &InvitationFact,
+        own: AuthorityId,
+    ) -> Option<InvitationCreationWitness> {
+        InvitationCreationWitness::from_sent_fact(fact, own)
     }
 
     /// Read one projection value and its source revision atomically.
@@ -196,6 +228,27 @@ mod policy_tests {
                         path.display()
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn production_workflows_do_not_insert_raw_homes() {
+        let mut files = Vec::new();
+        let workflows = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workflows");
+        rust_files(&workflows, &mut files);
+        for path in files {
+            if path.file_name().is_some_and(|name| name == "tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read workflow source");
+            let production = production_prefix(&source);
+            for insertion in [".add_home(", "HomesState::from_parts("] {
+                assert!(
+                    !production.contains(insertion),
+                    "{} inserts a home without creation evidence via {insertion}",
+                    path.display()
+                );
             }
         }
     }

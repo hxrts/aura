@@ -12,19 +12,19 @@ use aura_app::effects::reactive::ConditionalEmit;
 use aura_app::errors::AppError;
 use aura_app::projection_owner::{ProjectionOwner, ProjectionSlot};
 use aura_app::signal_defs::{ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL};
+pub(crate) use aura_app::views::invitations::InvitationCreationWitness;
 use aura_app::views::{
-    chat::{
-        note_to_self_channel_id, Channel, ChannelType, ChatState, Message, MessageDeliveryStatus,
-    },
-    contacts::{Contact, ContactError, ContactRelationshipState, ContactsState},
+    chat::{note_to_self_channel_id, ChatState, Message, MessageDeliveryStatus},
+    contacts::{ContactError, ContactRelationshipState, ContactsState},
     home::{
-        BanRecord, HomeMember, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
-        PinnedMessageMeta,
+        BanRecord, HomeCreationWitness, HomeMember, HomeRole, HomeState, HomesState, KickRecord,
+        MuteRecord, PinnedMessageMeta,
     },
-    invitations::{Invitation, InvitationDirection, InvitationStatus},
+    invitations::{InvitationDirection, InvitationStatus},
     recovery::{Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState},
 };
 use aura_app::ReactiveHandler;
+use aura_composition::{downcast_delta_owned, ViewDeltaReducer};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -33,22 +33,22 @@ use aura_journal::{DomainFact, ProtocolRelationalFact};
 use aura_protocol::amp::{
     amp_open_committed, get_channel_state, ChannelMembershipFact, ChannelParticipantEvent,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::scheduler::{ReactiveUpdateFuture, ReactiveView};
 use crate::reactive::app_signal_projection;
 
+use crate::handlers::invitation::ChannelInviteDetails;
 use crate::runtime::AuraEffectSystem;
-use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{
-    InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
+    Invitation as CachedInvitation, InvitationFact, InvitationStatus as DomainInvitationStatus,
+    InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
-use aura_relational::{
-    ContactFact, FriendshipFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
-};
+use aura_relational::{ContactFact, FriendshipFact, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID};
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
@@ -69,36 +69,171 @@ async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
         .await;
 }
 
+/// Canonical AMP checkpoint and joined-participant evidence for projecting an
+/// accepted home on the joining runtime. Fields are private to the owner.
+pub(crate) struct VerifiedJoinedHome {
+    channel_id: ChannelId,
+    context_id: ContextId,
+    name: String,
+    sender_id: AuthorityId,
+    own_authority: AuthorityId,
+    now_ms: u64,
+}
+
+impl VerifiedJoinedHome {
+    pub(crate) async fn verify(
+        effects: &AuraEffectSystem,
+        invite: &ChannelInviteDetails,
+        own_authority: AuthorityId,
+        now_ms: u64,
+    ) -> Result<Self, String> {
+        if !invite.home || invite.home_name.trim().is_empty() {
+            return Err("home materialization requires a named home invitation".into());
+        }
+        get_channel_state(effects, invite.context_id, invite.channel_id)
+            .await
+            .map_err(|error| {
+                format!("home materialization requires channel checkpoint: {error}")
+            })?;
+        let participants = aura_protocol::amp::list_channel_participants(
+            effects,
+            invite.context_id,
+            invite.channel_id,
+        )
+        .await
+        .map_err(|error| format!("home materialization requires channel membership: {error}"))?;
+        if !participants.contains(&own_authority) {
+            return Err("home materialization requires the local joined participant".into());
+        }
+        Ok(Self {
+            channel_id: invite.channel_id,
+            context_id: invite.context_id,
+            name: invite.home_name.clone(),
+            sender_id: invite.sender_id,
+            own_authority,
+            now_ms,
+        })
+    }
+
+    pub(crate) fn bind_committed_creation(
+        self,
+        owner: &ProjectionOwner,
+        fact: &SocialFact,
+    ) -> Result<JoinedHomeEvidence, String> {
+        let SocialFact::HomeCreated {
+            home_id,
+            context_id,
+            creator_id,
+            name,
+            ..
+        } = fact
+        else {
+            return Err("joined home requires a committed HomeCreated fact".into());
+        };
+        if home_id.as_bytes() != self.channel_id.as_bytes()
+            || *context_id != self.context_id
+            || *creator_id != self.sender_id
+            || name != &self.name
+        {
+            return Err("committed HomeCreated fact does not match joined channel".into());
+        }
+        let creation = owner
+            .home_created_witness(fact)
+            .ok_or_else(|| "joined home requires a HomeCreated fact".to_string())?;
+        Ok(JoinedHomeEvidence {
+            verified: self,
+            creation,
+        })
+    }
+}
+
+/// Joined AMP channel plus its durably committed home creation fact.
+pub struct JoinedHomeEvidence {
+    verified: VerifiedJoinedHome,
+    creation: HomeCreationWitness,
+}
+
+/// Accepted invitation evidence for the inviter's home projection.
+pub struct AcceptedHomeEvidence {
+    home_id: ChannelId,
+    context_id: ContextId,
+    sender_id: AuthorityId,
+    receiver_id: AuthorityId,
+    now_ms: u64,
+}
+
+impl AcceptedHomeEvidence {
+    fn from_invitation(
+        invitation: &CachedInvitation,
+        name: &str,
+        now_ms: u64,
+    ) -> Result<Self, String> {
+        let DomainInvitationType::Channel {
+            home_id,
+            home: true,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err("home materialization requires a home invitation".into());
+        };
+        if name.trim().is_empty() {
+            return Err("home materialization requires a nonempty home name".into());
+        }
+        Ok(Self {
+            home_id: *home_id,
+            context_id: invitation.context_id,
+            sender_id: invitation.sender_id,
+            receiver_id: invitation.receiver_id,
+            now_ms,
+        })
+    }
+
+    pub(crate) fn from_accepted_invitation(
+        invitation: &CachedInvitation,
+        name: &str,
+        now_ms: u64,
+    ) -> Result<Self, String> {
+        if invitation.status != DomainInvitationStatus::Accepted {
+            return Err("home materialization requires an accepted invitation".into());
+        }
+        Self::from_invitation(invitation, name, now_ms)
+    }
+
+    pub(crate) fn from_exchange_response(
+        invitation: &CachedInvitation,
+        response: &aura_invitation::protocol::InvitationResponse,
+        name: &str,
+        now_ms: u64,
+    ) -> Result<Self, String> {
+        if !response.accepted || response.invitation_id != invitation.invitation_id {
+            return Err("home materialization requires a matching acceptance response".into());
+        }
+        Self::from_invitation(invitation, name, now_ms)
+    }
+}
+
 pub(crate) async fn materialize_home_signal_for_channel_invitation(
     reactive: &ReactiveHandler,
-    own_authority: AuthorityId,
-    channel_id: ChannelId,
-    home_name: &str,
-    sender_id: AuthorityId,
-    context_id: ContextId,
-    now_ms: u64,
+    evidence: JoinedHomeEvidence,
 ) -> Result<(), String> {
+    let JoinedHomeEvidence { verified, creation } = evidence;
+    let VerifiedJoinedHome {
+        own_authority,
+        channel_id,
+        context_id,
+        name: _,
+        sender_id,
+        now_ms,
+    } = verified;
     let result = ProjectionOwner::new(reactive.clone())
         .update(ProjectionSlot::homes(), |homes| -> Result<(), ()> {
             let mut changed = false;
 
             if !homes.has_home(&channel_id) {
-                let mut home = HomeState::new(
-                    channel_id,
-                    Some(home_name.to_string()),
-                    sender_id,
-                    now_ms,
-                    context_id,
-                );
-
-                if sender_id != own_authority {
-                    if let Some(owner) = home.member_mut(&sender_id) {
-                        owner.name = sender_id.to_string();
-                        owner.is_online = false;
-                        owner.last_seen = Some(now_ms);
-                    }
-                    home.my_role = HomeRole::Participant;
-                }
+                let _ = homes.materialize_created_home(creation, own_authority);
+                let home = homes
+                    .home_mut(&channel_id)
+                    .expect("creation witness materialized home");
 
                 if home.member(&own_authority).is_none() {
                     home.add_member(HomeMember {
@@ -112,7 +247,6 @@ pub(crate) async fn materialize_home_signal_for_channel_invitation(
                     });
                 }
 
-                homes.add_home(home);
                 if homes.current_home_id().is_none() {
                     homes.select_home(Some(channel_id));
                 }
@@ -162,56 +296,74 @@ pub(crate) async fn materialize_home_signal_for_channel_invitation(
 }
 
 pub(crate) async fn materialize_home_signal_for_channel_acceptance(
-    reactive: &ReactiveHandler,
-    home_id: ChannelId,
-    home_name: &str,
-    sender_id: AuthorityId,
-    receiver_id: AuthorityId,
-    context_id: ContextId,
-    now_ms: u64,
+    effects: &AuraEffectSystem,
+    evidence: AcceptedHomeEvidence,
 ) -> Result<(), String> {
-    let result = ProjectionOwner::new(reactive.clone())
+    let AcceptedHomeEvidence {
+        home_id,
+        context_id,
+        sender_id,
+        receiver_id,
+        now_ms,
+    } = evidence;
+    let reactive = effects.reactive_handler();
+    let owner = ProjectionOwner::new(reactive);
+    owner
+        .snapshot(ProjectionSlot::homes())
+        .await
+        .map_err(|error| {
+            format!("homes signal materialization requires registered homes signal: {error}")
+        })?;
+    let created = effects
+        .load_committed_facts(sender_id)
+        .await
+        .map_err(|error| format!("load canonical HomeCreated fact: {error}"))?
+        .into_iter()
+        .filter_map(|fact| match fact.content {
+            FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID =>
+            {
+                SocialFact::from_envelope(&envelope)
+            }
+            _ => None,
+        })
+        .find(|fact| matches!(fact,
+            SocialFact::HomeCreated { home_id: fact_home_id, context_id: fact_context_id, creator_id, .. }
+            if fact_home_id.as_bytes() == home_id.as_bytes()
+                && *fact_context_id == context_id
+                && *creator_id == sender_id
+        ))
+        .ok_or_else(|| "accepted home has no committed HomeCreated fact".to_string())?;
+    let creation = owner
+        .home_created_witness(&created)
+        .ok_or_else(|| "accepted home requires HomeCreated evidence".to_string())?;
+    let mut materialization_error = None;
+    let result = owner
         .update(ProjectionSlot::homes(), |homes| -> Result<(), ()> {
             let mut changed = false;
 
             if !homes.has_home(&home_id) {
-                let mut home = HomeState::new(
-                    home_id,
-                    Some(home_name.to_string()),
-                    sender_id,
-                    now_ms,
-                    context_id,
-                );
-                if home.member(&receiver_id).is_none() {
-                    home.add_member(HomeMember {
-                        id: receiver_id,
-                        name: receiver_id.to_string(),
-                        role: HomeRole::Participant,
-                        is_online: false,
-                        joined_at: now_ms,
-                        last_seen: Some(now_ms),
-                        storage_allocated: HomeState::MEMBER_ALLOCATION,
-                    });
-                }
-                homes.add_home(home);
+                let _ = homes.materialize_created_home(creation, sender_id);
                 changed = true;
-            } else if let Some(home) = homes.home_mut(&home_id) {
-                if home.context_id != Some(context_id) {
-                    home.context_id = Some(context_id);
-                    changed = true;
-                }
-                if home.member(&receiver_id).is_none() {
-                    home.add_member(HomeMember {
-                        id: receiver_id,
-                        name: receiver_id.to_string(),
-                        role: HomeRole::Participant,
-                        is_online: false,
-                        joined_at: now_ms,
-                        last_seen: Some(now_ms),
-                        storage_allocated: HomeState::MEMBER_ALLOCATION,
-                    });
-                    changed = true;
-                }
+            }
+            let home = homes
+                .home_mut(&home_id)
+                .expect("creation witness materialized home");
+            if home.context_id != Some(context_id) {
+                materialization_error = Some("accepted home context differs from canonical home");
+                return Err(());
+            }
+            if home.member(&receiver_id).is_none() {
+                home.add_member(HomeMember {
+                    id: receiver_id,
+                    name: receiver_id.to_string(),
+                    role: HomeRole::Participant,
+                    is_online: false,
+                    joined_at: now_ms,
+                    last_seen: Some(now_ms),
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
+                });
+                changed = true;
             }
 
             if !changed {
@@ -223,6 +375,9 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
         .map_err(|error| {
             format!("homes signal materialization requires registered homes signal: {error}")
         })?;
+    if let Some(error) = materialization_error {
+        return Err(error.to_string());
+    }
     let _ = result;
     Ok(())
 }
@@ -230,61 +385,59 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
 pub(crate) async fn materialize_pending_invitation_signal(
     reactive: &ReactiveHandler,
     own_authority: AuthorityId,
-    invitation_id: &str,
-    sender_id: AuthorityId,
-    receiver_id: AuthorityId,
-    invitation_type: &DomainInvitationType,
-    receiver_nickname: Option<&str>,
-    created_at: u64,
-    expires_at: Option<u64>,
-    message: Option<String>,
+    validated_import: aura_invitation::shareable::ValidatedImportedInvitation,
 ) -> Result<(), String> {
+    let witness = InvitationCreationWitness::from_imported(&validated_import, own_authority)
+        .ok_or_else(|| "validated import is not pending".to_string())?;
+    materialize_pending_invitation_witness(reactive, witness).await
+}
+
+/// Unsigned unit fixtures enter through a synthetic full creation fact in the
+/// agent's test build. This path cannot construct a validated import token.
+#[cfg(test)]
+pub(crate) async fn materialize_unverified_invitation_fixture_signal(
+    reactive: &ReactiveHandler,
+    own_authority: AuthorityId,
+    invitation: &CachedInvitation,
+) -> Result<(), String> {
+    let sent = InvitationFact::Sent {
+        context_id: invitation.context_id,
+        invitation_id: invitation.invitation_id.clone(),
+        sender_id: invitation.sender_id,
+        receiver_id: invitation.receiver_id,
+        invitation_type: invitation.invitation_type.clone(),
+        sent_at: aura_core::time::PhysicalTime {
+            ts_ms: invitation.created_at,
+            uncertainty: None,
+        },
+        expires_at: invitation
+            .expires_at
+            .map(|ts_ms| aura_core::time::PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+        receiver_nickname: invitation.receiver_nickname.clone(),
+        message: invitation.message.clone(),
+    };
+    let witness = ProjectionOwner::new(reactive.clone())
+        .invitation_sent_witness(&sent, own_authority)
+        .expect("synthetic Sent fixture has creation evidence");
+    materialize_pending_invitation_witness(reactive, witness).await
+}
+
+async fn materialize_pending_invitation_witness(
+    reactive: &ReactiveHandler,
+    witness: InvitationCreationWitness,
+) -> Result<(), String> {
+    let invitation_id = witness.id().to_string();
     let result = ProjectionOwner::new(reactive.clone())
         .update(
             ProjectionSlot::invitations(),
             |invitations| -> Result<(), ()> {
-                if invitations.invitation(invitation_id).is_some() {
+                if invitations.invitation(&invitation_id).is_some() {
                     return Err(());
                 }
-
-                let direction = if sender_id == own_authority {
-                    InvitationDirection::Sent
-                } else {
-                    InvitationDirection::Received
-                };
-                let is_generic_sent_contact_invitation = direction == InvitationDirection::Sent
-                    && matches!(invitation_type, DomainInvitationType::Contact { .. })
-                    && sender_id == receiver_id;
-                let (home_id, home_name) =
-                    app_signal_projection::map_channel_metadata(invitation_type);
-                invitations.add_invitation(Invitation {
-                    id: invitation_id.to_string(),
-                    invitation_type: app_signal_projection::map_invitation_type(invitation_type),
-                    status: InvitationStatus::Pending,
-                    direction,
-                    from_id: sender_id,
-                    from_name: app_signal_projection::invitation_sender_name(invitation_type),
-                    to_id: (direction == InvitationDirection::Sent
-                        && !is_generic_sent_contact_invitation)
-                        .then_some(receiver_id),
-                    to_name: if direction == InvitationDirection::Sent {
-                        if is_generic_sent_contact_invitation {
-                            receiver_nickname
-                                .map(str::trim)
-                                .filter(|value| !value.is_empty())
-                                .map(ToOwned::to_owned)
-                        } else {
-                            Some("Unknown".to_string())
-                        }
-                    } else {
-                        None
-                    },
-                    created_at,
-                    expires_at,
-                    message,
-                    home_id,
-                    home_name,
-                });
+                invitations.add_invitation(witness);
 
                 Ok(())
             },
@@ -307,6 +460,7 @@ pub struct InvitationsSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     update_gate: Mutex<()>,
+    deferred_status: Mutex<HashMap<String, InvitationStatus>>,
 }
 
 impl InvitationsSignalView {
@@ -315,6 +469,7 @@ impl InvitationsSignalView {
             own_authority,
             reactive,
             update_gate: Mutex::new(()),
+            deferred_status: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -337,6 +492,8 @@ impl ReactiveView for InvitationsSignalView {
                     }
                 };
                 let mut state = current.value;
+                let mut deferred_status = self.deferred_status.lock().await;
+                let mut next_deferred_status = deferred_status.clone();
                 let mut changed = false;
 
                 for fact in facts {
@@ -363,87 +520,73 @@ impl ReactiveView for InvitationsSignalView {
                     };
 
                     match inv {
-                        InvitationFact::Sent {
-                            invitation_id,
-                            sender_id,
-                            receiver_id,
-                            invitation_type,
-                            sent_at,
-                            expires_at,
-                            receiver_nickname,
-                            message,
-                            ..
-                        } => {
+                        sent_fact @ InvitationFact::Sent { .. } => {
+                            let invitation = owner
+                                .invitation_sent_witness(&sent_fact, self.own_authority)
+                                .expect("matched InvitationFact::Sent");
+                            let invitation_id = invitation.id().to_string();
                             // A replayed Sent fact cannot recreate a pending row after
                             // a newer acceptance, rejection, or cancellation.
-                            if state.invitation(invitation_id.as_str()).is_some() {
+                            if state.invitation(&invitation_id).is_some() {
+                                if let Some(status) = next_deferred_status.remove(&invitation_id) {
+                                    let id = invitation_id.as_str();
+                                    changed |= match status {
+                                        InvitationStatus::Accepted => {
+                                            state.accept_invitation(id).is_ok()
+                                        }
+                                        InvitationStatus::Rejected => {
+                                            state.reject_invitation(id).is_ok()
+                                        }
+                                        InvitationStatus::Revoked => {
+                                            state.observe_cancelled_invitation(id).is_ok()
+                                        }
+                                        _ => false,
+                                    };
+                                }
                                 continue;
                             }
-                            let direction = if sender_id == self.own_authority {
-                                InvitationDirection::Sent
-                            } else {
-                                InvitationDirection::Received
-                            };
-                            let is_generic_sent_contact_invitation = direction
-                                == InvitationDirection::Sent
-                                && matches!(invitation_type, DomainInvitationType::Contact { .. })
-                                && sender_id == receiver_id;
-                            let (home_id, home_name) =
-                                app_signal_projection::map_channel_metadata(&invitation_type);
-
-                            let invitation = Invitation {
-                                id: invitation_id.to_string(),
-                                invitation_type: app_signal_projection::map_invitation_type(
-                                    &invitation_type,
-                                ),
-                                status: InvitationStatus::Pending,
-                                direction,
-                                from_id: sender_id,
-                                from_name: app_signal_projection::invitation_sender_name(
-                                    &invitation_type,
-                                ),
-                                to_id: (direction == InvitationDirection::Sent
-                                    && !is_generic_sent_contact_invitation)
-                                    .then_some(receiver_id),
-                                to_name: if direction == InvitationDirection::Sent {
-                                    if is_generic_sent_contact_invitation {
-                                        receiver_nickname
-                                            .as_deref()
-                                            .map(str::trim)
-                                            .filter(|value| !value.is_empty())
-                                            .map(ToOwned::to_owned)
-                                            .or_else(|| {
-                                                state
-                                                    .invitation(invitation_id.as_str())
-                                                    .and_then(|existing| existing.to_name.clone())
-                                            })
-                                    } else {
-                                        Some("Unknown".to_string())
-                                    }
-                                } else {
-                                    None
-                                },
-                                created_at: sent_at.ts_ms,
-                                expires_at: expires_at.map(|t| t.ts_ms),
-                                message,
-                                home_id,
-                                home_name,
-                            };
-
+                            let pending_status = next_deferred_status.remove(&invitation_id);
                             state.add_invitation(invitation);
+                            match pending_status {
+                                Some(InvitationStatus::Accepted) => {
+                                    let _ = state.accept_invitation(&invitation_id);
+                                }
+                                Some(InvitationStatus::Rejected) => {
+                                    let _ = state.reject_invitation(&invitation_id);
+                                }
+                                Some(InvitationStatus::Revoked) => {
+                                    let _ = state.observe_cancelled_invitation(&invitation_id);
+                                }
+                                _ => {}
+                            }
                             changed = true;
                         }
                         InvitationFact::Accepted { invitation_id, .. } => {
-                            let _ = state.accept_invitation(invitation_id.as_str());
-                            changed = true;
+                            if state.accept_invitation(invitation_id.as_str()).is_ok() {
+                                changed = true;
+                            } else if state.invitation(invitation_id.as_str()).is_none() {
+                                next_deferred_status
+                                    .insert(invitation_id.to_string(), InvitationStatus::Accepted);
+                            }
                         }
                         InvitationFact::Declined { invitation_id, .. } => {
-                            let _ = state.reject_invitation(invitation_id.as_str());
-                            changed = true;
+                            if state.reject_invitation(invitation_id.as_str()).is_ok() {
+                                changed = true;
+                            } else if state.invitation(invitation_id.as_str()).is_none() {
+                                next_deferred_status
+                                    .insert(invitation_id.to_string(), InvitationStatus::Rejected);
+                            }
                         }
                         InvitationFact::Cancelled { invitation_id, .. } => {
-                            let _ = state.revoke_invitation(invitation_id.as_str());
-                            changed = true;
+                            if state
+                                .observe_cancelled_invitation(invitation_id.as_str())
+                                .is_ok()
+                            {
+                                changed = true;
+                            } else if state.invitation(invitation_id.as_str()).is_none() {
+                                next_deferred_status
+                                    .insert(invitation_id.to_string(), InvitationStatus::Revoked);
+                            }
                         }
                         InvitationFact::CeremonyInitiated {
                             ceremony_id,
@@ -517,6 +660,7 @@ impl ReactiveView for InvitationsSignalView {
                 }
 
                 if !changed {
+                    *deferred_status = next_deferred_status;
                     return;
                 }
 
@@ -524,7 +668,10 @@ impl ReactiveView for InvitationsSignalView {
                     .replace_if_current(ProjectionSlot::invitations(), current.revision, state)
                     .await
                 {
-                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Published { .. }) => {
+                        *deferred_status = next_deferred_status;
+                        return;
+                    }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
                     Err(error) => {
                         emit_internal_error(
@@ -552,6 +699,7 @@ pub struct ContactsSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     state: Mutex<ContactsState>,
+    pending_relationships: Mutex<HashMap<AuthorityId, ContactRelationshipState>>,
 }
 
 impl ContactsSignalView {
@@ -560,10 +708,16 @@ impl ContactsSignalView {
             own_authority,
             reactive,
             state: Mutex::new(ContactsState::default()),
+            pending_relationships: Mutex::new(HashMap::new()),
         }
     }
 
-    fn apply_friendship_fact(&self, state: &mut ContactsState, fact: &FriendshipFact) -> bool {
+    fn apply_friendship_fact(
+        &self,
+        state: &mut ContactsState,
+        pending: &mut HashMap<AuthorityId, ContactRelationshipState>,
+        fact: &FriendshipFact,
+    ) -> bool {
         let Some(other) = fact.other_participant(self.own_authority) else {
             return false;
         };
@@ -576,8 +730,13 @@ impl ContactsSignalView {
             FriendshipFact::Accepted { .. } => ContactRelationshipState::Friend,
             FriendshipFact::Revoked { .. } => ContactRelationshipState::Contact,
         };
-        state.set_relationship_state(other, relationship_state);
-        true
+        if state.set_relationship_state(other, relationship_state) {
+            pending.remove(&other);
+            true
+        } else {
+            pending.insert(other, relationship_state);
+            false
+        }
     }
 }
 
@@ -598,6 +757,7 @@ impl ReactiveView for ContactsSignalView {
                     }
                 };
                 let mut state = self.state.lock().await;
+                let mut pending = self.pending_relationships.lock().await;
                 *state = current.value;
                 let mut changed = false;
 
@@ -618,6 +778,7 @@ impl ReactiveView for ContactsSignalView {
                                 continue;
                             };
 
+                            let creation_witness = owner.contact_added_witness(&contact_fact);
                             match contact_fact {
                                 ContactFact::Added {
                                     contact_id,
@@ -663,23 +824,19 @@ impl ReactiveView for ContactsSignalView {
                                             contact_id = %contact_id,
                                             "ContactsSignalView: Creating new contact entry"
                                         );
-                                        state.apply_contact(Contact {
-                                            id: contact_id,
-                                            nickname: String::new(),
-                                            nickname_suggestion: suggested_name,
-                                            is_guardian: false,
-                                            is_member: false,
-                                            last_interaction: Some(added_at.ts_ms),
-                                            is_online: false,
-                                            read_receipt_policy: ReadReceiptPolicy::default(),
-                                            relationship_state: ContactRelationshipState::Contact,
-                                            invitation_code,
-                                        });
+                                        state.apply_contact(
+                                            creation_witness.expect("matched ContactFact::Added"),
+                                        );
+                                    }
+                                    if let Some(relationship_state) = pending.remove(&contact_id) {
+                                        state
+                                            .set_relationship_state(contact_id, relationship_state);
                                     }
                                     changed = true;
                                 }
                                 ContactFact::Removed { contact_id, .. } => {
                                     state.remove_contact(&contact_id);
+                                    pending.remove(&contact_id);
                                     changed = true;
                                 }
                                 ContactFact::Renamed {
@@ -719,7 +876,11 @@ impl ReactiveView for ContactsSignalView {
                                 .await;
                                 continue;
                             };
-                            changed |= self.apply_friendship_fact(&mut state, &friendship_fact);
+                            changed |= self.apply_friendship_fact(
+                                &mut state,
+                                &mut pending,
+                                &friendship_fact,
+                            );
                         }
                         FactContent::Relational(RelationalFact::Protocol(
                             aura_journal::ProtocolRelationalFact::GuardianBinding {
@@ -1014,6 +1175,7 @@ impl ReactiveView for RecoverySignalView {
 pub struct HomeSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
+    pending_memberships: Mutex<Vec<SocialFact>>,
 }
 
 impl HomeSignalView {
@@ -1021,6 +1183,7 @@ impl HomeSignalView {
         Self {
             own_authority,
             reactive,
+            pending_memberships: Mutex::new(Vec::new()),
         }
     }
 
@@ -1038,61 +1201,54 @@ impl HomeSignalView {
     }
 
     /// Applies a social fact that creates a home or changes its membership.
-    fn apply_social_fact(homes: &mut HomesState, fact: SocialFact) -> bool {
-        match fact {
-            SocialFact::HomeCreated {
-                home_id,
-                context_id,
-                created_at,
-                creator_id,
-                name,
-                ..
-            } => {
-                let home_id = ChannelId::from_bytes(*home_id.as_bytes());
-                if homes.has_home(&home_id) {
-                    return false;
-                }
-                let home = HomeState::new(
-                    home_id,
-                    Some(name),
-                    creator_id,
-                    created_at.ts_ms,
-                    context_id,
-                );
-                tracing::info!(home_id = %home_id, context_id = %context_id, "materialized home from HomeCreated fact");
-                let first_home = homes.is_empty();
-                let _ = homes.add_home(home);
-                if first_home {
-                    homes.select_home(Some(home_id));
-                }
-                true
-            }
-            SocialFact::MemberJoined {
-                authority_id,
-                context_id,
-                joined_at,
-                name,
-                ..
-            } => {
-                let Some(home) = Self::home_for_context_mut(homes, &context_id) else {
-                    return false;
-                };
-                if home.member(&authority_id).is_some() {
-                    return false;
-                }
-                home.add_member(HomeMember {
-                    id: authority_id,
-                    name,
-                    role: HomeRole::Participant,
-                    is_online: false,
-                    joined_at: joined_at.ts_ms,
-                    last_seen: Some(joined_at.ts_ms),
-                    storage_allocated: HomeState::MEMBER_ALLOCATION,
-                });
-                true
-            }
-            _ => false,
+    fn materialize_created_home(
+        &self,
+        homes: &mut HomesState,
+        witness: HomeCreationWitness,
+    ) -> bool {
+        let first_home = homes.is_empty();
+        let before = homes.iter().count();
+        let result = homes.materialize_created_home(witness, self.own_authority);
+        if homes.iter().count() == before {
+            return false;
         }
+        tracing::info!(home_id = %result.home_id, "materialized home from HomeCreated fact");
+        if first_home {
+            homes.select_home(Some(result.home_id));
+        }
+        true
+    }
+
+    fn apply_member_joined(homes: &mut HomesState, fact: &SocialFact) -> Option<bool> {
+        let SocialFact::MemberJoined {
+            authority_id,
+            home_id,
+            context_id,
+            joined_at,
+            name,
+            storage_allocated,
+        } = fact
+        else {
+            return Some(false);
+        };
+        let channel_id = ChannelId::from_bytes(*home_id.as_bytes());
+        let home = homes.home_mut(&channel_id)?;
+        if home.context_id != Some(*context_id) {
+            return Some(false);
+        }
+        if home.member(authority_id).is_some() {
+            return Some(false);
+        }
+        home.add_member(HomeMember {
+            id: *authority_id,
+            name: name.clone(),
+            role: HomeRole::Participant,
+            is_online: false,
+            joined_at: joined_at.ts_ms,
+            last_seen: Some(joined_at.ts_ms),
+            storage_allocated: *storage_allocated,
+        });
+        Some(true)
     }
 }
 
@@ -1100,6 +1256,10 @@ impl ReactiveView for HomeSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
             let owner = ProjectionOwner::new(self.reactive.clone());
+            // Keep unresolved joins across scheduler batches. The lock also
+            // serializes this view's retries while other projection owners
+            // may publish to the same signal.
+            let mut pending = self.pending_memberships.lock().await;
             loop {
                 let current = match owner.snapshot(ProjectionSlot::homes()).await {
                     Ok(current) => current,
@@ -1117,6 +1277,48 @@ impl ReactiveView for HomeSignalView {
 
                 let mut changed = false;
 
+                // Creation is reduced first even when journal replay presents
+                // membership before creation in the same batch.
+                for fact in facts {
+                    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
+                        &fact.content
+                    else {
+                        continue;
+                    };
+                    if envelope.type_id.as_str() != SOCIAL_FACT_TYPE_ID {
+                        continue;
+                    }
+                    if let Some(witness) = SocialFact::from_envelope(envelope)
+                        .as_ref()
+                        .and_then(|fact| owner.home_created_witness(fact))
+                    {
+                        changed |= self.materialize_created_home(&mut homes, witness);
+                    }
+                }
+
+                let mut unresolved = Vec::new();
+                for join in pending
+                    .iter()
+                    .cloned()
+                    .chain(facts.iter().filter_map(|fact| {
+                        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
+                            &fact.content
+                        else {
+                            return None;
+                        };
+                        (envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID)
+                            .then(|| SocialFact::from_envelope(envelope))
+                            .flatten()
+                            .filter(|social| matches!(social, SocialFact::MemberJoined { .. }))
+                    }))
+                {
+                    match Self::apply_member_joined(&mut homes, &join) {
+                        Some(applied) => changed |= applied,
+                        None if !unresolved.contains(&join) => unresolved.push(join),
+                        None => {}
+                    }
+                }
+
                 for fact in facts {
                     let FactContent::Relational(RelationalFact::Generic {
                         context_id,
@@ -1127,9 +1329,6 @@ impl ReactiveView for HomeSignalView {
                     };
 
                     if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
-                        if let Some(social) = SocialFact::from_envelope(envelope) {
-                            changed |= Self::apply_social_fact(&mut homes, social);
-                        }
                         continue;
                     }
                     let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id)
@@ -1253,6 +1452,7 @@ impl ReactiveView for HomeSignalView {
                 }
 
                 if !changed {
+                    *pending = unresolved;
                     return;
                 }
 
@@ -1260,7 +1460,10 @@ impl ReactiveView for HomeSignalView {
                     .replace_if_current(ProjectionSlot::homes(), current.revision, homes)
                     .await
                 {
-                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Published { .. }) => {
+                        *pending = unresolved;
+                        return;
+                    }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
                     Err(error) => {
                         emit_internal_error(
@@ -1539,17 +1742,28 @@ impl ReactiveView for ChatSignalView {
                                 continue;
                             };
 
+                            let canonical_creation = ChatViewReducer
+                                .reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None)
+                                .into_iter()
+                                .filter_map(downcast_delta_owned::<ChatDelta>)
+                                .find_map(|delta| match delta {
+                                    ChatDelta::ChannelAdded(creation) => Some(creation),
+                                    _ => None,
+                                });
                             match chat_fact {
                                 ChatFact::ChannelCreated {
                                     channel_id,
                                     context_id,
-                                    name,
-                                    topic,
+                                    name: _,
+                                    topic: _,
                                     is_dm,
-                                    created_at,
+                                    created_at: _,
                                     creator_id,
                                     ..
                                 } => {
+                                    let creation = canonical_creation.expect(
+                                        "ChannelCreated carries canonical creation evidence",
+                                    );
                                     tracing::debug!(
                                         channel_id = %channel_id,
                                         %creator_id,
@@ -1574,60 +1788,10 @@ impl ReactiveView for ChatSignalView {
                                     .await;
                                     state = self.state.lock().await;
 
-                                    // Seed membership from inbound channel facts so reply routing
-                                    // has at least one deterministic peer even before richer
-                                    // membership reductions are available.
-                                    let (member_ids, member_count) = if is_dm {
-                                        let mut members = vec![self.own_authority];
-                                        if creator_id != self.own_authority {
-                                            members.push(creator_id);
-                                        }
-                                        let count = members.len().max(2) as u32;
-                                        (members, count)
-                                    } else if creator_id != self.own_authority {
-                                        // For group channels we may not know the full roster yet.
-                                        // Seed the creator as an initial peer so recipients can reply.
-                                        (vec![creator_id], 2)
-                                    } else {
-                                        (Vec::new(), 0)
-                                    };
-
-                                    let channel = Channel {
-                                        id: channel_id,
-                                        context_id: Some(context_id),
-                                        name,
-                                        topic,
-                                        channel_type: if is_dm {
-                                            ChannelType::DirectMessage
-                                        } else {
-                                            ChannelType::Home
-                                        },
-                                        unread_count: 0,
-                                        is_dm,
-                                        member_ids,
-                                        member_count,
-                                        last_message: None,
-                                        last_message_time: None,
-                                        last_activity: created_at.ts_ms,
-                                        last_finalized_epoch: 0,
-                                    };
-                                    // An update may have created the entry first; the creation
-                                    // fact is authoritative for DM-ness and seeded members.
-                                    if let Some(existing) = state.channel_mut(&channel.id) {
-                                        if channel.is_dm {
-                                            existing.is_dm = true;
-                                            existing.channel_type = ChannelType::DirectMessage;
-                                        }
-                                        for member in channel.member_ids {
-                                            if !existing.member_ids.contains(&member) {
-                                                existing.member_ids.push(member);
-                                            }
-                                        }
-                                        existing.member_count =
-                                            existing.member_count.max(channel.member_count);
-                                    } else {
-                                        state.add_channel(channel);
-                                    }
+                                    state.materialize_canonical_channel(
+                                        creation,
+                                        Some(self.own_authority),
+                                    );
                                     changed = true;
                                 }
                                 ChatFact::ChannelClosed { channel_id, .. } => {
@@ -1653,46 +1817,17 @@ impl ReactiveView for ChatSignalView {
                                     {
                                         continue;
                                     }
-                                    if let Some(channel) = state.channel_mut(&channel_id) {
-                                        channel.context_id = Some(context_id);
-                                        if let Some(name) = name {
-                                            channel.name = name;
-                                        }
-                                        if topic.is_some() {
-                                            channel.topic = topic;
-                                        }
-                                        if let Some(member_count) = member_count {
-                                            channel.member_count = member_count;
-                                        }
-                                        if let Some(member_ids) = member_ids {
-                                            channel.member_ids = member_ids;
-                                        }
-                                        channel.last_activity = updated_at.ts_ms;
-                                    } else {
-                                        let Some(name) = name else {
-                                            tracing::debug!(
-                                                channel_id = %channel_id,
-                                                context_id = %context_id,
-                                                "ignoring ChannelUpdated without canonical name for unknown channel"
-                                            );
-                                            continue;
-                                        };
-                                        state.upsert_channel(Channel {
-                                            id: channel_id,
+                                    state.apply_or_stage_channel_update(
+                                        channel_id,
+                                        aura_app::views::chat::ChannelProjectionUpdate {
                                             context_id: Some(context_id),
                                             name,
                                             topic,
-                                            channel_type: ChannelType::Home,
-                                            unread_count: 0,
-                                            is_dm: false,
-                                            member_ids: member_ids.unwrap_or_default(),
-                                            member_count: member_count.unwrap_or(1),
-                                            last_message: None,
-                                            last_message_time: None,
-                                            last_activity: updated_at.ts_ms,
-                                            last_finalized_epoch: 0,
-                                        });
-                                    }
+                                            member_count,
+                                            member_ids,
+                                            updated_at: updated_at.ts_ms,
+                                        },
+                                    );
                                     changed = true;
                                 }
                                 ChatFact::MessageSentSealed {
@@ -2031,6 +2166,21 @@ mod tests {
     };
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
+
+    fn add_fixture_home(
+        homes: &mut HomesState,
+        home: HomeState,
+    ) -> aura_app::views::home::AddHomeResult {
+        let home_id = home.id;
+        let was_first = homes.is_empty();
+        let mut detached = serde_json::to_value(&*homes).unwrap();
+        detached["homes"]
+            .as_object_mut()
+            .unwrap()
+            .insert(home_id.to_string(), serde_json::to_value(home).unwrap());
+        *homes = serde_json::from_value(detached).unwrap();
+        aura_app::views::home::AddHomeResult { home_id, was_first }
+    }
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -2073,7 +2223,7 @@ mod tests {
         );
 
         let mut homes = HomesState::new();
-        let result = homes.add_home(home_state);
+        let result = add_fixture_home(&mut homes, home_state);
         if result.was_first {
             homes.select_home(Some(result.home_id));
         }
@@ -2090,6 +2240,286 @@ mod tests {
             }),
             FactContent::Relational(relational),
         )
+    }
+
+    #[test]
+    fn canonical_entity_creation_stays_in_owned_publication_paths() {
+        fn has_forbidden_creation_bypass(source: &str) -> bool {
+            let production = source.split("\nmod tests {").next().expect("source prefix");
+            production.contains("ChatState::from_channels(")
+                || production.contains("ContactsState::from_contacts(")
+                || production.contains("InvitationsState::from_parts(")
+                || production.contains("ContactAddedWitness::from_fact(")
+                || production.contains("InvitationCreationWitness::from_sent_fact(")
+        }
+
+        fn check_tree(root: &std::path::Path) {
+            for entry in std::fs::read_dir(root).expect("publication source directory") {
+                let path = entry.expect("publication source entry").path();
+                if path.is_dir() {
+                    check_tree(&path);
+                } else if path.extension().is_some_and(|extension| extension == "rs")
+                    && path
+                        .file_name()
+                        .map(|name| name != "tests.rs")
+                        .unwrap_or(true)
+                {
+                    let source = std::fs::read_to_string(&path).expect("publication source");
+                    assert!(
+                        !has_forbidden_creation_bypass(&source),
+                        "entity creation must use owned witnesses; raw hydration is reserved for typed query decoding and tests: {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        assert!(has_forbidden_creation_bypass(
+            "fn publish() { ChatState::from_channels(rows); }"
+        ));
+        assert!(has_forbidden_creation_bypass(
+            "fn publish() { ContactsState::from_contacts(rows); }"
+        ));
+        assert!(has_forbidden_creation_bypass(
+            "fn publish() { InvitationsState::from_parts(pending, sent, history); }"
+        ));
+        assert!(has_forbidden_creation_bypass(
+            "fn publish() { ContactAddedWitness::from_fact(&fact); }"
+        ));
+        assert!(has_forbidden_creation_bypass(
+            "fn publish() { InvitationCreationWitness::from_sent_fact(&fact, own); }"
+        ));
+        assert!(!has_forbidden_creation_bypass(
+            "fn publish() {}\nmod tests { ContactsState::from_contacts(rows); }"
+        ));
+
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for relative in [
+            "crates/aura-agent/src/reactive",
+            "crates/aura-app/src/runtime_bridge",
+            "crates/aura-app/src/workflows",
+            "crates/aura-ui/src/app/runtime_views",
+            "crates/aura-terminal/src/tui",
+            "crates/aura-web/src",
+        ] {
+            check_tree(&workspace.join(relative));
+        }
+    }
+
+    async fn materialize_test_invitation(
+        reactive: &ReactiveHandler,
+        own_authority: AuthorityId,
+        invitation_id: &str,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        invitation_type: &DomainInvitationType,
+        receiver_nickname: Option<&str>,
+        created_at: u64,
+        expires_at: Option<u64>,
+        message: Option<String>,
+    ) -> Result<(), String> {
+        let sent = InvitationFact::Sent {
+            invitation_id: aura_core::types::identifiers::InvitationId::new(invitation_id),
+            context_id: ContextId::new_from_entropy([0x91; 32]),
+            sender_id,
+            receiver_id,
+            invitation_type: invitation_type.clone(),
+            sent_at: PhysicalTime {
+                ts_ms: created_at,
+                uncertainty: None,
+            },
+            expires_at: expires_at.map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+            message,
+            receiver_nickname: receiver_nickname.map(ToOwned::to_owned),
+        };
+        materialize_pending_invitation_witness(
+            reactive,
+            ProjectionOwner::new(reactive.clone())
+                .invitation_sent_witness(&sent, own_authority)
+                .expect("sent invitation has creation evidence"),
+        )
+        .await
+    }
+
+    #[test]
+    fn invitation_creation_witness_rejects_status_only_evidence() {
+        let authority = AuthorityId::new_from_entropy([0x81; 32]);
+        let invitation_id = aura_core::types::identifiers::InvitationId::new("status-only");
+        let at = PhysicalTime {
+            ts_ms: 1,
+            uncertainty: None,
+        };
+        let accepted = InvitationFact::Accepted {
+            context_id: None,
+            invitation_id: invitation_id.clone(),
+            acceptor_id: authority,
+            accepted_at: at,
+        };
+        let reactive = ReactiveHandler::new();
+        assert!(ProjectionOwner::new(reactive)
+            .invitation_sent_witness(&accepted, authority)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn invitation_status_before_sent_replays_without_pending_phantom() {
+        let own = AuthorityId::new_from_entropy([0x84; 32]);
+        let sender = AuthorityId::new_from_entropy([0x85; 32]);
+        let context = ContextId::new_from_entropy([0x86; 32]);
+        let invitation_id = aura_core::types::identifiers::InvitationId::new("early-acceptance");
+        let sent = fact_from_relational(
+            InvitationFact::sent_ms(
+                context,
+                invitation_id.clone(),
+                sender,
+                own,
+                DomainInvitationType::Contact { nickname: None },
+                1,
+                None,
+                None,
+            )
+            .to_generic(),
+        );
+        let accepted = fact_from_relational(
+            InvitationFact::Accepted {
+                context_id: Some(context),
+                invitation_id,
+                acceptor_id: own,
+                accepted_at: PhysicalTime {
+                    ts_ms: 2,
+                    uncertainty: None,
+                },
+            }
+            .to_generic(),
+        );
+
+        // The second pass simulates a fresh projection rebuilding from facts.
+        for _ in 0..2 {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let view = InvitationsSignalView::new(own, reactive.clone());
+            view.update(std::slice::from_ref(&accepted)).await;
+            let before = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+            assert!(before.invitation("early-acceptance").is_none());
+
+            view.update(std::slice::from_ref(&sent)).await;
+            let after = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+            assert_eq!(
+                after
+                    .invitation("early-acceptance")
+                    .map(|invite| invite.status),
+                Some(InvitationStatus::Accepted)
+            );
+            assert_eq!(after.open_invitations().count(), 0);
+        }
+    }
+
+    async fn assert_terminal_status_before_sent_converges(
+        invitation_id: &str,
+        terminal_fact: InvitationFact,
+        expected_status: InvitationStatus,
+    ) {
+        let own = AuthorityId::new_from_entropy([0x88; 32]);
+        let sender = AuthorityId::new_from_entropy([0x89; 32]);
+        let context = ContextId::new_from_entropy([0x8a; 32]);
+        let sent = fact_from_relational(
+            InvitationFact::sent_ms(
+                context,
+                aura_core::types::identifiers::InvitationId::new(invitation_id),
+                sender,
+                own,
+                DomainInvitationType::Contact { nickname: None },
+                1,
+                None,
+                None,
+            )
+            .to_generic(),
+        );
+        let terminal = fact_from_relational(terminal_fact.to_generic());
+
+        // First deliver the terminal fact alone. Then rebuild a separate view
+        // from the same out-of-order fact sequence to cover fresh replay.
+        for fresh_replay in [false, true] {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let view = InvitationsSignalView::new(own, reactive.clone());
+            if fresh_replay {
+                view.update(&[terminal.clone(), sent.clone()]).await;
+            } else {
+                view.update(std::slice::from_ref(&terminal)).await;
+                let before = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+                assert!(before.invitation(invitation_id).is_none());
+                assert_eq!(before.pending_count(), 0);
+                view.update(std::slice::from_ref(&sent)).await;
+            }
+
+            let settled = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+            assert_eq!(
+                settled
+                    .invitation(invitation_id)
+                    .map(|invite| invite.status),
+                Some(expected_status)
+            );
+            assert_eq!(settled.pending_count(), 0);
+            assert_eq!(settled.open_invitations().count(), 0);
+            assert_eq!(settled.history_count(), 1);
+
+            // A duplicate creation fact cannot resurrect the settled row.
+            view.update(std::slice::from_ref(&sent)).await;
+            let replayed = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+            assert_eq!(
+                replayed
+                    .invitation(invitation_id)
+                    .map(|invite| invite.status),
+                Some(expected_status)
+            );
+            assert_eq!(replayed.pending_count(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn declined_before_sent_converges_without_pending_phantom_after_fresh_replay() {
+        let own = AuthorityId::new_from_entropy([0x88; 32]);
+        let context = ContextId::new_from_entropy([0x8a; 32]);
+        let invitation_id = "early-decline";
+        assert_terminal_status_before_sent_converges(
+            invitation_id,
+            InvitationFact::Declined {
+                context_id: Some(context),
+                invitation_id: aura_core::types::identifiers::InvitationId::new(invitation_id),
+                decliner_id: own,
+                declined_at: PhysicalTime {
+                    ts_ms: 2,
+                    uncertainty: None,
+                },
+            },
+            InvitationStatus::Rejected,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cancelled_before_sent_converges_without_pending_phantom_after_fresh_replay() {
+        let sender = AuthorityId::new_from_entropy([0x89; 32]);
+        let context = ContextId::new_from_entropy([0x8a; 32]);
+        let invitation_id = "early-cancellation";
+        assert_terminal_status_before_sent_converges(
+            invitation_id,
+            InvitationFact::Cancelled {
+                context_id: Some(context),
+                invitation_id: aura_core::types::identifiers::InvitationId::new(invitation_id),
+                canceller_id: sender,
+                cancelled_at: PhysicalTime {
+                    ts_ms: 2,
+                    uncertainty: None,
+                },
+            },
+            InvitationStatus::Revoked,
+        )
+        .await;
     }
 
     #[test]
@@ -2115,28 +2545,13 @@ mod tests {
         );
 
         let mut homes = HomesState::new();
-        homes.add_home(channel_home);
-        homes.add_home(synthetic_home);
+        add_fixture_home(&mut homes, channel_home);
+        add_fixture_home(&mut homes, synthetic_home);
 
         let selected =
             app_signal_projection::select_moderation_home(&homes, context_id, channel_home_id)
                 .expect("channel-authoritative home should be selected");
         assert_eq!(selected.id, channel_home_id);
-    }
-
-    #[test]
-    fn invitation_signal_view_preserves_channel_metadata() {
-        let channel_id = ChannelId::from_bytes([41u8; 32]);
-        let (home_id, home_name) =
-            app_signal_projection::map_channel_metadata(&DomainInvitationType::Channel {
-                home_id: channel_id,
-                nickname_suggestion: Some("shared-parity-lab".to_string()),
-                bootstrap: None,
-                home: false,
-            });
-
-        assert_eq!(home_id, Some(channel_id));
-        assert_eq!(home_name.as_deref(), Some("shared-parity-lab"));
     }
 
     #[tokio::test]
@@ -2191,7 +2606,7 @@ mod tests {
         register_app_signals(&reactive).await.unwrap();
 
         let own_authority = AuthorityId::new_from_entropy([81u8; 32]);
-        materialize_pending_invitation_signal(
+        materialize_test_invitation(
             &reactive,
             own_authority,
             "generic-contact-invite",
@@ -2237,24 +2652,35 @@ mod tests {
             .await
             .unwrap();
 
+        let evidence = |channel_id: ChannelId, context_id: ContextId, name: &str, now_ms| {
+            let verified = VerifiedJoinedHome {
+                own_authority: own,
+                channel_id,
+                name: name.into(),
+                sender_id: sender,
+                context_id,
+                now_ms,
+            };
+            let created = SocialFact::home_created_ms(
+                aura_social::HomeId::from_bytes(*channel_id.as_bytes()),
+                context_id,
+                now_ms,
+                sender,
+                name.into(),
+            );
+            verified
+                .bind_committed_creation(&ProjectionOwner::new(reactive.clone()), &created)
+                .unwrap()
+        };
+
         let (a, b) = tokio::join!(
             materialize_home_signal_for_channel_invitation(
                 &reactive,
-                own,
-                first,
-                "First",
-                sender,
-                ContextId::new_from_entropy([65u8; 32]),
-                1,
+                evidence(first, ContextId::new_from_entropy([65u8; 32]), "First", 1),
             ),
             materialize_home_signal_for_channel_invitation(
                 &reactive,
-                own,
-                second,
-                "Second",
-                sender,
-                ContextId::new_from_entropy([66u8; 32]),
-                2,
+                evidence(second, ContextId::new_from_entropy([66u8; 32]), "Second", 2),
             )
         );
         a.unwrap();
@@ -2277,7 +2703,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([72u8; 32]);
         let invitation_id = aura_core::types::identifiers::InvitationId::new("accepted-invite");
         let invitation_type = DomainInvitationType::Contact { nickname: None };
-        materialize_pending_invitation_signal(
+        materialize_test_invitation(
             &reactive,
             own,
             invitation_id.as_str(),
@@ -2331,7 +2757,7 @@ mod tests {
         register_app_signals(&reactive).await.unwrap();
 
         let own_authority = AuthorityId::new_from_entropy([82u8; 32]);
-        materialize_pending_invitation_signal(
+        materialize_test_invitation(
             &reactive,
             own_authority,
             "generic-contact-invite-labeled",
@@ -2370,20 +2796,14 @@ mod tests {
         let unknown_channel_id = ChannelId::from_bytes([99u8; 32]);
 
         let mut homes = HomesState::new();
-        homes.add_home(HomeState::new(
-            home_a_id,
-            Some("home-a".to_string()),
-            owner,
-            0,
-            context_id,
-        ));
-        homes.add_home(HomeState::new(
-            home_b_id,
-            Some("home-b".to_string()),
-            owner,
-            0,
-            context_id,
-        ));
+        add_fixture_home(
+            &mut homes,
+            HomeState::new(home_a_id, Some("home-a".to_string()), owner, 0, context_id),
+        );
+        add_fixture_home(
+            &mut homes,
+            HomeState::new(home_b_id, Some("home-b".to_string()), owner, 0, context_id),
+        );
 
         let selected =
             app_signal_projection::select_moderation_home(&homes, context_id, unknown_channel_id);
@@ -2486,20 +2906,26 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([41u8; 32]);
 
         let mut homes = HomesState::new();
-        homes.add_home(HomeState::new(
-            ChannelId::from_bytes([42u8; 32]),
-            Some("home-a".to_string()),
-            own_authority,
-            0,
-            context_id,
-        ));
-        homes.add_home(HomeState::new(
-            ChannelId::from_bytes([43u8; 32]),
-            Some("home-b".to_string()),
-            own_authority,
-            0,
-            context_id,
-        ));
+        add_fixture_home(
+            &mut homes,
+            HomeState::new(
+                ChannelId::from_bytes([42u8; 32]),
+                Some("home-a".to_string()),
+                own_authority,
+                0,
+                context_id,
+            ),
+        );
+        add_fixture_home(
+            &mut homes,
+            HomeState::new(
+                ChannelId::from_bytes([43u8; 32]),
+                Some("home-b".to_string()),
+                own_authority,
+                0,
+                context_id,
+            ),
+        );
         reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
 
         let allowed = view
@@ -2698,6 +3124,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn home_join_before_creation_is_replayed_once_and_bound_to_home_and_context() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own = AuthorityId::new_from_entropy([81u8; 32]);
+        let creator = AuthorityId::new_from_entropy([82u8; 32]);
+        let member = AuthorityId::new_from_entropy([83u8; 32]);
+        let context = ContextId::new_from_entropy([84u8; 32]);
+        let wrong_context = ContextId::new_from_entropy([85u8; 32]);
+        let home_id = aura_social::HomeId::from_bytes([86u8; 32]);
+        let other_home_id = aura_social::HomeId::from_bytes([87u8; 32]);
+        let view = HomeSignalView::new(own, reactive.clone());
+
+        let joined = SocialFact::member_joined_ms(member, home_id, context, 20, "Member".into())
+            .to_generic();
+        let wrong_home = SocialFact::member_joined_ms(
+            AuthorityId::new_from_entropy([88u8; 32]),
+            other_home_id,
+            context,
+            21,
+            "Other".into(),
+        )
+        .to_generic();
+        let wrong_context_join = SocialFact::member_joined_ms(
+            AuthorityId::new_from_entropy([89u8; 32]),
+            home_id,
+            wrong_context,
+            22,
+            "Wrong".into(),
+        )
+        .to_generic();
+        view.update(&[
+            fact_from_relational(joined.clone()),
+            fact_from_relational(wrong_home.clone()),
+            fact_from_relational(wrong_context_join.clone()),
+        ])
+        .await;
+        assert!(reactive.read(&*HOMES_SIGNAL).await.unwrap().is_empty());
+
+        let created =
+            SocialFact::home_created_ms(home_id, context, 10, creator, "Den".into()).to_generic();
+        view.update(&[fact_from_relational(created.clone())]).await;
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes([86u8; 32]))
+            .unwrap();
+        assert_eq!(home.member_count, 2);
+        assert_eq!(home.members.len(), 2);
+        assert_eq!(home.online_count, 0);
+        assert_eq!(home.my_role, HomeRole::Participant);
+        assert!(home.member(&member).is_some());
+        assert!(home
+            .member(&AuthorityId::new_from_entropy([88u8; 32]))
+            .is_none());
+        assert!(home
+            .member(&AuthorityId::new_from_entropy([89u8; 32]))
+            .is_none());
+
+        // Duplicate delivery does not inflate counts.
+        view.update(&[fact_from_relational(joined.clone())]).await;
+        let restarted_reactive = ReactiveHandler::new();
+        register_app_signals(&restarted_reactive).await.unwrap();
+        let restarted = HomeSignalView::new(own, restarted_reactive.clone());
+        restarted
+            .update(&[
+                fact_from_relational(joined),
+                fact_from_relational(wrong_home),
+                fact_from_relational(wrong_context_join),
+                fact_from_relational(created),
+            ])
+            .await;
+        let home = restarted_reactive
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap()
+            .home_state(&ChannelId::from_bytes([86u8; 32]))
+            .unwrap()
+            .clone();
+        assert_eq!(home.member_count, 2);
+        assert_eq!(home.members.len(), 2);
+    }
+
+    #[tokio::test]
     async fn chat_signal_view_ignores_membership_join_without_canonical_channel_metadata() {
         let reactive = ReactiveHandler::new();
         register_app_signals(&reactive).await.unwrap();
@@ -2729,6 +3237,77 @@ mod tests {
             chat.channel(&channel_id).is_none(),
             "membership-only facts must not fabricate channel projection without canonical metadata"
         );
+    }
+
+    #[tokio::test]
+    async fn chat_signal_view_stages_named_update_until_creation_and_keeps_newer_metadata() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own = AuthorityId::new_from_entropy([111u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own)
+                .unwrap(),
+        );
+        let view = ChatSignalView::new(own, reactive.clone(), effects);
+        let context = ContextId::new_from_entropy([112u8; 32]);
+        let channel_id = ChannelId::from_bytes([113u8; 32]);
+        let update = ChatFact::channel_updated_ms(
+            context,
+            channel_id,
+            Some("current".to_string()),
+            Some("topic".to_string()),
+            Some(3),
+            None,
+            30,
+            own,
+        )
+        .to_generic();
+        let creation = ChatFact::channel_created_ms(
+            context,
+            channel_id,
+            "initial".to_string(),
+            None,
+            false,
+            10,
+            own,
+        )
+        .to_generic();
+
+        view.update(&[fact_from_relational(update.clone())]).await;
+        assert!(reactive
+            .read(&*CHAT_SIGNAL)
+            .await
+            .unwrap()
+            .channel(&channel_id)
+            .is_none());
+
+        view.update(&[fact_from_relational(creation.clone())]).await;
+        let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
+        let channel = chat
+            .channel(&channel_id)
+            .expect("creation fact materializes channel");
+        assert_eq!(channel.name, "current");
+        assert_eq!(channel.topic.as_deref(), Some("topic"));
+        assert_eq!(channel.member_count, 3);
+
+        let restarted = ChatSignalView::new(
+            own,
+            reactive.clone(),
+            Arc::new(
+                AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own)
+                    .unwrap(),
+            ),
+        );
+        restarted
+            .update(&[fact_from_relational(update), fact_from_relational(creation)])
+            .await;
+        let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
+        let channel = chat.channel(&channel_id).unwrap();
+        assert_eq!(
+            channel.name, "current",
+            "duplicate replay must not reset later metadata"
+        );
+        assert_eq!(chat.channel_count(), 1);
     }
 
     #[tokio::test]
@@ -3006,7 +3585,88 @@ mod tests {
             contacts
                 .contact(&inbound_peer)
                 .map(|contact| contact.relationship_state),
-            Some(ContactRelationshipState::PendingInbound)
+            None,
+            "friendship evidence must not create a contact without ContactFact::Added"
         );
+
+        let inbound_added = ContactFact::Added {
+            context_id: contact_context,
+            owner_id: own_authority,
+            contact_id: inbound_peer,
+            nickname: "Inbound peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 15,
+                uncertainty: None,
+            },
+            invitation_code: None,
+        }
+        .to_generic();
+        view.update(&[fact_from_relational(inbound_added)]).await;
+        let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+        assert_eq!(
+            contacts
+                .contact(&inbound_peer)
+                .map(|contact| contact.relationship_state),
+            Some(ContactRelationshipState::PendingInbound),
+            "canonical contact creation applies previously observed friendship state"
+        );
+    }
+
+    #[tokio::test]
+    async fn replayed_friendship_waits_for_contact_creation_after_restart() {
+        let own = AuthorityId::new_from_entropy([0x61; 32]);
+        let peer = AuthorityId::new_from_entropy([0x62; 32]);
+        let context = ContextId::new_from_entropy([0x63; 32]);
+        let at = PhysicalTime {
+            ts_ms: 10,
+            uncertainty: None,
+        };
+        let friendship = fact_from_relational(
+            FriendshipFact::Accepted {
+                context_id: context,
+                requester: own,
+                accepter: peer,
+                accepted_at: at.clone(),
+            }
+            .to_generic(),
+        );
+        let added = fact_from_relational(
+            ContactFact::Added {
+                context_id: context,
+                owner_id: own,
+                contact_id: peer,
+                nickname: "Peer".to_string(),
+                added_at: at,
+                invitation_code: None,
+            }
+            .to_generic(),
+        );
+
+        for replay in [false, true] {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let view = ContactsSignalView::new(own, reactive.clone());
+            view.update(std::slice::from_ref(&friendship)).await;
+            assert!(reactive
+                .read(&*CONTACTS_SIGNAL)
+                .await
+                .unwrap()
+                .contact(&peer)
+                .is_none());
+            view.update(std::slice::from_ref(&added)).await;
+            let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+            assert_eq!(
+                contacts
+                    .contact(&peer)
+                    .map(|contact| contact.relationship_state),
+                Some(ContactRelationshipState::Friend),
+                "friendship should enrich the canonical contact after {}",
+                if replay {
+                    "restart replay"
+                } else {
+                    "out-of-order delivery"
+                }
+            );
+        }
     }
 }

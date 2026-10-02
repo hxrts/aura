@@ -90,6 +90,8 @@ Summary:
   explicit transparent debug surface and do not transfer ownership of adaptive
   policy or path selection away from the runtime-owned services.
 - Contacts/friend projections derive `ContactRelationshipState` from relational facts inside `aura-agent`; frontend shells consume the emitted projection and do not keep separate friendship state machines.
+- Runtime home projection creates a canonical home only from a `HomeCreationWitness` derived through `ProjectionOwner` from `SocialFact::HomeCreated`. The invitee first verifies its AMP checkpoint and local join, commits the creation fact, then binds that fact to opaque joined-home evidence before projecting. Accepted invitation evidence on the inviter only enriches an existing home; `MemberJoined` and moderation facts cannot create one. The home reducer buffers early membership, binds joins to both home ID and context, deduplicates replay, and counts only materialized members; a remote creator is not the local online member. The witness proves fact shape; journal ingestion and the invitation workflow own commitment/authenticity upstream.
+- Runtime invitation projection creates rows only from `InvitationCreationWitness` supplied by a validated imported cache record or `InvitationFact::Sent`; status-only facts update existing rows but cannot fabricate one. Runtime contact projection creates rows only from `ContactAddedWitness` supplied by `ContactFact::Added`; friendship and guardian facts enrich established contacts, with early friendship state buffered until creation arrives.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.
 
@@ -298,6 +300,16 @@ canonical channel or invitation metadata from weaker facts such as membership
 events or raw identifiers. If runtime acceptance or reconciliation needs to
 materialize canonical metadata, one explicit owned handler path must do that
 end to end before reactive views are allowed to enrich the projection.
+`ChatSignalView` stages pre-creation `ChannelUpdated` metadata without exposing
+a channel. It consumes `CanonicalChannelCreation` from `ChannelCreated`, replays
+staged updates in timestamp order, and keeps later duplicate creation from
+resetting metadata. Runtime channel-name lookup likewise requires a matching
+creation fact before an update-derived name can identify a channel.
+The runtime bridge can recover a `CanonicalChannelCreation` for a joined
+channel only from a committed `ChannelCreated` fact matching both the channel
+and authoritative context; AMP membership and name hints are not creation
+evidence. This closes the gap when the join result reaches the app before
+reactive signal delivery.
 The runtime's reactive views and invitation materializers publish through
 `aura-app::projection_owner::ProjectionOwner`, which serializes each signal
 commit and assigns a source revision. Pure materializer deltas update the

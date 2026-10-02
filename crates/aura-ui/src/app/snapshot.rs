@@ -279,8 +279,14 @@ mod projection_source_tests {
     use super::*;
     use crate::app::runtime_views::load_neighborhood_runtime_view;
     use crate::MemoryClipboard;
-    use aura_app::{ui::workflows::context, AppConfig, AppCore, ProjectionSlot};
-    use aura_core::AuthorityId;
+    use aura_app::{
+        ui::{
+            types::{HomeState, HomesState},
+            workflows::context,
+        },
+        AppConfig, AppCore, ProjectionSlot,
+    };
+    use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::{Arc, OnceLock};
 
     #[test]
@@ -292,17 +298,37 @@ mod projection_source_tests {
             AppCore::init_signals_with_hooks(&app_core)
                 .await
                 .expect("register app signals");
-            let home_id = context::initialize_test_home(
-                &app_core,
-                "Revision home",
+            let home_id = ChannelId::from_bytes([80u8; 32]);
+            let home = HomeState::new(
+                home_id,
+                Some("Revision home".to_string()),
                 AuthorityId::new_from_entropy([81u8; 32]),
                 1,
-            )
-            .await
-            .expect("publish home through app projection owner");
+                ContextId::new_from_entropy([82u8; 32]),
+            );
+            // Build a detached query-style fixture without exposing raw home
+            // insertion to production callers.
+            let mut serialized = serde_json::to_value(HomesState::new()).unwrap();
+            serialized["homes"]
+                .as_object_mut()
+                .unwrap()
+                .insert(home_id.to_string(), serde_json::to_value(home).unwrap());
+            let fixture: HomesState = serde_json::from_value(serialized).unwrap();
+            let owner = app_core.read().await.projection_owner();
+            owner
+                .update(ProjectionSlot::homes(), move |homes| {
+                    *homes = fixture;
+                    Ok::<_, ()>(())
+                })
+                .await
+                .expect("publish home through app projection owner")
+                .expect("fixture update is infallible");
             context::add_home_to_neighborhood(&app_core, &home_id.to_string())
                 .await
                 .expect("materialize the home in the neighborhood projection");
+            context::move_position(&app_core, &home_id.to_string(), "full")
+                .await
+                .expect("mirror the home revision into the app snapshot");
             let graph_revision = app_core
                 .read()
                 .await

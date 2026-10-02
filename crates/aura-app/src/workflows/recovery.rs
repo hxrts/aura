@@ -3,7 +3,6 @@
 //! This module contains guardian recovery operations that are portable
 //! across all frontends. Uses typed reactive signals for state reads/writes.
 
-use crate::views::contacts::{Contact, ContactRelationshipState, ReadReceiptPolicy};
 use crate::workflows::ceremonies::{
     CeremonyLifecycle, CeremonyLifecycleState, CeremonyPollPolicy, CeremonyStatusLike,
 };
@@ -11,7 +10,7 @@ use crate::workflows::observed_projection::{
     try_update_recovery_projection_observed, update_contacts_projection_observed,
     update_recovery_projection_observed,
 };
-use crate::workflows::observed_snapshot::observed_recovery_snapshot;
+use crate::workflows::observed_snapshot::{observed_contacts_snapshot, observed_recovery_snapshot};
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::workflows::time::current_time_ms;
@@ -204,6 +203,15 @@ pub async fn toggle_guardian_contact(
     timestamp_ms: u64,
 ) -> Result<bool, AuraError> {
     let contact = parse_authority_id(contact_id)?;
+    // OWNERSHIP: observed. Require an already materialized contact before a
+    // guardian action can proceed; this read does not create contact state.
+    if observed_contacts_snapshot(app_core)
+        .await
+        .contact(&contact)
+        .is_none()
+    {
+        return Err(AuraError::not_found("guardian contact is not materialized"));
+    }
     let was_guardian = get_recovery_status(app_core).await?.has_guardian(&contact);
 
     if !was_guardian {
@@ -259,25 +267,13 @@ pub async fn toggle_guardian_contact(
     .await?;
 
     // OWNERSHIP: observed-display-update
-    update_contacts_projection_observed(app_core, |state| {
-        if let Some(existing) = state.contact_mut(&contact) {
-            existing.is_guardian = !was_guardian;
-        } else {
-            state.apply_contact(Contact {
-                id: contact,
-                nickname: String::new(),
-                nickname_suggestion: None,
-                is_guardian: !was_guardian,
-                is_member: false,
-                last_interaction: Some(timestamp_ms),
-                is_online: false,
-                read_receipt_policy: ReadReceiptPolicy::default(),
-                relationship_state: ContactRelationshipState::Contact,
-                invitation_code: None,
-            });
-        }
+    let updated = update_contacts_projection_observed(app_core, |state| {
+        state.update_contact(&contact, |existing| existing.is_guardian = !was_guardian)
     })
     .await?;
+    if !updated {
+        return Err(AuraError::not_found("guardian contact is not materialized"));
+    }
 
     Ok(!was_guardian)
 }
@@ -483,6 +479,18 @@ mod tests {
         let status = get_recovery_status(&app_core).await.unwrap();
         assert!(status.active_recovery().is_none());
         assert_eq!(status.guardian_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn toggle_guardian_requires_materialized_contact() {
+        let app_core = crate::testing::default_test_app_core();
+        let peer = AuthorityId::new_from_entropy([0x72; 32]);
+        let result = toggle_guardian_contact(&app_core, &peer.to_string(), 1).await;
+        assert!(matches!(result, Err(AuraError::NotFound { .. })));
+        assert!(observed_contacts_snapshot(&app_core)
+            .await
+            .contact(&peer)
+            .is_none());
     }
 
     #[tokio::test]

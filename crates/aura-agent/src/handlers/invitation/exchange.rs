@@ -222,7 +222,6 @@ impl InvitationHandler {
                             ..
                         } = &invitation.invitation_type
                         {
-                            let reactive = effects.reactive_handler();
                             let now_ms =
                                 Self::best_effort_current_timestamp_ms(effects.as_ref()).await;
                             let home_name = require_channel_invitation_name(
@@ -239,14 +238,17 @@ impl InvitationHandler {
                             )
                             .await?;
                             if *home {
+                                let evidence =
+                                    app_signal_views::AcceptedHomeEvidence::from_exchange_response(
+                                        invitation,
+                                        &response.0,
+                                        &home_name,
+                                        now_ms,
+                                    )
+                                    .map_err(AgentError::runtime)?;
                                 app_signal_views::materialize_home_signal_for_channel_acceptance(
-                                    &reactive,
-                                    *home_id,
-                                    &home_name,
-                                    invitation.sender_id,
-                                    invitation.receiver_id,
-                                    invitation.context_id,
-                                    now_ms,
+                                    effects.as_ref(),
+                                    evidence,
                                 )
                                 .await
                                 .map_err(AgentError::runtime)?;

@@ -1,13 +1,42 @@
 #![allow(missing_docs)]
 
 use super::delivery::MessageDeliveryStatus;
-use super::models::{Channel, Message};
+use super::models::{Channel, ChannelType, Message};
 use super::serde_support::channel_id_keyed_map;
-use aura_core::types::identifiers::ChannelId;
+use aura_chat::view::CanonicalChannelCreation;
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+/// A metadata update that may be held until its channel creation fact arrives.
+#[derive(Debug, Clone)]
+pub struct ChannelProjectionUpdate {
+    pub context_id: Option<ContextId>,
+    pub name: Option<String>,
+    pub topic: Option<String>,
+    pub member_count: Option<u32>,
+    pub member_ids: Option<Vec<AuthorityId>>,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ChannelUpdateClocks {
+    name: u64,
+    topic: u64,
+    member_count: u64,
+    member_ids: u64,
+}
 
 /// Chat state.
+///
+/// Observed callers cannot insert a channel from raw metadata. Production
+/// materialization requires `CanonicalChannelCreation`.
+///
+/// ```compile_fail
+/// use aura_app::views::chat::{Channel, ChatState};
+/// let mut chat = ChatState::new();
+/// chat.add_channel(Channel::default());
+/// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
@@ -23,6 +52,13 @@ pub struct ChatState {
     pub loading_more: bool,
     /// Whether there are more messages to load (per-channel state managed by caller).
     pub has_more: bool,
+    /// Internal provenance is reconstructed from journal replay after restart.
+    #[serde(skip)]
+    canonical_channels: HashSet<ChannelId>,
+    #[serde(skip)]
+    pending_channel_updates: HashMap<ChannelId, Vec<ChannelProjectionUpdate>>,
+    #[serde(skip)]
+    channel_update_clocks: HashMap<ChannelId, ChannelUpdateClocks>,
 }
 
 impl ChatState {
@@ -53,6 +89,16 @@ impl ChatState {
     #[must_use]
     pub fn has_channel(&self, id: &ChannelId) -> bool {
         self.channels.contains_key(id)
+    }
+
+    /// Whether this channel was established from canonical creation evidence.
+    #[must_use]
+    pub fn has_canonical_channel(&self, id: &ChannelId, context_id: ContextId) -> bool {
+        self.canonical_channels.contains(id)
+            && self
+                .channels
+                .get(id)
+                .is_some_and(|channel| channel.context_id == Some(context_id))
     }
 
     pub fn all_channels(&self) -> impl Iterator<Item = &Channel> {
@@ -93,14 +139,147 @@ impl ChatState {
         self.channel_messages.values().map(|v| v.len()).sum()
     }
 
+    #[cfg(test)]
     pub fn add_channel(&mut self, channel: Channel) {
         self.channels.entry(channel.id).or_insert(channel);
     }
 
+    #[cfg(test)]
     pub fn upsert_channel(&mut self, channel: Channel) {
         self.channels.insert(channel.id, channel);
     }
 
+    /// Materialize a channel only after a caller has consumed creation evidence.
+    /// Duplicate creation replay does not reset later metadata updates.
+    pub fn materialize_canonical_channel(
+        &mut self,
+        creation: CanonicalChannelCreation,
+        local_authority: Option<AuthorityId>,
+    ) -> bool {
+        let channel_id = creation.channel_id();
+        if !self.canonical_channels.insert(channel_id) {
+            return false;
+        }
+        let is_dm = creation.is_dm();
+        let creator = creation.creator_id();
+        let mut member_ids = Vec::new();
+        if let Some(local_authority) = local_authority {
+            if is_dm {
+                member_ids.push(local_authority);
+            }
+            if creator != local_authority {
+                member_ids.push(creator);
+            }
+        }
+        let member_count = if is_dm {
+            member_ids.len().max(2) as u32
+        } else if member_ids.is_empty() {
+            creation.member_count()
+        } else {
+            member_ids.len().saturating_add(1) as u32
+        };
+        let mut channel = Channel {
+            id: channel_id,
+            context_id: Some(creation.context_id()),
+            name: creation.name().to_string(),
+            topic: creation.topic().map(str::to_string),
+            channel_type: if is_dm {
+                ChannelType::DirectMessage
+            } else {
+                ChannelType::Home
+            },
+            unread_count: 0,
+            is_dm,
+            member_ids,
+            member_count,
+            last_message: None,
+            last_message_time: None,
+            last_activity: creation.created_at(),
+            last_finalized_epoch: 0,
+        };
+        if let Some(previous) = self.channels.get(&channel_id) {
+            channel.unread_count = previous.unread_count;
+            channel.last_message = previous.last_message.clone();
+            channel.last_message_time = previous.last_message_time;
+            channel.last_finalized_epoch = previous.last_finalized_epoch;
+        }
+        if let Some(last_message) = self
+            .channel_messages
+            .get(&channel_id)
+            .and_then(|messages| messages.last())
+        {
+            if channel
+                .last_message_time
+                .is_none_or(|time| last_message.timestamp >= time)
+            {
+                channel.last_message = Some(last_message.content.clone());
+                channel.last_message_time = Some(last_message.timestamp);
+                channel.last_activity = channel.last_activity.max(last_message.timestamp);
+            }
+        }
+        self.channels.insert(channel_id, channel);
+        if let Some(mut pending) = self.pending_channel_updates.remove(&channel_id) {
+            pending.sort_by_key(|update| update.updated_at);
+            for update in pending {
+                self.apply_or_stage_channel_update(channel_id, update);
+            }
+        }
+        true
+    }
+
+    /// Enrich an established channel or stage a pre-creation update without
+    /// exposing a phantom channel to observers.
+    pub fn apply_or_stage_channel_update(
+        &mut self,
+        channel_id: ChannelId,
+        update: ChannelProjectionUpdate,
+    ) -> bool {
+        if !self.canonical_channels.contains(&channel_id) {
+            self.pending_channel_updates
+                .entry(channel_id)
+                .or_default()
+                .push(update);
+            return false;
+        }
+        let Some(channel) = self.channels.get_mut(&channel_id) else {
+            return false;
+        };
+        if update
+            .context_id
+            .is_some_and(|context| channel.context_id != Some(context))
+        {
+            return false;
+        }
+        let clocks = self.channel_update_clocks.entry(channel_id).or_default();
+        if let Some(name) = update.name {
+            if update.updated_at >= clocks.name {
+                channel.name = name;
+                clocks.name = update.updated_at;
+            }
+        }
+        if let Some(topic) = update.topic {
+            if update.updated_at >= clocks.topic {
+                channel.topic = Some(topic);
+                clocks.topic = update.updated_at;
+            }
+        }
+        if let Some(member_count) = update.member_count {
+            if update.updated_at >= clocks.member_count {
+                channel.member_count = member_count;
+                clocks.member_count = update.updated_at;
+            }
+        }
+        if let Some(member_ids) = update.member_ids {
+            if update.updated_at >= clocks.member_ids {
+                channel.member_ids = member_ids;
+                clocks.member_ids = update.updated_at;
+            }
+        }
+        channel.last_activity = channel.last_activity.max(update.updated_at);
+        true
+    }
+
+    #[cfg(test)]
     pub fn rebind_channel_identity(&mut self, from: &ChannelId, mut canonical: Channel) {
         let canonical_id = canonical.id;
         if *from == canonical.id {
@@ -147,12 +326,18 @@ impl ChatState {
 
     pub fn remove_channel(&mut self, channel_id: &ChannelId) -> Option<Channel> {
         self.channel_messages.remove(channel_id);
+        self.canonical_channels.remove(channel_id);
+        self.pending_channel_updates.remove(channel_id);
+        self.channel_update_clocks.remove(channel_id);
         self.channels.remove(channel_id)
     }
 
     pub fn clear(&mut self) {
         self.channels.clear();
         self.channel_messages.clear();
+        self.canonical_channels.clear();
+        self.pending_channel_updates.clear();
+        self.channel_update_clocks.clear();
         self.total_unread = 0;
     }
 
@@ -341,6 +526,7 @@ impl ChatState {
     }
 }
 
+#[cfg(test)]
 fn merge_channel_projection(canonical: &mut Channel, previous: Channel) {
     if canonical.context_id.is_none() {
         canonical.context_id = previous.context_id;

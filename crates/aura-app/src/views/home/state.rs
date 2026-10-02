@@ -2,8 +2,10 @@
 
 use super::members::{HomeMember, HomeRole};
 use super::moderation::{BanRecord, KickRecord, MuteRecord, PinnedMessageMeta};
+use super::serde_support::{authority_id_keyed_map, channel_id_keyed_map};
 use crate::workflows::budget::HomeFlowBudget;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
+use aura_social::SocialFact;
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -25,13 +27,13 @@ pub struct HomeState {
     #[serde(default)]
     pub pinned_metadata: HashMap<String, PinnedMessageMeta>,
     pub mode_flags: Option<String>,
-    #[serde(default)]
+    #[serde(with = "authority_id_keyed_map", default)]
     pub access_overrides: HashMap<AuthorityId, AccessLevel>,
     #[serde(default)]
     pub access_level_capabilities: Option<AccessLevelCapabilityConfig>,
-    #[serde(default)]
+    #[serde(with = "authority_id_keyed_map", default)]
     pub ban_list: HashMap<AuthorityId, BanRecord>,
-    #[serde(default)]
+    #[serde(with = "authority_id_keyed_map", default)]
     pub mute_list: HashMap<AuthorityId, MuteRecord>,
     #[serde(default)]
     pub kick_log: Vec<KickRecord>,
@@ -226,6 +228,39 @@ pub struct AddHomeResult {
     pub was_first: bool,
 }
 
+/// Creation fields extracted from a canonical `HomeCreated` fact. Membership
+/// and moderation facts cannot construct this witness.
+pub struct HomeCreationWitness {
+    id: ChannelId,
+    context_id: ContextId,
+    creator_id: AuthorityId,
+    created_at: u64,
+    name: String,
+}
+
+impl HomeCreationWitness {
+    pub(crate) fn from_created_fact(fact: &SocialFact) -> Option<Self> {
+        let SocialFact::HomeCreated {
+            home_id,
+            context_id,
+            creator_id,
+            created_at,
+            name,
+            ..
+        } = fact
+        else {
+            return None;
+        };
+        Some(Self {
+            id: ChannelId::from_bytes(*home_id.as_bytes()),
+            context_id: *context_id,
+            creator_id: *creator_id,
+            created_at: created_at.ts_ms,
+            name: name.clone(),
+        })
+    }
+}
+
 /// Result returned when removing a home.
 #[derive(Debug, Clone)]
 pub struct RemoveHomeResult {
@@ -237,7 +272,7 @@ pub struct RemoveHomeResult {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct HomesState {
-    #[serde(default)]
+    #[serde(with = "channel_id_keyed_map", default)]
     homes: HashMap<ChannelId, HomeState>,
     current_home_id: Option<ChannelId>,
 }
@@ -247,7 +282,9 @@ impl HomesState {
         Self::default()
     }
 
-    pub fn from_parts(
+    /// Hydrate a trusted query result. Canonical insertion is owned by the
+    /// home workflow or runtime fact materializer, not external observers.
+    pub(crate) fn from_parts(
         homes: HashMap<ChannelId, HomeState>,
         current_home_id: Option<ChannelId>,
     ) -> Self {
@@ -321,11 +358,42 @@ impl HomesState {
     }
 
     /// Add a home without implicitly changing current selection.
-    pub fn add_home(&mut self, home_state: HomeState) -> AddHomeResult {
+    pub(crate) fn add_home(&mut self, home_state: HomeState) -> AddHomeResult {
         let was_first = self.homes.is_empty();
         let home_id = home_state.id;
         self.homes.insert(home_id, home_state);
         AddHomeResult { home_id, was_first }
+    }
+
+    /// Materialize a canonical home from its creation fact. Subsequent facts
+    /// may enrich this entry but cannot create another entry by raw ID.
+    pub fn materialize_created_home(
+        &mut self,
+        witness: HomeCreationWitness,
+        own_authority: AuthorityId,
+    ) -> AddHomeResult {
+        if self.has_home(&witness.id) {
+            return AddHomeResult {
+                home_id: witness.id,
+                was_first: false,
+            };
+        }
+        let mut home = HomeState::new(
+            witness.id,
+            Some(witness.name),
+            witness.creator_id,
+            witness.created_at,
+            witness.context_id,
+        );
+        if own_authority != witness.creator_id {
+            if let Some(creator) = home.member_mut(&witness.creator_id) {
+                creator.name = witness.creator_id.to_string();
+                creator.is_online = false;
+            }
+            home.online_count = 0;
+            home.my_role = HomeRole::Participant;
+        }
+        self.add_home(home)
     }
 
     /// Remove a home and clear selection if the removed home was selected.

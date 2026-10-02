@@ -875,24 +875,6 @@ async fn send_message_ref_owned(
         .await?;
     } else {
         update_chat_projection_observed(app_core, |chat_state| {
-            if !chat_state.has_channel(&channel_id) {
-                chat_state.add_channel(Channel {
-                    id: channel_id,
-                    context_id: channel_context,
-                    name: channel_label.clone(),
-                    topic: None,
-                    channel_type: ChannelType::Home,
-                    unread_count: 0,
-                    is_dm: false,
-                    member_ids: Vec::new(),
-                    member_count: 1,
-                    last_message: None,
-                    last_message_time: None,
-                    last_activity: timestamp_ms,
-                    last_finalized_epoch: 0,
-                });
-            }
-
             chat_state.apply_message(
                 channel_id,
                 Message {
@@ -1171,30 +1153,42 @@ pub async fn start_direct_chat_with_authority(
     }
 
     let channel_id = dm_channel_id(&contact_id);
-    let now = timestamp_ms;
-    let dm_channel = Channel {
-        id: channel_id,
-        context_id: None,
-        name: if contact_name.trim().is_empty() {
-            format!("dm-{}", &contact_id[..8.min(contact_id.len())])
-        } else {
-            format!("DM: {contact_name}")
-        },
-        topic: Some(format!("Direct messages with {contact_id}")),
-        channel_type: ChannelType::DirectMessage,
-        unread_count: 0,
-        is_dm: true,
-        member_ids: vec![contact_authority],
-        member_count: 2,
-        last_message: None,
-        last_message_time: None,
-        last_activity: now,
-        last_finalized_epoch: 0,
+    let local_context =
+        ContextId::new_from_entropy(hash(format!("local-dm-context:{channel_id}").as_bytes()));
+    let local_owner = { app_core.read().await.authority().cloned() }.unwrap_or_else(|| {
+        AuthorityId::new_from_entropy(hash(format!("local-dm-owner:{channel_id}").as_bytes()))
+    });
+    let name = if contact_name.trim().is_empty() {
+        format!("dm-{}", &contact_id[..8.min(contact_id.len())])
+    } else {
+        format!("DM: {contact_name}")
     };
-
-    update_chat_projection_observed(app_core, |chat_state| {
-        chat_state.add_channel(dm_channel);
-    })
+    reduce_chat_fact_observed(
+        app_core,
+        &ChatFact::channel_created_ms(
+            local_context,
+            channel_id,
+            name,
+            Some(format!("Direct messages with {contact_id}")),
+            true,
+            timestamp_ms,
+            local_owner,
+        ),
+    )
+    .await?;
+    reduce_chat_fact_observed(
+        app_core,
+        &ChatFact::channel_updated_ms(
+            local_context,
+            channel_id,
+            None,
+            None,
+            Some(2),
+            Some(vec![contact_authority]),
+            timestamp_ms,
+            local_owner,
+        ),
+    )
     .await?;
 
     Ok(channel_id)

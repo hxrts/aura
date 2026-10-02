@@ -1,0 +1,10 @@
+error[E0624]: method `add_home` is private
+  --> tests/ui/raw_home_insertion_private.rs:13:19
+   |
+13 |     let _ = homes.add_home(raw);
+   |                   ^^^^^^^^ private method
+   |
+  ::: src/views/home/state.rs
+   |
+   |     pub(crate) fn add_home(&mut self, home_state: HomeState) -> AddHomeResult {
+   |     ------------------------------------------------------------------------- private method defined here

@@ -1029,7 +1029,9 @@ mod tests {
 
         // Should produce 2 deltas (channel and message)
         assert_eq!(deltas.len(), 2);
-        assert!(matches!(&deltas[0], ChatDelta::ChannelAdded { name, .. } if name == "general"));
+        assert!(
+            matches!(&deltas[0], ChatDelta::ChannelAdded(creation) if creation.name() == "general")
+        );
         assert!(
             matches!(&deltas[1], ChatDelta::MessageAdded { content, .. } if content == "<sealed message>")
         );

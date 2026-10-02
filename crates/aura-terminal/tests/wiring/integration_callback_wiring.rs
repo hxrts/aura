@@ -37,8 +37,8 @@
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::views::{
-    Contact as ViewContact, Message, MessageDeliveryStatus, ReadReceiptPolicy, RecoveryProcess,
-    RecoveryProcessStatus,
+    Contact as ViewContact, ContactsState, Message, MessageDeliveryStatus, ReadReceiptPolicy,
+    RecoveryProcess, RecoveryProcessStatus,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId};
@@ -364,20 +364,21 @@ async fn test_contacts_signal_contact_tracking() {
     let contact_alice_id = AuthorityId::new_from_entropy([0xCA; 32]);
     {
         let core = app_core.read().await;
-        let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
+        let previous = core.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-        contacts.apply_contact(ViewContact {
-            id: contact_alice_id.clone(),
-            nickname: "Alice (Friend)".to_string(),
-            nickname_suggestion: Some("Alice".to_string()),
-            is_guardian: false,
-            is_member: false,
-            last_interaction: None,
-            is_online: true,
-            read_receipt_policy: ReadReceiptPolicy::default(),
-            relationship_state: aura_app::views::contacts::ContactRelationshipState::Contact,
-            invitation_code: None,
-        });
+        let contacts =
+            ContactsState::from_contacts(previous.all_contacts().cloned().chain([ViewContact {
+                id: contact_alice_id.clone(),
+                nickname: "Alice (Friend)".to_string(),
+                nickname_suggestion: Some("Alice".to_string()),
+                is_guardian: false,
+                is_member: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: ReadReceiptPolicy::default(),
+                relationship_state: aura_app::views::contacts::ContactRelationshipState::Contact,
+                invitation_code: None,
+            }]));
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
         println!("  Emitted contact 'Alice' to signal");

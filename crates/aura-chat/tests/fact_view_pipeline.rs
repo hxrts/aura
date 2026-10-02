@@ -35,9 +35,9 @@ fn channel_creation_produces_view_delta() {
         panic!("expected ChatDelta");
     };
     match chat_delta {
-        ChatDelta::ChannelAdded { name, topic, .. } => {
-            assert_eq!(name, "general");
-            assert_eq!(topic, &Some("General discussion".to_string()));
+        ChatDelta::ChannelAdded(creation) => {
+            assert_eq!(creation.name(), "general");
+            assert_eq!(creation.topic(), Some("General discussion"));
         }
         other => panic!("Expected ChannelAdded, got {other:?}"),
     }

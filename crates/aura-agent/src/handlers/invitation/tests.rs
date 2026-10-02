@@ -17,7 +17,6 @@ use aura_core::types::identifiers::{
     AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
 };
 use aura_core::DeviceId;
-use aura_effects::reactive::ReactiveHandler;
 use aura_invitation::guards::{EffectCommand, GuardOutcome};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
@@ -548,16 +547,31 @@ impl Drop for EnvRestore {
 
 #[tokio::test]
 async fn channel_home_materialization_requires_registered_homes_signal() {
-    let reactive = ReactiveHandler::new();
+    let effects = effects_for(&AuthorityContext::new(AuthorityId::new_from_entropy([2u8; 32])));
+    let invitation = Invitation {
+        invitation_id: InvitationId::new("registered-homes"),
+        context_id: ContextId::new_from_entropy([3u8; 32]),
+        sender_id: AuthorityId::new_from_entropy([2u8; 32]),
+        receiver_id: AuthorityId::new_from_entropy([1u8; 32]),
+        invitation_type: InvitationType::Channel {
+            home_id: canonical_home_id(1),
+            nickname_suggestion: Some("shared-parity-lab".into()),
+            bootstrap: None,
+            home: true,
+        },
+        status: InvitationStatus::Accepted,
+        created_at: 0,
+        expires_at: None,
+        message: None,
+        receiver_nickname: None,
+    };
+    let evidence = app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
+        &invitation, "shared-parity-lab", 0,
+    )
+    .unwrap();
 
-    let error = app_signal_views::materialize_home_signal_for_channel_invitation(
-        &reactive,
-        AuthorityId::new_from_entropy([1u8; 32]),
-        canonical_home_id(1),
-        "shared-parity-lab",
-        AuthorityId::new_from_entropy([2u8; 32]),
-        ContextId::new_from_entropy([3u8; 32]),
-        0,
+    let error = app_signal_views::materialize_home_signal_for_channel_acceptance(
+        effects.as_ref(), evidence,
     )
     .await
     .unwrap_err();
@@ -566,6 +580,56 @@ async fn channel_home_materialization_requires_registered_homes_signal() {
         message.contains("requires registered homes signal"),
         "unexpected error: {message}"
     );
+}
+
+#[tokio::test]
+async fn joined_home_evidence_requires_canonical_checkpoint_and_membership() {
+    let own = AuthorityId::new_from_entropy([11u8; 32]);
+    let effects = effects_for(&AuthorityContext::new(own));
+    let invite = ChannelInviteDetails {
+        context_id: ContextId::new_from_entropy([12u8; 32]),
+        channel_id: canonical_home_id(13),
+        home_name: "Den".into(),
+        sender_id: AuthorityId::new_from_entropy([14u8; 32]),
+        bootstrap: None,
+        home: true,
+    };
+    let error = app_signal_views::VerifiedJoinedHome::verify(effects.as_ref(), &invite, own, 0)
+        .await
+        .err()
+        .expect("an uncommitted channel cannot provide home creation evidence");
+    assert!(error.contains("channel checkpoint"), "{error}");
+}
+
+#[test]
+fn accepted_home_evidence_rejects_pending_and_nonhome_invitations() {
+    let mut invitation = Invitation {
+        invitation_id: InvitationId::new("home-evidence"),
+        context_id: ContextId::new_from_entropy([21u8; 32]),
+        sender_id: AuthorityId::new_from_entropy([22u8; 32]),
+        receiver_id: AuthorityId::new_from_entropy([23u8; 32]),
+        invitation_type: InvitationType::Channel {
+            home_id: canonical_home_id(24),
+            nickname_suggestion: Some("Den".into()),
+            bootstrap: None,
+            home: true,
+        },
+        status: InvitationStatus::Pending,
+        created_at: 0,
+        expires_at: None,
+        message: None,
+        receiver_nickname: None,
+    };
+    assert!(app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
+        &invitation, "Den", 0,
+    )
+    .is_err());
+    invitation.status = InvitationStatus::Accepted;
+    invitation.invitation_type = InvitationType::Contact { nickname: None };
+    assert!(app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
+        &invitation, "Den", 0,
+    )
+    .is_err());
 }
 
 #[tokio::test]
@@ -2663,7 +2727,7 @@ large_stack_async_test!(accepting_channel_invitation_materializes_home_and_chann
             home_id,
             nickname_suggestion: Some("Oak House".to_string()),
             bootstrap: None,
-            home: false,
+            home: true,
         },
         expires_at: None,
         message: Some("Join Oak House".to_string()),
@@ -2979,7 +3043,7 @@ large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when
             home_id,
             nickname_suggestion: Some("Birch House".to_string()),
             bootstrap: None,
-            home: false,
+            home: true,
         },
         expires_at: None,
         message: Some("Join Birch House".to_string()),
@@ -3956,7 +4020,6 @@ async fn production_harness_mode_still_rejects_invalid_sender_proof() {
 
     let authority = create_test_authority(237);
     let effects = production_effects_for(&authority);
-    let handler = handler_for(authority.clone());
     assert!(effects.harness_mode_enabled());
     let (_, public_key) = effects.ed25519_generate_keypair().await.unwrap();
     let shareable = ShareableInvitation {
@@ -3977,24 +4040,35 @@ async fn production_harness_mode_still_rejects_invalid_sender_proof() {
         key_epoch: Some(1),
     };
 
-    let missing = handler
-        .validate_importable_shareable_invitation(&effects, &shareable, None, &transport)
+    let missing_code = shareable.to_code().unwrap();
+    let missing = ValidatedImportedInvitation::verify_code(
+        effects.as_ref(),
+        &missing_code,
+        authority.authority_id(),
+        default_context_id_for_authority(authority.authority_id()),
+        0,
+    )
     .await
-    .unwrap_err();
+    .err()
+    .expect("unsigned code must not mint import evidence");
     assert!(
         missing.to_string().contains("missing sender proof"),
         "unexpected missing-proof error: {missing}"
     );
 
-    let invalid = handler
-        .validate_importable_shareable_invitation(
-            &effects,
-            &shareable,
-            Some(&invalid_proof),
-            &transport,
-        )
+    let invalid_code = shareable
+        .to_signed_code_with_transport(invalid_proof, transport)
+        .unwrap();
+    let invalid = ValidatedImportedInvitation::verify_code(
+        effects.as_ref(),
+        &invalid_code,
+        authority.authority_id(),
+        default_context_id_for_authority(authority.authority_id()),
+        0,
+    )
     .await
-    .unwrap_err();
+    .err()
+    .expect("invalid proof must not mint import evidence");
     assert!(
         invalid.to_string().contains("sender proof is invalid"),
         "unexpected invalid-proof error: {invalid}"
@@ -4008,7 +4082,6 @@ async fn production_sender_proof_validation_is_harness_mode_neutral() {
     std::env::remove_var(harness_mode_env);
 
     let authority = create_test_authority(236);
-    let handler = handler_for(authority.clone());
     let baseline_effects = production_effects_for(&authority);
     let (private_key, public_key) = baseline_effects.ed25519_generate_keypair().await.unwrap();
     let shareable = ShareableInvitation {
@@ -4039,26 +4112,27 @@ async fn production_sender_proof_validation_is_harness_mode_neutral() {
         key_epoch: Some(1),
     };
 
-    handler
-        .validate_importable_shareable_invitation(
-            &baseline_effects,
-            &shareable,
-            Some(&proof),
-            &transport,
-        )
+    let code = shareable.to_signed_code_with_transport(proof, transport).unwrap();
+    ValidatedImportedInvitation::verify_code(
+        baseline_effects.as_ref(),
+        &code,
+        authority.authority_id(),
+        default_context_id_for_authority(authority.authority_id()),
+        0,
+    )
     .await
     .unwrap();
 
     std::env::set_var(harness_mode_env, "1");
     let harness_effects = production_effects_for(&authority);
     assert!(harness_effects.harness_mode_enabled());
-    handler
-        .validate_importable_shareable_invitation(
-            &harness_effects,
-            &shareable,
-            Some(&proof),
-            &transport,
-        )
+    ValidatedImportedInvitation::verify_code(
+        harness_effects.as_ref(),
+        &code,
+        authority.authority_id(),
+        default_context_id_for_authority(authority.authority_id()),
+        0,
+    )
     .await
     .unwrap();
 }

@@ -293,6 +293,22 @@ but it may not create a channel with `channel_id.to_string()` as a fallback
 name. Canonical entity materialization must come from one owned path that
 already carries the authoritative metadata.
 
+The materialization owner exposes a distinct opaque creation witness for each
+entity family. It mints that witness only from a validated creation fact or an
+authenticated completion outcome with the same required metadata. A
+projection's insertion boundary requires the corresponding witness;
+enrichment boundaries require an already-materialized entity and cannot mint
+one. Witness constructors remain private to the materialization owner.
+Out-of-order enrichment is retained for later application only when its entity
+identity and context match the eventual creation evidence. Compile-fail/API
+tests guard the constructor boundary, and permutation/replay tests guard the
+order-independent behavior.
+The app-private `HomeCreationWitness` constructor accepts only `HomeCreated`
+shape through `ProjectionOwner::home_created_witness`. The projection owner
+controls that conversion, while journal commitment remains the responsibility
+of the runtime ingestion path. A plain public fact value does not itself prove
+commitment.
+
 ## Owner Body Rules
 
 Once a function is designated as a semantic owner, its body is constrained more strictly than ordinary async code.
