@@ -13,6 +13,7 @@ use super::EffectCommand;
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
 use aura_app::ui::workflows::runtime as runtime_workflows;
+use aura_core::effects::reactive::ReactiveEffects;
 
 /// Handle network/peer commands
 ///
@@ -102,10 +103,19 @@ pub async fn handle_network(
                 address
             );
 
+            // Name ourselves so the peer's request reads "from <nickname>".
+            let sender_nickname = {
+                let core = app_core.read().await;
+                core.read(&*aura_app::ui::signals::SETTINGS_SIGNAL)
+                    .await
+                    .ok()
+                    .map(|settings| settings.nickname_suggestion.trim().to_string())
+                    .filter(|name| !name.is_empty())
+            };
             let invitation = match aura_app::ui::workflows::invitation::create_contact_invitation(
                 app_core,
                 *authority_id,
-                None,
+                sender_nickname,
                 None,
                 None,
                 None,

@@ -301,7 +301,7 @@ pub(crate) async fn materialize_pending_invitation_signal(
         status: InvitationStatus::Pending,
         direction,
         from_id: sender_id,
-        from_name: "Unknown".to_string(),
+        from_name: app_signal_projection::invitation_sender_name(invitation_type),
         to_id: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
             .then_some(receiver_id),
         to_name: if direction == InvitationDirection::Sent {
@@ -422,7 +422,9 @@ impl ReactiveView for InvitationsSignalView {
                             status: InvitationStatus::Pending,
                             direction,
                             from_id: sender_id,
-                            from_name: "Unknown".to_string(),
+                            from_name: app_signal_projection::invitation_sender_name(
+                                &invitation_type,
+                            ),
                             to_id: (direction == InvitationDirection::Sent
                                 && !is_generic_sent_contact_invitation)
                                 .then_some(receiver_id),

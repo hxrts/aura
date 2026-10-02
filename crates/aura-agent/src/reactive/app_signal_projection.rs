@@ -113,9 +113,34 @@ pub(crate) fn select_moderation_home(
     None
 }
 
+/// Display name of an invitation's sender: the nickname a contact invitation
+/// carries, or "Unknown" when the invitation names no sender.
+pub(crate) fn invitation_sender_name(inv_type: &DomainInvitationType) -> String {
+    match inv_type {
+        DomainInvitationType::Contact {
+            nickname: Some(nickname),
+        } if !nickname.trim().is_empty() => nickname.trim().to_string(),
+        _ => "Unknown".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contact_invitations_name_their_sender() {
+        assert_eq!(
+            invitation_sender_name(&DomainInvitationType::Contact {
+                nickname: Some(" Alex ".to_string())
+            }),
+            "Alex"
+        );
+        assert_eq!(
+            invitation_sender_name(&DomainInvitationType::Contact { nickname: None }),
+            "Unknown"
+        );
+    }
 
     #[test]
     fn invitation_kinds_project_to_distinct_view_types() {
