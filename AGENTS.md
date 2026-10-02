@@ -35,6 +35,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Build | `just build-release` | Build and install the deployable terminal release binary |
 | Build | `just build-workspace-release` | Full workspace release validation |
 | Build | `just e2e-build-terminal`, `just e2e-build-web`, `just e2e-build-harness` | Disk-budgeted LAN rebuilds; run on each host |
+| Build | `scripts/harness/lan/build.sh <lane>` | Tracked LAN host build entry point with optional `AURA_EXPECT_COMMIT` check |
 | Build | `just disk-report`, `just cache-inventory`, `just build-budget-dry-run` | Read-only disk and cache inventory, cleanup preview |
 | Build | `just prune-inactive-lane wasm-debug --apply` | Guarded whole-lane cleanup when that lane is idle |
 | Build | `just check` | Check without building |

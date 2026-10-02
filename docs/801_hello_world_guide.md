@@ -55,6 +55,12 @@ just e2e-build-harness
 just disk-report
 ```
 
+The tracked LAN entry point is `scripts/harness/lan/build.sh`; its lane is
+`terminal`, `terminal-live`, `terminal-dev`, `web`, or `harness`.
+It prints the host and commit before building, enters `nix develop` when
+needed, and accepts `AURA_EXPECT_COMMIT=<full-hash>` to reject a host on a
+different revision. Use its `--dry-run` flag to preview the selected recipe.
+
 Run `just e2e-build-terminal-dev` separately when a test explicitly needs
 the development feature set. Each successful guarded build also saves its
 own disk report under `artifacts/disk-budget/`.
