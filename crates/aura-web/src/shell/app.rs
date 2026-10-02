@@ -141,11 +141,15 @@ pub(crate) fn App() -> Element {
     }
 }
 
+fn onboarding_finished(controller: &aura_ui::UiController) -> bool {
+    let snapshot = controller.semantic_model_snapshot();
+    snapshot.readiness == UiReadiness::Ready && snapshot.screen != ScreenId::Onboarding
+}
+
 #[component]
 fn BootstrappedApp(state: BootstrapState) -> Element {
     let controller = state.controller.clone();
     let rerender = schedule_update();
-    controller.set_rerender_callback(rerender.clone());
     let mut account_name = use_signal(String::new);
     let mut account_error = use_signal(|| Option::<WebUiError>::None);
     let creating_account = use_signal(|| false);
@@ -155,8 +159,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
     let mut auto_import_started = use_signal(|| false);
     let bootstrap_candidates = use_signal(Vec::<BootstrapCandidateInfo>::new);
     let controller_snapshot = controller.semantic_model_snapshot();
-    let controller_account_ready = controller_snapshot.readiness == UiReadiness::Ready
-        && controller_snapshot.screen != ScreenId::Onboarding;
+    let controller_account_ready = onboarding_finished(&controller);
     let account_ready = state.account_ready || controller_account_ready;
     let dual_demo_enabled = dual_demo_web_enabled();
     let demo_tablet_storage_key = demo_tablet_enrollment_code_key(&active_storage_prefix());
@@ -196,16 +199,37 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
             }
         };
     }
+    // The onboarding surface owns controller rerenders only until the account
+    // is ready. Once `AuraUiRoot` mounts, its shell installs its own callback.
+    // Re-installing ours on a later `BootstrappedApp` render would route every
+    // controller-driven rerender (harness keys, page-owned navigation) here,
+    // where the memoized `AuraUiRoot` does not re-render, so the DOM would stay
+    // on the previous screen while the semantic snapshot moved on.
+    controller.set_rerender_callback(rerender.clone());
 
     use_effect({
+        let controller = controller.clone();
         let app_core = controller.app_core().clone();
         move || {
             let mut bootstrap_candidates = bootstrap_candidates;
+            let controller = controller.clone();
             let app_core = app_core.clone();
             shared_web_task_owner().spawn_local(async move {
                 loop {
+                    // Candidates are only listed on the onboarding surface;
+                    // stop once the account is ready instead of polling (and
+                    // re-rendering this component) for the page's lifetime.
+                    if onboarding_finished(&controller) {
+                        break;
+                    }
                     let candidate_result = {
                         let app = app_core.read().await;
+                        // Discovery is runtime-owned and there is no
+                        // agent-free candidate source: without a runtime, stop
+                        // instead of polling a call that can only fail.
+                        if !app.has_runtime() {
+                            break;
+                        }
                         app.get_bootstrap_candidates()
                             .await
                             .map_err(|error| error.to_string())

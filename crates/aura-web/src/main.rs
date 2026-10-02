@@ -910,4 +910,31 @@ mod tests {
             "web onboarding should keep the existing device-enrollment import flow"
         );
     }
+
+    #[test]
+    fn web_onboarding_releases_rerender_ownership_and_stops_candidate_polling() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let app_path = repo_root.join("crates/aura-web/src/shell/app.rs");
+        let source = std::fs::read_to_string(&app_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
+        let body = source
+            .split_once("fn BootstrappedApp(state: BootstrapState) -> Element {")
+            .map(|(_, body)| body)
+            .unwrap_or_else(|| panic!("missing BootstrappedApp"));
+        let ready_return = body
+            .find("AuraUiRoot {")
+            .unwrap_or_else(|| panic!("missing AuraUiRoot handoff"));
+        let install = body
+            .find("controller.set_rerender_callback(")
+            .unwrap_or_else(|| panic!("missing onboarding rerender callback"));
+        assert!(
+            ready_return < install,
+            "the onboarding surface must not re-install its rerender callback once AuraUiRoot owns rendering; otherwise controller-driven navigation leaves the shell DOM on the old screen"
+        );
+        assert!(
+            body.contains("if onboarding_finished(&controller) {")
+                && body.contains("if !app.has_runtime() {"),
+            "onboarding candidate refresh must stop once the account is ready or when no runtime exists"
+        );
+    }
 }

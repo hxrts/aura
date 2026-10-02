@@ -685,6 +685,20 @@ function markObservationMutation(session, reason) {
   session.lastMutationReason = reason;
 }
 
+function captureObservationMutationFloor(session) {
+  return {
+    requiredUiStateRevision: session.requiredUiStateRevision ?? null,
+    requiredUiGeneration: session.requiredUiGeneration ?? null,
+    lastMutationReason: session.lastMutationReason ?? null,
+  };
+}
+
+function restoreObservationMutationFloor(session, floor) {
+  session.requiredUiStateRevision = floor.requiredUiStateRevision;
+  session.requiredUiGeneration = floor.requiredUiGeneration;
+  session.lastMutationReason = floor.lastMutationReason;
+}
+
 function clearObservationMutationIfSatisfied(session, snapshot) {
   const requiredRevision = session.requiredUiStateRevision ?? 0;
   if (
@@ -5221,9 +5235,35 @@ async function dispatch(method: DriverMethod, params: DriverRequest["params"]) {
     instanceId &&
     ACTION_METHODS.has(method) &&
     sessions.has(instanceId);
+  const mutationFloorBeforeAction = shouldMarkActionMutation
+    ? captureObservationMutationFloor(getSession(instanceId))
+    : null;
   if (shouldMarkActionMutation) {
     markObservationMutation(getSession(instanceId), method);
   }
+  try {
+    return await dispatchMethod(method, params, instanceId);
+  } catch (error) {
+    // A failed action (absent/hidden/disabled control, exhausted click
+    // retries) did not mutate the page, so the page never publishes the newer
+    // semantic revision the pre-action floor demands. Leaving that floor in
+    // place makes every later `ui_state` read reject the page's still-valid
+    // snapshot as stale until the browser restarts.
+    if (mutationFloorBeforeAction && sessions.has(instanceId)) {
+      restoreObservationMutationFloor(
+        getSession(instanceId),
+        mutationFloorBeforeAction,
+      );
+    }
+    throw error;
+  }
+}
+
+async function dispatchMethod(
+  method: DriverMethod,
+  params: DriverRequest["params"],
+  instanceId: string | null,
+) {
   let result;
   switch (method) {
     case "start_page":

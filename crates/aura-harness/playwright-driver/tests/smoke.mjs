@@ -93,6 +93,12 @@ const fixtureHtml = `<!doctype html>
           }
         };
 
+        window.__AURA_UI_STATE_JSON__ = JSON.stringify({
+          screen: "contacts",
+          open_modal: null,
+          revision: { semantic_seq: 3, render_seq: 3 }
+        });
+
         window.__AURA_UI_ACTIVE_GENERATION__ = 1;
         window.__AURA_UI_READY_GENERATION__ = 1;
         window.__AURA_UI_GENERATION_PHASE__ = 'ready';
@@ -212,6 +218,21 @@ async function main() {
     const logs = await driver.call('tail_log', { instance_id: 'smoke-a', lines: 5 });
     assert.ok(Array.isArray(logs.lines));
     assert.ok(logs.lines.some((line) => line.includes('keydown:')));
+
+    const before = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(before.screen, 'contacts');
+    // A failed click must not strand structured ui_state behind a revision
+    // floor the page never reaches (Task 23 / F-04).
+    await assert.rejects(
+      driver.call('click_button', {
+        instance_id: 'smoke-a',
+        selector: '#aura-absent-control'
+      }),
+      /click_button failed/
+    );
+    const after = await driver.call('ui_state', { instance_id: 'smoke-a' });
+    assert.equal(after.screen, 'contacts');
+    assert.equal(after.revision.semantic_seq, 3);
 
     const stop = await driver.call('stop', { instance_id: 'smoke-a' });
     assert.equal(stop.status, 'stopped');

@@ -93,6 +93,15 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   page-owned publication path and pushed caches, but navigation/session
   recovery stays on the explicit `recover_ui_state` path rather than being
   folded into ordinary semantic observation reads.
+- Controller rerender ownership has one owner per surface: the onboarding
+  `BootstrappedApp` installs the `UiController` rerender callback only while
+  the account is not ready, and the mounted `AuraUiRoot` shell owns it after.
+  A later outer render must not re-install the onboarding callback, or
+  controller-driven mutations (harness keys, page-owned navigation) publish a
+  new semantic screen while the memoized shell DOM stays on the old one.
+- Onboarding bootstrap-candidate refresh runs only while the account is not
+  ready and a runtime exists; there is no agent-free candidate source, so it
+  stops instead of polling a call that can only fail.
 - Missing or degraded semantic snapshot/render-heartbeat publication must be
   surfaced explicitly through browser-side publication state, not just console
   logging or `null`/default fallbacks.
