@@ -1,13 +1,6 @@
 #![allow(missing_docs)]
 
 use super::*;
-use aura_core::{AttemptBudget, RetryBudgetPolicy};
-
-fn device_enrollment_accept_retry_policy() -> Result<RetryBudgetPolicy, AuraError> {
-    workflow_retry_policy(80, Duration::from_millis(250), Duration::from_millis(500))
-        .map_err(AuraError::from)
-}
-
 enum DeviceEnrollmentAcceptConvergenceError {
     Terminal(String),
     Workflow(AuraError),
@@ -118,126 +111,45 @@ pub async fn accept_device_enrollment_invitation(
         invitation.invitation_id
     ));
 
-    let expected_min_devices = 2_usize;
-    let policy = device_enrollment_accept_retry_policy()?;
+    // The accept above is authoritative: the runtime returns success only after
+    // the signed enrollment choreography completed and this device adopted the
+    // enrolled epoch. What remains is settling local state; device counts are
+    // not evidence of success (the device list includes this device even before
+    // the tree does), so they no longer decide the outcome.
     let invitation_id = invitation.invitation_id.clone();
-    let enrollment_result: Result<(), DeviceEnrollmentAcceptConvergenceError> = {
-        let mut attempts = AttemptBudget::new(policy.max_attempts());
-        loop {
-            let attempt = match attempts.record_attempt() {
-                Ok(attempt) => attempt,
-                Err(error) => {
-                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
-                        AuraError::from(error),
-                    ));
-                }
-            };
-            #[cfg(not(feature = "instrumented"))]
-            let _ = &invitation_id;
-            log_device_enrollment_accept_progress(format!(
-                "convergence attempt={attempt} invitation_id={invitation_id}"
-            ));
-
-            if let Err(error) = timeout_runtime_call(
-                &runtime,
-                "accept_device_enrollment_invitation",
-                "process_ceremony_messages",
-                INVITATION_RUNTIME_OPERATION_TIMEOUT,
-                || runtime.process_ceremony_messages(),
-            )
+    let enrollment_result: Result<(), DeviceEnrollmentAcceptConvergenceError> = async {
+        timeout_runtime_call(
+            &runtime,
+            "accept_device_enrollment_invitation",
+            "process_ceremony_messages",
+            INVITATION_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.process_ceremony_messages(),
+        )
+        .await
+        .unwrap_or_else(|error| Err(crate::core::IntentError::internal_error(error.to_string())))
+        .map_err(|error| {
+            DeviceEnrollmentAcceptConvergenceError::Terminal(format!(
+                "device enrollment ceremony processing failed: {error}"
+            ))
+        })?;
+        converge_runtime(&runtime).await;
+        settings::refresh_settings_from_runtime(app_core)
             .await
-            .unwrap_or_else(|error| {
-                Err(crate::core::IntentError::internal_error(error.to_string()))
-            }) {
-                break Err(DeviceEnrollmentAcceptConvergenceError::Terminal(format!(
-                    "device enrollment ceremony processing failed during convergence: {error}"
-                )));
-            }
-            log_device_enrollment_accept_progress(format!(
-                "process_ceremony_messages ok attempt={attempt} invitation_id={invitation_id}"
-            ));
-
-            converge_runtime(&runtime).await;
-            if let Err(error) = settings::refresh_settings_from_runtime(app_core).await {
-                break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error));
-            }
-
-            let runtime_device_count = match timeout_runtime_call(
-                &runtime,
-                "accept_device_enrollment_invitation",
-                "try_list_devices",
-                INVITATION_RUNTIME_QUERY_TIMEOUT,
-                || runtime.try_list_devices(),
-            )
-            .await
-            {
-                Ok(Ok(devices)) => devices.len(),
-                Ok(Err(error)) => {
-                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
-                        AuraError::from(super::super::error::runtime_call("list devices", error)),
-                    ));
-                }
-                Err(error) => {
-                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
-                        AuraError::from(super::super::error::runtime_call("list devices", error)),
-                    ));
-                }
-            };
-            let settings_device_count = match settings::get_settings(app_core).await {
-                Ok(settings) => settings.devices.len(),
-                Err(error) => break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(error)),
-            };
-            log_device_enrollment_accept_progress(format!(
-                "counts attempt={attempt} invitation_id={invitation_id} runtime_devices={runtime_device_count} settings_devices={settings_device_count} expected_min_devices={expected_min_devices}"
-            ));
+            .map_err(DeviceEnrollmentAcceptConvergenceError::Workflow)?;
+        log_device_enrollment_accept_progress(format!("settled invitation_id={invitation_id}"));
+        if let Err(_error) =
+            ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
+        {
             #[cfg(feature = "instrumented")]
-            tracing::info!(
+            tracing::warn!(
+                error = %_error,
                 invitation_id = %invitation_id,
-                attempt,
-                runtime_device_count,
-                settings_device_count,
-                expected_min_devices,
-                "device enrollment convergence poll"
+                "device enrollment acceptance completed without reachable peers"
             );
-            if runtime_device_count >= expected_min_devices
-                || settings_device_count >= expected_min_devices
-            {
-                settings::refresh_settings_from_runtime(app_core).await?;
-                log_device_enrollment_accept_progress(format!(
-                    "converged attempt={attempt} invitation_id={invitation_id}"
-                ));
-                if let Err(_error) =
-                    ensure_runtime_peer_connectivity(&runtime, "device_enrollment_accept").await
-                {
-                    #[cfg(feature = "instrumented")]
-                    tracing::warn!(
-                        error = %_error,
-                        invitation_id = %invitation_id,
-                        "device enrollment acceptance completed without reachable peers"
-                    );
-                }
-                break Ok(());
-            }
-
-            if !attempts.can_attempt() {
-                break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
-                    AuraError::from(super::super::error::WorkflowError::Precondition(
-                        "device enrollment acceptance not yet converged",
-                    )),
-                ));
-            }
-
-            let delay_ms = match u64::try_from(policy.delay_for_attempt(attempt).as_millis()) {
-                Ok(delay_ms) => delay_ms,
-                Err(_) => {
-                    break Err(DeviceEnrollmentAcceptConvergenceError::Workflow(
-                        AuraError::agent("device enrollment retry delay overflow"),
-                    ));
-                }
-            };
-            runtime.sleep_ms(delay_ms).await;
         }
-    };
+        Ok(())
+    }
+    .await;
     match enrollment_result {
         Ok(()) => {
             log_device_enrollment_accept_progress(format!("success invitation_id={invitation_id}"));
@@ -253,15 +165,12 @@ pub async fn accept_device_enrollment_invitation(
             #[cfg(feature = "instrumented")]
             tracing::warn!(
                 invitation_id = %invitation.invitation_id,
-                expected_min_devices,
                 error = %error,
-                "device enrollment acceptance failed before local device list convergence"
+                "device enrollment acceptance failed while settling the enrolled runtime"
             );
             fail_device_enrollment_accept(
                 app_core,
-                format!(
-                    "device enrollment acceptance did not converge to {expected_min_devices} local devices: {error}"
-                ),
+                format!("device enrollment acceptance did not settle: {error}"),
             )
             .await
         }
