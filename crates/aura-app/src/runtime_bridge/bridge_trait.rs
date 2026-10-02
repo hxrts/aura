@@ -322,6 +322,12 @@ pub trait RuntimeBridge: Send + Sync {
     // Sync Operations
     // =========================================================================
 
+    /// Re-publish committed facts into the runtime's reactive views, after the
+    /// frontend has registered its signals.
+    async fn replay_committed_facts(&self) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     /// LAN discovery counters, or `None` when LAN discovery is not running.
     async fn try_get_lan_discovery_stats(
         &self,

@@ -714,6 +714,14 @@ impl RuntimeSystem {
         self.effect_system.clone()
     }
 
+    /// Re-publish committed facts into the reactive views (see
+    /// `ReactivePipelineService::replay_committed_facts`).
+    pub async fn replay_committed_facts(&self) -> Result<(), String> {
+        self.reactive_pipeline_service
+            .replay_committed_facts()
+            .await
+    }
+
     /// Check whether the service-owned reactive pipeline is running.
     pub async fn reactive_pipeline_running(&self) -> bool {
         self.reactive_pipeline_service.is_running().await

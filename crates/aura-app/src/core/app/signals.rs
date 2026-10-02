@@ -58,6 +58,19 @@ impl AppCore {
                 IntentError::internal_error(format!("Failed to initialize signals: {e}"))
             })?;
 
+        // The runtime may already have replayed its journal before these
+        // signals existed; replay into the now-registered signals.
+        if let Some(runtime) = self.runtime.as_ref() {
+            let _ = crate::workflows::runtime::timeout_runtime_call(
+                runtime,
+                "ensure_signals_registered",
+                "replay_committed_facts",
+                APP_RUNTIME_OPERATION_TIMEOUT,
+                || runtime.replay_committed_facts(),
+            )
+            .await;
+        }
+
         Ok(())
     }
 }

@@ -75,6 +75,30 @@ impl ReactivePipelineService {
         *self.shared.state.write().await = next;
     }
 
+    /// Re-publish committed facts into the views. Frontends register their
+    /// signals after the runtime starts, so the startup replay can run before
+    /// those signals exist; replaying once they do lets views that emit into
+    /// them (homes, for example) rebuild their state. Views apply facts
+    /// idempotently. A no-op while the pipeline is not running.
+    pub async fn replay_committed_facts(&self) -> Result<(), String> {
+        let pipeline = self.shared.pipeline.read().await;
+        let Some(pipeline) = pipeline.as_ref() else {
+            return Ok(());
+        };
+        let facts = self
+            .effects
+            .load_committed_facts(self.authority_id)
+            .await
+            .map_err(|error| format!("load committed facts: {error}"))?;
+        if facts.is_empty() {
+            return Ok(());
+        }
+        pipeline
+            .publish_journal_facts(facts)
+            .await
+            .map_err(|error| format!("replay committed facts: {error}"))
+    }
+
     pub async fn is_running(&self) -> bool {
         let state = *self.shared.state.read().await;
         state == ReactivePipelineServiceState::Running

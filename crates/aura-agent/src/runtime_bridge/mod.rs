@@ -1725,6 +1725,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_bootstrap_candidates(self).await
     }
 
+    async fn replay_committed_facts(&self) -> Result<(), IntentError> {
+        self.agent
+            .runtime()
+            .replay_committed_facts()
+            .await
+            .map_err(|error| IntentError::internal_error(error))
+    }
+
     async fn try_get_lan_discovery_stats(
         &self,
     ) -> Result<Option<aura_app::signal_defs::LanDiscoveryStats>, IntentError> {
