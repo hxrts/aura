@@ -338,6 +338,11 @@ impl UiController {
     }
 
     pub fn runtime_error_toast(&self, message: impl Into<String>) {
+        let message = message.into();
+        // Show an invitation outcome's user-facing sentence, not its error chain.
+        let message =
+            aura_app::ui::workflows::invitation::contact_acceptance_outcome_message(&message)
+                .unwrap_or(message);
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✗', message);
         drop(model);

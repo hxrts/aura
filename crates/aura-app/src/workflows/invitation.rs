@@ -123,6 +123,28 @@ pub use utils::{
     INVITATION_TTL_PRESETS,
 };
 
+/// Stable, user-facing sentences the runtime reports when an inviter rejects
+/// or never confirms a contact invitation acceptance.
+const CONTACT_ACCEPTANCE_OUTCOME_SENTENCES: &[&str] = &[
+    "The inviter revoked this contact invitation",
+    "This contact invitation has expired",
+    "This contact invitation was already used",
+    "The inviter did not confirm this contact invitation",
+];
+
+/// The runtime's user-facing sentence for a rejected or unconfirmed contact
+/// acceptance, extracted from a wrapped error chain, for frontend toasts.
+#[must_use]
+pub fn contact_acceptance_outcome_message(raw: &str) -> Option<String> {
+    CONTACT_ACCEPTANCE_OUTCOME_SENTENCES
+        .iter()
+        .find_map(|sentence| {
+            let rest = &raw[raw.find(sentence)?..];
+            let end = rest.find(['"', ')', '\n']).unwrap_or(rest.len());
+            Some(rest[..end].trim_end_matches('.').trim().to_string())
+        })
+}
+
 const INVITATION_ACCEPT_LOOKUP_TIMEOUT_MS: u64 = 3_000;
 /// Contact accepts wait for the inviter's signed response (up to 30s in the
 /// runtime) and must outlast that wait to see its typed outcome.
@@ -1233,6 +1255,18 @@ mod tests {
                 operation_state: Some(OperationState::Succeeded),
             } if authority_id == &contact_id.to_string()
         )));
+    }
+
+    #[test]
+    fn contact_acceptance_outcome_message_extracts_the_runtime_sentence() {
+        assert_eq!(
+            contact_acceptance_outcome_message(
+                "Internal error: Failed to accept invitation: Agent configuration error: The inviter revoked this contact invitation"
+            )
+            .as_deref(),
+            Some("The inviter revoked this contact invitation")
+        );
+        assert_eq!(contact_acceptance_outcome_message("storage failed"), None);
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 use super::contact_confirmation::{
-    contact_acceptance_digest, ContactInvitationDecision, CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
+    contact_acceptance_digest, settled_contact_invitation_decision, ContactInvitationDecision,
+    CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
 };
 use super::*;
 use aura_journal::fact::RelationalFact;
@@ -566,22 +567,11 @@ impl<'a> InvitationContactHandler<'a> {
                             )
                             .await;
                     }
-                    let decision = match invitation.status {
-                        InvitationStatus::Pending if invitation.is_expired(now_ms) => {
-                            Some(ContactInvitationDecision::Expired)
-                        }
-                        InvitationStatus::Pending => None,
-                        InvitationStatus::Accepted
-                            if invitation.receiver_id == acceptance.acceptor_id =>
-                        {
-                            Some(ContactInvitationDecision::Confirmed)
-                        }
-                        InvitationStatus::Cancelled => Some(ContactInvitationDecision::Revoked),
-                        InvitationStatus::Expired => Some(ContactInvitationDecision::Expired),
-                        InvitationStatus::Accepted | InvitationStatus::Declined => {
-                            Some(ContactInvitationDecision::AlreadySettled)
-                        }
-                    };
+                    let decision = settled_contact_invitation_decision(
+                        &invitation.status,
+                        invitation.is_expired(now_ms),
+                        invitation.receiver_id == acceptance.acceptor_id,
+                    );
                     if let Some(decision) = decision {
                         tracing::debug!(
                             invitation_id = %acceptance.invitation_id,

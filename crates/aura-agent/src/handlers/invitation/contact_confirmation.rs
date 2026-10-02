@@ -133,6 +133,28 @@ impl SecurityTranscript for ContactInvitationResponseTranscript<'_> {
     }
 }
 
+/// Inviter: the answer to an authenticated acceptance when the invitation is
+/// no longer simply pending, or `None` to accept it now. A duplicate from the
+/// acceptor who already accepted is re-confirmed.
+pub(super) fn settled_contact_invitation_decision(
+    status: &InvitationStatus,
+    expired: bool,
+    from_accepted_receiver: bool,
+) -> Option<ContactInvitationDecision> {
+    match status {
+        InvitationStatus::Pending if expired => Some(ContactInvitationDecision::Expired),
+        InvitationStatus::Pending => None,
+        InvitationStatus::Accepted if from_accepted_receiver => {
+            Some(ContactInvitationDecision::Confirmed)
+        }
+        InvitationStatus::Cancelled => Some(ContactInvitationDecision::Revoked),
+        InvitationStatus::Expired => Some(ContactInvitationDecision::Expired),
+        InvitationStatus::Accepted | InvitationStatus::Declined => {
+            Some(ContactInvitationDecision::AlreadySettled)
+        }
+    }
+}
+
 pub(super) fn contact_acceptance_digest(payload: &[u8]) -> [u8; 32] {
     hash(payload)
 }

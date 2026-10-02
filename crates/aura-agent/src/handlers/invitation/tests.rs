@@ -5229,3 +5229,18 @@ large_stack_async_test!(invitee_applies_only_authentic_responses_to_its_pending_
     // A duplicate of it is ignored (idempotent).
     assert_eq!(apply(authentic).await, None);
 });
+
+#[test]
+fn inviter_answers_each_settled_status_with_a_typed_decision() {
+    use super::contact_confirmation::{settled_contact_invitation_decision, ContactInvitationDecision};
+    use ContactInvitationDecision::*;
+    let decide = settled_contact_invitation_decision;
+    assert_eq!(decide(&InvitationStatus::Pending, false, false), None);
+    assert_eq!(decide(&InvitationStatus::Pending, true, false), Some(Expired));
+    assert_eq!(decide(&InvitationStatus::Expired, false, false), Some(Expired));
+    assert_eq!(decide(&InvitationStatus::Cancelled, false, false), Some(Revoked));
+    assert_eq!(decide(&InvitationStatus::Declined, false, false), Some(AlreadySettled));
+    assert_eq!(decide(&InvitationStatus::Accepted, false, false), Some(AlreadySettled));
+    // A duplicate from the acceptor who already accepted is re-confirmed.
+    assert_eq!(decide(&InvitationStatus::Accepted, false, true), Some(Confirmed));
+}

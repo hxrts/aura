@@ -129,25 +129,6 @@ const INTERNAL_ERROR_MARKERS: &[&str] = &[
     "invalid:",
 ];
 
-/// Stable, user-facing sentences the runtime uses when an inviter rejects or
-/// never confirms a contact invitation acceptance.
-const INVITATION_OUTCOME_SENTENCES: &[&str] = &[
-    "The inviter revoked this contact invitation",
-    "This contact invitation has expired",
-    "This contact invitation was already used",
-    "The inviter did not confirm this contact invitation",
-];
-
-/// The runtime's invitation-outcome sentence inside a wrapped error chain.
-fn invitation_outcome_sentence(raw: &str) -> Option<String> {
-    INVITATION_OUTCOME_SENTENCES.iter().find_map(|sentence| {
-        let start = raw.find(sentence)?;
-        let rest = &raw[start..];
-        let end = rest.find(['"', ')', '\n']).unwrap_or(rest.len());
-        Some(rest[..end].trim_end_matches('.').trim().to_string())
-    })
-}
-
 /// Turn a raw error string into a short user-facing message.
 ///
 /// Returns the message to show and, when it differs, the raw text kept as
@@ -155,7 +136,9 @@ fn invitation_outcome_sentence(raw: &str) -> Option<String> {
 #[must_use]
 pub fn user_facing_error(raw: &str) -> (String, Option<String>) {
     let lowered = raw.to_ascii_lowercase();
-    let friendly = if let Some(outcome) = invitation_outcome_sentence(raw) {
+    let friendly = if let Some(outcome) =
+        aura_app::ui::workflows::invitation::contact_acceptance_outcome_message(raw)
+    {
         Some(outcome)
     } else if lowered.contains("invalid invite code") || lowered.contains("invalid invitation code")
     {
