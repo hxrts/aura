@@ -503,8 +503,12 @@ pub fn NeighborhoodScreen(
     });
 
     let neighborhood_name = reactive_neighborhood_name.read().clone();
-    let homes = reactive_homes.read().clone();
+    let mut homes = reactive_homes.read().clone();
     let members = reactive_members.read().clone();
+    // The current home's tile counts the same member projection as its detail.
+    if let Some(current) = homes.iter_mut().find(|home| home.is_home) {
+        current.member_count = u8::try_from(members.len()).unwrap_or(u8::MAX);
+    }
     let budget = reactive_budget.read().clone();
     let channels = reactive_channels.read().clone();
 
