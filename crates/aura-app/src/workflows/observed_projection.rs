@@ -92,7 +92,7 @@ pub async fn mirror_homes_signal_into_view(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
     let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await?;
-    let anchor = {
+    let neighborhood = {
         let mut core = app_core.write().await;
         let anchor = homes
             .current_home()
@@ -100,23 +100,43 @@ pub async fn mirror_homes_signal_into_view(
         if let Some((home_id, _)) = anchor {
             core.set_active_home_selection(Some(home_id));
         }
+        let mut neighborhood = core.views().get_neighborhood();
+        let mut changed = false;
+        if let Some((home_id, home_name)) =
+            anchor.filter(|_| neighborhood.home_home_id == ChannelId::default())
+        {
+            neighborhood.home_home_id = home_id;
+            neighborhood.home_name = home_name.clone();
+            neighborhood.position = Some(crate::views::neighborhood::TraversalPosition {
+                current_home_id: home_id,
+                current_home_name: home_name,
+                depth: 2,
+                path: vec![home_id],
+            });
+            changed = true;
+        }
+        // Every home this authority belongs to is listed, including homes
+        // joined through an invitation after the anchor was set.
+        for (home_id, home) in homes.iter() {
+            if *home_id == neighborhood.home_home_id || neighborhood.neighbor(home_id).is_some() {
+                continue;
+            }
+            neighborhood.add_neighbor(crate::views::neighborhood::NeighborHome {
+                id: *home_id,
+                name: home.name.clone(),
+                one_hop_link: crate::views::neighborhood::OneHopLinkType::Direct,
+                shared_contacts: 0,
+                member_count: Some(home.member_count),
+                can_traverse: true,
+            });
+            changed = true;
+        }
         core.views_mut().set_homes(homes);
-        let neighborhood = core.views().get_neighborhood();
-        anchor
-            .filter(|_| neighborhood.home_home_id == ChannelId::default())
-            .map(|(home_id, home_name)| (neighborhood, home_id, home_name))
+        changed.then_some(neighborhood)
     };
-    let Some((mut neighborhood, home_id, home_name)) = anchor else {
+    let Some(neighborhood) = neighborhood else {
         return Ok(());
     };
-    neighborhood.home_home_id = home_id;
-    neighborhood.home_name = home_name.clone();
-    neighborhood.position = Some(crate::views::neighborhood::TraversalPosition {
-        current_home_id: home_id,
-        current_home_name: home_name,
-        depth: 2,
-        path: vec![home_id],
-    });
     replace_neighborhood_projection_observed(app_core, neighborhood).await
 }
 
@@ -736,6 +756,53 @@ mod tests {
         assert_eq!(view_state.current_home_id(), homes.current_home_id());
         assert_eq!(view_state.count(), homes.count());
         assert!(view_state.home_state(&home_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn mirror_homes_lists_every_joined_home_in_the_neighborhood() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+
+        let home_state = |seed: &[u8], name: &str| {
+            let id = ChannelId::from_bytes(hash(seed));
+            (
+                id,
+                crate::views::home::HomeState::new(
+                    id,
+                    Some(name.to_string()),
+                    AuthorityId::new_from_entropy([21u8; 32]),
+                    1,
+                    ContextId::new_from_entropy([22u8; 32]),
+                ),
+            )
+        };
+        let (first_id, first) = home_state(b"mirror-first-home", "First");
+        let (joined_id, joined) = home_state(b"mirror-joined-home", "Joined");
+
+        let publish = |homes: HomesState| {
+            let app_core = app_core.clone();
+            async move {
+                replace_homes_projection_observed(&app_core, homes)
+                    .await
+                    .unwrap();
+                mirror_homes_signal_into_view(&app_core).await.unwrap();
+            }
+        };
+        publish(HomesState::from_parts(
+            std::collections::HashMap::from([(first_id, first.clone())]),
+            Some(first_id),
+        ))
+        .await;
+        // A home joined later (e.g. an accepted home invitation).
+        publish(HomesState::from_parts(
+            std::collections::HashMap::from([(first_id, first), (joined_id, joined)]),
+            Some(first_id),
+        ))
+        .await;
+
+        let neighborhood = app_core.read().await.views().get_neighborhood();
+        assert_eq!(neighborhood.home_home_id, first_id);
+        assert!(neighborhood.neighbor(&joined_id).is_some());
     }
 
     #[tokio::test]
