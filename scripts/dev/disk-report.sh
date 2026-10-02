@@ -29,22 +29,26 @@ printf 'Build context: lane=%s profile=%s target=%s features=%s\n' \
 printf 'Free: %s KiB\n' "$(free_kib)"
 printf 'Checkout: %s KiB\n' "$(size_kib "$root")"
 
-printf 'Other linked Aura worktrees (separate checkout/target KiB):\n'
-printf 'Checkout KiB\tTarget KiB\tPath\n'
+printf 'Other linked Aura worktrees (separate build caches, KiB):\n'
+printf 'Checkout\tTarget\tDebug deps\tDebug incremental\tTrybuild\tPath\n'
 while IFS= read -r line; do
   [[ "$line" == worktree\ * ]] || continue
   linked="${line#worktree }"
   [[ "$linked" != "$root" && -d "$linked" ]] || continue
   if [[ -L "$linked/target" ]]; then
-    printf 'target symlink; excluded\t%s\n' "$linked"
+    printf 'excluded\texcluded\texcluded\texcluded\texcluded\t%s (target symlink)\n' "$linked"
   else
-    printf '%s\t%s\t%s\n' "$(size_kib "$linked")" \
-      "$(size_kib "$linked/target")" "$linked"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(size_kib "$linked")" \
+      "$(size_kib "$linked/target")" \
+      "$(size_kib "$linked/target/debug/deps")" \
+      "$(size_kib "$linked/target/debug/incremental")" \
+      "$(size_kib "$linked/target/tests/trybuild")" "$linked"
   fi
 done < <(git -C "$root" worktree list --porcelain 2>/dev/null)
 
 paths=(
-  target target/debug target/release target/release/deps target/release/build
+  target target/debug target/debug/deps target/debug/incremental
+  target/tests/trybuild target/release target/release/deps target/release/build
   target/wasm-release target/wasm32-unknown-unknown target/dylint target/dx
   .tmp .tmp/e2e bin/aura
 )
