@@ -129,6 +129,25 @@ const INTERNAL_ERROR_MARKERS: &[&str] = &[
     "invalid:",
 ];
 
+/// Stable, user-facing sentences the runtime uses when an inviter rejects or
+/// never confirms a contact invitation acceptance.
+const INVITATION_OUTCOME_SENTENCES: &[&str] = &[
+    "The inviter revoked this contact invitation",
+    "This contact invitation has expired",
+    "This contact invitation was already used",
+    "The inviter did not confirm this contact invitation",
+];
+
+/// The runtime's invitation-outcome sentence inside a wrapped error chain.
+fn invitation_outcome_sentence(raw: &str) -> Option<String> {
+    INVITATION_OUTCOME_SENTENCES.iter().find_map(|sentence| {
+        let start = raw.find(sentence)?;
+        let rest = &raw[start..];
+        let end = rest.find(['"', ')', '\n']).unwrap_or(rest.len());
+        Some(rest[..end].trim_end_matches('.').trim().to_string())
+    })
+}
+
 /// Turn a raw error string into a short user-facing message.
 ///
 /// Returns the message to show and, when it differs, the raw text kept as
@@ -136,30 +155,32 @@ const INTERNAL_ERROR_MARKERS: &[&str] = &[
 #[must_use]
 pub fn user_facing_error(raw: &str) -> (String, Option<String>) {
     let lowered = raw.to_ascii_lowercase();
-    let friendly =
-        if lowered.contains("invalid invite code") || lowered.contains("invalid invitation code") {
-            Some("That invitation code isn't valid".to_string())
-        } else if lowered.contains("amp_send_message") || lowered.contains("send_message failed") {
-            Some("Couldn't send the message - retry".to_string())
-        } else if INTERNAL_ERROR_MARKERS
+    let friendly = if let Some(outcome) = invitation_outcome_sentence(raw) {
+        Some(outcome)
+    } else if lowered.contains("invalid invite code") || lowered.contains("invalid invitation code")
+    {
+        Some("That invitation code isn't valid".to_string())
+    } else if lowered.contains("amp_send_message") || lowered.contains("send_message failed") {
+        Some("Couldn't send the message - retry".to_string())
+    } else if INTERNAL_ERROR_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+    {
+        // Keep the leading human label ("Failed to import invitation") and drop
+        // the internal chain behind it.
+        let head = raw.split(": ").next().unwrap_or(raw).trim();
+        let head_is_internal = INTERNAL_ERROR_MARKERS
             .iter()
-            .any(|marker| lowered.contains(marker))
-        {
-            // Keep the leading human label ("Failed to import invitation") and drop
-            // the internal chain behind it.
-            let head = raw.split(": ").next().unwrap_or(raw).trim();
-            let head_is_internal = INTERNAL_ERROR_MARKERS
-                .iter()
-                .any(|marker| head.to_ascii_lowercase().contains(marker))
-                || head.chars().next().is_some_and(|c| !c.is_ascii_uppercase());
-            Some(if head_is_internal || head.len() == raw.trim().len() {
-                "Something went wrong (press y to copy details)".to_string()
-            } else {
-                format!("{head} (press y to copy details)")
-            })
+            .any(|marker| head.to_ascii_lowercase().contains(marker))
+            || head.chars().next().is_some_and(|c| !c.is_ascii_uppercase());
+        Some(if head_is_internal || head.len() == raw.trim().len() {
+            "Something went wrong (press y to copy details)".to_string()
         } else {
-            None
-        };
+            format!("{head} (press y to copy details)")
+        })
+    } else {
+        None
+    };
     match friendly {
         Some(message) => (message, Some(raw.to_string())),
         None => (raw.to_string(), None),
@@ -298,6 +319,24 @@ impl From<aura_app::ui::types::ToastLevel> for ToastLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invitation_outcomes_show_the_runtime_sentence() {
+        let raw =
+            "Internal error: operation_kind=AcceptContactInvitation; detail=accept invitation \
+                   failed: Invalid: The inviter revoked this contact invitation";
+        let toast = QueuedToast::error(1, raw);
+        assert_eq!(toast.message, "The inviter revoked this contact invitation");
+        assert_eq!(toast.details.as_deref(), Some(raw));
+
+        let (message, _) = user_facing_error(
+            "detail=The inviter did not confirm this contact invitation within 30s; try again when they are online",
+        );
+        assert_eq!(
+            message,
+            "The inviter did not confirm this contact invitation within 30s; try again when they are online"
+        );
+    }
 
     #[test]
     fn internal_error_chains_are_shortened_and_kept_as_details() {

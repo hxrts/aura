@@ -841,12 +841,32 @@ impl AcceptInvitationError {
             SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
         };
 
+        use crate::workflows::runtime_error_classification::{
+            classify_contact_confirmation_error, ContactConfirmationErrorClass,
+        };
+
         match self {
-            Self::AcceptFailed { detail } => SemanticOperationError::new(
-                SemanticFailureDomain::Invitation,
-                SemanticFailureCode::InternalError,
-            )
-            .with_detail(format!("operation_kind={kind:?}; detail={detail}")),
+            Self::AcceptFailed { detail } => {
+                // An inviter that rejected or never confirmed the acceptance is
+                // a typed outcome, not an internal failure.
+                let code = match classify_contact_confirmation_error(detail) {
+                    Some(ContactConfirmationErrorClass::Revoked) => {
+                        SemanticFailureCode::InvitationRevoked
+                    }
+                    Some(ContactConfirmationErrorClass::Expired) => {
+                        SemanticFailureCode::InvitationExpired
+                    }
+                    Some(ContactConfirmationErrorClass::AlreadySettled) => {
+                        SemanticFailureCode::InvitationAlreadySettled
+                    }
+                    Some(ContactConfirmationErrorClass::Unconfirmed) => {
+                        SemanticFailureCode::InviterDidNotConfirm
+                    }
+                    None => SemanticFailureCode::InternalError,
+                };
+                SemanticOperationError::new(SemanticFailureDomain::Invitation, code)
+                    .with_detail(format!("operation_kind={kind:?}; detail={detail}"))
+            }
             Self::ContactLinkDidNotConverge { contact_id } => SemanticOperationError::new(
                 SemanticFailureDomain::Invitation,
                 SemanticFailureCode::ContactLinkDidNotConverge,

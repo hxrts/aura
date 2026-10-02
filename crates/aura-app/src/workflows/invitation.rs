@@ -1560,6 +1560,8 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        // Accepting a channel commits its channel fact to the journal.
+        runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
             crate::runtime_bridge::InvitationMutationOutcome {
                 invitation_id: InvitationId::new("pending-channel-binding"),
@@ -1877,6 +1879,8 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        // Accepting a channel commits its channel fact to the journal.
+        runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
             crate::runtime_bridge::InvitationMutationOutcome {
                 invitation_id: InvitationId::new("pending-channel-recipient-readiness"),
@@ -1956,6 +1960,8 @@ mod tests {
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
             our_authority,
         ));
+        // Accepting a channel commits its channel fact to the journal.
+        runtime.record_relational_facts();
         runtime.set_accept_invitation_result(Ok(
             crate::runtime_bridge::InvitationMutationOutcome {
                 invitation_id: InvitationId::new("pending-channel-membership-only"),
@@ -2002,6 +2008,10 @@ mod tests {
         outcome
             .result
             .expect("accepted channel invitation should succeed with membership readiness");
+        assert!(
+            !runtime.recorded_relational_facts().is_empty(),
+            "accepting a channel invitation should commit its channel fact"
+        );
 
         let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
         assert!(facts.iter().any(|fact| {

@@ -22,6 +22,33 @@ pub(crate) fn classify_invitation_accept_error(error: &impl Display) -> Invitati
     }
 }
 
+/// Typed outcome of a contact acceptance the inviter did not confirm, keyed on
+/// the runtime's stable messages (`aura-agent` `ContactConfirmationError`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContactConfirmationErrorClass {
+    Revoked,
+    Expired,
+    AlreadySettled,
+    Unconfirmed,
+}
+
+pub(crate) fn classify_contact_confirmation_error(
+    error: &impl Display,
+) -> Option<ContactConfirmationErrorClass> {
+    let lowered = error.to_string().to_ascii_lowercase();
+    if lowered.contains("inviter revoked this contact invitation") {
+        Some(ContactConfirmationErrorClass::Revoked)
+    } else if lowered.contains("contact invitation has expired") {
+        Some(ContactConfirmationErrorClass::Expired)
+    } else if lowered.contains("contact invitation was already used") {
+        Some(ContactConfirmationErrorClass::AlreadySettled)
+    } else if lowered.contains("inviter did not confirm this contact invitation") {
+        Some(ContactConfirmationErrorClass::Unconfirmed)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn classify_amp_channel_error(error: &impl Display) -> AmpChannelErrorClass {
     let lowered = error.to_string().to_ascii_lowercase();
     if lowered.contains("channel state not found") {
@@ -36,9 +63,38 @@ pub(crate) fn classify_amp_channel_error(error: &impl Display) -> AmpChannelErro
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
+        classify_amp_channel_error, classify_contact_confirmation_error,
+        classify_invitation_accept_error, AmpChannelErrorClass, ContactConfirmationErrorClass,
         InvitationAcceptErrorClass,
     };
+
+    #[test]
+    fn contact_confirmation_classifier_maps_runtime_messages() {
+        let wrapped = |message: &str| format!("accept invitation failed: Invalid: {message}");
+        assert_eq!(
+            classify_contact_confirmation_error(&wrapped(
+                "The inviter revoked this contact invitation"
+            )),
+            Some(ContactConfirmationErrorClass::Revoked)
+        );
+        assert_eq!(
+            classify_contact_confirmation_error(&wrapped("This contact invitation has expired")),
+            Some(ContactConfirmationErrorClass::Expired)
+        );
+        assert_eq!(
+            classify_contact_confirmation_error(&wrapped(
+                "This contact invitation was already used"
+            )),
+            Some(ContactConfirmationErrorClass::AlreadySettled)
+        );
+        assert_eq!(
+            classify_contact_confirmation_error(&wrapped(
+                "The inviter did not confirm this contact invitation within 30s; try again when they are online"
+            )),
+            Some(ContactConfirmationErrorClass::Unconfirmed)
+        );
+        assert_eq!(classify_contact_confirmation_error(&"storage failed"), None);
+    }
 
     #[test]
     fn invitation_accept_classifier_detects_idempotent_acceptance() {

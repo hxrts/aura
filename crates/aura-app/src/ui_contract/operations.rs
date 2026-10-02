@@ -208,6 +208,14 @@ pub enum SemanticFailureCode {
     DeliveryReadinessNotReached,
     OperationTimedOut,
     ShellDeclaredSuccessIllegally,
+    /// The inviter revoked the invitation before confirming the acceptance.
+    InvitationRevoked,
+    /// The invitation expired before the inviter confirmed the acceptance.
+    InvitationExpired,
+    /// The invitation was already accepted by someone else or declined.
+    InvitationAlreadySettled,
+    /// The inviter did not confirm the acceptance within the bounded wait.
+    InviterDidNotConfirm,
     InternalError,
 }
 

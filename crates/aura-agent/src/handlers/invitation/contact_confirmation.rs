@@ -54,14 +54,37 @@ impl ContactInvitationDecision {
     }
 }
 
-/// Why a contact invitation acceptance did not establish a link.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+/// Why a contact invitation acceptance did not establish a link. The messages
+/// are user-facing and stable: `aura-app` classifies them into typed failure
+/// codes (`classify_contact_confirmation_error`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ContactConfirmationError {
-    #[error("the inviter rejected the contact invitation ({0:?})")]
     Rejected(ContactInvitationDecision),
-    #[error("the inviter did not confirm the contact invitation within {0} ms")]
     Unconfirmed(u64),
 }
+
+impl std::fmt::Display for ContactConfirmationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rejected(ContactInvitationDecision::Revoked) => {
+                write!(f, "The inviter revoked this contact invitation")
+            }
+            Self::Rejected(ContactInvitationDecision::Expired) => {
+                write!(f, "This contact invitation has expired")
+            }
+            Self::Rejected(
+                ContactInvitationDecision::AlreadySettled | ContactInvitationDecision::Confirmed,
+            ) => write!(f, "This contact invitation was already used"),
+            Self::Unconfirmed(wait_ms) => write!(
+                f,
+                "The inviter did not confirm this contact invitation within {}s; try again when they are online",
+                wait_ms / 1000
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ContactConfirmationError {}
 
 impl From<ContactConfirmationError> for AgentError {
     fn from(error: ContactConfirmationError) -> Self {

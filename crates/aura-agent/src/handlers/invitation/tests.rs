@@ -5061,7 +5061,7 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
         .await
         .expect_err("accepting a revoked invitation must fail");
     assert!(
-        error.to_string().contains("Revoked"),
+        error.to_string().contains("revoked this contact invitation"),
         "expected a typed revocation failure, got: {error}"
     );
 
@@ -5100,7 +5100,7 @@ large_stack_async_test!(unanswered_contact_acceptance_fails_typed_and_stays_pend
     .expect("the confirmation wait must be bounded")
     .expect_err("an unanswered acceptance must not succeed");
     assert!(
-        error.to_string().contains("did not confirm"),
+        error.to_string().contains("did not confirm this contact invitation"),
         "expected a typed unconfirmed failure, got: {error}"
     );
 
