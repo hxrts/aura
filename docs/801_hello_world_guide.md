@@ -99,6 +99,20 @@ The build helper does not change firewall settings.
 Run `just e2e-build-terminal-dev` separately when a test explicitly needs
 the development feature set. Each successful guarded build also saves its
 own disk report under `artifacts/disk-budget/`.
+For one-off Work 8 Cargo test, check, or Clippy rebuilds, wrap the Cargo
+command too. For example, inside `nix develop`:
+
+```bash
+AURA_BUILD_PROFILE=debug AURA_BUILD_FEATURES=work8-test \
+  nice -n 10 bash scripts/dev/build-budget.sh \
+  --lane work8-debug --allow-live-harness -- \
+  cargo test -p hxrts-aura-app
+```
+
+Substitute the required Cargo subcommand and package selector. Start only
+when no other Cargo or Dioxus build is active. The live option preserves
+release/web/Dylint caches while a LAN run is active; the disk monitor still
+stops only its own command at the emergency floor.
 When the LAN owner permits a terminal build during a live run, use
 `just e2e-build-terminal-live`. That recipe skips global Cargo sweeping and
 may collect only an idle WASM debug lane. The ordinary
