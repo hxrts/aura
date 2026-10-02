@@ -58,6 +58,7 @@ use aura_social::moderation::{
     HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
     HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
+use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
@@ -987,44 +988,74 @@ impl HomeSignalView {
         }
     }
 
-    fn synthetic_home_id_for_context(context_id: &ContextId) -> ChannelId {
-        let mut bytes = [0u8; 32];
-        bytes[..16].copy_from_slice(context_id.as_bytes());
-        ChannelId::from_bytes(bytes)
-    }
-
+    /// The materialized home for a context. Homes exist only once their
+    /// `SocialFact::HomeCreated` is reduced; facts for an unknown context are
+    /// not given a fabricated placeholder home.
     fn home_for_context_mut<'a>(
-        &self,
         homes: &'a mut HomesState,
         context_id: &ContextId,
-    ) -> &'a mut HomeState {
-        let existing_home_id = homes
-            .iter()
-            .find_map(|(home_id, home)| (home.context_id == Some(*context_id)).then_some(*home_id));
-        if let Some(home_id) = existing_home_id {
-            return homes
-                .home_mut(&home_id)
-                .expect("home id from iter() must exist in map");
-        }
+    ) -> Option<&'a mut HomeState> {
+        let home_id = homes.iter().find_map(|(home_id, home)| {
+            (home.context_id == Some(*context_id)).then_some(*home_id)
+        })?;
+        homes.home_mut(&home_id)
+    }
 
-        let mut placeholder = HomeState::new(
-            Self::synthetic_home_id_for_context(context_id),
-            Some("Shared Home".to_string()),
-            self.own_authority,
-            0,
-            *context_id,
-        );
-        // Placeholder state exists to host moderation facts for shared contexts
-        // that have not been materialized as local homes yet.
-        placeholder.my_role = HomeRole::Participant;
-        placeholder.members.clear();
-        placeholder.online_count = 0;
-        placeholder.member_count = 0;
-        let placeholder_id = placeholder.id;
-        let _ = homes.add_home(placeholder);
-        homes
-            .home_mut(&placeholder_id)
-            .expect("placeholder home should exist immediately after insertion")
+    /// Applies a social fact that creates a home or changes its membership.
+    fn apply_social_fact(homes: &mut HomesState, fact: SocialFact) -> bool {
+        match fact {
+            SocialFact::HomeCreated {
+                home_id,
+                context_id,
+                created_at,
+                creator_id,
+                name,
+                ..
+            } => {
+                let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+                if homes.has_home(&home_id) {
+                    return false;
+                }
+                let home = HomeState::new(
+                    home_id,
+                    Some(name),
+                    creator_id,
+                    created_at.ts_ms,
+                    context_id,
+                );
+                let first_home = homes.is_empty();
+                let _ = homes.add_home(home);
+                if first_home {
+                    homes.select_home(Some(home_id));
+                }
+                true
+            }
+            SocialFact::MemberJoined {
+                authority_id,
+                context_id,
+                joined_at,
+                name,
+                ..
+            } => {
+                let Some(home) = Self::home_for_context_mut(homes, &context_id) else {
+                    return false;
+                };
+                if home.member(&authority_id).is_some() {
+                    return false;
+                }
+                home.add_member(HomeMember {
+                    id: authority_id,
+                    name,
+                    role: HomeRole::Participant,
+                    is_online: false,
+                    joined_at: joined_at.ts_ms,
+                    last_seen: Some(joined_at.ts_ms),
+                    storage_allocated: HomeState::MEMBER_ALLOCATION,
+                });
+                true
+            }
+            _ => false,
+        }
     }
 }
 
@@ -1054,7 +1085,15 @@ impl ReactiveView for HomeSignalView {
                     continue;
                 };
 
-                let home_state = self.home_for_context_mut(&mut homes, context_id);
+                if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
+                    if let Some(social) = SocialFact::from_envelope(envelope) {
+                        changed |= Self::apply_social_fact(&mut homes, social);
+                    }
+                    continue;
+                }
+                let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id) else {
+                    continue;
+                };
 
                 match envelope.type_id.as_str() {
                     HOME_BAN_FACT_TYPE_ID => {
@@ -2393,18 +2432,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn home_signal_view_materializes_unknown_context_for_mutes() {
+    async fn home_signal_view_materializes_homes_only_from_home_created_facts() {
         let reactive = ReactiveHandler::new();
         let known_context = ContextId::new_from_entropy([2u8; 32]);
-        let unknown_context = ContextId::new_from_entropy([4u8; 32]);
+        let new_context = ContextId::new_from_entropy([4u8; 32]);
         let actor = AuthorityId::new_from_entropy([1u8; 32]);
         let target = AuthorityId::new_from_entropy([9u8; 32]);
         let _ = setup_homes(&reactive, known_context).await;
-
         let view = HomeSignalView::new(actor, reactive.clone());
+        let home_count = |homes: &HomesState| homes.iter().count();
+        let before = home_count(&reactive.read(&*HOMES_SIGNAL).await.unwrap());
 
+        // A moderation fact for a context with no home does not fabricate one.
         let mute = HomeMuteFact::new_ms(
-            unknown_context,
+            new_context,
             None,
             target,
             actor,
@@ -2413,26 +2454,38 @@ mod tests {
             Some(160_000),
         )
         .to_generic();
+        view.update(&[fact_from_relational(mute.clone())]).await;
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        assert_eq!(home_count(&homes), before);
+        assert!(homes
+            .iter()
+            .all(|(_, home)| home.context_id != Some(new_context)));
+
+        // HomeCreated and MemberJoined materialize the home and its member.
+        let home_id = aura_social::HomeId::from_bytes([44u8; 32]);
+        let created =
+            SocialFact::home_created_ms(home_id, new_context, 50, actor, "Den".to_string())
+                .to_generic();
+        let joined =
+            SocialFact::member_joined_ms(target, home_id, new_context, 60, "Bob".to_string())
+                .to_generic();
+        view.update(&[fact_from_relational(created), fact_from_relational(joined)])
+            .await;
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes([44u8; 32]))
+            .expect("HomeCreated should materialize the home");
+        assert_eq!(home.name, "Den");
+        assert_eq!(home.context_id, Some(new_context));
+        assert!(home.member(&target).is_some());
+
+        // Moderation now applies to the materialized home.
         view.update(&[fact_from_relational(mute)]).await;
-
-        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
-        let home_state = updated
-            .iter()
-            .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
-            .expect("unknown context home should be materialized");
-        assert!(home_state.mute_list.contains_key(&target));
-        assert!(home_state.members.is_empty());
-        assert!(matches!(home_state.my_role, HomeRole::Participant));
-
-        let unmute = HomeUnmuteFact::new_ms(unknown_context, None, target, actor, 200).to_generic();
-        view.update(&[fact_from_relational(unmute)]).await;
-
-        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
-        let home_state = updated
-            .iter()
-            .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
-            .expect("unknown context home should still exist");
-        assert!(!home_state.mute_list.contains_key(&target));
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes([44u8; 32]))
+            .unwrap();
+        assert!(home.mute_list.contains_key(&target));
     }
 
     #[tokio::test]

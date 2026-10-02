@@ -3,9 +3,11 @@ use std::sync::Arc;
 use async_lock::RwLock;
 use aura_core::{
     crypto::hash::hash,
+    effects::{ChannelCreateParams, ChannelJoinParams},
     types::{AuthorityId, ChannelId, ContextId},
     AuraError, OperationContext, TraceContext,
 };
+use aura_journal::DomainFact;
 
 use crate::{
     ui_contract::{
@@ -340,10 +342,80 @@ async fn create_home_with_creator(
         (homes, neighborhood)
     };
 
+    persist_created_home(
+        app_core,
+        home_id,
+        context_id,
+        &home_name,
+        creator,
+        timestamp_ms,
+    )
+    .await?;
     publish_homes_and_neighborhood_projection(app_core, homes, neighborhood).await?;
 
     let _ = description;
     Ok(home_id)
+}
+
+/// Makes a created home durable and invitable: its AMP channel exists in the
+/// home's context with the creator joined, and `SocialFact::HomeCreated` plus
+/// the creator's `MemberJoined` are committed, so the home projection is
+/// rebuilt from facts after a restart. Without a runtime the home stays local.
+async fn persist_created_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: ChannelId,
+    context_id: ContextId,
+    home_name: &str,
+    creator: AuthorityId,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    runtime
+        .amp_create_channel(ChannelCreateParams {
+            context: context_id,
+            channel: Some(home_id),
+            skip_window: None,
+            topic: Some(home_name.to_string()),
+        })
+        .await
+        .map_err(|error| AuraError::agent(format!("create home channel: {error}")))?;
+    runtime
+        .amp_join_channel(ChannelJoinParams {
+            context: context_id,
+            channel: home_id,
+            participant: creator,
+        })
+        .await
+        .map_err(|error| AuraError::agent(format!("join home channel: {error}")))?;
+    let social_home_id = aura_social::HomeId::from_bytes(*home_id.as_bytes());
+    let facts = [
+        aura_social::SocialFact::home_created_ms(
+            social_home_id,
+            context_id,
+            timestamp_ms,
+            creator,
+            home_name.to_string(),
+        )
+        .to_generic(),
+        aura_social::SocialFact::member_joined_ms(
+            creator,
+            social_home_id,
+            context_id,
+            timestamp_ms,
+            creator.to_string(),
+        )
+        .to_generic(),
+    ];
+    runtime
+        .commit_relational_facts(&facts)
+        .await
+        .map_err(|error| AuraError::agent(format!("persist home: {error}")))
 }
 
 async fn fail_create_home<T>(
