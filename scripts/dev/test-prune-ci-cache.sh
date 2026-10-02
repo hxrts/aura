@@ -97,6 +97,9 @@ expect_status 0 run_prune --apply
 printf 'tool_repl\n' > "$ACTIVE_FILE"
 expect_status 1 run_prune --apply
 [[ ! -s "$CALLS_FILE" ]]
+printf 'cargo\n' > "$ACTIVE_FILE"
+expect_status 1 run_prune --apply
+[[ ! -s "$CALLS_FILE" && -f "$project/target/release/production" ]]
 rm -f "$ACTIVE_FILE"
 
 mkdir "$project/target/.aura-build-budget.lock"
