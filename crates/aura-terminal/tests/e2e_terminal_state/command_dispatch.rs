@@ -98,7 +98,12 @@ async fn test_lan_peer_invitation_flow() {
             address: "192.168.1.100:8080".to_string(),
         })
         .await;
-    assert!(invite_result.is_ok() || invite_result.is_err());
+    // The invitation is created, but nothing listens at this address: the send
+    // must surface as a failure rather than a "queued" success.
+    assert!(
+        invite_result.is_err(),
+        "inviting an unreachable LAN peer must fail, got {invite_result:?}"
+    );
 
     env.ctx
         .mark_peer_invited(&test_authority_id.to_string())
