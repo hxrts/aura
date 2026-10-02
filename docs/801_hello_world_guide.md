@@ -54,6 +54,23 @@ active. Failed, pinned, active and unclassified bundles are preserved.
 The disk report lists the current checkout and linked Git worktrees
 separately, including debug incremental and trybuild caches; it never
 collects another worktree's target.
+Work 8 debug, test, and Clippy rebuilds also produce Cargo artifacts. Route
+each of those commands through the same guard, keeping any chosen Cargo
+profile or incremental environment settings on the command. During an
+approved live LAN run, use:
+
+```bash
+AURA_BUILD_PROFILE=debug nice -n 10 bash scripts/dev/build-budget.sh \
+  --lane work8-debug --allow-live-harness -- cargo test -p hxrts-aura-agent --lib
+```
+
+Replace the Cargo command after `--` for `cargo check`, `cargo clippy`, or
+another package test. Omit `--allow-live-harness` outside a live run. The
+guard refuses admission when another builder is active or free space is below
+the configured floor; wait for the current owner to finish and release an
+idle cache window before retrying. The incremental-cache default remains
+pending the isolated measurement in `work/9.md`.
+
 Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
 have stopped. Its startup and per-step preflight refuses active consumers,
 checks free space, and can collect only idle compiler caches. It preserves
