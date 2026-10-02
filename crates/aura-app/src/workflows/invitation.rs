@@ -602,9 +602,12 @@ mod tests {
     use super::*;
     use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
     use crate::ui_contract::{
-        AuthoritativeSemanticFact, AuthoritativeSemanticFactsSnapshot, ProjectionRevision,
-        SemanticFailureCode, SemanticFailureDomain, SemanticOperationKind, SemanticOperationPhase,
-        SemanticOperationStatus,
+        AuthoritativeSemanticFact, SemanticFailureCode, SemanticFailureDomain,
+        SemanticOperationKind, SemanticOperationPhase,
+    };
+    #[cfg(feature = "signals")]
+    use crate::ui_contract::{
+        AuthoritativeSemanticFactsSnapshot, ProjectionRevision, SemanticOperationStatus,
     };
     use crate::views::invitations::InvitationType;
     #[cfg(feature = "signals")]
@@ -612,18 +615,24 @@ mod tests {
     use crate::workflows::semantic_facts::assert_terminal_failure_status;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    #[cfg(feature = "signals")]
     use async_lock::Mutex;
-    use std::{ffi::OsString, fs, path::PathBuf, sync::OnceLock};
+    #[cfg(feature = "signals")]
+    use std::{ffi::OsString, sync::OnceLock};
+    use std::{fs, path::PathBuf};
 
+    #[cfg(feature = "signals")]
     fn harness_env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[cfg(feature = "signals")]
     struct EnvRestore {
         saved: Vec<(&'static str, Option<OsString>)>,
     }
 
+    #[cfg(feature = "signals")]
     impl EnvRestore {
         fn capture(keys: &[&'static str]) -> Self {
             Self {
@@ -635,6 +644,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "signals")]
     impl Drop for EnvRestore {
         fn drop(&mut self) {
             for (key, value) in &self.saved {
