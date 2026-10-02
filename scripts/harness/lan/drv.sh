@@ -43,6 +43,9 @@ start)
   [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
     echo 'LAN run token must be lowercase letters, digits and hyphens' >&2; exit 2;
   }
+  (( ${#AURA_E2E_RUN_TOKEN} >= 16 )) || {
+    echo 'LAN run token must be at least 16 bytes for the native harness' >&2; exit 2;
+  }
   runs_root="$(retention_root_for_config "$2")"
   run_bundle="$runs_root/$AURA_E2E_RUN_TOKEN"
   [[ ! -e "$run_bundle" && ! -L "$run_bundle" ]] || {

@@ -47,4 +47,9 @@ bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
 bash "$driver" stop >/dev/null
 bash "$driver" finish failed >/dev/null
 [[ "$(jq -r .outcome "$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json")" == failed ]]
+export AURA_E2E_RUN_TOKEN=short
+if bash "$driver" start "$test_root/configs/lan.toml" >/dev/null 2>&1; then
+  echo 'LAN driver accepted a token too short for the native harness' >&2; exit 1
+fi
+[[ ! -e "$runs/short" ]]
 echo 'LAN retention lifecycle tests passed'
