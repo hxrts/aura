@@ -151,7 +151,11 @@ const path = require("path");
 const { WebSocketServer } = require("ws");
 const publicDir = process.argv[1];
 const port = Number(process.argv[2]);
-const host = process.env.AURA_HARNESS_WEB_BIND_HOST || "127.0.0.1";
+const host = "127.0.0.1";
+// Multi-host LAN runs also expose the transport relay on the LAN
+// address so peers on another host can reach browsers on this host. Pages
+// keep loading from loopback, which browsers treat as a secure context.
+const relayHost = process.env.AURA_HARNESS_WEB_RELAY_HOST || "";
 const TRANSPORT_POLL_PATH = "/__aura_harness_transport__/poll";
 const TRANSPORT_ENQUEUE_PATH = "/__aura_harness_transport__/enqueue";
 const DEBUG_EVENT_PATH = "/__aura_harness_debug__/event";
@@ -368,4 +372,15 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(port, host, () => {
   process.stdout.write(`[serve-web-static] serving ${publicDir} on http://${host}:${port}\n`);
 });
+if (relayHost && relayHost !== host) {
+  const relayServer = http.createServer(server.listeners("request")[0]);
+  relayServer.on("upgrade", (req, socket, head) => {
+    websocketServer.handleUpgrade(req, socket, head, (ws) => {
+      websocketServer.emit("connection", ws, req);
+    });
+  });
+  relayServer.listen(port, relayHost, () => {
+    process.stdout.write(`[serve-web-static] transport relay on ${relayHost}:${port}\n`);
+  });
+}
 ' "$public_dir" "$port" "${2:-}"

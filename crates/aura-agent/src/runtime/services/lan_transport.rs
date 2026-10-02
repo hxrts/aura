@@ -5,6 +5,19 @@
 
 use cfg_if::cfg_if;
 
+/// Page query key naming the harness transport relay a browser advertises
+/// instead of its loopback page host (multi-host harness runs).
+const HARNESS_RELAY_ADDR_QUERY_KEY: &str = "__aura_harness_relay_addr";
+
+/// The harness relay address from a page query string (without `?`), if any.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub(crate) fn harness_relay_addr(query: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == HARNESS_RELAY_ADDR_QUERY_KEY && !value.is_empty()).then(|| value.to_string())
+    })
+}
+
 cfg_if! {
     if #[cfg(target_arch = "wasm32")] {
         use std::sync::Arc;
@@ -25,6 +38,11 @@ cfg_if! {
             });
             if !allow_transport_advertisement {
                 return None;
+            }
+            // Multi-host harness runs name a relay reachable from other hosts;
+            // the loopback page host is only reachable on this host.
+            if let Some(relay) = harness_relay_addr(query) {
+                return Some(relay);
             }
 
             let host = window.location().host().ok()?;

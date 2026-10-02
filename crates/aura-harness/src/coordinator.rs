@@ -1413,8 +1413,8 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         });
     }
 
-    let bind_host = owned_web_server_bind_host();
-    let port = choose_available_port(&bind_host, 4173, 32)?;
+    let relay_host = owned_web_server_relay_host();
+    let port = choose_available_port(relay_host.as_deref(), 4173, 32)?;
     let script = harness_repo_root().join("scripts/web/serve-static.sh");
     let artifact_root = config
         .run
@@ -1430,6 +1430,10 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         .arg(port.to_string())
         .arg(OWNED_WEB_SERVER_MARKER)
         .env("AURA_HARNESS_WEB_BUILD_PROFILE", "release")
+        .env(
+            "AURA_HARNESS_WEB_RELAY_HOST",
+            relay_host.clone().unwrap_or_default(),
+        )
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err))
         .process_group(0)
@@ -1440,11 +1444,12 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
                 script.display()
             )
         })?;
+    let server_url = format!("http://127.0.0.1:{port}");
     Ok(BrowserAppUrlProvision {
-        url: format!("http://{bind_host}:{port}"),
+        url: owned_web_app_url(&server_url, relay_host.as_deref(), port),
         server: Some(OwnedWebServer {
             child,
-            url: format!("http://{bind_host}:{port}"),
+            url: server_url,
         }),
         log_path: Some(log_path),
     })
@@ -1547,29 +1552,43 @@ fn http_server_ready(url: &str) -> bool {
         .is_some_and(|read| read > 0)
 }
 
-/// Host the owned web server listens on. Loopback by default; multi-host LAN
-/// runs set `AURA_HARNESS_WEB_BIND_HOST` to the host's LAN address so the
-/// browser's advertised page-host relay is reachable from the other host.
-fn owned_web_server_bind_host() -> String {
-    std::env::var("AURA_HARNESS_WEB_BIND_HOST")
+/// Query key carrying the browser transport relay address the page should
+/// advertise to peers instead of its own (loopback) page host.
+const HARNESS_RELAY_ADDR_QUERY_KEY: &str = "__aura_harness_relay_addr";
+
+/// LAN host on which the owned web server also exposes its transport relay.
+/// Multi-host LAN runs set `AURA_HARNESS_WEB_RELAY_HOST` so peers on another
+/// host can reach this host's browsers; pages still load from loopback, which
+/// browsers treat as a secure context.
+fn owned_web_server_relay_host() -> Option<String> {
+    std::env::var("AURA_HARNESS_WEB_RELAY_HOST")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 
-fn choose_available_port(host: &str, start: u16, attempts: u16) -> Result<u16> {
+fn owned_web_app_url(server_url: &str, relay_host: Option<&str>, port: u16) -> String {
+    match relay_host {
+        Some(relay_host) => {
+            format!("{server_url}/?{HARNESS_RELAY_ADDR_QUERY_KEY}={relay_host}:{port}")
+        }
+        None => server_url.to_string(),
+    }
+}
+
+/// Picks a port free on loopback and, when given, on the relay host too.
+fn choose_available_port(relay_host: Option<&str>, start: u16, attempts: u16) -> Result<u16> {
+    let port_free = |host: &str, port: u16| {
+        TcpStream::connect((host, port)).is_err() && TcpListener::bind((host, port)).is_ok()
+    };
     for offset in 0..attempts {
         let port = start.saturating_add(offset);
-        if TcpStream::connect((host, port)).is_ok() {
-            continue;
-        }
-        if TcpListener::bind((host, port)).is_ok() {
+        if port_free("127.0.0.1", port) && relay_host.is_none_or(|host| port_free(host, port)) {
             return Ok(port);
         }
     }
     bail!(
-        "failed to allocate port in range {host}:{}-{}",
+        "failed to allocate port in range 127.0.0.1:{}-{}",
         start,
         start.saturating_add(attempts.saturating_sub(1))
     )
@@ -1835,11 +1854,24 @@ mod tests {
 
     use super::{
         classify_owned_harness_process, clear_directory_contents, normalize_key_stream,
-        parse_process_snapshot, wait_pattern_matches, HarnessCoordinator, OwnedHarnessProcessKind,
+        owned_web_app_url, parse_process_snapshot, wait_pattern_matches, HarnessCoordinator,
+        OwnedHarnessProcessKind,
     };
     use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
     use std::net::TcpListener;
     use std::path::PathBuf;
+
+    #[test]
+    fn owned_web_app_url_advertises_relay_only_when_configured() {
+        assert_eq!(
+            owned_web_app_url("http://127.0.0.1:4173", None, 4173),
+            "http://127.0.0.1:4173"
+        );
+        assert_eq!(
+            owned_web_app_url("http://127.0.0.1:4173", Some("relay-host"), 4173),
+            "http://127.0.0.1:4173/?__aura_harness_relay_addr=relay-host:4173"
+        );
+    }
 
     #[allow(clippy::disallowed_methods)]
     fn unique_test_dir(label: &str) -> PathBuf {

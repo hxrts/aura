@@ -893,7 +893,18 @@ fn resolve_browser_transport_target(addr: &str) -> (String, bool) {
     if let Some((host, _origin, harness_mode)) =
         current_browser_location_and_authenticated_harness_mode()
     {
-        if harness_mode && browser_target_uses_harness_transport(&host, &normalized_target) {
+        let own_relay = web_sys::window()
+            .and_then(|window| window.location().search().ok())
+            .and_then(|search| {
+                crate::runtime::services::lan_transport::harness_relay_addr(
+                    search.strip_prefix('?').unwrap_or(&search),
+                )
+            })
+            .unwrap_or_default();
+        if harness_mode
+            && (browser_target_uses_harness_transport(&host, &normalized_target)
+                || browser_target_uses_harness_transport(&own_relay, &normalized_target))
+        {
             if let Some(enqueue_url) = current_browser_harness_enqueue_url() {
                 return (enqueue_url, true);
             }
@@ -1034,6 +1045,17 @@ mod tests {
             order_routes_for_local_dialer(routes, &[LinkProtocol::Tcp, LinkProtocol::WebSocket]);
         let protocols: Vec<_> = both.iter().map(|r| r.destination.protocol).collect();
         assert_eq!(protocols, vec![LinkProtocol::Tcp, LinkProtocol::WebSocket]);
+    }
+
+    #[test]
+    fn harness_relay_addr_reads_only_its_query_key() {
+        use crate::runtime::services::lan_transport::harness_relay_addr;
+        assert_eq!(
+            harness_relay_addr("__aura_harness_instance=x&__aura_harness_relay_addr=relay:1"),
+            Some("relay:1".to_string())
+        );
+        assert_eq!(harness_relay_addr("__aura_harness_relay_addr="), None);
+        assert_eq!(harness_relay_addr("__aura_harness_instance=x"), None);
     }
 
     #[test]
