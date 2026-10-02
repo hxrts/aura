@@ -607,10 +607,19 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
                 return Ok(());
             }
 
+            // Harness peers may be another host's browser relay, which only
+            // accepts the JSON wrapper; native LAN listeners accept it too.
+            let message = if current_browser_location_and_authenticated_harness_mode()
+                .is_some_and(|(_, _, harness_mode)| harness_mode)
+            {
+                Message::Text(encode_harness_browser_transport_envelope(envelope, &payload)?)
+            } else {
+                Message::Bytes(payload)
+            };
             run_local_ws(move || async move {
                 let mut ws = WebSocket::open(&url)
                     .map_err(|e| format!("WebSocket open failed ({url}): {e}"))?;
-                ws.send(Message::Bytes(payload))
+                ws.send(message)
                     .await
                     .map_err(|e| format!("WebSocket send failed ({url}): {e}"))?;
                 Ok(())
