@@ -12,11 +12,16 @@ case "${1:-}" in
 esac
 
 commit="$(git -C "$repo_root" rev-parse HEAD)"
+jobs="${AURA_COMPARE_CARGO_JOBS:-4}"
+[[ "$jobs" =~ ^[0-9]+$ && "$jobs" -gt 0 ]] || {
+  echo 'AURA_COMPARE_CARGO_JOBS must be a positive integer' >&2; exit 2;
+}
 free_kib() { df -Pk "$repo_root" | awk 'NR == 2 {print $4}'; }
 consumers() {
   ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}'
 }
-printf 'Clean release comparison: commit=%s free=%s KiB mode=%s\n' "$commit" "$(free_kib)" "$mode"
+printf 'Clean release comparison: commit=%s free=%s KiB mode=%s cargo-jobs=%s\n' \
+  "$commit" "$(free_kib)" "$mode" "$jobs"
 printf 'Order: clean terminal build, remove its owned worktree, clean workspace build, remove its owned worktree\n'
 if [[ "$mode" == dry ]]; then
   printf 'Terminal: cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal\n'
@@ -49,8 +54,9 @@ build_one() {
   if (
     unset CARGO_TARGET_DIR
     cd "$repo_root"
-    AURA_BUILD_TARGET_CAP_GIB=1000 AURA_BUILD_PROFILE=release \
-      AURA_BUILD_FEATURES="$label" nix develop -c bash \
+    CARGO_BUILD_JOBS="$jobs" AURA_BUILD_TARGET_CAP_GIB=1000 \
+      AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES="$label" \
+      nice -n 10 nix develop -c bash \
       "$repo_root/scripts/dev/build-budget.sh" --root "$worktree" \
       --lane "clean-$label" -- "$@"
   ) > "$log" 2>&1; then status=0; else status=$?; fi

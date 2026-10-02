@@ -30,6 +30,8 @@ expect_status() {
 before="$(git -C "$repo_root" worktree list --porcelain | rg -c '^worktree ' )"
 printf '%s\n' $((50 * 1024 * 1024)) > "$FREE_FILE"
 expect_status 0 compare --dry-run
+rg -q 'cargo-jobs=4' "$test_root/output"
+expect_status 2 env AURA_COMPARE_CARGO_JOBS=zero bash "$repo_root/scripts/dev/compare-release-scopes.sh" --dry-run
 touch "$ACTIVE_FILE"
 expect_status 1 compare --apply
 rg -q 'consumer is active' "$test_root/output"
