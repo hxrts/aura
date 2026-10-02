@@ -1583,7 +1583,7 @@ fn choose_available_port(relay_host: Option<&str>, start: u16, attempts: u16) ->
     };
     for offset in 0..attempts {
         let port = start.saturating_add(offset);
-        if port_free("127.0.0.1", port) && relay_host.is_none_or(|host| port_free(host, port)) {
+        if port_free("127.0.0.1", port) && relay_host.map_or(true, |host| port_free(host, port)) {
             return Ok(port);
         }
     }

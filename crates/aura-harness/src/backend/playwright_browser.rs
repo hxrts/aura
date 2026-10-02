@@ -266,6 +266,10 @@ pub struct PlaywrightBrowserBackend {
     rpc_timeout_ms: u64,
     start_max_attempts: u32,
     start_retry_backoff_ms: u64,
+    /// Whether the browser profile has been started once. Only the first
+    /// start clears it; a restart keeps the profile, like a native restart
+    /// keeps its data directory.
+    profile_initialized: bool,
 }
 
 impl PlaywrightBrowserBackend {
@@ -330,6 +334,7 @@ impl PlaywrightBrowserBackend {
             rpc_timeout_ms,
             start_max_attempts,
             start_retry_backoff_ms,
+            profile_initialized: false,
         })
     }
 
@@ -516,7 +521,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
                 "data_dir": absolutize_path(self.config.data_dir.clone()),
                 "artifact_dir": absolutize_path(self.artifact_dir.clone()),
                 "headless": self.headless,
-                "reset_storage": true,
+                "reset_storage": !self.profile_initialized,
                 "page_goto_timeout_ms": self.page_goto_timeout_ms,
                 "harness_ready_timeout_ms": self.harness_ready_timeout_ms,
                 "start_max_attempts": self.start_max_attempts,
@@ -556,6 +561,7 @@ impl InstanceBackend for PlaywrightBrowserBackend {
 
         self.session = Some(Mutex::new(session));
         self.state = BackendState::Running;
+        self.profile_initialized = true;
         Ok(())
     }
 
@@ -1350,6 +1356,14 @@ mod tests {
         parse_u64_setting, tool_key_name, BrowserDiagnosticScreenPayload,
         DEFAULT_PAGE_GOTO_TIMEOUT_MS, PLAYWRIGHT_DRIVER_OWNED_MARKER,
     };
+
+    #[test]
+    fn browser_restart_keeps_the_profile_and_only_first_start_resets_it() {
+        let source = include_str!("playwright_browser.rs");
+        assert!(source.contains("\"reset_storage\": !self.profile_initialized,"));
+        assert!(source.contains("self.profile_initialized = true;"));
+        assert!(!source.contains(concat!("\"reset_storage\": ", "true,")));
+    }
 
     #[test]
     fn disabled_click_errors_are_recognized() {
