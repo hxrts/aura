@@ -284,6 +284,19 @@ impl std::fmt::Display for DiscoveredPeerMethod {
     }
 }
 
+/// Cumulative LAN discovery counters for Observability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LanDiscoveryStats {
+    /// Announcements this device broadcast.
+    pub announcements_sent: u64,
+    /// Discovery packets received.
+    pub packets_received: u64,
+    /// Received packets rejected as invalid or unauthenticated.
+    pub packets_invalid: u64,
+    /// Peers discovered from valid packets.
+    pub peers_discovered: u64,
+}
+
 /// State of discovered peers for the signal
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DiscoveredPeersState {
@@ -291,6 +304,8 @@ pub struct DiscoveredPeersState {
     pub peers: Vec<DiscoveredPeer>,
     /// Timestamp of last update (ms since epoch)
     pub last_updated_ms: u64,
+    /// LAN discovery counters, when LAN discovery runs.
+    pub lan_stats: Option<LanDiscoveryStats>,
 }
 
 /// Device information for settings

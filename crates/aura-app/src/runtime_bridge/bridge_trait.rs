@@ -322,6 +322,13 @@ pub trait RuntimeBridge: Send + Sync {
     // Sync Operations
     // =========================================================================
 
+    /// LAN discovery counters, or `None` when LAN discovery is not running.
+    async fn try_get_lan_discovery_stats(
+        &self,
+    ) -> Result<Option<crate::signal_defs::LanDiscoveryStats>, IntentError> {
+        Ok(None)
+    }
+
     /// Get current sync status, distinguishing runtime unavailability from a real
     /// zero-value status.
     async fn try_get_sync_status(&self) -> Result<SyncStatus, IntentError>;

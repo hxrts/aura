@@ -225,6 +225,7 @@ mod tests {
                 },
             ],
             last_updated_ms: 0,
+            lan_stats: None,
         };
 
         let runtime = build_contacts_runtime_view(contacts, discovered);

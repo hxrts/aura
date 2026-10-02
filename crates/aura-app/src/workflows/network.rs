@@ -371,11 +371,25 @@ async fn emit_discovered_peers_signal(
     .into_iter()
     .collect();
 
+    // Counters are advisory; a failed read leaves them unknown.
+    let lan_stats = timeout_runtime_call(
+        &runtime,
+        "emit_discovered_peers_signal",
+        "try_get_lan_discovery_stats",
+        Duration::from_millis(5_000),
+        || runtime.try_get_lan_discovery_stats(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .flatten();
+
     let peers = merge_discovered_peers(rendezvous_peers, bootstrap_candidates, &invited_ids);
 
     let state = DiscoveredPeersState {
         peers,
         last_updated_ms: timestamp_ms,
+        lan_stats,
     };
 
     // Emit the signal

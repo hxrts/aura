@@ -2294,6 +2294,62 @@ mod tests {
         assert!(!manager.is_running().await);
     }
 
+    /// LAN discovery feeds bootstrap candidates: an authenticated peer is
+    /// listed with the nickname it announced; a placeholder descriptor and our
+    /// own authority are not candidates.
+    #[tokio::test]
+    async fn lan_discovered_peers_become_named_bootstrap_candidates() {
+        let manager = RendezvousManager::new(
+            test_authority(),
+            RendezvousManagerConfig::for_testing(),
+            test_time(),
+            test_udp(),
+        );
+        // Keep the context alive: its task group owns the command actor.
+        let context = test_service_context();
+        RuntimeService::start(&manager, &context).await.unwrap();
+        let commands = manager.command_handle().await.unwrap();
+        let peer = |seed: u8, nickname: &str, real_keys: bool| {
+            let authority_id = AuthorityId::new_from_entropy([seed; 32]);
+            let key = if real_keys { [seed; 32] } else { [0u8; 32] };
+            DiscoveredPeer {
+                authority_id,
+                descriptor: RendezvousDescriptor {
+                    authority_id,
+                    device_id: None,
+                    context_id: default_context_id_for_authority(authority_id),
+                    transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:9000").unwrap()],
+                    handshake_psk_commitment: key,
+                    public_key: key,
+                    valid_from: 0,
+                    valid_until: u64::MAX,
+                    nonce: [seed; 32],
+                    nickname_suggestion: Some(nickname.to_string()),
+                },
+                source_addr: "127.0.0.1:9000".to_string(),
+                discovered_at_ms: 1,
+            }
+        };
+        for candidate in [peer(71, "Barbara", true), peer(72, "Forger", false)] {
+            commands
+                .request(|reply| RendezvousCommand::CacheDiscoveredPeer {
+                    local_authority_id: test_authority(),
+                    peer: Box::new(candidate),
+                    reply,
+                })
+                .await
+                .unwrap();
+        }
+
+        let peers = manager.list_lan_discovered_peers().await;
+        assert_eq!(peers.len(), 1, "placeholder descriptors are not candidates");
+        assert_eq!(
+            peers[0].descriptor.nickname_suggestion.as_deref(),
+            Some("Barbara")
+        );
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
     #[tokio::test]
     async fn test_manager_concurrent_lifecycle_transitions_are_idempotent() {
         let config = RendezvousManagerConfig::for_testing();

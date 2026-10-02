@@ -48,7 +48,7 @@ pub mod signals {
         RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
         UNREAD_COUNT_SIGNAL,
     };
-    pub use crate::signal_defs::{ConnectionStatus, NetworkStatus, SyncStatus};
+    pub use crate::signal_defs::{ConnectionStatus, LanDiscoveryStats, NetworkStatus, SyncStatus};
     pub use crate::ui_contract::AuthoritativeSemanticFact;
     // Signal name constants for emit_signal calls
     pub use crate::signal_defs::{

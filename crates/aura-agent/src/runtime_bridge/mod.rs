@@ -1725,6 +1725,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_bootstrap_candidates(self).await
     }
 
+    async fn try_get_lan_discovery_stats(
+        &self,
+    ) -> Result<Option<aura_app::signal_defs::LanDiscoveryStats>, IntentError> {
+        let rendezvous = require_rendezvous_service(self)?;
+        Ok(rendezvous
+            .lan_metrics()
+            .await
+            .map(|metrics| aura_app::signal_defs::LanDiscoveryStats {
+                announcements_sent: metrics.announcements_sent,
+                packets_received: metrics.packets_received,
+                packets_invalid: metrics.packets_invalid,
+                peers_discovered: metrics.peers_discovered,
+            }))
+    }
+
     async fn refresh_bootstrap_candidate_registration(&self) -> Result<(), IntentError> {
         rendezvous::refresh_bootstrap_candidate_registration(self).await
     }

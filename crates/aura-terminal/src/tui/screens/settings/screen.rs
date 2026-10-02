@@ -105,6 +105,7 @@ pub fn SettingsScreen(
     let reactive_sync_status = hooks.use_state(SyncStatus::default);
     let reactive_transport_peers = hooks.use_state(|| 0usize);
     let reactive_discovery_counts = hooks.use_state(|| (0usize, 0usize, 0usize, 0u64));
+    let reactive_lan_stats = hooks.use_state(|| None::<aura_app::ui::signals::LanDiscoveryStats>);
     let reactive_now_ms = use_display_clock_state(&mut hooks, &app_ctx);
 
     // Subscribe to settings signal for domain data
@@ -206,8 +207,10 @@ pub fn SettingsScreen(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut reactive_discovery_counts = reactive_discovery_counts.clone();
+        let mut reactive_lan_stats = reactive_lan_stats.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |state| {
+                reactive_lan_stats.set(state.lan_stats);
                 let mut lan_count = 0usize;
                 let mut rendezvous_count = 0usize;
                 for peer in &state.peers {
@@ -239,6 +242,7 @@ pub fn SettingsScreen(
     let transport_peers = *reactive_transport_peers.read();
     let (discovered_total, discovered_lan, discovered_rendezvous, discovered_last_ms) =
         *reactive_discovery_counts.read();
+    let lan_stats = *reactive_lan_stats.read();
     let now_ms = *reactive_now_ms.read();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
@@ -501,6 +505,19 @@ pub fn SettingsScreen(
                     Theme::TEXT,
                 ),
                 (format!("Last update: {discovery_display}"), Theme::TEXT),
+                (
+                    match lan_stats {
+                        Some(stats) => format!(
+                            "LAN: {} received, {} invalid, {} discovered, {} sent",
+                            stats.packets_received,
+                            stats.packets_invalid,
+                            stats.peers_discovered,
+                            stats.announcements_sent
+                        ),
+                        None => "LAN: discovery not running".to_string(),
+                    },
+                    Theme::TEXT,
+                ),
             ]
         }
     };
