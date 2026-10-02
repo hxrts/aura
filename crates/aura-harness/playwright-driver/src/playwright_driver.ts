@@ -96,29 +96,6 @@ const CHROMIUM_HARNESS_ARGS = [
   "--disable-renderer-backgrounding",
 ];
 
-// A harness page served from a LAN address (multi-host runs) is not a secure
-// context, which hides WebCrypto. Treat only that app origin as secure;
-// loopback origins are already secure.
-export function chromiumArgsForAppUrl(appUrl) {
-  let url;
-  try {
-    url = new URL(appUrl);
-  } catch {
-    return CHROMIUM_HARNESS_ARGS;
-  }
-  const loopback =
-    url.hostname === "localhost" ||
-    url.hostname === "[::1]" ||
-    url.hostname.startsWith("127.");
-  if (url.protocol !== "http:" || loopback) {
-    return CHROMIUM_HARNESS_ARGS;
-  }
-  return [
-    ...CHROMIUM_HARNESS_ARGS,
-    `--unsafely-treat-insecure-origin-as-secure=${url.origin}`,
-  ];
-}
-
 async function getChromium() {
   if (!chromiumPromise) {
     chromiumPromise = import("playwright").then((module) => module.chromium);
@@ -3293,7 +3270,7 @@ async function startPage(params) {
         headless,
         viewport: { width: 1280, height: 900 },
         ignoreHTTPSErrors: true,
-        args: chromiumArgsForAppUrl(appUrl),
+        args: CHROMIUM_HARNESS_ARGS,
       });
       traceDriver(
         `[driver] start_page attempt ${attempt}/${startMaxAttempts} instance=${instanceId} launchPersistentContext done`,
