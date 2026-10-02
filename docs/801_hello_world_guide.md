@@ -53,6 +53,10 @@ active. Failed, pinned, active and unclassified bundles are preserved.
 
 The disk report lists the current checkout and linked Git worktrees
 separately; it never collects another worktree's target.
+Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
+have stopped. Its startup and per-step preflight refuses active consumers,
+checks free space, and can collect only idle compiler caches. It preserves
+`.tmp/e2e` and current CI logs.
 
 The normal guarded build sequence on each host is:
 

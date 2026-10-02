@@ -1087,9 +1087,17 @@ ci-dry-run profile="push":
         bash scripts/dev/prune-ci-cache.sh --apply --root "${PWD}"
     }
 
+    active_build_consumers() {
+        ps -axo pid=,comm= | awk '{
+            name=$2; sub(/^.*\//, "", name)
+            if (name ~ /^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|tool_repl|aura-harness|aura)$/)
+                printf "%s(%s) ", name, $1
+        }'
+    }
+
     ensure_disk_headroom() {
         local phase="$1"
-        local free_now
+        local free_now active_now
         free_now="$(free_gib)"
         if [[ "$free_now" -lt "$ci_prune_target_gib" ]]; then
             echo "  low disk headroom before ${phase}: ${free_now}GiB free"
@@ -1100,6 +1108,11 @@ ci-dry-run profile="push":
         fi
         if [[ "$free_now" -lt "$ci_min_free_gib" ]]; then
             echo "  error: only ${free_now}GiB free before ${phase}; need ${ci_min_free_gib}GiB (${ci_min_free_gib} - ${free_now} = $((ci_min_free_gib - free_now))GiB short)" >&2
+            return 1
+        fi
+        active_now="$(active_build_consumers)"
+        if [[ -n "$active_now" ]]; then
+            echo "  error: active builder or harness consumer before ${phase}: ${active_now}" >&2
             return 1
         fi
     }
