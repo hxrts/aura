@@ -13,7 +13,7 @@ use aura_core::crypto::tree_signing::{
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     PhysicalTimeEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-    ThresholdSigningEffects, TransportEffects, TransportError,
+    ThresholdSigningEffects, TransportError,
 };
 use aura_core::threshold::{ParticipantIdentity, SigningContext};
 use aura_core::tree::metadata::DeviceLeafMetadata;
@@ -479,16 +479,16 @@ impl DeviceEpochRotationService {
         let mut completed = 0usize;
 
         loop {
-            let envelope = match self.effects.receive_envelope().await {
+            // Take only rotation envelopes; sync and other traffic stay queued for
+            // their own consumers instead of blocking a proposal behind them.
+            let envelope = match self
+                .effects
+                .take_inbound_envelope(is_device_epoch_rotation_envelope)
+            {
                 Ok(envelope) => envelope,
                 Err(TransportError::NoMessage) => break,
                 Err(error) => return Err(AgentError::internal(error.to_string())),
             };
-
-            if !is_device_epoch_rotation_envelope(&envelope) {
-                self.effects.requeue_envelope(envelope);
-                break;
-            }
 
             let envelope = verified_device_epoch_envelope(envelope)?;
 
