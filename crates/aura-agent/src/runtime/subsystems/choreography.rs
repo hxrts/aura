@@ -484,6 +484,23 @@ impl ChoreographyState {
         self_device_id: &str,
     ) -> Option<TransportEnvelope> {
         let inbox = self.session_inboxes.get_mut(&session_id)?;
+        if !inbox.is_empty() {
+            tracing::debug!(
+                session_id = %session_id,
+                expected_source = %source,
+                expected_context = %context_id,
+                self_device_id,
+                queued = ?inbox
+                    .iter()
+                    .map(|env| (
+                        env.source,
+                        env.context,
+                        env.metadata.get("aura-destination-device-id").cloned()
+                    ))
+                    .collect::<Vec<_>>(),
+                "matching session envelope"
+            );
+        }
         inbox
             .iter()
             .position(|env| {
