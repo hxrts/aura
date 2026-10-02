@@ -7,12 +7,13 @@ root="${1:-$repo_root}"
 root="$(cd "$root" && pwd -P)"
 
 size_kib() {
-  local path="$1"
-  if [[ -e "$path" ]]; then
-    du -sk "$path" | awk 'NR == 1 { print $1 }'
-  else
-    printf '0\n'
-  fi
+  local path="$1" sample
+  if [[ ! -e "$path" ]]; then printf '0\n'; return; fi
+  # Builds can unlink temporary outputs while this read-only inventory runs.
+  # Keep a numeric partial sample instead of aborting the entire report.
+  sample="$(du -sk "$path" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
+  if [[ "$sample" =~ ^[0-9]+$ ]]; then printf '%s\n' "$sample";
+  else printf 'unavailable\n'; fi
 }
 
 free_kib() {
