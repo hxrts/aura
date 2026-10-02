@@ -663,8 +663,44 @@ impl InvitationHandler {
         Ok(())
     }
 
+    /// Whether `key` signed a contact invitation from `sender` that this
+    /// authority imported and the sender confirmed (status Accepted).
+    async fn confirmed_sender_proof_key(
+        effects: &AuraEffectSystem,
+        own_id: AuthorityId,
+        sender: AuthorityId,
+        key: &[u8],
+    ) -> bool {
+        let prefix = InvitationCacheHandler::imported_invitation_prefix(own_id);
+        let Ok(keys) = effects.list_keys(Some(&prefix)).await else {
+            return false;
+        };
+        for storage_key in keys {
+            let Ok(Some(bytes)) = effects.retrieve(&storage_key).await else {
+                continue;
+            };
+            let Some(stored) =
+                InvitationCacheHandler::parse_imported_invitation_bytes(&bytes, None)
+            else {
+                continue;
+            };
+            if stored.shareable.sender_id == sender
+                && stored.status == InvitationStatus::Accepted
+                && matches!(
+                    stored.shareable.invitation_type,
+                    InvitationType::Contact { .. }
+                )
+                && stored.sender_proof_key.as_deref() == Some(key)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     async fn classify_imported_sender_trust(
         &self,
+        effects: &AuraEffectSystem,
         shareable: &ShareableInvitation,
         sender_proof: Option<&ShareableInvitationSenderProof>,
     ) -> AgentResult<ImportedSenderTrust> {
@@ -680,6 +716,21 @@ impl InvitationHandler {
             let device_id = proof.sender_device_id.ok_or_else(|| {
                 AgentError::invalid("known sender invitation requires sender device id")
             })?;
+            // The key that signed a code we already accepted from this contact
+            // (confirmed by their signed response) is trusted for new codes.
+            if Self::confirmed_sender_proof_key(
+                effects,
+                local_authority,
+                shareable.sender_id,
+                &proof.public_key,
+            )
+            .await
+            {
+                return Ok(ImportedSenderTrust::TrustedDevice {
+                    device_id,
+                    key_epoch: proof.key_epoch,
+                });
+            }
             let trusted_key = self
                 .trusted_key_resolver
                 .resolve_device_key(device_id)
@@ -1881,7 +1932,7 @@ impl InvitationHandler {
         )
         .await?;
         let sender_trust = self
-            .classify_imported_sender_trust(&shareable, sender_proof.as_ref())
+            .classify_imported_sender_trust(effects, &shareable, sender_proof.as_ref())
             .await?;
 
         let now_ms = Self::best_effort_current_timestamp_ms(effects).await;

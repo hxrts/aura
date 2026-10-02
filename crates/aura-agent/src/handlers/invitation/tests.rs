@@ -431,7 +431,11 @@ impl ContactPair {
         crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
             self.sender_effects.as_ref(),
             invitation,
-            &ShareableInvitationTransportMetadata::default(),
+            // Real exports name the sender device, as known-sender trust needs.
+            &ShareableInvitationTransportMetadata {
+                sender_device_id: Some(self.sender_effects.device_id()),
+                ..ShareableInvitationTransportMetadata::default()
+            },
             false,
         )
         .await
@@ -5322,3 +5326,21 @@ async fn home_invitation_acceptance_commits_durable_home_membership() {
             if *authority_id == own && home_id.as_bytes() == &[64u8; 32]
     )));
 }
+
+large_stack_async_test!(existing_contact_can_import_a_new_code_signed_by_its_confirmed_key, {
+    let pair = contact_pair(66).await;
+    let first = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&first).await).await;
+    pair.accept_with_responding_inviter(&imported.invitation_id)
+        .await
+        .expect("first contact invitation should be confirmed");
+
+    // The sender is now a contact; a second code signed by the same key imports.
+    let second = pair.create_contact_invitation().await;
+    let reimported = pair
+        .receiver_handler
+        .import_invitation_code(&pair.receiver_effects, &pair.signed_code(&second).await)
+        .await
+        .expect("a confirmed contact's new code should import");
+    assert_eq!(reimported.sender_id, pair.sender_id);
+});
