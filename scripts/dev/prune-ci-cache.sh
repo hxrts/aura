@@ -14,7 +14,7 @@ while [[ $# -gt 0 ]]; do
     *) echo 'usage: prune-ci-cache.sh [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
-root="$(cd "$root" && pwd)"
+root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo "prune-ci-cache: no Cargo.toml in $root" >&2; exit 2; }
 [[ "$cap_gib" =~ ^[0-9]+$ && "$cap_gib" -gt 0 ]] || { echo 'prune-ci-cache: invalid cap' >&2; exit 2; }
 if [[ -L "$root/target" ]]; then

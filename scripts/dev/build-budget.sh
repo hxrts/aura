@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-root="$(cd "$root" && pwd)"
+root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo "build-budget: no Cargo.toml in $root" >&2; exit 2; }
 [[ ! -L "$root/target" ]] || { echo 'build-budget: target is a symlink; refusing' >&2; exit 1; }
 if [[ "$dry_run" -eq 0 && "$#" -eq 0 ]]; then

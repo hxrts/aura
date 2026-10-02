@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/aura-prune-ci-test.XXXXXX")"
+test_root="$(cd "$test_root" && pwd -P)"
 trap 'rm -rf "$test_root"' EXIT
 project="$test_root/project"
 fakebin="$test_root/fakebin"

@@ -4,6 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/aura-build-budget-test.XXXXXX")"
+test_root="$(cd "$test_root" && pwd -P)"
 trap 'rm -rf "$test_root"' EXIT
 fakebin="$test_root/fakebin"
 project="$test_root/project"
