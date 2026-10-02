@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 root="${1:-$repo_root}"
-root="$(cd "$root" && pwd)"
+root="$(cd "$root" && pwd -P)"
 
 size_kib() {
   local path="$1"
@@ -27,6 +27,21 @@ printf 'Build context: lane=%s profile=%s target=%s features=%s\n' \
   "${AURA_BUILD_LANE:-unlabelled}" "${AURA_BUILD_PROFILE:-unlabelled}" \
   "${AURA_BUILD_TARGET_TRIPLE:-$rust_host}" "${AURA_BUILD_FEATURES:-unlabelled}"
 printf 'Free: %s KiB\n' "$(free_kib)"
+printf 'Checkout: %s KiB\n' "$(size_kib "$root")"
+
+printf 'Other linked Aura worktrees (separate checkout/target KiB):\n'
+printf 'Checkout KiB\tTarget KiB\tPath\n'
+while IFS= read -r line; do
+  [[ "$line" == worktree\ * ]] || continue
+  linked="${line#worktree }"
+  [[ "$linked" != "$root" && -d "$linked" ]] || continue
+  if [[ -L "$linked/target" ]]; then
+    printf 'target symlink; excluded\t%s\n' "$linked"
+  else
+    printf '%s\t%s\t%s\n' "$(size_kib "$linked")" \
+      "$(size_kib "$linked/target")" "$linked"
+  fi
+done < <(git -C "$root" worktree list --porcelain 2>/dev/null)
 
 paths=(
   target target/debug target/release target/release/deps target/release/build

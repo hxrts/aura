@@ -51,6 +51,9 @@ evidence. Use `scripts/dev/retain-e2e-runs.sh prune --dry-run` to inspect
 completed successful run bundles, then `--apply` when no harness run is
 active. Failed, pinned, active and unclassified bundles are preserved.
 
+The disk report lists the current checkout and linked Git worktrees
+separately; it never collects another worktree's target.
+
 The normal guarded build sequence on each host is:
 
 ```bash
