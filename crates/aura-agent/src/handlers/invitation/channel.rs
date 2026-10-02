@@ -914,6 +914,10 @@ impl<'a> InvitationChannelHandler<'a> {
                 .await;
         }
 
+        // Only a home invitation joins a home; DMs and group channels do not.
+        if !invite.home {
+            return Ok(());
+        }
         let reactive = effects.reactive_handler();
         let now_ms = InvitationHandler::best_effort_current_timestamp_ms(effects).await;
         crate::reactive::app_signal_views::materialize_home_signal_for_channel_invitation(

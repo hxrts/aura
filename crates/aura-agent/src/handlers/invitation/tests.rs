@@ -2333,6 +2333,18 @@ async fn channel_acceptance_notification_surfaces_peer_channel_establishment_fai
         .materialize_channel_invitation_acceptance(effects.as_ref(), &channel_invite)
         .await
         .expect("channel invitation accept should succeed locally");
+    {
+        use aura_effects::ReactiveEffects;
+        let homes: HomesState = effects
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap();
+        assert!(
+            homes.home_state(&canonical_home_id(19)).is_none(),
+            "accepting a plain channel invitation must not create a home"
+        );
+    }
     bootstrap_test_signing_authority(&effects, receiver_id).await;
 
     let error = handler
@@ -2663,7 +2675,7 @@ large_stack_async_test!(accepting_channel_invitation_materializes_home_and_chann
             home_id,
             nickname_suggestion: Some("Oak House".to_string()),
             bootstrap: None,
-            home: false,
+            home: true,
         },
         expires_at: None,
         message: Some("Join Oak House".to_string()),
@@ -2979,7 +2991,7 @@ large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when
             home_id,
             nickname_suggestion: Some("Birch House".to_string()),
             bootstrap: None,
-            home: false,
+            home: true,
         },
         expires_at: None,
         message: Some("Join Birch House".to_string()),
