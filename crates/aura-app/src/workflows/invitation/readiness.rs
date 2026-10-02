@@ -7,6 +7,17 @@ use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
 pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
+    refresh_authoritative_invitation_readiness_for_mode(app_core, crate::harness_mode_enabled())
+        .await
+}
+
+/// Mode-explicit readiness refresh. The production wrapper above reads the
+/// actual runtime harness mode; tests pass the decision directly so they never
+/// depend on or mutate process-wide `AURA_HARNESS_MODE`.
+pub(super) async fn refresh_authoritative_invitation_readiness_for_mode(
+    app_core: &Arc<RwLock<AppCore>>,
+    harness_mode: bool,
+) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
     #[cfg(feature = "signals")]
     let signal_has_pending =
@@ -18,9 +29,7 @@ pub(in crate::workflows) async fn refresh_authoritative_invitation_readiness(
 
     let runtime_has_pending = if signal_has_pending {
         true
-    } else if crate::harness_mode_enabled()
-        && harness_invitation_accept_operation_in_flight(app_core).await
-    {
+    } else if harness_mode && harness_invitation_accept_operation_in_flight(app_core).await {
         false
     } else {
         authoritative_pending_home_or_channel_invitation(&runtime)
