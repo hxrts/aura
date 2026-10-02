@@ -52,6 +52,8 @@ pub(super) fn ChatScreen(
     let exit_insert_mode_controller = controller.clone();
     let composer_value = composer_text.clone();
     let composer_active_channel = active_channel.clone();
+    let composer_channel_id = model.selected_channel_id().map(str::to_string);
+    let send_channel_id = composer_channel_id.clone();
     let composer_submit_text = composer_text.clone();
     let retryable_message = runtime
         .messages
@@ -272,6 +274,7 @@ pub(super) fn ChatScreen(
                                                 event.prevent_default();
                                                 let _ = submit_runtime_chat_input(
                                                     composer_keydown_controller.clone(),
+                                                    composer_channel_id.clone(),
                                                     composer_active_channel.clone(),
                                                     composer_submit_text.clone(),
                                                     schedule_update(),
@@ -366,6 +369,7 @@ pub(super) fn ChatScreen(
                                             if is_input_mode {
                                                 let _ = submit_runtime_chat_input(
                                                     send_message_controller.clone(),
+                                                    send_channel_id.clone(),
                                                     active_channel.clone(),
                                                     composer_text.clone(),
                                                     schedule_update(),

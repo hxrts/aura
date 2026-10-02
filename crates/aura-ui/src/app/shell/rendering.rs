@@ -255,6 +255,7 @@ fn AuraUiShell(controller: Arc<UiController>) -> Element {
                     && model.input_mode
                     && submit_runtime_chat_input(
                         keydown_controller.clone(),
+                        model.selected_channel_id().map(str::to_string),
                         shell_state.runtime.chat.active_channel.clone(),
                         model.input_buffer.clone(),
                         keydown_rerender.clone(),

@@ -39,6 +39,7 @@ pub(crate) fn selected_home_id_for_modal(
 
 pub(crate) fn submit_runtime_chat_input(
     controller: Arc<UiController>,
+    channel_id: Option<String>,
     channel_name: String,
     input_text: String,
     rerender: Arc<dyn Fn() + Send + Sync>,
@@ -68,9 +69,7 @@ pub(crate) fn submit_runtime_chat_input(
                     messaging_workflows::handoff::send_chat_message(
                         &app_core,
                         messaging_workflows::handoff::SendChatMessageRequest {
-                            target: messaging_workflows::handoff::SendChatTarget::ChannelName(
-                                channel_name.clone(),
-                            ),
+                            target: send_chat_target(channel_id.as_deref(), &channel_name),
                             content: content.clone(),
                             operation_instance_id: None,
                         },
@@ -236,5 +235,34 @@ pub(crate) fn handle_runtime_character_shortcut(
             true
         }
         _ => false,
+    }
+}
+
+/// The selected channel's id is the authoritative send target; its display
+/// name (e.g. "DM: Barbara") is only used when no channel is selected.
+fn send_chat_target(
+    channel_id: Option<&str>,
+    channel_name: &str,
+) -> messaging_workflows::handoff::SendChatTarget {
+    use messaging_workflows::handoff::SendChatTarget;
+    channel_id
+        .and_then(|id| id.parse::<aura_core::ChannelId>().ok())
+        .map(SendChatTarget::ChannelId)
+        .unwrap_or_else(|| SendChatTarget::ChannelName(channel_name.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::send_chat_target;
+    use aura_app::ui::workflows::messaging::handoff::SendChatTarget;
+
+    #[test]
+    fn chat_send_targets_selected_channel_id_over_display_name() {
+        let id = aura_core::ChannelId::from_bytes([7; 32]);
+        let target = send_chat_target(Some(&id.to_string()), "DM: Barbara");
+        assert!(matches!(target, SendChatTarget::ChannelId(parsed) if parsed == id));
+
+        let target = send_chat_target(None, "Note to self");
+        assert!(matches!(target, SendChatTarget::ChannelName(name) if name == "Note to self"));
     }
 }
