@@ -111,11 +111,11 @@ prune_safe_lanes() {
     if [[ "$mode" == dry ]]; then
       bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$candidate" --dry-run
     else
-      require_idle
+      require_idle || return $?
       if ! bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" \
         --lane "$candidate" --apply --lock-owned-by "$$"; then
         echo "build-budget: $candidate remains protected or busy" >&2
-        require_idle
+        require_idle || return $?
       fi
       if (( $(target_kib) <= cap_kib && $(free_kib) >= min_free_kib )); then
         break
