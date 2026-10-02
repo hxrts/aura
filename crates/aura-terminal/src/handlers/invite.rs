@@ -275,6 +275,7 @@ mod tests {
             home_id,
             nickname_suggestion: None,
             bootstrap: None,
+            home: false,
         });
         let result = format_invitation_type(&shareable);
         assert_eq!(result, format!("Channel (home: {home_id})"));

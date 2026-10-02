@@ -218,6 +218,7 @@ impl InvitationHandler {
                         if let InvitationType::Channel {
                             home_id,
                             nickname_suggestion,
+                            home,
                             ..
                         } = &invitation.invitation_type
                         {
@@ -237,17 +238,33 @@ impl InvitationHandler {
                                 invitation.receiver_id,
                             )
                             .await?;
-                            app_signal_views::materialize_home_signal_for_channel_acceptance(
-                                &reactive,
-                                *home_id,
-                                &home_name,
-                                invitation.sender_id,
-                                invitation.receiver_id,
-                                invitation.context_id,
-                                now_ms,
-                            )
-                            .await
-                            .map_err(AgentError::runtime)?;
+                            if *home {
+                                app_signal_views::materialize_home_signal_for_channel_acceptance(
+                                    &reactive,
+                                    *home_id,
+                                    &home_name,
+                                    invitation.sender_id,
+                                    invitation.receiver_id,
+                                    invitation.context_id,
+                                    now_ms,
+                                )
+                                .await
+                                .map_err(AgentError::runtime)?;
+                                self.commit_home_membership(
+                                    effects.as_ref(),
+                                    &ChannelInviteDetails {
+                                        context_id: invitation.context_id,
+                                        channel_id: *home_id,
+                                        home_name: home_name.clone(),
+                                        sender_id: invitation.sender_id,
+                                        bootstrap: None,
+                                        home: true,
+                                    },
+                                    invitation.receiver_id,
+                                    false,
+                                )
+                                .await?;
+                            }
                         }
                     }
                     let status = if response.0.accepted {

@@ -2027,6 +2027,7 @@ mod tests {
                 home_id: channel_id,
                 nickname_suggestion: Some("shared-parity-lab".to_string()),
                 bootstrap: None,
+                home: false,
             });
 
         assert_eq!(home_id, Some(channel_id));

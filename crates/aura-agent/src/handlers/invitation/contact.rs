@@ -654,6 +654,7 @@ impl<'a> InvitationContactHandler<'a> {
                     if let InvitationType::Channel {
                         home_id,
                         nickname_suggestion,
+                        home,
                         ..
                     } = &updated.invitation_type
                     {
@@ -672,7 +673,8 @@ impl<'a> InvitationContactHandler<'a> {
                             updated.receiver_id,
                         )
                         .await?;
-                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                        if *home {
+                            crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
                             &reactive,
                             *home_id,
                             &home_name,
@@ -683,6 +685,7 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await
                         .map_err(AgentError::runtime)?;
+                        }
                     }
                     self.handler
                         .invitation_cache
@@ -900,6 +903,7 @@ impl<'a> InvitationContactHandler<'a> {
                     let InvitationType::Channel {
                         home_id,
                         nickname_suggestion,
+                        home,
                         ..
                     } = &updated.invitation_type
                     else {
@@ -919,17 +923,34 @@ impl<'a> InvitationContactHandler<'a> {
                         updated.receiver_id,
                     )
                     .await?;
-                    crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
-                        &reactive,
-                        *home_id,
-                        &home_name,
-                        updated.sender_id,
-                        updated.receiver_id,
-                        updated.context_id,
-                        now_ms,
-                    )
-                    .await
-                    .map_err(AgentError::runtime)?;
+                    if *home {
+                        crate::reactive::app_signal_views::materialize_home_signal_for_channel_acceptance(
+                            &reactive,
+                            *home_id,
+                            &home_name,
+                            updated.sender_id,
+                            updated.receiver_id,
+                            updated.context_id,
+                            now_ms,
+                        )
+                        .await
+                        .map_err(AgentError::runtime)?;
+                        self.handler
+                            .commit_home_membership(
+                                effects.as_ref(),
+                                &ChannelInviteDetails {
+                                    context_id: updated.context_id,
+                                    channel_id: *home_id,
+                                    home_name: home_name.clone(),
+                                    sender_id: updated.sender_id,
+                                    bootstrap: None,
+                                    home: true,
+                                },
+                                updated.receiver_id,
+                                false,
+                            )
+                            .await?;
+                    }
                     let _ = home_name;
 
                     processed = processed.saturating_add(1);

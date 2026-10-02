@@ -338,6 +338,8 @@ struct ChannelInviteDetails {
     home_name: String,
     sender_id: AuthorityId,
     bootstrap: Option<ChannelBootstrapPackage>,
+    /// A home invitation: accepting joins the inviter's home.
+    home: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1483,8 +1485,59 @@ impl InvitationHandler {
 
             self.materialize_channel_invitation_acceptance(effects, &channel_invite)
                 .await?;
+            if channel_invite.home {
+                self.commit_home_membership(
+                    effects,
+                    &channel_invite,
+                    self.context.authority.authority_id(),
+                    true,
+                )
+                .await?;
+            }
         }
 
+        Ok(())
+    }
+
+    /// Commits durable home membership for a home invitation: the joining
+    /// member's `MemberJoined`, plus (on the invitee, which never saw the
+    /// inviter's facts) the home's `HomeCreated` with the inviter as creator.
+    async fn commit_home_membership(
+        &self,
+        effects: &AuraEffectSystem,
+        invite: &ChannelInviteDetails,
+        member: AuthorityId,
+        include_home: bool,
+    ) -> AgentResult<()> {
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        let home_id = aura_social::HomeId::from_bytes(*invite.channel_id.as_bytes());
+        let mut facts = Vec::new();
+        if include_home {
+            facts.push(aura_social::SocialFact::home_created_ms(
+                home_id,
+                invite.context_id,
+                now_ms,
+                invite.sender_id,
+                invite.home_name.clone(),
+            ));
+        }
+        facts.push(aura_social::SocialFact::member_joined_ms(
+            member,
+            home_id,
+            invite.context_id,
+            now_ms,
+            member.to_string(),
+        ));
+        for fact in facts {
+            effects
+                .commit_generic_fact_bytes(
+                    invite.context_id,
+                    aura_social::SOCIAL_FACT_TYPE_ID.into(),
+                    fact.to_bytes(),
+                )
+                .await
+                .map_err(|error| AgentError::effects(format!("commit home membership: {error}")))?;
+        }
         Ok(())
     }
 

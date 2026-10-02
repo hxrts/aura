@@ -727,6 +727,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 home_id,
                 nickname_suggestion,
                 bootstrap,
+                home,
             } = &inv.invitation_type
             {
                 let home_name =
@@ -737,6 +738,7 @@ impl<'a> InvitationChannelHandler<'a> {
                     home_name,
                     sender_id: inv.sender_id,
                     bootstrap: bootstrap.clone(),
+                    home: *home,
                 }));
             }
         }
@@ -749,6 +751,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 home_id,
                 nickname_suggestion,
                 bootstrap,
+                home,
             } = shareable.invitation_type
             {
                 let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
@@ -762,6 +765,7 @@ impl<'a> InvitationChannelHandler<'a> {
                     home_name,
                     sender_id: shareable.sender_id,
                     bootstrap,
+                    home,
                 }));
             }
         }
@@ -805,6 +809,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 home_id,
                 nickname_suggestion,
                 bootstrap,
+                home,
             } = invitation_type
             {
                 let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
@@ -814,6 +819,7 @@ impl<'a> InvitationChannelHandler<'a> {
                     home_name,
                     sender_id,
                     bootstrap,
+                    home,
                 }));
             }
 

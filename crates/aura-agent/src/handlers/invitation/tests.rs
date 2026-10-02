@@ -916,6 +916,7 @@ async fn invitation_can_be_declined() {
                 home_id,
                 nickname_suggestion: None,
                 bootstrap: None,
+                home: false,
             },
             None,
             Some(context_id),
@@ -948,6 +949,7 @@ async fn importing_channel_invitation_without_context_rejects_before_persist() {
             home_id: canonical_home_id(17),
             nickname_suggestion: Some("shared-parity-lab".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: None,
@@ -2028,6 +2030,23 @@ large_stack_async_test!(channel_acceptance_notification_transports_and_updates_s
         .await
         .unwrap();
 
+    // The channel is the sender's own home, so this is a home invitation and
+    // the acceptance materializes home membership.
+    sender_effects
+        .commit_generic_fact_bytes(
+            context_id,
+            aura_social::SOCIAL_FACT_TYPE_ID.into(),
+            aura_social::SocialFact::home_created_ms(
+                aura_social::HomeId::from_bytes(*channel_id.as_bytes()),
+                context_id,
+                1,
+                sender_id,
+                "shared-parity-lab".to_string(),
+            )
+            .to_bytes(),
+        )
+        .await
+        .unwrap();
     let invitation = sender_service
         .invite_to_channel(
             receiver_id,
@@ -2237,6 +2256,7 @@ async fn import_channel_invitation_requires_authoritative_context() {
             home_id: canonical_home_id(18),
             nickname_suggestion: Some("No Context House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join No Context House".to_string()),
@@ -2285,6 +2305,7 @@ async fn channel_acceptance_notification_surfaces_peer_channel_establishment_fai
             home_id: canonical_home_id(19),
             nickname_suggestion: Some("Context Strict House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join Context Strict House".to_string()),
@@ -2379,6 +2400,7 @@ async fn channel_acceptance_notification_uses_materialized_channel_context() {
             home_id,
             nickname_suggestion: Some("Materialized Context House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join Materialized Context House".to_string()),
@@ -2525,6 +2547,7 @@ async fn invitation_envelope_processing_imports_pending_channel_invites() {
             home_id,
             nickname_suggestion: Some("Maple House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join Maple House".to_string()),
@@ -2636,6 +2659,7 @@ large_stack_async_test!(accepting_channel_invitation_materializes_home_and_chann
             home_id,
             nickname_suggestion: Some("Oak House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join Oak House".to_string()),
@@ -2759,6 +2783,7 @@ fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
                 home_id,
                 nickname_suggestion: Some("Maple House".to_string()),
                 bootstrap: None,
+                home: false,
             },
             expires_at: None,
             message: Some("Join Maple House".to_string()),
@@ -2854,6 +2879,7 @@ large_stack_async_test!(accepting_channel_invitation_materializes_amp_bootstrap_
                 bootstrap_id,
                 key: bootstrap_key.to_vec(),
             }),
+            home: false,
         },
         expires_at: None,
         message: Some("Join Elm House".to_string()),
@@ -2949,6 +2975,7 @@ large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when
             home_id,
             nickname_suggestion: Some("Birch House".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join Birch House".to_string()),
@@ -3074,6 +3101,7 @@ async fn imported_channel_invitation_preserves_authoritative_context_for_choreog
             home_id: channel_id,
             nickname_suggestion: Some("shared-parity-lab".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Channel invitation".to_string()),
@@ -3321,6 +3349,7 @@ fn shareable_invitation_roundtrip_channel() {
             home_id,
             nickname_suggestion: None,
             bootstrap: None,
+            home: false,
         },
         expires_at: Some(1800000000000),
         message: Some("Join my channel!".to_string()),
@@ -3337,6 +3366,7 @@ fn shareable_invitation_roundtrip_channel() {
             home_id,
             nickname_suggestion: _,
             bootstrap: _,
+            home: _,
         } => {
             assert_eq!(home_id, ChannelId::from_bytes([21u8; 32]));
         }
@@ -4411,6 +4441,7 @@ async fn production_import_rejects_signed_channel_replay_against_another_context
             home_id: ChannelId::from_bytes([251u8; 32]),
             nickname_suggestion: None,
             bootstrap: None,
+            home: false,
         },
         expires_at: Some(4_102_444_800_000),
         message: None,
@@ -5243,4 +5274,51 @@ fn inviter_answers_each_settled_status_with_a_typed_decision() {
     assert_eq!(decide(&InvitationStatus::Accepted, false, false), Some(AlreadySettled));
     // A duplicate from the acceptor who already accepted is re-confirmed.
     assert_eq!(decide(&InvitationStatus::Accepted, false, true), Some(Confirmed));
+}
+
+#[tokio::test]
+async fn home_invitation_acceptance_commits_durable_home_membership() {
+    let own = AuthorityId::new_from_entropy([61u8; 32]);
+    let inviter = AuthorityId::new_from_entropy([62u8; 32]);
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own).unwrap(),
+    );
+    let handler = handler_for_id(own);
+    let invite = ChannelInviteDetails {
+        context_id: ContextId::new_from_entropy([63u8; 32]),
+        channel_id: ChannelId::from_bytes([64u8; 32]),
+        home_name: "Den".to_string(),
+        sender_id: inviter,
+        bootstrap: None,
+        home: true,
+    };
+    handler
+        .commit_home_membership(effects.as_ref(), &invite, own, true)
+        .await
+        .unwrap();
+
+    let social: Vec<aura_social::SocialFact> = effects
+        .load_committed_facts(own)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|fact| match fact.content {
+            FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                if envelope.type_id.as_str() == aura_social::SOCIAL_FACT_TYPE_ID =>
+            {
+                aura_social::SocialFact::from_envelope(&envelope)
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(social.iter().any(|fact| matches!(
+        fact,
+        aura_social::SocialFact::HomeCreated { home_id, creator_id, name, .. }
+            if home_id.as_bytes() == &[64u8; 32] && *creator_id == inviter && name == "Den"
+    )));
+    assert!(social.iter().any(|fact| matches!(
+        fact,
+        aura_social::SocialFact::MemberJoined { authority_id, home_id, .. }
+            if *authority_id == own && home_id.as_bytes() == &[64u8; 32]
+    )));
 }

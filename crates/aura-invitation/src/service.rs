@@ -115,6 +115,10 @@ pub enum InvitationType {
         /// Optional bootstrap key package for provisional AMP messaging.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bootstrap: Option<ChannelBootstrapPackage>,
+        /// Whether this invites the recipient into the home this channel
+        /// belongs to (`/homeinvite`), not only into the channel.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        home: bool,
     },
     /// Invitation to become a guardian
     Guardian {
@@ -722,6 +726,7 @@ mod tests {
                 home_id: ChannelId::from_bytes([1u8; 32]),
                 nickname_suggestion: None,
                 bootstrap: None,
+                home: false,
             }
             .as_type_string(),
             "channel"

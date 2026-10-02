@@ -427,6 +427,29 @@ impl InvitationServiceApi {
         Ok(Some(ceremony_id))
     }
 
+    /// Whether `channel_id` is a home this authority created (its committed
+    /// `SocialFact::HomeCreated`).
+    async fn is_own_home(&self, channel_id: ChannelId) -> bool {
+        let own = self.handler.authority_context().authority_id();
+        let Ok(facts) = self.effects.load_committed_facts(own).await else {
+            return false;
+        };
+        facts.iter().any(|fact| {
+            let aura_journal::fact::FactContent::Relational(
+                aura_journal::fact::RelationalFact::Generic { envelope, .. },
+            ) = &fact.content
+            else {
+                return false;
+            };
+            envelope.type_id.as_str() == aura_social::SOCIAL_FACT_TYPE_ID
+                && matches!(
+                    <aura_social::SocialFact as aura_journal::DomainFact>::from_envelope(envelope),
+                    Some(aura_social::SocialFact::HomeCreated { home_id, creator_id, .. })
+                        if home_id.as_bytes() == channel_id.as_bytes() && creator_id == own
+                )
+        })
+    }
+
     /// Create an invitation to a channel/home
     ///
     /// # Arguments
@@ -452,6 +475,9 @@ impl InvitationServiceApi {
                 "invalid channel/home id `{home_id}`: expected canonical ChannelId format ({e})"
             ))
         })?;
+        // Inviting into a channel that is one of our own fact-backed homes is a
+        // home invitation: the recipient joins the home, not only the channel.
+        let home = self.is_own_home(home_id).await;
 
         let prepared = self
             .handler
@@ -462,6 +488,7 @@ impl InvitationServiceApi {
                     home_id,
                     nickname_suggestion,
                     bootstrap,
+                    home,
                 },
                 None,
                 context_id,

@@ -153,6 +153,7 @@ mod tests {
                 home_id: aura_core::types::identifiers::ChannelId::from_bytes([1; 32]),
                 nickname_suggestion: None,
                 bootstrap: None,
+                home: false,
             }),
             InvitationType::Chat
         );

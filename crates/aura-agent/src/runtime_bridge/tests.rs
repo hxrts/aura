@@ -659,6 +659,7 @@ async fn identify_materialized_channel_ids_by_name_requires_materialized_runtime
             home_id: channel,
             nickname_suggestion: Some("shared-parity-lab".to_string()),
             bootstrap: None,
+            home: false,
         },
         expires_at: None,
         message: Some("Join shared-parity-lab".to_string()),
