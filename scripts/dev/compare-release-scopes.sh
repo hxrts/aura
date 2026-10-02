@@ -5,11 +5,17 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 mode=dry
-case "${1:-}" in
-  ''|--dry-run) ;;
-  --apply) mode=apply ;;
-  *) echo 'usage: compare-release-scopes.sh [--dry-run|--apply]' >&2; exit 2 ;;
-esac
+allow_live_harness=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) mode=dry ;;
+    --check) mode=check ;;
+    --apply) mode=apply ;;
+    --allow-live-harness) allow_live_harness=1 ;;
+    *) echo 'usage: compare-release-scopes.sh [--dry-run|--check|--apply] [--allow-live-harness]' >&2; exit 2 ;;
+  esac
+  shift
+done
 
 commit="$(git -C "$repo_root" rev-parse HEAD)"
 jobs="${AURA_COMPARE_CARGO_JOBS:-4}"
@@ -18,10 +24,13 @@ jobs="${AURA_COMPARE_CARGO_JOBS:-4}"
 }
 free_kib() { df -Pk "$repo_root" | awk 'NR == 2 {print $4}'; }
 consumers() {
-  ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}'
+  ps -axo pid=,comm= | awk -v allow="$allow_live_harness" \
+    '{n=$2;sub(/^.*\//,"",n);builder=n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep)$/;
+      harness=n~/^(tool_repl|aura-harness|aura)$/;
+      if(builder || (!allow && harness))printf "%s(%s) ",n,$1}'
 }
-printf 'Clean release comparison: commit=%s free=%s KiB mode=%s cargo-jobs=%s\n' \
-  "$commit" "$(free_kib)" "$mode" "$jobs"
+printf 'Clean release comparison: commit=%s free=%s KiB mode=%s cargo-jobs=%s live-harness=%s\n' \
+  "$commit" "$(free_kib)" "$mode" "$jobs" "$allow_live_harness"
 printf 'Order: clean terminal build, remove its owned worktree, clean workspace build, remove its owned worktree\n'
 if [[ "$mode" == dry ]]; then
   printf 'Terminal: cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal\n'
@@ -31,6 +40,7 @@ fi
 
 [[ -z "$(consumers)" ]] || { echo "another build or harness consumer is active: $(consumers)" >&2; exit 1; }
 (( $(free_kib) >= 40 * 1024 * 1024 )) || { echo 'need at least 40 GiB free for isolated clean-build comparison' >&2; exit 1; }
+[[ "$mode" == check ]] && { echo 'Preflight passed: no build or deletion performed'; exit 0; }
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/aura-release-compare.XXXXXX")"
 scratch="$(cd "$scratch" && pwd -P)"
 results="$repo_root/artifacts/disk-budget/comparisons/$(date -u +%Y%m%dT%H%M%SZ)-${commit:0:8}"
@@ -51,14 +61,15 @@ build_one() {
   current_worktree="$worktree"
   git -C "$repo_root" worktree add --detach "$worktree" "$commit" > "$results/$label-worktree.log" 2>&1
   printf 'Building %s from %s; log=%s\n' "$label" "$commit" "$log"
+  local budget_args=(--root "$worktree" --lane "clean-$label")
+  if (( allow_live_harness == 1 )); then budget_args+=(--allow-live-harness); fi
   if (
     unset CARGO_TARGET_DIR
     cd "$repo_root"
     CARGO_BUILD_JOBS="$jobs" AURA_BUILD_TARGET_CAP_GIB=1000 \
       AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES="$label" \
       nice -n 10 nix develop -c bash \
-      "$repo_root/scripts/dev/build-budget.sh" --root "$worktree" \
-      --lane "clean-$label" -- "$@"
+      "$repo_root/scripts/dev/build-budget.sh" "${budget_args[@]}" -- "$@"
   ) > "$log" 2>&1; then status=0; else status=$?; fi
   if [[ -d "$worktree/artifacts/disk-budget" ]]; then
     cp -R "$worktree/artifacts/disk-budget" "$results/$label-disk-budget"
