@@ -2951,11 +2951,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| map_serialization_error("Serialize operation", e))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
-        let consensus_required = signing_service
-            .threshold_state(&authority_id)
-            .await
-            .map(|state| state.threshold > 1 || state.total_participants > 1)
-            .unwrap_or(true);
+        // Aura Consensus agrees between authorities; the remaining participants
+        // here are devices of this one authority, which agree through the
+        // device-epoch rotation sessions below instead.
+        let intra_authority = participants
+            .iter()
+            .all(|participant| matches!(participant, ParticipantIdentity::Device(_)));
+        let consensus_required = !intra_authority
+            && signing_service
+                .threshold_state(&authority_id)
+                .await
+                .map(|state| state.threshold > 1 || state.total_participants > 1)
+                .unwrap_or(true);
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
             && consensus_required
@@ -2988,7 +2995,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         {
             tracing::info!(
                 ceremony = "device_removal",
-                "Skipping consensus DKG transcript (single-signer authority)"
+                "Skipping consensus DKG transcript (single-signer or device-only participants)"
             );
         }
 
