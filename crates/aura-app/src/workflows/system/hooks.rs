@@ -102,6 +102,9 @@ async fn refresh_authoritative_contact_link_readiness_hook(
         .capture(crate::workflows::observed_projection::mirror_contacts_signal_into_view(app_core))
         .await;
     let _ = best_effort
+        .capture(crate::workflows::observed_projection::mirror_homes_signal_into_view(app_core))
+        .await;
+    let _ = best_effort
         .capture(
             crate::workflows::invitation::refresh_authoritative_contact_link_readiness(app_core),
         )

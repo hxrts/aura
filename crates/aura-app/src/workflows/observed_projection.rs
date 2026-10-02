@@ -83,6 +83,43 @@ pub async fn mirror_contacts_signal_into_view(
     Ok(())
 }
 
+/// Mirror the runtime-owned homes signal (rebuilt from `SocialFact`s, including
+/// after a restart) into the ViewState cell that snapshots read, and anchor the
+/// neighborhood at the current home when it has none yet.
+///
+/// OWNERSHIP: observed-display-update
+pub async fn mirror_homes_signal_into_view(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME).await?;
+    let anchor = {
+        let mut core = app_core.write().await;
+        let anchor = homes
+            .current_home()
+            .map(|home| (home.id, home.name.clone()));
+        if let Some((home_id, _)) = anchor {
+            core.set_active_home_selection(Some(home_id));
+        }
+        core.views_mut().set_homes(homes);
+        let neighborhood = core.views().get_neighborhood();
+        anchor
+            .filter(|_| neighborhood.home_home_id == ChannelId::default())
+            .map(|(home_id, home_name)| (neighborhood, home_id, home_name))
+    };
+    let Some((mut neighborhood, home_id, home_name)) = anchor else {
+        return Ok(());
+    };
+    neighborhood.home_home_id = home_id;
+    neighborhood.home_name = home_name.clone();
+    neighborhood.position = Some(crate::views::neighborhood::TraversalPosition {
+        current_home_id: home_id,
+        current_home_name: home_name,
+        depth: 2,
+        path: vec![home_id],
+    });
+    replace_neighborhood_projection_observed(app_core, neighborhood).await
+}
+
 pub async fn homes_signal_snapshot(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<HomesState, AuraError> {
