@@ -46,6 +46,30 @@ pub struct OperationSnapshot {
     pub state: OperationState,
 }
 
+/// Health of a frontend-owned observer for one registered runtime signal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionHealthSnapshot {
+    pub signal: String,
+    pub state: SubscriptionHealthState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionFailureCode {
+    RegistrationFailed,
+    StreamClosed,
+    SnapshotReadFailed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionHealthState {
+    Attaching,
+    Healthy,
+    Degraded { reason: SubscriptionFailureCode },
+    Recovering,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AmpTransitionState {
@@ -708,6 +732,8 @@ pub struct UiSnapshot {
     pub operations: Vec<OperationSnapshot>,
     pub toasts: Vec<ToastSnapshot>,
     pub runtime_events: Vec<RuntimeEventSnapshot>,
+    #[serde(default)]
+    pub subscription_health: Vec<SubscriptionHealthSnapshot>,
 }
 
 impl UiSnapshot {
@@ -732,10 +758,21 @@ impl UiSnapshot {
             operations: Vec::new(),
             toasts: Vec::new(),
             runtime_events: Vec::new(),
+            subscription_health: Vec::new(),
         }
     }
 
     pub fn validate_invariants(&self) -> Result<(), String> {
+        let mut subscription_signals = HashSet::new();
+        for health in &self.subscription_health {
+            if health.signal.is_empty() || !subscription_signals.insert(&health.signal) {
+                return Err(format!(
+                    "invalid or duplicate subscription health for signal {}",
+                    health.signal
+                ));
+            }
+        }
+
         let mut list_ids = HashSet::new();
         for list in &self.lists {
             if !list_ids.insert(list.id) {
@@ -896,6 +933,28 @@ impl UiSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_health_exports_typed_failure_and_rejects_duplicate_observers() {
+        let mut snapshot = UiSnapshot::loading(ScreenId::Neighborhood);
+        snapshot
+            .subscription_health
+            .push(SubscriptionHealthSnapshot {
+                signal: "contacts".to_string(),
+                state: SubscriptionHealthState::Degraded {
+                    reason: SubscriptionFailureCode::StreamClosed,
+                },
+            });
+        let encoded = serde_json::to_string(&snapshot).expect("encode snapshot");
+        let decoded: UiSnapshot = serde_json::from_str(&encoded).expect("decode snapshot");
+        assert_eq!(decoded.subscription_health, snapshot.subscription_health);
+        assert!(decoded.validate_invariants().is_ok());
+
+        snapshot
+            .subscription_health
+            .push(snapshot.subscription_health[0].clone());
+        assert!(snapshot.validate_invariants().is_err());
+    }
 
     #[test]
     fn amp_transition_runtime_fact_is_searchable_and_keyed() {

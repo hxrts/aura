@@ -4148,7 +4148,7 @@ fn dispatch_ui_snapshot_payload_in_lane(
     request: ToolRequest,
 ) -> Result<UiSnapshot> {
     match dispatch_payload_in_lane(tool_api, lane, request)? {
-        ToolPayload::UiSnapshot(snapshot) => Ok(snapshot),
+        ToolPayload::UiSnapshot(snapshot) => Ok(*snapshot),
         payload => bail!("expected ui snapshot payload, got {payload:?}"),
     }
 }

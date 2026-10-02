@@ -55,7 +55,10 @@ use aura_app::ui::contract::{
     OperationId, OperationInstanceId, OperationSnapshot, OperationState, RuntimeEventId,
     RuntimeEventKind, RuntimeEventSnapshot,
 };
-use aura_app::ui_contract::{ProjectionRevision, RuntimeFact, SemanticOperationCausality};
+use aura_app::ui_contract::{
+    ProjectionRevision, RuntimeFact, SemanticOperationCausality, SubscriptionFailureCode,
+    SubscriptionHealthState,
+};
 use operations::OperationTracker;
 use std::collections::HashMap;
 
@@ -140,6 +143,9 @@ pub struct TuiState {
 
     /// Long-lived subscriptions that have permanently degraded.
     pub degraded_subscriptions: HashMap<String, String>,
+
+    /// Current attachment health for shell-owned signal subscriptions.
+    pub subscription_health: HashMap<String, SubscriptionHealthState>,
 
     /// Runtime facts exported from owned TUI transitions.
     pub runtime_facts: Vec<RuntimeFact>,
@@ -293,6 +299,24 @@ impl TuiState {
         let changed = self.degraded_subscriptions.get(&signal_id) != Some(&reason);
         self.degraded_subscriptions.insert(signal_id, reason);
         changed
+    }
+
+    pub fn mark_subscription_retrying(
+        &mut self,
+        signal_id: impl Into<String>,
+        reason: SubscriptionFailureCode,
+    ) {
+        self.subscription_health.insert(
+            signal_id.into(),
+            SubscriptionHealthState::Degraded { reason },
+        );
+    }
+
+    pub fn mark_subscription_recovered(&mut self, signal_id: impl Into<String>) {
+        let signal_id = signal_id.into();
+        self.subscription_health
+            .insert(signal_id.clone(), SubscriptionHealthState::Healthy);
+        self.degraded_subscriptions.remove(&signal_id);
     }
 
     #[must_use]
@@ -732,6 +756,14 @@ mod tests {
     fn degraded_subscriptions_are_structural_and_deduplicated() {
         let mut state = TuiState::new();
 
+        state.mark_subscription_retrying("chat", SubscriptionFailureCode::StreamClosed);
+        assert_eq!(
+            state.subscription_health.get("chat"),
+            Some(&SubscriptionHealthState::Degraded {
+                reason: SubscriptionFailureCode::StreamClosed,
+            })
+        );
+
         assert!(state.mark_subscription_degraded("chat", "retry budget exhausted"));
         assert_eq!(state.degraded_subscription_count(), 1);
         assert_eq!(
@@ -751,6 +783,13 @@ mod tests {
 
         assert!(state.mark_subscription_degraded("network", "subscription cancelled"));
         assert_eq!(state.degraded_subscription_count(), 2);
+
+        state.mark_subscription_recovered("chat");
+        assert_eq!(state.degraded_subscription_count(), 1);
+        assert_eq!(
+            state.subscription_health.get("chat"),
+            Some(&SubscriptionHealthState::Healthy)
+        );
     }
 
     #[test]

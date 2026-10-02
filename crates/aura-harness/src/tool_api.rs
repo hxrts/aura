@@ -201,7 +201,7 @@ pub struct DiagnosticContactListPayload {
 pub enum ToolPayload {
     Negotiation(ToolNegotiationPayload),
     DiagnosticScreenCapture(DiagnosticScreenCapture),
-    UiSnapshot(UiSnapshot),
+    UiSnapshot(Box<UiSnapshot>),
     Status(ToolStatusPayload),
     ContactInvitationCreated(ContactInvitationCreatedPayload),
     TailLog(TailLogPayload),
@@ -452,7 +452,7 @@ impl ToolApi {
             ToolRequest::UiState { instance_id } => self
                 .coordinator
                 .ui_snapshot(&instance_id)
-                .map(ToolPayload::UiSnapshot),
+                .map(|snapshot| ToolPayload::UiSnapshot(Box::new(snapshot))),
             ToolRequest::SendKeys { instance_id, keys } => {
                 self.coordinator.send_keys(&instance_id, &keys).map(|_| {
                     ToolPayload::Status(ToolStatusPayload {
@@ -721,6 +721,26 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to decode tool response: {error}"));
 
         assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn ui_snapshot_tool_response_preserves_subscription_failure() {
+        let mut snapshot = UiSnapshot::loading(aura_app::ui_contract::ScreenId::Neighborhood);
+        snapshot
+            .subscription_health
+            .push(aura_app::ui_contract::SubscriptionHealthSnapshot {
+                signal: "contacts".to_string(),
+                state: aura_app::ui_contract::SubscriptionHealthState::Degraded {
+                    reason: aura_app::ui_contract::SubscriptionFailureCode::StreamClosed,
+                },
+            });
+        let response = ToolResponse::Ok {
+            payload: ToolPayload::UiSnapshot(Box::new(snapshot)),
+        };
+        let encoded = serde_json::to_string(&response).expect("encode tool response");
+        let decoded: ToolResponse = serde_json::from_str(&encoded).expect("decode tool response");
+        assert_eq!(decoded, response);
+        assert!(encoded.contains("subscription_health"));
     }
 
     #[test]

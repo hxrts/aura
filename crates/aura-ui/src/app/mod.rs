@@ -262,7 +262,9 @@ mod tests {
         });
 
         assert!(source.contains("use_hook(crate::task_owner::new_ui_task_owner)"));
-        assert!(source.contains("subscription_task_owner.spawn_local_cancellable(async move {"));
+        assert!(source.contains("let spawner = subscription_task_owner.owned_spawner()"));
+        assert!(source.contains("spawner.spawn_local_cancellable(Box::pin(async move {"));
+        assert!(!source.contains("subscription_task_owner.clone()"));
         assert!(!source.contains("spawn_ui(async move {"));
     }
 

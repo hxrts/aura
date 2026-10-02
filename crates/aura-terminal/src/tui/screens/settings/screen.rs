@@ -114,7 +114,7 @@ pub fn SettingsScreen(
         let mut reactive_devices = reactive_devices.clone();
         let mut reactive_threshold = reactive_threshold.clone();
         let mut reactive_authorities = reactive_authorities.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 reactive_nickname_suggestion.set(settings_state.nickname_suggestion.clone());
@@ -157,7 +157,7 @@ pub fn SettingsScreen(
     hooks.use_future({
         let mut reactive_guardian_count = reactive_guardian_count.clone();
         let mut reactive_recovery_status = reactive_recovery_status.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
                 reactive_guardian_count.set(recovery_state.guardian_count());
@@ -169,7 +169,7 @@ pub fn SettingsScreen(
 
     // Subscribe to network status signal for observability
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         let mut reactive_network_status = reactive_network_status.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NETWORK_STATUS_SIGNAL, move |status| {
@@ -181,7 +181,7 @@ pub fn SettingsScreen(
 
     // Subscribe to sync status signal for observability
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         let mut reactive_sync_status = reactive_sync_status.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SYNC_STATUS_SIGNAL, move |status| {
@@ -193,7 +193,7 @@ pub fn SettingsScreen(
 
     // Subscribe to transport peers signal for observability
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         let mut reactive_transport_peers = reactive_transport_peers.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
@@ -205,7 +205,7 @@ pub fn SettingsScreen(
 
     // Subscribe to discovered peers for observability
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("settings");
         let mut reactive_discovery_counts = reactive_discovery_counts.clone();
         let mut reactive_lan_stats = reactive_lan_stats.clone();
         async move {

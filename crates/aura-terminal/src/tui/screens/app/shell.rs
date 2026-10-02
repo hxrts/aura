@@ -27,7 +27,7 @@ use aura_app::scenario_contract::SemanticCommandValue;
 use aura_app::ui::contract::HarnessUiCommand;
 use aura_app::ui::contract::OperationState;
 use aura_app::ui::prelude::*;
-use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::network as network_workflows;
 use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
@@ -56,10 +56,10 @@ use crate::tui::navigation::clamp_list_index;
 use crate::tui::screens::app::subscriptions::{
     use_authoritative_semantic_facts_subscription, use_authority_id_subscription,
     use_channels_subscription, use_contacts_subscription, use_devices_subscription,
-    use_discovered_peers_subscription, use_invitations_subscription, use_messages_subscription,
-    use_nav_status_signals, use_neighborhood_home_meta_subscription,
-    use_neighborhood_homes_subscription, use_notifications_subscription,
-    use_pending_requests_subscription, use_threshold_subscription, SharedDevices,
+    use_discovered_peers_subscription, use_invitations_subscription, use_nav_status_signals,
+    use_neighborhood_home_meta_subscription, use_neighborhood_homes_subscription,
+    use_notifications_subscription, use_pending_requests_subscription, use_shell_signal_fanout,
+    use_threshold_subscription, SharedDevices,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -287,6 +287,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     // Get AppCoreContext for IoContext access
     let app_ctx = hooks.use_context::<AppCoreContext>();
+    app_ctx.set_subscription_update_sender(update_tx_holder.clone());
     let tasks = app_ctx.tasks();
 
     // =========================================================================
@@ -295,11 +296,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let nav_signals = use_nav_status_signals(
         &mut hooks,
         &app_ctx,
+        update_tx_holder.clone(),
         props.network_status.clone(),
         props.known_online,
         props.transport_peers,
     );
     let projection_export_version = hooks.use_state(|| 0usize);
+    let settings_fanout = use_shell_signal_fanout(&mut hooks, &app_ctx, &*SETTINGS_SIGNAL);
+    let recovery_fanout = use_shell_signal_fanout(&mut hooks, &app_ctx, &*RECOVERY_SIGNAL);
 
     // =========================================================================
     // Contacts subscription: SharedContacts for dispatch handlers to read
@@ -320,8 +324,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Authority subscription: current authority id for dispatch handlers
     // =========================================================================
-    let shared_authority_id =
-        use_authority_id_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_authority_id = use_authority_id_subscription(
+        &mut hooks,
+        &app_ctx,
+        update_tx_holder.clone(),
+        &settings_fanout,
+    );
 
     // =========================================================================
     // Shared selected channel identity for subscriptions and dispatch
@@ -340,26 +348,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
-    // Must be created before messages subscription since messages depend on channels
-    let shared_channels = use_channels_subscription(
+    let (shared_channels, shared_messages) = use_channels_subscription(
         &mut hooks,
         &app_ctx,
         shared_authority_id.clone(),
         tui_selected.clone(),
         update_tx_holder.clone(),
         projection_export_version.clone(),
-    );
-
-    // =========================================================================
-    // Messages subscription: SharedMessages for dispatch handlers to read
-    // =========================================================================
-    // Used to look up failed messages by ID for retry operations.
-    // The Arc is kept up-to-date by a reactive subscription to CHAT_SIGNAL.
-    let shared_messages = use_messages_subscription(
-        &mut hooks,
-        &app_ctx,
-        tui_selected.clone(),
-        projection_export_version.clone(),
+        &settings_fanout,
     );
 
     // Clone for ChatScreen to compute per-channel message counts
@@ -373,6 +369,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         &app_ctx,
         update_tx_holder.clone(),
         projection_export_version.clone(),
+        &settings_fanout,
     );
     let callbacks_ref =
         hooks.use_ref(|| Arc::new(parking_lot::RwLock::new(props.callbacks.clone())));
@@ -407,19 +404,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
     // =========================================================================
-    let shared_pending_requests =
-        use_pending_requests_subscription(&mut hooks, &app_ctx, projection_export_version.clone());
+    let shared_pending_requests = use_pending_requests_subscription(
+        &mut hooks,
+        projection_export_version.clone(),
+        &recovery_fanout,
+    );
 
     // =========================================================================
     // Notifications subscription: keep notification count in sync for navigation
     // =========================================================================
-    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    use_notifications_subscription(
+        &mut hooks,
+        &app_ctx,
+        update_tx_holder.clone(),
+        &recovery_fanout,
+    );
 
     // =========================================================================
     // Threshold subscription: SharedThreshold for dispatch handlers to read
     // =========================================================================
     // Threshold values from settings - used for recovery eligibility checks
-    let shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
+    let shared_threshold = use_threshold_subscription(&mut hooks, &settings_fanout);
     let shared_threshold_for_dispatch = shared_threshold;
 
     // =========================================================================

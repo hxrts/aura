@@ -56,6 +56,9 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
   transitions alone.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - Onboarding must publish through the same semantic snapshot path as every other screen.
+- Mounted runtime subscriptions form one component-owned group per runtime generation, with one observer per distinct required signal. The group reports typed attachment and stream health; a failed attach or closed stream cannot leave the group apparently ready.
+- Unmount and generation change cancel the entire subscription group, including refresh work, before replacement observers attach. Subscription tasks cannot retain the group owner through their own captures.
+- Attachment and recovery resnapshot current signal state after the receiver is live. Lag may skip intermediate values, so observed projections must converge from a newer current snapshot.
 
 ### InvariantUiSnapshotReflectsSemanticState
 
@@ -111,7 +114,7 @@ Contract alignment:
 | Notification action bar and action dispatchers | `Observed` | `notification_actions.rs` submits operations via handoff owners and renders action buttons; terminal truth stays in `aura-app` workflows. |
 | AMP transition notification projection | `Observed` | Reducer-derived runtime events from `aura-app` own transition truth; `app/runtime_views/notifications.rs` chooses shared labels/actions without local ratchet guesses. |
 | Dioxus-specific spawn wiring for shared task-owner | `ActorOwned` helper for Dioxus shells | `task_owner.rs` provides the Dioxus-specific default spawn wiring. The core `FrontendTaskOwner` type lives in `aura-app::frontend_primitives`. |
-| Mounted shell signal subscriptions | `ActorOwned` helper scoped to component lifetime | `app/shell/subscriptions.rs` owns cancellable component-scoped subscription tasks so preserved-profile rebootstrap tears down old generation observers instead of accumulating immortal frontend loops. |
+| Mounted shell signal subscriptions | `ActorOwned` helper scoped to component lifetime and runtime generation | `app/shell/subscriptions.rs` owns one supervised group with typed health, unique signal receivers, current-state resnapshot, and explicit cancellation on unmount or rebootstrap. Listener tasks may hold a task spawner, but not a clone of the group's lifetime owner. |
 
 ### Capability-Gated Points
 
@@ -141,6 +144,8 @@ just ci-observed-layer-boundaries
 | Restarted operation reuses stale id | UiSnapshotReflectsSemanticState | `restarting_operation_generates_new_operation_instance_id` | Covered |
 | Shared frontend task owner stops reporting live after shutdown/drop | Ownership inventory | `task_owner::tests` | Covered |
 | Shared flow shapes diverge per frontend | SharedFlowShapesAreUniform | `just ci-shared-flow-policy` | Covered |
+| Failed attach or stream closure silently freezes the UI | Mounted subscription ownership | Fault-injected attach/closure and recovery tests in `app/shell/subscriptions.rs` | Required |
+| Rebootstrap retains old observers or misses current state | Mounted subscription ownership | Generation-change, repeated-mount, subscriber-count, and post-lag resnapshot tests | Required |
 
 ## References
 

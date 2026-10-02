@@ -277,7 +277,7 @@ pub fn NotificationsScreen(
 
     hooks.use_future({
         let mut reactive_contact_names = reactive_contact_names.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("notifications");
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |state| {
                 let names = state
@@ -293,7 +293,7 @@ pub fn NotificationsScreen(
     // Invitations notifications
     hooks.use_future({
         let mut reactive_invites = reactive_invites.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("notifications");
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
                 let mut items = Vec::new();
@@ -346,7 +346,7 @@ pub fn NotificationsScreen(
     // Recovery approval notifications
     hooks.use_future({
         let mut reactive_recovery = reactive_recovery.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("notifications");
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 let mut items = Vec::new();

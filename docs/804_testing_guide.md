@@ -287,6 +287,8 @@ The required split is that actor-owned subsystems own long-lived mutable async s
 
 App bootstrap tests must fail each required signal-registration and refresh-hook attachment step, then retry the same runtime generation. A successful hook installation means every signal receiver is attached and its listener has acknowledged startup; tests assert one live subscriber per required signal. Detach must cancel that generation's hook group before rebootstrap attaches another. Query-bound signal registration has the same retry contract, including a failed query binding after signals were registered. A task spawner that discards listeners must fail installation rather than report readiness.
 
+Mounted UI subscription tests must separately fail attachment of every distinct required signal, close an attached stream, and restart the runtime generation. Assert typed health, bounded recovery, one receiver per required signal, and cancellation of the previous generation on unmount and repeated mount. Attach before reading the initial state, then force updates across that boundary and after a lag to prove the projection converges from a fresh snapshot. Test both TUI and browser observation of the recovered authoritative state; neither a stale projection nor an empty default is evidence of success. A listener task that captures a clone of its own lifetime owner must fail the duplicate-ownership regression test.
+
 Do not use this table to justify ambient shared ownership. If a subsystem needs both actor and move semantics, the actor owns mutable lifecycle state while the move-owned handle or token defines who may advance or transfer it.
 
 ### Reactive Subscription Policy

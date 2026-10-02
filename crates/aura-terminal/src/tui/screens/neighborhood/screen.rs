@@ -399,7 +399,7 @@ pub fn NeighborhoodScreen(
     let reactive_contacts = hooks.use_state(Vec::new);
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("neighborhood");
         let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
         let mut reactive_homes = reactive_homes.clone();
         let mut reactive_depth = reactive_depth.clone();
@@ -444,7 +444,7 @@ pub fn NeighborhoodScreen(
     });
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("neighborhood");
         let mut reactive_contacts = reactive_contacts.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
@@ -457,7 +457,7 @@ pub fn NeighborhoodScreen(
     });
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("neighborhood");
         let mut reactive_members = reactive_members.clone();
         let mut reactive_budget = reactive_budget.clone();
         async move {
@@ -483,7 +483,7 @@ pub fn NeighborhoodScreen(
     });
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("neighborhood");
         let mut reactive_channels = reactive_channels.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {

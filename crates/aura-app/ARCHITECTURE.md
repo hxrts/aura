@@ -49,6 +49,7 @@ The crate uses explicit concern-owned submodules.
 - **Owned refresh loops**: each signal listener is the sole owner of its refresh pass. It receives the next update only after the current pass ends, so updates during a pass remain in the bounded stream. Lag may discard intermediate snapshots; the next pass reads current authoritative state and must converge without relying on every event being delivered.
 - **Frontend agnostic**: works with multiple platform frontends.
 - **Shared frontend task-root exception is narrow**: `frontend_primitives::FrontendTaskManager` may own cancellation/spawn state for Layer 7 shells, but `aura-app` must not grow general runtime service ownership.
+- **Observed subscription health is typed**: `UiSnapshot.subscription_health` carries one frontend observer state per signal, including typed registration, stream-closure, and snapshot-read failures. Frontend owners update the field across attachment and recovery; a missing observer must not appear healthy.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
 - **Shared semantic ownership authority**: parity-critical semantic operation categories, typed terminal lifecycle, and owner-routed handles/tokens are defined here rather than in frontend-local crates.
 - **Contacts relationship authority**: `ContactRelationshipState` and shared friend-management control availability are defined here and derived from runtime-fed projections rather than frontend-local state machines.

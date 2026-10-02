@@ -108,6 +108,11 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser generation rebinding must be surfaced explicitly through page-owned
   generation diagnostics, so harness observation can distinguish rebinding from
   stale or missing semantic publication.
+- A keyed browser generation remount must release the previous `aura-ui`
+  subscription group before the new generation attaches observers. The shared
+  UI group reports typed attachment, closure, and recovery health and takes a
+  fresh snapshot after attachment; the browser shell must not retain a second
+  observer for the same runtime signal.
 - Preserved-profile rebootstrap must tear down the previous browser runtime
   generation before starting the next one; clearing controller/publication
   state without stopping the old `aura-agent` runtime is forbidden because it

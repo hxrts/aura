@@ -13,21 +13,23 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
+use parking_lot::{Mutex as ParkingMutex, RwLock};
 
 use iocraft::prelude::*;
 
+use aura_app::ui::signals::SettingsState;
 use aura_app::ui::signals::{
     ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus,
     AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
     DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    NETWORK_STATUS_SIGNAL,
 };
-use aura_app::ui::types::EffectiveName;
+use aura_app::ui::types::{EffectiveName, RecoveryState};
 use aura_app::ui::workflows::time as time_workflows;
 use aura_app::ui_contract::{
     bridged_operation_statuses, AuthoritativeSemanticFact, RuntimeEventKind, RuntimeFact,
 };
+use aura_core::effects::reactive::Signal;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 
@@ -47,13 +49,84 @@ use crate::tui::updates::{
     UiUpdateSender,
 };
 
-pub use chat_projection::{
-    use_channels_subscription, use_messages_subscription, SharedChannels, SharedMessages,
-};
+pub use chat_projection::{use_channels_subscription, SharedChannels, SharedMessages};
 pub use display_clock::use_display_clock_state;
 pub use nav_status::{
     use_authority_id_subscription, use_nav_status_signals, NavStatusSignals, SharedAuthorityId,
 };
+
+/// One shell-owned signal stream fans out to independently owned projections.
+pub struct ShellSignalFanout<T> {
+    callbacks:
+        Arc<ParkingMutex<HashMap<&'static str, Arc<ParkingMutex<Box<dyn FnMut(T) + Send>>>>>>,
+    latest: Arc<ParkingMutex<Option<T>>>,
+}
+
+impl<T> Clone for ShellSignalFanout<T> {
+    fn clone(&self) -> Self {
+        Self {
+            callbacks: self.callbacks.clone(),
+            latest: self.latest.clone(),
+        }
+    }
+}
+
+impl<T: Clone> ShellSignalFanout<T> {
+    fn new() -> Self {
+        Self {
+            callbacks: Arc::new(ParkingMutex::new(HashMap::new())),
+            latest: Arc::new(ParkingMutex::new(None)),
+        }
+    }
+
+    pub(crate) fn register(&self, key: &'static str, callback: impl FnMut(T) + Send + 'static) {
+        let callback = Arc::new(ParkingMutex::new(
+            Box::new(callback) as Box<dyn FnMut(T) + Send>
+        ));
+        let first_registration = self
+            .callbacks
+            .lock()
+            .insert(key, callback.clone())
+            .is_none();
+        if first_registration {
+            let latest = self.latest.lock().clone();
+            if let Some(latest) = latest {
+                (callback.lock())(latest);
+            }
+        }
+    }
+
+    fn dispatch(&self, value: T) {
+        *self.latest.lock() = Some(value.clone());
+        let callbacks = self.callbacks.lock().values().cloned().collect::<Vec<_>>();
+        for callback in callbacks {
+            (callback.lock())(value.clone());
+        }
+    }
+}
+
+pub(crate) fn use_shell_signal_fanout<T>(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    signal: &'static Signal<T>,
+) -> ShellSignalFanout<T>
+where
+    T: Clone + Send + Sync + 'static,
+{
+    let fanout_ref = hooks.use_ref(ShellSignalFanout::<T>::new);
+    let fanout = fanout_ref.read().clone();
+    hooks.use_future({
+        let app_ctx = app_ctx.clone();
+        let fanout = fanout.clone();
+        async move {
+            subscribe_observed_projection_signal(app_ctx, signal, move |value| {
+                fanout.dispatch(value);
+            })
+            .await;
+        }
+    });
+    fanout
+}
 
 fn bump_projection_version(version: &mut State<usize>) {
     version.set(version.get().wrapping_add(1));
@@ -316,6 +389,7 @@ pub fn use_devices_subscription(
     app_ctx: &AppCoreContext,
     update_tx: Option<UiUpdateSender>,
     projection_version: State<usize>,
+    settings_fanout: &ShellSignalFanout<SettingsState>,
 ) -> SharedDevices {
     let shared_devices_ref = hooks.use_ref(SharedDevices::new);
     let shared_devices: SharedDevices = shared_devices_ref.read().clone();
@@ -324,78 +398,65 @@ pub fn use_devices_subscription(
     let known_devices = known_devices_ref.read().clone();
     let tasks = app_ctx.tasks();
 
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let devices = shared_devices.clone();
-        let update_tx = update_tx;
-        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_update_bridge_signal(
-                app_core,
-                &*SETTINGS_SIGNAL,
-                move |settings_state| {
-                    let list: Vec<Device> = settings_state
-                        .devices
+    let devices = shared_devices.clone();
+    let mut projection_version = projection_version.clone();
+    settings_fanout.register("devices", move |settings_state| {
+        let list: Vec<Device> = settings_state
+            .devices
+            .iter()
+            .map(|d| Device {
+                id: d.id.to_string(),
+                name: d.name.clone(),
+                is_current: d.is_current,
+                last_seen: d.last_seen,
+            })
+            .collect();
+        let current_devices = list
+            .iter()
+            .map(|device| (device.id.clone(), device.name.clone()))
+            .collect::<HashMap<_, _>>();
+        let new_devices = {
+            let mut known = known_devices.write();
+            let added = known
+                .as_ref()
+                .map(|existing| {
+                    current_devices
                         .iter()
-                        .map(|d| Device {
-                            id: d.id.to_string(),
-                            name: d.name.clone(),
-                            is_current: d.is_current,
-                            last_seen: d.last_seen,
-                        })
-                        .collect();
-                    let current_devices = list
-                        .iter()
-                        .map(|device| (device.id.clone(), device.name.clone()))
-                        .collect::<HashMap<_, _>>();
-                    let new_devices = {
-                        let mut known = known_devices.write();
-                        let added = known
-                            .as_ref()
-                            .map(|existing| {
-                                current_devices
-                                    .iter()
-                                    .filter(|(device_id, _)| !existing.contains_key(*device_id))
-                                    .map(|(device_id, device_name)| {
-                                        RuntimeFact::DeviceEnrollmentAccepted {
-                                            device_id: Some(device_id.clone()),
-                                            device_name: Some(device_name.clone()),
-                                            device_count: Some(list.len()),
-                                        }
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        *known = Some(current_devices);
-                        added
-                    };
-                    *devices.write() = list.clone();
-                    bump_projection_version(&mut projection_version);
-                    if let Some(tx) = update_tx.as_ref() {
-                        for fact in new_devices {
-                            spawn_ui_update(
-                                &tasks,
-                                tx,
-                                UiUpdate::RuntimeFactObserved(fact),
-                                UiUpdatePublication::RequiredUnordered,
-                            );
-                        }
-                    }
-                    if list.len() >= 2 {
-                        if let Some(tx) = update_tx.as_ref() {
-                            spawn_ui_update(
-                                &tasks,
-                                tx,
-                                UiUpdate::RuntimeBootstrapFinalized,
-                                UiUpdatePublication::RequiredUnordered,
-                            );
-                        }
-                    }
-                },
-                degradation,
-            )
-            .await;
+                        .filter(|(device_id, _)| !existing.contains_key(*device_id))
+                        .map(
+                            |(device_id, device_name)| RuntimeFact::DeviceEnrollmentAccepted {
+                                device_id: Some(device_id.clone()),
+                                device_name: Some(device_name.clone()),
+                                device_count: Some(list.len()),
+                            },
+                        )
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            *known = Some(current_devices);
+            added
+        };
+        *devices.write() = list.clone();
+        bump_projection_version(&mut projection_version);
+        if let Some(tx) = update_tx.as_ref() {
+            for fact in new_devices {
+                spawn_ui_update(
+                    &tasks,
+                    tx,
+                    UiUpdate::RuntimeFactObserved(fact),
+                    UiUpdatePublication::RequiredUnordered,
+                );
+            }
+        }
+        if list.len() >= 2 {
+            if let Some(tx) = update_tx.as_ref() {
+                spawn_ui_update(
+                    &tasks,
+                    tx,
+                    UiUpdate::RuntimeBootstrapFinalized,
+                    UiUpdatePublication::RequiredUnordered,
+                );
+            }
         }
     });
 
@@ -418,7 +479,7 @@ pub fn use_invitations_subscription(
     let shared_invitations: SharedInvitations = shared_invitations_ref.read().clone();
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.clone();
         let invitations = shared_invitations.clone();
         let mut projection_version = projection_version.clone();
         async move {
@@ -509,7 +570,7 @@ pub fn use_neighborhood_homes_subscription(
     let shared_homes: SharedNeighborhoodHomes = shared_homes_ref.read().clone();
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.clone();
         let homes = shared_homes.clone();
         let mut projection_version = projection_version.clone();
         async move {
@@ -550,7 +611,7 @@ pub fn use_neighborhood_home_meta_subscription(
     let shared_meta: SharedNeighborhoodHomeMeta = shared_meta_ref.read().clone();
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.clone();
         let meta = shared_meta.clone();
         let mut projection_version = projection_version.clone();
         async move {
@@ -580,28 +641,22 @@ pub type SharedPendingRequests = Arc<RwLock<Vec<PendingRequest>>>;
 /// Create a shared pending requests holder and subscribe it to RECOVERY_SIGNAL.
 pub fn use_pending_requests_subscription(
     hooks: &mut Hooks,
-    app_ctx: &AppCoreContext,
     projection_version: State<usize>,
+    recovery_fanout: &ShellSignalFanout<RecoveryState>,
 ) -> SharedPendingRequests {
     let shared_requests_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_requests: SharedPendingRequests = shared_requests_ref.read().clone();
 
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let requests = shared_requests.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_observed_projection_signal(app_core, &*RECOVERY_SIGNAL, move |r| {
-                let pending: Vec<PendingRequest> = r
-                    .pending_requests()
-                    .iter()
-                    .map(PendingRequest::from)
-                    .collect();
-                *requests.write() = pending;
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
+    let requests = shared_requests.clone();
+    let mut projection_version = projection_version.clone();
+    recovery_fanout.register("pending_requests", move |r| {
+        let pending: Vec<PendingRequest> = r
+            .pending_requests()
+            .iter()
+            .map(PendingRequest::from)
+            .collect();
+        *requests.write() = pending;
+        bump_projection_version(&mut projection_version);
     });
 
     shared_requests
@@ -612,10 +667,14 @@ pub fn use_notifications_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     update_tx: Option<UiUpdateSender>,
+    recovery_fanout: &ShellSignalFanout<RecoveryState>,
 ) {
-    let invite_count = Arc::new(AtomicUsize::new(0));
-    let recovery_count = Arc::new(AtomicUsize::new(0));
-    let last_total = Arc::new(AtomicUsize::new(usize::MAX));
+    let invite_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
+    let invite_count = invite_count_ref.read().clone();
+    let recovery_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
+    let recovery_count = recovery_count_ref.read().clone();
+    let last_total_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
+    let last_total = last_total_ref.read().clone();
     let tasks = app_ctx.tasks();
 
     let send_total = |tasks: &Arc<UiTaskOwner>,
@@ -669,28 +728,15 @@ pub fn use_notifications_subscription(
     });
 
     // Recovery requests
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let tasks = tasks;
-        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
-        async move {
-            subscribe_update_bridge_signal(
-                app_core,
-                &*RECOVERY_SIGNAL,
-                move |state| {
-                    recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
-                    send_total(
-                        &tasks,
-                        &update_tx,
-                        &invite_count,
-                        &recovery_count,
-                        &last_total,
-                    );
-                },
-                degradation,
-            )
-            .await;
-        }
+    recovery_fanout.register("notification_count", move |state| {
+        recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
+        send_total(
+            &tasks,
+            &update_tx,
+            &invite_count,
+            &recovery_count,
+            &last_total,
+        );
     });
 }
 
@@ -704,23 +750,16 @@ pub type SharedThreshold = Arc<RwLock<(u8, u8)>>;
 ///
 /// Returns an Arc that closures can capture. The subscription updates the Arc's
 /// contents whenever settings change, so readers always get current threshold.
-pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedThreshold {
+pub fn use_threshold_subscription(
+    hooks: &mut Hooks,
+    settings_fanout: &ShellSignalFanout<SettingsState>,
+) -> SharedThreshold {
     let shared_threshold_ref = hooks.use_ref(|| Arc::new(RwLock::new((2u8, 3u8))));
     let shared_threshold: SharedThreshold = shared_threshold_ref.read().clone();
 
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let threshold = shared_threshold.clone();
-        async move {
-            subscribe_observed_projection_signal(
-                app_core,
-                &*SETTINGS_SIGNAL,
-                move |settings_state| {
-                    *threshold.write() = (settings_state.threshold_k, settings_state.threshold_n);
-                },
-            )
-            .await;
-        }
+    let threshold = shared_threshold.clone();
+    settings_fanout.register("threshold", move |settings_state| {
+        *threshold.write() = (settings_state.threshold_k, settings_state.threshold_n);
     });
 
     shared_threshold
@@ -728,16 +767,76 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 
 #[cfg(test)]
 mod tests {
-    use super::contracts::{report_subscription_degradation, StructuralDegradationSink};
+    use super::contracts::{report_subscription_health, StructuralDegradationSink};
     use super::display_clock::{
         DISPLAY_CLOCK_MAX_CONSECUTIVE_FAILURES, DISPLAY_CLOCK_POLL_INTERVAL,
     };
+    use super::ShellSignalFanout;
+    use crate::tui::hooks::SubscriptionHealth;
     use crate::tui::tasks::UiTaskOwner;
     use crate::tui::types::Device;
     use crate::tui::updates::UiUpdate;
+    use aura_core::effects::reactive::ReactiveError;
+    use aura_core::RetryRunError;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
+
+    #[test]
+    fn shell_signal_fanout_replaces_callbacks_on_rerender() {
+        let fanout = ShellSignalFanout::<usize>::new();
+        let first = Arc::new(AtomicUsize::new(0));
+        let first_callback = first.clone();
+        fanout.register("projection", move |value| {
+            first_callback.store(value, Ordering::Relaxed);
+        });
+        fanout.dispatch(1);
+        assert_eq!(first.load(Ordering::Relaxed), 1);
+
+        let second = Arc::new(AtomicUsize::new(0));
+        let second_callback = second.clone();
+        fanout.register("projection", move |value| {
+            second_callback.store(value, Ordering::Relaxed);
+        });
+        fanout.dispatch(2);
+        assert_eq!(first.load(Ordering::Relaxed), 1);
+        assert_eq!(second.load(Ordering::Relaxed), 2);
+
+        let late = Arc::new(AtomicUsize::new(0));
+        let late_callback = late.clone();
+        fanout.register("late_projection", move |value| {
+            late_callback.store(value, Ordering::Relaxed);
+        });
+        assert_eq!(late.load(Ordering::Relaxed), 2);
+        assert_eq!(fanout.callbacks.lock().len(), 2);
+    }
+
+    #[test]
+    fn shell_settings_and_recovery_have_one_reactive_receiver_each() {
+        let shell = include_str!("shell.rs");
+        assert_eq!(
+            shell
+                .matches("use_shell_signal_fanout(&mut hooks, &app_ctx, &*SETTINGS_SIGNAL)")
+                .count(),
+            1
+        );
+        assert_eq!(
+            shell
+                .matches("use_shell_signal_fanout(&mut hooks, &app_ctx, &*RECOVERY_SIGNAL)")
+                .count(),
+            1
+        );
+        for source in [
+            include_str!("subscriptions.rs"),
+            include_str!("subscriptions/nav_status.rs"),
+            include_str!("subscriptions/chat_projection.rs"),
+        ] {
+            let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+            assert!(!production.contains("&*SETTINGS_SIGNAL"));
+            assert!(!production.contains("&*RECOVERY_SIGNAL"));
+        }
+    }
 
     #[tokio::test]
     async fn subscription_degradation_reports_structural_ui_update() {
@@ -745,19 +844,42 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let sink = StructuralDegradationSink::new(tasks.clone(), Some(tx));
 
-        report_subscription_degradation(
+        report_subscription_health(
             &sink,
-            "app:chat",
-            "attempts exhausted after 1 retries".to_string(),
+            "shell/app:chat".to_string(),
+            SubscriptionHealth::Degraded(RetryRunError::AttemptsExhausted {
+                attempts_used: 1,
+                last_error: ReactiveError::SubscriptionClosed {
+                    id: "app:chat".to_string(),
+                },
+            }),
         );
 
         match rx.recv().await {
-            Some(UiUpdate::SubscriptionDegraded { signal_id, reason }) => {
-                assert_eq!(signal_id, "app:chat");
-                assert_eq!(reason, "attempts exhausted after 1 retries");
+            Some(UiUpdate::SubscriptionDegraded {
+                signal_id,
+                reason,
+                reason_code,
+            }) => {
+                assert_eq!(signal_id, "shell/app:chat");
+                assert!(reason.contains("retry attempts exhausted after 1 attempts"));
+                assert_eq!(
+                    reason_code,
+                    aura_app::ui_contract::SubscriptionFailureCode::StreamClosed
+                );
             }
             other => panic!("expected SubscriptionDegraded update, got {other:?}"),
         }
+
+        report_subscription_health(
+            &sink,
+            "shell/app:chat".to_string(),
+            SubscriptionHealth::Ready,
+        );
+        assert!(matches!(
+            rx.recv().await,
+            Some(UiUpdate::SubscriptionRecovered { signal_id }) if signal_id == "shell/app:chat"
+        ));
 
         tasks.shutdown();
     }

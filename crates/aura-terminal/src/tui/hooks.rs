@@ -10,19 +10,18 @@
 //!
 //! ## Push-Based Signal Subscription
 //!
-//! iocraft's `use_future` hook enables true push-based reactive updates by
-//! spawning async tasks that subscribe to `ReactiveEffects` signals. When a
-//! signal emits a new value, the task updates iocraft's `State<T>`, which
-//! triggers a re-render.
+//! iocraft's `use_future` hook owns a supervised subscription for the
+//! component lifetime. The helper reports typed health to the shell and
+//! updates iocraft's `State<T>` when a signal emits a new value.
 //!
 //! ```ignore
 //! use iocraft::prelude::*;
 //! use aura_app::ui::signals::CHAT_SIGNAL;
-//! use aura_core::effects::reactive::ReactiveEffects;
+//! use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 //!
 //! #[component]
 //! fn ChatScreen(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-//!     // Get AppCore from context
+//!     // Get the reporting context from the shell.
 //!     let ctx = hooks.use_context::<AppCoreContext>();
 //!
 //!     // Initialize state from current value
@@ -31,18 +30,11 @@
 //!     // Subscribe to signal updates via use_future
 //!     hooks.use_future({
 //!         let mut chat_state = chat_state.clone();
-//!         let app_core = ctx.app_core.clone();
+//!         let subscription = ctx.for_subscription_scope("chat");
 //!         async move {
-//!             // Get subscription via ReactiveEffects
-//!             let mut stream = {
-//!                 let core = app_core.raw().read().await;
-//!                 core.subscribe(&*CHAT_SIGNAL)
-//!             };
-//!
-//!             // Process updates until component unmounts
-//!             while let Ok(new_value) = stream.recv().await {
-//!                 chat_state.set(new_value);
-//!             }
+//!             subscribe_signal_with_retry(subscription, &*CHAT_SIGNAL, move |value| {
+//!                 chat_state.set(value);
+//!             }).await;
 //!         }
 //!     });
 //!
@@ -69,10 +61,15 @@ use aura_core::{
     TimeoutExecutionProfile,
 };
 use aura_effects::time::PhysicalTimeHandler;
+use parking_lot::RwLock;
 
 use crate::error::TerminalResult;
 use crate::tui::context::{InitializedAppCore, IoContext};
 use crate::tui::tasks::UiTaskOwner;
+use crate::tui::updates::{
+    spawn_ordered_ui_updates, OrderedUiUpdateGate, UiUpdate, UiUpdateSender,
+};
+use aura_app::ui_contract::SubscriptionFailureCode;
 
 #[derive(Debug, Clone)]
 pub enum AppSnapshotAvailability {
@@ -93,9 +90,8 @@ pub enum AppSnapshotAvailability {
 /// ## Example
 ///
 /// ```ignore
-/// use crate::tui::hooks::AppCoreContext;
+/// use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 /// use aura_app::ui::signals::CHAT_SIGNAL;
-/// use aura_core::effects::reactive::ReactiveEffects;
 ///
 /// #[component]
 /// fn MyComponent(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
@@ -104,18 +100,14 @@ pub enum AppSnapshotAvailability {
 ///     // Initialize state from current value
 ///     let messages = hooks.use_state(|| Vec::new());
 ///
-///     // Subscribe to signal updates via ReactiveEffects
+///     // Subscribe through the component-owned health reporter.
 ///     hooks.use_future({
 ///         let mut messages = messages.clone();
-///         let app_core = ctx.app_core.clone();
+///         let subscription = ctx.for_subscription_scope("chat");
 ///         async move {
-///             let mut stream = {
-///                 let core = app_core.raw().read().await;
-///                 core.subscribe(&*CHAT_SIGNAL)
-///             };
-///             while let Ok(state) = stream.recv().await {
+///             subscribe_signal_with_retry(subscription, &*CHAT_SIGNAL, move |state| {
 ///                 messages.set(state.messages.clone());
-///             }
+///             }).await;
 ///         }
 ///     });
 ///
@@ -129,6 +121,9 @@ pub struct AppCoreContext {
 
     /// The IoContext for effect dispatch
     io_context: Arc<IoContext>,
+    subscription_updates: Arc<RwLock<Option<UiUpdateSender>>>,
+    subscription_health_gate: Arc<OrderedUiUpdateGate>,
+    subscription_scope: &'static str,
 }
 
 impl AppCoreContext {
@@ -138,6 +133,36 @@ impl AppCoreContext {
         Self {
             app_core,
             io_context,
+            subscription_updates: Arc::new(RwLock::new(None)),
+            subscription_health_gate: Arc::new(OrderedUiUpdateGate::new()),
+            subscription_scope: "shell",
+        }
+    }
+
+    /// Give a mounted screen an independent health identity for shared signals.
+    #[must_use]
+    pub fn for_subscription_scope(&self, scope: &'static str) -> Self {
+        let mut scoped = self.clone();
+        scoped.subscription_scope = scope;
+        scoped
+    }
+
+    /// Connect component subscription health to the shell's owned update loop.
+    pub fn set_subscription_update_sender(&self, sender: Option<UiUpdateSender>) {
+        *self.subscription_updates.write() = sender;
+    }
+
+    fn report_subscription_health(&self, signal_id: String, health: SubscriptionHealth) {
+        if let Some(sender) = self.subscription_updates.read().clone() {
+            spawn_ordered_ui_updates(
+                &self.tasks(),
+                &sender,
+                &self.subscription_health_gate,
+                vec![subscription_health_update(
+                    format!("{}/{signal_id}", self.subscription_scope),
+                    health,
+                )],
+            );
         }
     }
 
@@ -248,13 +273,14 @@ impl AppCoreContext {
 ///
 /// This is the default TUI subscription primitive. It avoids a class of
 /// "silent non-updating" UIs by ensuring that:
-/// - subscription failures emit `ERROR_SIGNAL` (best-effort), and
-/// - subscriptions retry with backoff instead of terminating permanently.
+/// - attachment and recovery publish typed health through the shell update loop,
+/// - subscription failures emit `ERROR_SIGNAL` for diagnostics, and
+/// - subscriptions retry with a bounded backoff policy.
 ///
 /// **Behavior**:
-/// - Reads the current value first (catch-up).
-/// - Subscribes and forwards values to `on_value`.
-/// - On any error, emits `ERROR_SIGNAL` and retries.
+/// - Attaches first, then reads the current value for catch-up.
+/// - Forwards stream values to `on_value`.
+/// - On error, reports health and retries until the owner budget ends.
 ///
 /// Maximum outer retry attempts before giving up on a signal subscription.
 /// At 2s max backoff this is ~6+ minutes of retrying before the loop exits.
@@ -291,25 +317,75 @@ fn subscription_retry_policy() -> RetryBudgetPolicy {
 }
 
 pub async fn subscribe_signal_with_retry<T, F>(
-    app_core: InitializedAppCore,
+    app_ctx: AppCoreContext,
     signal: &'static Signal<T>,
     on_value: F,
 ) where
     T: Clone + Send + Sync + 'static,
     F: FnMut(T) + Send + 'static,
 {
-    subscribe_signal_with_retry_report(app_core, signal, on_value, |_| {}).await;
+    let app_core = app_ctx.app_core.clone();
+    let signal_id = signal.id().to_string();
+    subscribe_signal_with_retry_report(app_core, signal, on_value, move |health| {
+        app_ctx.report_subscription_health(signal_id.clone(), health);
+    })
+    .await;
+}
+
+/// Health transitions for a component-owned reactive subscription.
+#[derive(Debug, Clone)]
+pub enum SubscriptionHealth {
+    /// A fresh snapshot was delivered to the component.
+    Ready,
+    /// The current attachment failed and the owner is retrying.
+    Retrying(ReactiveError),
+    /// The bounded retry policy ended without a live subscription.
+    Degraded(RetryRunError<ReactiveError>),
+}
+
+fn subscription_failure_code(error: &ReactiveError) -> SubscriptionFailureCode {
+    match error {
+        ReactiveError::SignalNotFound { .. } => SubscriptionFailureCode::RegistrationFailed,
+        ReactiveError::SubscriptionClosed { .. } => SubscriptionFailureCode::StreamClosed,
+        _ => SubscriptionFailureCode::SnapshotReadFailed,
+    }
+}
+
+pub(crate) fn subscription_health_update(
+    signal_id: String,
+    health: SubscriptionHealth,
+) -> UiUpdate {
+    match health {
+        SubscriptionHealth::Ready => UiUpdate::SubscriptionRecovered { signal_id },
+        SubscriptionHealth::Retrying(error) => UiUpdate::SubscriptionRetrying {
+            signal_id,
+            reason_code: subscription_failure_code(&error),
+        },
+        SubscriptionHealth::Degraded(error) => {
+            let reason_code = match &error {
+                RetryRunError::AttemptsExhausted { last_error, .. } => {
+                    subscription_failure_code(last_error)
+                }
+                RetryRunError::Timeout(_) => SubscriptionFailureCode::SnapshotReadFailed,
+            };
+            UiUpdate::SubscriptionDegraded {
+                signal_id,
+                reason: error.to_string(),
+                reason_code,
+            }
+        }
+    }
 }
 
 pub async fn subscribe_signal_with_retry_report<T, F, G>(
     app_core: InitializedAppCore,
     signal: &'static Signal<T>,
     on_value: F,
-    on_terminal_failure: G,
+    on_health: G,
 ) where
     T: Clone + Send + Sync + 'static,
     F: FnMut(T) + Send + 'static,
-    G: Fn(String) + Send + 'static,
+    G: Fn(SubscriptionHealth) + Send + 'static,
 {
     let reactive: ReactiveHandler = {
         let core = app_core.raw().read().await;
@@ -318,80 +394,62 @@ pub async fn subscribe_signal_with_retry_report<T, F, G>(
 
     let last_emitted = Arc::new(Mutex::new(None::<String>));
     let on_value = Arc::new(Mutex::new(on_value));
-    let on_terminal_failure = Arc::new(on_terminal_failure);
+    let on_health = Arc::new(on_health);
     let time = PhysicalTimeHandler::new();
     let retry_policy = subscription_retry_policy();
 
-    let result = execute_with_retry_budget(&time, &retry_policy, |_attempt| async {
-        if !reactive.is_registered(signal.id()) {
-            let message = format!("Reactive signal not registered: {}", signal.id());
-            maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
-            return Err(message);
-        }
-
-        match reactive.read(signal).await {
-            Ok(value) => {
-                let mut on_value = on_value.lock().await;
-                (*on_value)(value);
+    let result: Result<(), RetryRunError<ReactiveError>> =
+        execute_with_retry_budget(&time, &retry_policy, |_attempt| async {
+            if !reactive.is_registered(signal.id()) {
+                let error = ReactiveError::SignalNotFound {
+                    id: signal.id().to_string(),
+                };
+                (on_health)(SubscriptionHealth::Retrying(error.clone()));
+                maybe_emit_reactive_error(&reactive, &last_emitted, error.to_string()).await;
+                return Err(error);
             }
-            Err(e) => {
-                let message = format!(
-                    "Reactive read failed ({}): {}",
-                    signal.id(),
-                    format_reactive_error(&e)
-                );
-                maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
-                return Err(message);
-            }
-        }
 
-        let mut stream = reactive
-            .subscribe(signal)
-            .map_err(|error| format_reactive_error(&error))?;
-        loop {
-            match stream.recv().await {
+            let mut stream = match reactive.subscribe_attached(signal).await {
+                Ok(stream) => stream,
+                Err(error) => {
+                    (on_health)(SubscriptionHealth::Retrying(error.clone()));
+                    maybe_emit_reactive_error(&reactive, &last_emitted, error.to_string()).await;
+                    return Err(error);
+                }
+            };
+
+            match reactive.read(signal).await {
                 Ok(value) => {
                     let mut on_value = on_value.lock().await;
                     (*on_value)(value);
+                    (on_health)(SubscriptionHealth::Ready);
                 }
                 Err(e) => {
-                    let message = format!(
-                        "Reactive subscription failed ({}): {}",
-                        signal.id(),
-                        format_reactive_error(&e)
-                    );
-                    maybe_emit_reactive_error(&reactive, &last_emitted, message.clone()).await;
-                    return Err(message);
+                    (on_health)(SubscriptionHealth::Retrying(e.clone()));
+                    maybe_emit_reactive_error(&reactive, &last_emitted, e.to_string()).await;
+                    return Err(e);
                 }
             }
-        }
-    })
-    .await;
 
-    match result {
-        Ok(()) => {}
-        Err(RetryRunError::AttemptsExhausted {
-            attempts_used,
-            last_error,
-        }) => {
-            (*on_terminal_failure)(format!(
-                "attempts exhausted after {attempts_used} retries: {last_error}"
-            ));
-            tracing::warn!(
-                signal = %signal.id(),
-                attempts_used,
-                last_error,
-                "Signal subscription abandoned after max retries"
-            );
-        }
-        Err(RetryRunError::Timeout(error)) => {
-            (*on_terminal_failure)(format!("retry budget handling timed out: {error}"));
-            tracing::warn!(
-                signal = %signal.id(),
-                error = %error,
-                "Signal subscription abandoned because retry budget handling timed out"
-            );
-        }
+            loop {
+                match stream.recv().await {
+                    Ok(value) => {
+                        let mut on_value = on_value.lock().await;
+                        (*on_value)(value);
+                    }
+                    Err(e) => {
+                        (on_health)(SubscriptionHealth::Retrying(e.clone()));
+                        maybe_emit_reactive_error(&reactive, &last_emitted, e.to_string()).await;
+                        return Err(e);
+                    }
+                }
+            }
+        })
+        .await;
+
+    if let Err(error) = result {
+        tracing::warn!(signal = %signal.id(), %error, "Signal subscription abandoned");
+        (on_health)(SubscriptionHealth::Degraded(error));
     }
 }
 
@@ -412,24 +470,6 @@ async fn maybe_emit_reactive_error(
             Some(AppError::internal("tui:reactive", message)),
         )
         .await;
-}
-
-fn format_reactive_error(err: &ReactiveError) -> String {
-    match err {
-        ReactiveError::SignalNotFound { id } => format!("signal not found: {id}"),
-        ReactiveError::TypeMismatch {
-            id,
-            expected,
-            actual,
-        } => format!("type mismatch ({id}): expected {expected}, got {actual}"),
-        ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {id}"),
-        ReactiveError::EmissionFailed { id, reason } => {
-            format!("emission failed ({id}): {reason}")
-        }
-        ReactiveError::CycleDetected { path } => format!("cycle detected: {path}"),
-        ReactiveError::HandlerUnavailable => "handler unavailable".to_string(),
-        ReactiveError::Internal { reason } => format!("internal error: {reason}"),
-    }
 }
 
 /// Trait for types that can be used with reactive hooks
@@ -745,12 +785,10 @@ impl CallbackContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_lock::Mutex;
     use std::sync::{Arc, LazyLock};
 
     use async_lock::RwLock;
     use aura_app::ui::types::AppConfig;
-    use tokio::sync::oneshot;
 
     static UNREGISTERED_TEST_SIGNAL: LazyLock<Signal<u64>> =
         LazyLock::new(|| Signal::new("test:unregistered"));
@@ -830,31 +868,41 @@ mod tests {
             .await
             .unwrap_or_else(|error| panic!("Failed to init signals: {error}"));
 
-        let (tx, rx) = oneshot::channel();
-        let sender = Arc::new(Mutex::new(Some(tx)));
+        let health = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reported = health.clone();
         subscribe_signal_with_retry_report(
             app_core,
             &UNREGISTERED_TEST_SIGNAL,
             |_| {},
-            move |reason| {
-                if let Some(tx) = sender.lock_blocking().take() {
-                    let _ = tx.send(reason);
-                }
+            move |state| {
+                reported
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(state);
             },
         )
         .await;
 
-        let reason = rx.await.unwrap_or_else(|error| {
-            panic!("terminal failure callback should receive a reason: {error}")
-        });
+        let health = health
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(matches!(
+            health.first(),
+            Some(SubscriptionHealth::Retrying(ReactiveError::SignalNotFound { id }))
+                if id == "test:unregistered"
+        ));
         assert!(
-            reason.contains("attempts exhausted")
-                || reason.contains("retry budget handling timed out"),
-            "unexpected terminal failure reason: {reason}"
-        );
-        assert!(
-            reason.contains("Reactive signal not registered: test:unregistered"),
-            "terminal failure reason should preserve the signal registration error: {reason}"
+            matches!(
+                health.last(),
+                Some(SubscriptionHealth::Degraded(RetryRunError::AttemptsExhausted {
+                    last_error: ReactiveError::SignalNotFound { id },
+                    ..
+                }))
+                    if id == "test:unregistered"
+            ) || matches!(
+                health.last(),
+                Some(SubscriptionHealth::Degraded(RetryRunError::Timeout(_)))
+            )
         );
     }
 }

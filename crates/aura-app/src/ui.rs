@@ -41,7 +41,7 @@ impl From<Arc<RwLock<AppCore>>> for UiAppCore {
 pub mod signals {
     pub use crate::signal_defs::{
         register_app_signals, register_app_signals_with_queries, DiscoveredPeer,
-        DiscoveredPeerMethod, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        DiscoveredPeerMethod, SettingsState, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
         AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL_NAME, BUDGET_SIGNAL, CHAT_SIGNAL,
         CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
         HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,

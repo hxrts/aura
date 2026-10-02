@@ -4,12 +4,12 @@ use std::sync::Arc;
 use iocraft::prelude::*;
 use parking_lot::RwLock;
 
-use aura_app::ui::signals::{CHAT_SIGNAL, NEIGHBORHOOD_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::signals::{SettingsState, CHAT_SIGNAL, NEIGHBORHOOD_SIGNAL};
 use aura_app::ui::types::ChatState;
 use aura_core::AuthorityId;
 
 use super::contracts::subscribe_observed_projection_signal;
-use super::{bump_projection_version, SharedAuthorityId};
+use super::{bump_projection_version, SharedAuthorityId, ShellSignalFanout};
 use crate::tui::channel_selection::{CommittedChannelSelection, SharedCommittedChannelSelection};
 use crate::tui::chat_scope::{
     active_home_scope_id, effective_home_scope_id, is_dm_like_channel, scoped_channels,
@@ -261,61 +261,7 @@ impl ChannelProjectionCoordinator {
     }
 }
 
-/// Create a shared messages holder and subscribe it to CHAT_SIGNAL.
-///
-/// Returns an Arc that closures can capture. The subscription updates the Arc's
-/// contents whenever chat state changes, so readers always get current data.
-///
-/// Uses parking_lot::RwLock so dispatch handlers can read synchronously.
-pub fn use_messages_subscription(
-    hooks: &mut Hooks,
-    app_ctx: &AppCoreContext,
-    selected_channel_id: SharedCommittedChannelSelection,
-    projection_version: State<usize>,
-) -> SharedMessages {
-    let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
-    let shared_messages: SharedMessages = shared_messages_ref.read().clone();
-
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let messages = shared_messages.clone();
-        let mut projection_version = projection_version.clone();
-        async move {
-            subscribe_observed_projection_signal(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_id = selected_channel_id
-                    .read()
-                    .clone()
-                    .map(|selection| selection.channel_id().to_string());
-
-                let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
-                    if let Some(cid) = chat_state
-                        .all_channels()
-                        .find(|channel| channel.id.to_string() == channel_id)
-                        .map(|channel| channel.id)
-                    {
-                        chat_state
-                            .messages_for_channel(&cid)
-                            .iter()
-                            .map(Message::from)
-                            .collect()
-                    } else {
-                        Vec::new()
-                    }
-                } else {
-                    Vec::new()
-                };
-
-                *messages.write() = message_list;
-                bump_projection_version(&mut projection_version);
-            })
-            .await;
-        }
-    });
-
-    shared_messages
-}
-
-/// Create a shared channels holder and subscribe it to CHAT_SIGNAL.
+/// Create shared channel and message holders from one CHAT_SIGNAL subscription.
 pub fn use_channels_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
@@ -323,9 +269,13 @@ pub fn use_channels_subscription(
     selected_channel_id: SharedCommittedChannelSelection,
     update_tx: Option<UiUpdateSender>,
     projection_version: State<usize>,
-) -> SharedChannels {
+    settings_fanout: &ShellSignalFanout<SettingsState>,
+) -> (SharedChannels, SharedMessages) {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_channels: SharedChannels = shared_channels_ref.read().clone();
+    let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
+    let shared_messages: SharedMessages = shared_messages_ref.read().clone();
+    let selected_for_messages = selected_channel_id.clone();
     let tasks = app_ctx.tasks();
     let active_scope_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
     let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
@@ -352,35 +302,47 @@ pub fn use_channels_subscription(
     };
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.clone();
         let coordinator = coordinator.clone();
+        let messages = shared_messages.clone();
+        let mut message_projection_version = projection_version.clone();
         async move {
             subscribe_observed_projection_signal(app_core, &*CHAT_SIGNAL, move |chat_state| {
+                let selected_channel_id = selected_for_messages
+                    .read()
+                    .clone()
+                    .map(|selection| selection.channel_id().to_string());
+                let message_list: Vec<Message> = selected_channel_id
+                    .and_then(|selected_id| {
+                        chat_state
+                            .all_channels()
+                            .find(|channel| channel.id.to_string() == selected_id)
+                            .map(|channel| channel.id)
+                    })
+                    .map(|channel_id| {
+                        chat_state
+                            .messages_for_channel(&channel_id)
+                            .iter()
+                            .map(Message::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                *messages.write() = message_list;
+                bump_projection_version(&mut message_projection_version);
                 coordinator.update_chat_state(chat_state);
             })
             .await;
         }
     });
 
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let coordinator = coordinator.clone();
-        async move {
-            subscribe_observed_projection_signal(
-                app_core,
-                &*SETTINGS_SIGNAL,
-                move |settings_state| {
-                    coordinator.update_authority_id(
-                        settings_state.authority_id.parse::<AuthorityId>().ok(),
-                    );
-                },
-            )
-            .await;
-        }
+    let settings_coordinator = coordinator.clone();
+    settings_fanout.register("channel_authority", move |settings_state| {
+        settings_coordinator
+            .update_authority_id(settings_state.authority_id.parse::<AuthorityId>().ok());
     });
 
     hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.clone();
         let coordinator = coordinator;
         async move {
             subscribe_observed_projection_signal(
@@ -394,7 +356,7 @@ pub fn use_channels_subscription(
         }
     });
 
-    shared_channels
+    (shared_channels, shared_messages)
 }
 
 #[cfg(test)]
@@ -709,7 +671,8 @@ mod tests {
 
         assert!(section.contains("let coordinator = ChannelProjectionCoordinator"));
         assert!(section.contains("&*CHAT_SIGNAL"));
-        assert!(section.contains("&*SETTINGS_SIGNAL"));
+        assert!(section.contains("settings_fanout.register(\"channel_authority\""));
+        assert!(!section.contains("&*SETTINGS_SIGNAL"));
         assert!(section.contains("&*NEIGHBORHOOD_SIGNAL"));
         assert!(!section.contains("&*CONTACTS_SIGNAL"));
         assert!(!section.contains("&*HOMES_SIGNAL"));

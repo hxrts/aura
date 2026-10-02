@@ -115,33 +115,13 @@ The CLI usually reads state at a point in time. It can still use signals for wat
 
 ### Reading and subscribing to signals
 
-Signals are accessed through `AppCore`'s `ReactiveEffects` implementation. Read the current value with `read()` and subscribe for updates with `subscribe()`.
-
-```rust
-// Read current state from signal
-let contacts = {
-    let core = app_core.read().await;
-    core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
-};
-
-// Subscribe for ongoing updates
-let mut stream = {
-    let core = app_core.read().await;
-    core.subscribe(&*CONTACTS_SIGNAL)
-};
-
-while let Ok(state) = stream.recv().await {
-    render_contacts(&state);
-}
-```
-
-For initial render, read the current signal value first to avoid a blank frame. Then subscribe for updates. This pattern is used heavily by TUI screens.
+Signals are accessed through `AppCore`'s `ReactiveEffects` implementation. A continuously observed view must establish its receiver before reading the current value so an update between those operations cannot be lost. An unregistered signal, failed read, or closed receiver is a typed observation failure, not an empty or default domain state. After recovery, the view must read a fresh current snapshot; the reactive stream does not promise replay of intermediate values.
 
 ### Subscriptions and ownership
 
 Long-lived subscriptions that drive global TUI elements live in `crates/aura-terminal/src/tui/screens/app/subscriptions.rs`. Screen-local subscriptions should live with the screen module.
 
-Subscriptions should be owned by the component that renders the data. A subscription should not mutate `TuiState` unless it is updating navigation, focus, or overlay state.
+Subscriptions should be owned by the component that renders the data. A mounted shared UI shell owns one supervised subscription group per runtime generation, with one receiver per distinct required signal. The shared `UiSnapshot.subscription_health` field reports typed attachment, healthy, degraded, and recovering states, with a typed cause for registration, stream closure, or snapshot-read failure. Unmount or generation replacement cancels its old group before the next group becomes ready. A listener must not retain its own lifetime owner. A subscription should not mutate `TuiState` unless it is updating navigation, focus, or overlay state.
 
 ### Connection status (peer count)
 

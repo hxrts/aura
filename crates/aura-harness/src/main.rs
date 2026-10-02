@@ -396,7 +396,7 @@ fn collect_failure_diagnostics(
             aura_harness::tool_api::ToolResponse::Ok {
                 payload: ToolPayload::UiSnapshot(snapshot),
             } => (
-                Some(snapshot.clone()),
+                Some(*snapshot.clone()),
                 Some(serde_json::to_value(snapshot).unwrap_or_else(
                     |error| serde_json::json!({ "encode_error": error.to_string() }),
                 )),

@@ -393,7 +393,7 @@ pub fn ContactsScreen(
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
         let mut reactive_contacts = reactive_contacts.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("contacts");
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contacts: Vec<Contact> =
@@ -406,7 +406,7 @@ pub fn ContactsScreen(
 
     hooks.use_future({
         let mut reactive_invitations = reactive_invitations.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("contacts");
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |inv_state| {
                 let invitations: Vec<Invitation> = inv_state
@@ -432,7 +432,7 @@ pub fn ContactsScreen(
     // Subscribe to discovered peers signal updates
     hooks.use_future({
         let mut lan_peers_state = lan_peers_state.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("contacts");
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let last_updated_ms = peers_state.last_updated_ms;

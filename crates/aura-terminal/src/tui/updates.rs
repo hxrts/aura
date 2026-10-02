@@ -539,7 +539,18 @@ pub enum UiUpdate {
     NotificationsCountChanged(usize),
 
     /// A long-lived subscription exhausted its retry budget and degraded permanently.
-    SubscriptionDegraded { signal_id: String, reason: String },
+    SubscriptionDegraded {
+        signal_id: String,
+        reason: String,
+        reason_code: aura_app::ui_contract::SubscriptionFailureCode,
+    },
+    /// An attachment failed, but the subscription owner is retrying.
+    SubscriptionRetrying {
+        signal_id: String,
+        reason_code: aura_app::ui_contract::SubscriptionFailureCode,
+    },
+    /// A fresh snapshot was delivered after attachment or retry.
+    SubscriptionRecovered { signal_id: String },
 
     /// Replace the authoritative runtime facts for specific fact kinds.
     RuntimeFactsUpdated {

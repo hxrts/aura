@@ -777,6 +777,7 @@ mod tests {
                 operations: Vec::new(),
                 toasts: Vec::new(),
                 runtime_events: Vec::new(),
+                subscription_health: Vec::new(),
             }
         }
     }

@@ -18,7 +18,7 @@ use aura_app::ui::contract::{
 use aura_app::ui::types::StateSnapshot;
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, OperationState, ProjectionRevision,
-    QuiescenceSnapshot, QuiescenceState, RuntimeFact,
+    QuiescenceSnapshot, QuiescenceState, RuntimeFact, SubscriptionHealthSnapshot,
 };
 use parking_lot::Mutex;
 use std::fs;
@@ -455,6 +455,18 @@ fn build_authoritative_ui_snapshot(
         operations,
         toasts,
         runtime_events,
+        subscription_health: {
+            let mut health = state
+                .subscription_health
+                .iter()
+                .map(|(signal, state)| SubscriptionHealthSnapshot {
+                    signal: signal.clone(),
+                    state: *state,
+                })
+                .collect::<Vec<_>>();
+            health.sort_by(|left, right| left.signal.cmp(&right.signal));
+            health
+        },
     };
     snapshot.validate_invariants()?;
     Ok(snapshot)

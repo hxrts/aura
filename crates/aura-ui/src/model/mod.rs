@@ -20,6 +20,7 @@ use aura_app::frontend_primitives::ClipboardPort;
 use aura_app::ui_contract::{
     next_projection_revision, InvitationFactKind, ProjectionRevision, QuiescenceSnapshot,
     RuntimeFact, SemanticOperationCausality, SemanticOperationPhase, SemanticOperationStatus,
+    SubscriptionHealthSnapshot, SubscriptionHealthState,
 };
 use aura_app::{
     ui::contract::{
@@ -207,6 +208,7 @@ pub struct UiModel {
     pub operations: Vec<OperationSnapshot>,
     pub operation_causalities: HashMap<OperationId, Option<SemanticOperationCausality>>,
     pub runtime_events: Vec<RuntimeEventSnapshot>,
+    pub subscription_health: Vec<SubscriptionHealthSnapshot>,
     pub toast: Option<ToastState>,
     pub toast_key: u64,
     pub operation_instance_key: u64,
@@ -296,6 +298,7 @@ impl UiModel {
             operations: Vec::new(),
             operation_causalities: HashMap::new(),
             runtime_events: Vec::new(),
+            subscription_health: Vec::new(),
             toast: None,
             toast_key: 0,
             operation_instance_key: 0,
@@ -1065,6 +1068,31 @@ fn dismiss_modal(model: &mut UiModel) {
 }
 
 impl UiController {
+    pub(crate) fn set_subscription_health(&self, signal: &str, state: SubscriptionHealthState) {
+        let mut model = write_model(&self.model);
+        if let Some(entry) = model
+            .subscription_health
+            .iter_mut()
+            .find(|entry| entry.signal == signal)
+        {
+            if entry.state == state {
+                return;
+            }
+            entry.state = state;
+        } else {
+            model.subscription_health.push(SubscriptionHealthSnapshot {
+                signal: signal.to_owned(),
+                state,
+            });
+            model
+                .subscription_health
+                .sort_by(|left, right| left.signal.cmp(&right.signal));
+        }
+        model.advance_semantic_revision();
+        drop(model);
+        self.request_rerender();
+    }
+
     pub fn new(app_core: Arc<AsyncRwLock<AppCore>>, clipboard: Arc<dyn ClipboardPort>) -> Self {
         Self::with_authority_switcher(app_core, clipboard, None)
     }
@@ -1466,7 +1494,7 @@ mod tests {
     use aura_app::ui::contract::{
         OperationId, OperationInstanceId, OperationState, RuntimeEventKind,
     };
-    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact};
+    use aura_app::ui_contract::{InvitationFactKind, RuntimeFact, SubscriptionHealthState};
     use aura_app::{AppConfig, AppCore};
     use aura_core::types::identifiers::AuthorityId;
     use std::sync::Arc;
@@ -1845,6 +1873,40 @@ mod tests {
         };
 
         assert_eq!(event.kind(), RuntimeEventKind::InvitationAccepted);
+    }
+
+    #[test]
+    fn subscription_failure_and_recovery_are_visible_in_semantic_snapshot() {
+        let controller = UiController::new(
+            Arc::new(async_lock::RwLock::new(
+                AppCore::new(AppConfig::default()).unwrap_or_else(|error| panic!("{error}")),
+            )),
+            Arc::new(MemoryClipboard::default()),
+        );
+        let signal = "contacts";
+        controller.set_subscription_health(
+            signal,
+            SubscriptionHealthState::Degraded {
+                reason: aura_app::ui_contract::SubscriptionFailureCode::RegistrationFailed,
+            },
+        );
+        let failed = controller.ui_snapshot();
+        assert_eq!(failed.subscription_health.len(), 1);
+        assert!(matches!(
+            failed.subscription_health[0].state,
+            SubscriptionHealthState::Degraded {
+                reason: aura_app::ui_contract::SubscriptionFailureCode::RegistrationFailed
+            }
+        ));
+        controller.set_subscription_health(signal, SubscriptionHealthState::Recovering);
+        controller.set_subscription_health(signal, SubscriptionHealthState::Healthy);
+        let recovered = controller.ui_snapshot();
+        assert_eq!(recovered.subscription_health.len(), 1);
+        assert_eq!(
+            recovered.subscription_health[0].state,
+            SubscriptionHealthState::Healthy
+        );
+        assert_ne!(failed.revision, recovered.revision);
     }
 
     #[test]

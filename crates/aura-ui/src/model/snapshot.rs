@@ -205,6 +205,7 @@ impl UiModel {
             operations: self.operations.clone(),
             toasts,
             runtime_events: self.runtime_events.clone(),
+            subscription_health: self.subscription_health.clone(),
         }
     }
 }

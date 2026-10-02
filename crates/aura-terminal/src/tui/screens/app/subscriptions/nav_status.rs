@@ -28,56 +28,45 @@ pub fn use_authority_id_subscription(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
     update_tx: Option<UiUpdateSender>,
+    settings_fanout: &ShellSignalFanout<SettingsState>,
 ) -> SharedAuthorityId {
     let shared_ref = hooks.use_ref(SharedAuthorityId::new);
     let shared: SharedAuthorityId = shared_ref.read().clone();
     let tasks = app_ctx.tasks();
 
-    hooks.use_future({
-        let app_core = app_ctx.app_core.clone();
-        let authority_id = shared.clone();
-        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
-        async move {
-            subscribe_update_bridge_signal(
-                app_core,
-                &*SETTINGS_SIGNAL,
-                move |settings_state| {
-                    *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
-                    if let Some(ref tx) = update_tx {
-                        let current_index = settings_state
-                            .authorities
-                            .iter()
-                            .position(|authority| authority.is_current)
-                            .unwrap_or(0);
-                        let authorities = settings_state
-                            .authorities
-                            .iter()
-                            .map(|authority| {
-                                let info = AuthorityInfo::new(
-                                    authority.id.to_string(),
-                                    authority.nickname_suggestion.clone(),
-                                );
-                                if authority.is_current {
-                                    info.current()
-                                } else {
-                                    info
-                                }
-                            })
-                            .collect::<Vec<_>>();
-                        spawn_ui_update(
-                            &tasks,
-                            tx,
-                            UiUpdate::AuthoritiesUpdated {
-                                authorities,
-                                current_index,
-                            },
-                            UiUpdatePublication::RequiredUnordered,
-                        );
+    let authority_id = shared.clone();
+    settings_fanout.register("authority_id", move |settings_state| {
+        *authority_id.write() = settings_state.authority_id.parse::<AuthorityId>().ok();
+        if let Some(ref tx) = update_tx {
+            let current_index = settings_state
+                .authorities
+                .iter()
+                .position(|authority| authority.is_current)
+                .unwrap_or(0);
+            let authorities = settings_state
+                .authorities
+                .iter()
+                .map(|authority| {
+                    let info = AuthorityInfo::new(
+                        authority.id.to_string(),
+                        authority.nickname_suggestion.clone(),
+                    );
+                    if authority.is_current {
+                        info.current()
+                    } else {
+                        info
                     }
+                })
+                .collect::<Vec<_>>();
+            spawn_ui_update(
+                &tasks,
+                tx,
+                UiUpdate::AuthoritiesUpdated {
+                    authorities,
+                    current_index,
                 },
-                degradation,
-            )
-            .await;
+                UiUpdatePublication::RequiredUnordered,
+            );
         }
     });
 
@@ -94,6 +83,7 @@ pub struct NavStatusSignals {
 pub fn use_nav_status_signals(
     hooks: &mut Hooks,
     app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
     initial_network_status: NetworkStatus,
     initial_known_online: usize,
     initial_transport_peers: usize,
@@ -107,7 +97,7 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut network_status = network_status.clone();
-        let degradation = StructuralDegradationSink::new(tasks.clone(), None);
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         async move {
             subscribe_update_bridge_signal(
                 app_core,
@@ -126,7 +116,7 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut known_online = known_online.clone();
-        let degradation = StructuralDegradationSink::new(tasks.clone(), None);
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
         async move {
             subscribe_update_bridge_signal(
                 app_core,
@@ -150,7 +140,7 @@ pub fn use_nav_status_signals(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut reachable_peers = reachable_peers.clone();
-        let degradation = StructuralDegradationSink::new(tasks, None);
+        let degradation = StructuralDegradationSink::new(tasks, update_tx);
         async move {
             subscribe_update_bridge_signal(
                 app_core,

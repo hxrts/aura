@@ -47,6 +47,8 @@ See [Testing Guide](804_testing_guide.md) for backend implementation.
 - Snapshots carry `ProjectionRevision`, quiescence state, selections, lists, operations, toasts, and runtime events.
 - Parity-critical waits bind to typed contracts (readiness, visibility, events, quiescence, operation handles, strictly newer projections). Raw text matching and DOM scraping are diagnostics only.
 - Reactive refresh may combine a burst of signal updates into a later current-state projection. A wait for convergence checks the authoritative state and a strictly newer projection or declared barrier; it does not require every intermediate signal value or projection revision to be observed.
+- Frontend subscription health distinguishes attaching, ready, recovering, and failed observation for the active runtime generation. A missing signal or closed stream cannot be reported as ready; recovery attaches a new receiver and resnapshots current state before the frontend reports convergence.
+- Browser generation replacement and TUI remount cancel old observers before the new generation is ready. Harness waits bind to the active generation and treat stale-generation projections as stale even when their contents look plausible.
 - Observation paths are side-effect free. Reads do not repair state or retry hidden actions.
 
 See [Testing Guide](804_testing_guide.md) for observation patterns.

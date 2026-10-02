@@ -452,7 +452,7 @@ pub fn RecoveryScreen(
         let mut reactive_threshold_total = reactive_threshold_total.clone();
         let mut reactive_recovery_status = reactive_recovery_status.clone();
         let mut reactive_pending_requests = reactive_pending_requests.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("recovery");
         async move {
             let convert_state = |recovery_state: &aura_app::ui::types::RecoveryState| {
                 let guardians_vec: Vec<aura_app::ui::types::Guardian> =

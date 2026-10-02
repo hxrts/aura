@@ -1067,8 +1067,13 @@ pub(super) async fn process_ui_update_match(
                 });
             }
         }
-        UiUpdate::SubscriptionDegraded { signal_id, reason } => {
+        UiUpdate::SubscriptionDegraded {
+            signal_id,
+            reason,
+            reason_code,
+        } => {
             let changed = tui.with_mut(|state| {
+                state.mark_subscription_retrying(signal_id.clone(), reason_code);
                 state.mark_subscription_degraded(signal_id.clone(), reason.clone())
             });
             if changed {
@@ -1077,6 +1082,15 @@ pub(super) async fn process_ui_update_match(
                     crate::tui::state::ToastLevel::Warning
                 );
             }
+        }
+        UiUpdate::SubscriptionRetrying {
+            signal_id,
+            reason_code,
+        } => {
+            tui.with_mut(|state| state.mark_subscription_retrying(signal_id, reason_code));
+        }
+        UiUpdate::SubscriptionRecovered { signal_id } => {
+            tui.with_mut(|state| state.mark_subscription_recovered(signal_id));
         }
         UiUpdate::RuntimeFactsUpdated {
             revision,

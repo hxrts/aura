@@ -40,6 +40,19 @@ Aura tracks three different coverage classes in this document:
 
 This report is a traceability document for those classes. It is not a proof of protocol correctness, and it does not replace conformance or verification lanes.
 
+## Reactive observation health
+
+Both frontends export per-owner, per-signal `UiSnapshot.subscription_health` with
+typed attaching, healthy, degraded, and recovering states. A failed
+registration, closed stream, or failed snapshot read must remain observable;
+reattachment reads the current value before claiming healthy convergence.
+The shared UI and TUI library tests cover failure and recovery transitions,
+duplicate shell observer prevention, and snapshot serialization. The browser
+and TUI semantic-observation smoke scenarios remain the end-to-end anchors for
+startup, navigation, and `ui_state` convergence; they do not yet inject stream
+closure or runtime rebootstrap. The recovery smoke in `work/10.md` Task 14
+must add those fault-injection cases to the PR lane.
+
 ## Canonical UX Scenario Set
 
 | Scenario | File | Primary Flow |

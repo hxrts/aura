@@ -179,7 +179,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Subscribe to contacts signal for nickname lookup
     hooks.use_future({
         let mut reactive_contacts = reactive_contacts.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("chat");
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contacts: Vec<Contact> = contacts_state
@@ -196,7 +196,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     hooks.use_future({
         let mut reactive_active_scope = reactive_active_scope.clone();
         let active_scope = active_scope.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("chat");
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -211,7 +211,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
         let mut reactive_chat_state = reactive_chat_state.clone();
-        let app_core = app_ctx.app_core.clone();
+        let app_core = app_ctx.for_subscription_scope("chat");
         let update_tx = props.update_tx.clone();
         let shared_selected = props.selected_channel.clone();
         let shared_channels = props.shared_channels.clone();
