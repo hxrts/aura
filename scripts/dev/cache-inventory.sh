@@ -34,10 +34,9 @@ for path in "$target"/*; do
   lane_name="${path##*/}"
   if [[ "$lane_name" == release && -n "$harness_consumers" ]]; then
     use=harness-consumer
-  elif [[ "$open_scan" == available ]] && printf '%s\n' "$open_files" | rg -F -q "$path"; then
+  elif [[ "$open_scan" == available ]] && rg -F -q "$path" <<< "$open_files"; then
     use=open-files
-  elif printf '%s\n' "$process_args" | rg -F -q "$path" || \
-       printf '%s\n' "$process_args" | rg -F -q "target/$lane_name/"; then
+  elif rg -F -q "$path" <<< "$process_args"; then
     use=process-reference
   elif [[ -n "$builders" ]]; then
     use=builder-active
