@@ -58,6 +58,9 @@ use base64::Engine;
 use futures::future::{BoxFuture, LocalBoxFuture};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Real time the earliest virtual sleeper waits before advancing the clock.
+const MOCK_IDLE_SETTLE_MS: u64 = 5;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{watch, RwLock};
 use tokio::task::JoinHandle;
@@ -216,6 +219,8 @@ pub struct MockRuntimeBridge {
     id_counter: AtomicU64,
     /// Simulated current time (ms since epoch)
     current_time_ms: AtomicU64,
+    /// Pending virtual-time sleepers, keyed by (wake time, sleeper id).
+    sleepers: std::sync::Mutex<std::collections::BTreeSet<(u64, u64)>>,
     /// Devices registered with this authority
     devices: Arc<RwLock<Vec<BridgeDeviceInfo>>>,
     /// Whether canonical AMP channel state should be reported as available.
@@ -262,6 +267,7 @@ impl MockRuntimeBridge {
             mfa_policy: Arc::new(RwLock::new("Disabled".to_string())),
             id_counter: AtomicU64::new(1),
             current_time_ms: AtomicU64::new(1700000000000), // Fixed starting time
+            sleepers: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             devices: Arc::new(RwLock::new(vec![BridgeDeviceInfo {
                 id: device_id,
                 name: "MockDevice".to_string(),
@@ -1540,10 +1546,57 @@ impl RuntimeBridge for MockRuntimeBridge {
     }
 
     async fn sleep_ms(&self, ms: u64) {
-        // Mock bridge advances virtual time instead of sleeping
-        self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
-        // Yield to allow other tasks to run
-        tokio::task::yield_now().await;
+        // Virtual time: the clock only advances to the earliest pending wake
+        // time, so a long background sleep cannot jump past a shorter
+        // workflow deadline.
+        let target = self
+            .current_time_ms
+            .load(Ordering::SeqCst)
+            .saturating_add(ms);
+        let key = (target, self.id_counter.fetch_add(1, Ordering::SeqCst));
+        self.sleepers.lock().expect("sleepers lock").insert(key);
+        // Deregister even if this future is cancelled mid-sleep.
+        struct Deregister<'a>(
+            &'a std::sync::Mutex<std::collections::BTreeSet<(u64, u64)>>,
+            (u64, u64),
+        );
+        impl Drop for Deregister<'_> {
+            fn drop(&mut self) {
+                if let Ok(mut sleepers) = self.0.lock() {
+                    sleepers.remove(&self.1);
+                }
+            }
+        }
+        let _deregister = Deregister(&self.sleepers, key);
+        loop {
+            tokio::task::yield_now().await;
+            if self.current_time_ms.load(Ordering::SeqCst) >= target {
+                break;
+            }
+            let earliest = self
+                .sleepers
+                .lock()
+                .expect("sleepers lock")
+                .first()
+                .copied();
+            if earliest == Some(key) {
+                // Approximate "all tasks idle": let in-flight non-sleep work
+                // (locks, signals, channels) settle on real time before
+                // virtual time moves.
+                tokio::time::sleep(std::time::Duration::from_millis(MOCK_IDLE_SETTLE_MS)).await;
+                if self
+                    .sleepers
+                    .lock()
+                    .expect("sleepers lock")
+                    .first()
+                    .copied()
+                    == Some(key)
+                {
+                    self.current_time_ms.fetch_max(target, Ordering::SeqCst);
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1624,5 +1677,21 @@ mod tests {
         bridge.set_time_ms(2000000000000);
         let t3 = bridge.current_time_ms().await.unwrap();
         assert_eq!(t3, 2000000000000);
+    }
+
+    #[tokio::test]
+    async fn long_background_sleep_does_not_jump_past_shorter_sleeps() {
+        let bridge = std::sync::Arc::new(MockRuntimeBridge::new());
+        let start = bridge.current_time_ms().await.unwrap();
+        let background = bridge.clone();
+        let long = tokio::spawn(async move { background.sleep_ms(60_000).await });
+        tokio::task::yield_now().await;
+        for _ in 0..10 {
+            bridge.sleep_ms(100).await;
+        }
+        let elapsed = bridge.current_time_ms().await.unwrap() - start;
+        assert!(elapsed < 60_000, "short sleeps saw {elapsed}ms elapse");
+        long.await.unwrap();
+        assert!(bridge.current_time_ms().await.unwrap() - start >= 60_000);
     }
 }
