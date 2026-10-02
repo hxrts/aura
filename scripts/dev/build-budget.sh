@@ -8,6 +8,7 @@ root="$repo_root"
 lane=manual
 dry_run=0
 allow_live_harness=0
+no_prune=0
 cap_gib="${AURA_BUILD_TARGET_CAP_GIB:-24}"
 min_free_gib="${AURA_BUILD_MIN_FREE_GIB:-15}"
 emergency_gib="${AURA_BUILD_EMERGENCY_FREE_GIB:-5}"
@@ -16,7 +17,7 @@ poll_seconds="${AURA_BUILD_POLL_SECONDS:-2}"
 usage() {
   cat <<'EOF'
 Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
-                       [--allow-live-harness] -- COMMAND [ARGS...]
+                       [--allow-live-harness] [--no-prune] -- COMMAND [ARGS...]
 
 Defaults: target soft cap 24 GiB, admission floor 15 GiB free, emergency floor
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
@@ -30,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --lane) lane="${2:?missing lane}"; shift 2 ;;
     --dry-run) dry_run=1; shift ;;
     --allow-live-harness) allow_live_harness=1; shift ;;
+    --no-prune) no_prune=1; shift ;;
     --) shift; break ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
@@ -146,8 +148,12 @@ before_free="$(free_kib)"
 before_target="$(target_kib)"
 printf 'Before: free=%s KiB target=%s KiB\n' "$before_free" "$before_target"
 if [[ "$dry_run" -eq 1 ]]; then
-  sweep dry
-  prune_safe_lanes dry
+  if (( no_prune == 1 )); then
+    echo 'No-prune mode: cache collection disabled; admission and emergency floors remain active'
+  else
+    sweep dry
+    prune_safe_lanes dry
+  fi
   echo 'Dry run: no build or deletion performed'
   exit 0
 fi
@@ -184,6 +190,10 @@ trap 'exit 143' TERM
 
 require_idle
 if (( before_target > cap_kib || before_free < min_free_kib )); then
+  if (( no_prune == 1 )); then
+    echo 'build-budget: no-prune mode cannot recover the required headroom or target cap' >&2
+    exit 1
+  fi
   require_idle
   if sweep apply; then :;
   else
@@ -237,7 +247,9 @@ child_pid=''
 post_build_target="$(target_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
 
-if (( status == 0 )); then
+if (( status == 0 && no_prune == 1 )); then
+  echo 'No-prune mode: post-build cache collection skipped'
+elif (( status == 0 )); then
   if require_idle; then
     if sweep apply; then :;
     else

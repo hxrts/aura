@@ -86,6 +86,20 @@ expect_status 0 run_budget -- sh -c 'exit 0'
 rg -l 'Build context: lane=test' "$project"/artifacts/disk-budget/report.* >/dev/null
 
 reset_case
+expect_status 0 run_budget --no-prune -- sh -c 'exit 0'
+[[ ! -s "$CALLS_FILE" ]]
+rg -q 'post-build cache collection skipped' "$test_root/output"
+
+reset_case
+expect_status 0 run_budget --no-prune -- sh -c 'printf "cargo\n" > "$ACTIVE_FILE"'
+[[ ! -s "$CALLS_FILE" ]]
+
+reset_case
+printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" && ! -s "$CALLS_FILE" ]]
+
+reset_case
 rmdir "$project/target"
 ln -s "$test_root" "$project/target"
 expect_status 1 run_budget -- sh -c 'exit 0'

@@ -68,6 +68,9 @@ use `--check --allow-live-harness` and then `--apply --allow-live-harness`.
 This mode still refuses another builder, uses four low-priority Cargo jobs by
 default, and touches only the temporary worktree target. Override the job
 count with `AURA_COMPARE_CARGO_JOBS` when the host needs a lower limit.
+The comparison uses the budget wrapper's `--no-prune` mode because each
+temporary target is removed after measurement; its free-space admission and
+emergency stop remain active.
 
 The tracked LAN entry point is `scripts/harness/lan/build.sh`; its lane is
 `terminal`, `terminal-live`, `terminal-dev`, `web`, or `harness`.

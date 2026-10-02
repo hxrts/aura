@@ -61,7 +61,7 @@ build_one() {
   current_worktree="$worktree"
   git -C "$repo_root" worktree add --detach "$worktree" "$commit" > "$results/$label-worktree.log" 2>&1
   printf 'Building %s from %s; log=%s\n' "$label" "$commit" "$log"
-  local budget_args=(--root "$worktree" --lane "clean-$label")
+  local budget_args=(--root "$worktree" --lane "clean-$label" --no-prune)
   if (( allow_live_harness == 1 )); then budget_args+=(--allow-live-harness); fi
   if (
     unset CARGO_TARGET_DIR
@@ -74,15 +74,19 @@ build_one() {
   if [[ -d "$worktree/artifacts/disk-budget" ]]; then
     cp -R "$worktree/artifacts/disk-budget" "$results/$label-disk-budget"
   fi
+  if [[ -d "$worktree/target" ]]; then
+    printf '%s\n' "$(du -sk "$worktree/target" | awk '{print $1}')" > "$results/$label-target-kib"
+  fi
+  if [[ -d "$worktree/target/release" ]]; then
+    printf '%s\n' "$(du -sk "$worktree/target/release" | awk '{print $1}')" > "$results/$label-release-kib"
+  fi
+  printf '%s\n' "$(du -sk "$worktree" | awk '{print $1}')" > "$results/$label-checkout-kib"
+  compiling_count="$(rg -c '^   Compiling ' "$log" || true)"
+  printf '%s\n' "${compiling_count:-0}" > "$results/$label-compiling-count"
   if (( status != 0 )); then
     echo "$label clean build failed (exit $status); inspect $log" >&2
     return "$status"
   fi
-  printf '%s\n' "$(du -sk "$worktree/target" | awk '{print $1}')" > "$results/$label-target-kib"
-  printf '%s\n' "$(du -sk "$worktree/target/release" | awk '{print $1}')" > "$results/$label-release-kib"
-  printf '%s\n' "$(du -sk "$worktree" | awk '{print $1}')" > "$results/$label-checkout-kib"
-  compiling_count="$(rg -c '^   Compiling ' "$log" || true)"
-  printf '%s\n' "${compiling_count:-0}" > "$results/$label-compiling-count"
   git -C "$repo_root" worktree remove --force "$worktree"
   current_worktree=''
   printf 'Finished %s; isolated target removed before next lane\n' "$label"
