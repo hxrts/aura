@@ -23,7 +23,7 @@ const OBSERVED_PROJECTION_MODERATION_HOME_SELECTION_CAPABILITY: &str =
 pub(crate) fn map_invitation_type(inv_type: &DomainInvitationType) -> InvitationType {
     let _ = OBSERVED_PROJECTION_INVITATION_TYPE_MAPPING_CAPABILITY;
     match inv_type {
-        DomainInvitationType::Contact { .. } => InvitationType::Home,
+        DomainInvitationType::Contact { .. } => InvitationType::Contact,
         DomainInvitationType::Guardian { .. } => InvitationType::Guardian,
         DomainInvitationType::Channel { .. } => InvitationType::Chat,
         DomainInvitationType::DeviceEnrollment { .. } => InvitationType::Home,
@@ -111,4 +111,25 @@ pub(crate) fn select_moderation_home(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invitation_kinds_project_to_distinct_view_types() {
+        assert_eq!(
+            map_invitation_type(&DomainInvitationType::Contact { nickname: None }),
+            InvitationType::Contact
+        );
+        assert_eq!(
+            map_invitation_type(&DomainInvitationType::Channel {
+                home_id: aura_core::types::identifiers::ChannelId::from_bytes([1; 32]),
+                nickname_suggestion: None,
+                bootstrap: None,
+            }),
+            InvitationType::Chat
+        );
+    }
 }
