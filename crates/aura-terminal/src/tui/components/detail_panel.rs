@@ -55,7 +55,7 @@ pub fn DetailPanel<'a>(props: &mut DetailPanelProps<'a>) -> impl Into<AnyElement
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: focus_border_color(props.focused),
@@ -68,7 +68,7 @@ pub fn DetailPanel<'a>(props: &mut DetailPanelProps<'a>) -> impl Into<AnyElement
             // Scrollable content area
             View(
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
                 overflow: Overflow::Scroll,

@@ -210,7 +210,7 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
                 padding_right: Spacing::MODAL_PADDING,
                 padding_top: Spacing::XS,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {

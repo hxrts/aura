@@ -63,7 +63,6 @@ impl ConsensusProtocol {
                 prestate_hash,
                 operation_hash,
                 operation_bytes,
-                cached_commitments: _,
                 ..
             } => {
                 let threshold =

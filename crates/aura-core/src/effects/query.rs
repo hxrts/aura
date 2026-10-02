@@ -285,7 +285,8 @@ pub trait QueryEffects: Send + Sync {
 /// Convenience extension trait to register query-bound signals via QueryEffects.
 #[allow(async_fn_in_trait)]
 pub trait QuerySignalEffects: QueryEffects + ReactiveEffects {
-    /// Register a reactive signal that is bound to a query.
+    /// Ensure a reactive signal is bound to a query. Retrying after a failed
+    /// binding keeps the signal's current value and existing subscribers.
     async fn register_query_signal<Q: Query>(
         &self,
         signal: &Signal<Q::Result>,

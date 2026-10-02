@@ -54,7 +54,7 @@ pub fn contact_multi_select(props: &ContactMultiSelectProps) -> impl Into<AnyEle
             padding_right: Spacing::SM,
             padding_top: Spacing::XS,
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
         ) {
             Text(
                 content: props.prompt.clone(),

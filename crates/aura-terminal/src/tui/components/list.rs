@@ -62,7 +62,7 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
             } else {
                 None
             })
-            View(flex_direction: FlexDirection::Column, flex_grow: 1.0) {
+            View(flex_direction: FlexDirection::Column, flex_grow: 1.0_f32) {
                 Text(content: label, color: label_color, weight: Weight::Bold)
                 #(if has_desc {
                     Some(element! {

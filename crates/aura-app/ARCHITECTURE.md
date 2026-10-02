@@ -44,6 +44,8 @@ The crate uses explicit concern-owned submodules.
 - **Pure logic**: no runtime dependencies or impure I/O.
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
 - **Push-based reactive flow**: Intent -> Journal -> Reduce -> ViewState -> Signal -> UI.
+- **Complete signal initialization**: each required app signal is ensured independently without resetting an existing value. A single registered signal never proves that the full set is ready; partial initialization is retryable.
+- **Runtime hook ownership**: one `AppCore` hook group owns one subscription per required signal for one runtime attachment. Installation is serialized, enters `Installing`, and reaches `Ready` only after every receiver attaches and listener startup is acknowledged. Failure returns to `Stopped` with a typed reactive cause; detach drops the group and cancels its listeners.
 - **Frontend agnostic**: works with multiple platform frontends.
 - **Shared frontend task-root exception is narrow**: `frontend_primitives::FrontendTaskManager` may own cancellation/spawn state for Layer 7 shells, but `aura-app` must not grow general runtime service ownership.
 - **Shared-flow contract authority**: semantic UI ids, flow support declarations, typed command-plane metadata, and typed diagnostics are defined here.
@@ -125,6 +127,7 @@ If `aura-app` coordinates a parity-critical operation across async boundaries, o
 | Semantic command request/receipt types | `Pure` | `aura-app::ui_contract`, `aura-app::scenario_contract` | contract modules | `aura-terminal`, `aura-web`, `aura-harness` |
 | Parity-critical semantic operation lifecycle | `MoveOwned` | workflow-local semantic coordinator per operation | `aura-app::workflows::*`, semantic-fact publishers | frontends, harness |
 | Authoritative semantic-fact storage | `MoveOwned` | `AppCore` semantic-fact store with workflow-owned mutation helpers | `aura-app::workflows::semantic_facts`, sanctioned owner helpers | signals, frontends, harness |
+| Runtime refresh hook group | `MoveOwned` | `AppCore::hook_install_state` for the attached runtime | `src/core/app/hooks.rs`, `src/workflows/system/hooks.rs` | frontends, harness |
 | Invitation/channel/delivery readiness derivation rules | `Pure` + coordinator-consumed `ActorOwned` inputs | readiness coordinators in `aura-app::workflows::*` | workflow/coordinator modules only | frontends, harness |
 | Opaque handles / owner-token / handoff surfaces | `MoveOwned` | current token/record holder through sanctioned APIs | contract/workflow transfer APIs | render/projection layers, harness diagnostics |
 
@@ -183,6 +186,11 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership
+- hook installation must attach every required signal receiver before publishing
+  `Ready`; a failed attachment leaves no live partial group, and retry must
+  preserve existing signal values while restoring the full set of listeners
+- detaching or replacing a runtime must cancel its old hook group before the
+  next generation can become `Ready`; the install gate serializes these changes
 - app-owned system refresh hooks may coalesce repeated events, but they must
   not silently drop refresh/publication failures inside a pass; hook-owned
   diagnostics must retain the first failure explicitly

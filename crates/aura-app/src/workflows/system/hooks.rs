@@ -1,24 +1,57 @@
 //! Background refresh-hook installation for system-owned derived state.
 
 use super::refresh::{emit_chat_snapshot_signal, refresh_connection_status_from_contacts};
+use crate::runtime_bridge::RuntimeBridge;
 #[cfg(feature = "signals")]
 use crate::signal_defs::{CHAT_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, TRANSPORT_PEERS_SIGNAL};
 use crate::signal_defs::{CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL};
 use crate::workflows::runtime::workflow_best_effort;
 use crate::{AppCore, ReactiveHandler};
 use async_lock::RwLock;
-use aura_core::effects::reactive::{ReactiveEffects, Signal};
+use aura_core::effects::reactive::{ReactiveError, Signal, SignalStream};
 use aura_core::{AuraError, OwnedTaskSpawner};
+use futures::channel::oneshot;
+use futures::future::{BoxFuture, Shared};
+use futures::FutureExt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+type HookCancellation = Shared<BoxFuture<'static, ()>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 type BoxRefreshFuture = Pin<Box<dyn Future<Output = Result<(), AuraError>> + Send + 'static>>;
 #[cfg(target_arch = "wasm32")]
 type BoxRefreshFuture = Pin<Box<dyn Future<Output = Result<(), AuraError>> + 'static>>;
 type RefreshHook = Arc<dyn Fn(Arc<RwLock<AppCore>>) -> BoxRefreshFuture + Send + Sync + 'static>;
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum HookInstallError {
+    #[error("runtime unavailable for refresh hooks")]
+    RuntimeUnavailable,
+    #[error("reactive attachment failed for {signal_id}: {source}")]
+    Reactive {
+        signal_id: String,
+        #[source]
+        source: ReactiveError,
+    },
+    #[error("refresh listener {name} did not start: {source}")]
+    ListenerStart {
+        name: &'static str,
+        #[source]
+        source: AuraError,
+    },
+    #[cfg(feature = "signals")]
+    #[error("initial readiness refresh failed: {source}")]
+    InitialRefresh {
+        #[source]
+        source: AuraError,
+    },
+    #[cfg(test)]
+    #[error("injected hook attachment failure at step {step}")]
+    Injected { step: usize },
+}
 
 fn log_refresh_hook_error(refresh_name: &'static str, error: &AuraError) {
     #[cfg(feature = "instrumented")]
@@ -38,18 +71,23 @@ async fn refresh_chat_projection_and_readiness(
     #[cfg(feature = "signals")]
     {
         let _ = best_effort
-            .capture(
-                crate::workflows::messaging::refresh_authoritative_channel_membership_readiness(
-                    app_core,
-                ),
-            )
+            .capture(refresh_authoritative_channel_and_recipient_readiness_hook(
+                app_core,
+            ))
             .await;
+    }
+    best_effort.finish()
+}
+
+async fn refresh_contacts_and_readiness(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    let mut best_effort = workflow_best_effort();
+    let _ = best_effort
+        .capture(refresh_connection_status_from_contacts(app_core))
+        .await;
+    #[cfg(feature = "signals")]
+    {
         let _ = best_effort
-            .capture(
-                crate::workflows::messaging::refresh_authoritative_recipient_resolution_readiness(
-                    app_core,
-                ),
-            )
+            .capture(refresh_authoritative_contact_link_readiness_hook(app_core))
             .await;
     }
     best_effort.finish()
@@ -127,26 +165,30 @@ async fn refresh_authoritative_channel_and_recipient_readiness_hook(
 }
 
 async fn spawn_coalesced_signal_refresh<T>(
-    reactive: ReactiveHandler,
-    signal: &'static Signal<T>,
+    mut stream: SignalStream<T>,
     spawner: OwnedTaskSpawner,
+    runtime: Arc<dyn RuntimeBridge>,
     app_core: Arc<RwLock<AppCore>>,
     refresh_name: &'static str,
     refresh: RefreshHook,
-) -> Result<(), AuraError>
+    cancel: HookCancellation,
+) -> Result<(), HookInstallError>
 where
     T: Clone + Send + Sync + 'static,
 {
-    let mut stream = reactive
-        .subscribe(signal)
-        .map_err(|error| AuraError::internal(error.to_string()))?;
     let refresh_in_flight = Arc::new(AtomicBool::new(false));
     let refresh_pending = Arc::new(AtomicBool::new(false));
     let refresh_spawner = spawner.clone();
+    let (started_tx, started_rx) = oneshot::channel();
 
     spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let _ = started_tx.send(());
         loop {
-            let Ok(_) = stream.recv().await else {
+            let received = futures::select! {
+                _ = cancel.clone().fuse() => break,
+                received = stream.recv().fuse() => received,
+            };
+            let Ok(_) = received else {
                 break;
             };
 
@@ -159,9 +201,14 @@ where
             let refresh_in_flight = refresh_in_flight.clone();
             let refresh_pending = refresh_pending.clone();
             let refresh = refresh.clone();
+            let refresh_cancel = cancel.clone();
             spawn_runtime_refresh_task(&refresh_spawner, async move {
                 loop {
-                    if let Err(error) = refresh(refresh_app_core.clone()).await {
+                    let outcome = futures::select! {
+                        _ = refresh_cancel.clone().fuse() => break,
+                        outcome = refresh(refresh_app_core.clone()).fuse() => outcome,
+                    };
+                    if let Err(error) = outcome {
                         log_refresh_hook_error(refresh_name, &error);
                     }
 
@@ -175,8 +222,25 @@ where
             });
         }
     });
-
-    Ok(())
+    crate::workflows::runtime::timeout_runtime_call(
+        &runtime,
+        "install_system_refresh_hooks",
+        "listener_start",
+        std::time::Duration::from_secs(5),
+        || started_rx,
+    )
+    .await
+    .map_err(|source| HookInstallError::ListenerStart {
+        name: refresh_name,
+        source,
+    })?
+    .map_err(|source| HookInstallError::ListenerStart {
+        name: refresh_name,
+        source: AuraError::Internal {
+            message: "listener task exited before acknowledging startup".to_owned(),
+            source: Some(Arc::new(source)),
+        },
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -211,221 +275,206 @@ where
     spawner.spawn_local_cancellable(Box::pin(fut));
 }
 
-pub async fn install_contacts_refresh_hook(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<(), AuraError> {
-    let (reactive, spawner, should_install) = {
-        let core = app_core.read().await;
-        let already_installed = core.contacts_refresh_hook_installed();
-        let reactive = core.reactive().clone();
-        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
-        (reactive, spawner, !already_installed)
-    };
+/// Owns all refresh subscriptions for one runtime generation.
+pub(crate) struct HookGroup {
+    cancel: Option<oneshot::Sender<()>>,
+    cancelled: Arc<AtomicBool>,
+    #[cfg(test)]
+    cancellation: HookCancellation,
+    shutdown: aura_core::OwnedShutdownToken,
+}
 
-    if !should_install {
-        return Ok(());
+impl HookGroup {
+    pub(crate) fn is_active(&self) -> bool {
+        !self.cancelled.load(Ordering::SeqCst) && !self.shutdown.is_cancelled()
     }
 
-    let Some(spawner) = spawner else {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!("contacts refresh hook not installed: no task spawner available");
-        return Err(AuraError::from(
-            crate::workflows::error::WorkflowError::Precondition(
-                "contacts refresh hook requires a runtime task spawner",
-            ),
-        ));
-    };
+    #[cfg(test)]
+    pub(crate) fn cancellation_receiver(&self) -> HookCancellation {
+        self.cancellation.clone()
+    }
+}
 
-    {
-        let mut core = app_core.write().await;
-        if !core.mark_contacts_refresh_hook_installed() {
-            return Ok(());
+impl Drop for HookGroup {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
         }
     }
+}
 
+struct AttachmentAttempt {
+    next_step: usize,
+    fail_at: Option<usize>,
+}
+
+impl AttachmentAttempt {
+    async fn attach<T>(
+        &mut self,
+        reactive: &ReactiveHandler,
+        signal: &Signal<T>,
+    ) -> Result<SignalStream<T>, HookInstallError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let step = self.next_step;
+        self.next_step += 1;
+        if self.fail_at == Some(step) {
+            #[cfg(test)]
+            return Err(HookInstallError::Injected { step });
+            #[cfg(not(test))]
+            unreachable!("attachment fault injection is test-only");
+        }
+        reactive
+            .subscribe_attached(signal)
+            .await
+            .map_err(|source| HookInstallError::Reactive {
+                signal_id: signal.id().to_string(),
+                source,
+            })
+    }
+}
+
+/// Attach every graph receiver before any listener runs. An installation
+/// failure drops the previously attached streams and leaves no live hook.
+pub(crate) async fn install_system_refresh_hooks(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<HookGroup, HookInstallError> {
+    install_system_refresh_hooks_with_fault(app_core, None).await
+}
+
+pub(crate) async fn install_system_refresh_hooks_with_fault(
+    app_core: &Arc<RwLock<AppCore>>,
+    fail_at: Option<usize>,
+) -> Result<HookGroup, HookInstallError> {
+    let (reactive, runtime) = {
+        let core = app_core.read().await;
+        (core.reactive().clone(), core.runtime().cloned())
+    };
+    let runtime = runtime.ok_or(HookInstallError::RuntimeUnavailable)?;
+    let spawner = runtime.task_spawner();
+    let mut attempt = AttachmentAttempt {
+        next_step: 0,
+        fail_at,
+    };
+
+    let contacts = attempt.attach(&reactive, &*CONTACTS_SIGNAL).await?;
+    let chat = attempt.attach(&reactive, &*SYNC_STATUS_SIGNAL).await?;
+    #[cfg(feature = "signals")]
+    let chat_readiness = attempt.attach(&reactive, &*CHAT_SIGNAL).await?;
+    #[cfg(feature = "signals")]
+    let homes_readiness = attempt.attach(&reactive, &*HOMES_SIGNAL).await?;
+    #[cfg(feature = "signals")]
+    let peers_readiness = attempt.attach(&reactive, &*TRANSPORT_PEERS_SIGNAL).await?;
+    #[cfg(feature = "signals")]
+    let invitation_readiness = attempt.attach(&reactive, &*INVITATIONS_SIGNAL).await?;
+
+    let (cancel, cancel_rx) = oneshot::channel();
+    let cancel_rx = cancel_rx.map(|_| ()).boxed().shared();
+    let group = HookGroup {
+        cancel: Some(cancel),
+        cancelled: Arc::new(AtomicBool::new(false)),
+        #[cfg(test)]
+        cancellation: cancel_rx.clone(),
+        shutdown: spawner.shutdown_token().clone(),
+    };
     spawn_coalesced_signal_refresh(
-        reactive,
-        &*CONTACTS_SIGNAL,
-        spawner,
+        contacts,
+        spawner.clone(),
+        runtime.clone(),
         Arc::clone(app_core),
         "contacts_refresh_hook",
         Arc::new(|app_core| {
-            Box::pin(async move { refresh_connection_status_from_contacts(&app_core).await })
+            Box::pin(async move { refresh_contacts_and_readiness(&app_core).await })
         }),
+        cancel_rx.clone(),
     )
-    .await
-}
-
-pub async fn install_chat_refresh_hook(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
-    let (reactive, spawner, should_install) = {
-        let core = app_core.read().await;
-        let already_installed = core.chat_refresh_hook_installed();
-        let reactive = core.reactive().clone();
-        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
-        (reactive, spawner, !already_installed)
-    };
-
-    if !should_install {
-        return Ok(());
-    }
-
-    let Some(spawner) = spawner else {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!("chat refresh hook not installed: no task spawner available");
-        return Err(AuraError::from(
-            crate::workflows::error::WorkflowError::Precondition(
-                "chat refresh hook requires a runtime task spawner",
-            ),
-        ));
-    };
-
-    {
-        let mut core = app_core.write().await;
-        if !core.mark_chat_refresh_hook_installed() {
-            return Ok(());
-        }
-    }
-
+    .await?;
     spawn_coalesced_signal_refresh(
-        reactive,
-        &*SYNC_STATUS_SIGNAL,
-        spawner,
+        chat,
+        spawner.clone(),
+        runtime.clone(),
         Arc::clone(app_core),
         "chat_refresh_hook",
         Arc::new(|app_core| {
             Box::pin(async move { refresh_chat_projection_and_readiness(&app_core).await })
         }),
+        cancel_rx.clone(),
     )
-    .await
-}
-
-#[cfg(feature = "signals")]
-pub async fn install_authoritative_readiness_hook(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<(), AuraError> {
-    let (reactive, spawner, should_install) = {
-        let core = app_core.read().await;
-        let already_installed = core.authoritative_readiness_hook_installed();
-        let reactive = core.reactive().clone();
-        let spawner = core.runtime().map(|runtime| runtime.task_spawner());
-        (reactive, spawner, !already_installed)
-    };
-
-    if !should_install {
-        return Ok(());
-    }
-
-    let Some(spawner) = spawner else {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!("authoritative readiness hook not installed: no task spawner available");
-        return Err(AuraError::from(
-            crate::workflows::error::WorkflowError::Precondition(
-                "authoritative readiness hook requires a runtime task spawner",
-            ),
-        ));
-    };
-
+    .await?;
+    #[cfg(feature = "signals")]
     {
-        let mut core = app_core.write().await;
-        if !core.mark_authoritative_readiness_hook_installed() {
-            return Ok(());
-        }
+        spawn_coalesced_signal_refresh(
+            chat_readiness,
+            spawner.clone(),
+            runtime.clone(),
+            Arc::clone(app_core),
+            "authoritative_chat_readiness_hook",
+            Arc::new(|app_core| {
+                Box::pin(async move {
+                    refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+                })
+            }),
+            cancel_rx.clone(),
+        )
+        .await?;
+        spawn_coalesced_signal_refresh(
+            homes_readiness,
+            spawner.clone(),
+            runtime.clone(),
+            Arc::clone(app_core),
+            "authoritative_homes_readiness_hook",
+            Arc::new(|app_core| {
+                Box::pin(async move {
+                    refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+                })
+            }),
+            cancel_rx.clone(),
+        )
+        .await?;
+        spawn_coalesced_signal_refresh(
+            peers_readiness,
+            spawner.clone(),
+            runtime.clone(),
+            Arc::clone(app_core),
+            "authoritative_transport_peers_readiness_hook",
+            Arc::new(|app_core| {
+                Box::pin(async move {
+                    refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+                })
+            }),
+            cancel_rx.clone(),
+        )
+        .await?;
+        spawn_coalesced_signal_refresh(
+            invitation_readiness,
+            spawner,
+            runtime,
+            Arc::clone(app_core),
+            "authoritative_invitations_readiness_hook",
+            Arc::new(|app_core| {
+                Box::pin(async move {
+                    refresh_authoritative_invitation_and_channel_readiness_hook(&app_core).await
+                })
+            }),
+            cancel_rx,
+        )
+        .await?;
+
+        let mut best_effort = workflow_best_effort();
+        let _ = best_effort
+            .capture(refresh_authoritative_contact_link_readiness_hook(app_core))
+            .await;
+        let _ = best_effort
+            .capture(refresh_authoritative_invitation_and_channel_readiness_hook(
+                app_core,
+            ))
+            .await;
+        best_effort
+            .finish()
+            .map_err(|source| HookInstallError::InitialRefresh { source })?;
     }
 
-    spawn_coalesced_signal_refresh(
-        reactive.clone(),
-        &*CONTACTS_SIGNAL,
-        spawner.clone(),
-        Arc::clone(app_core),
-        "authoritative_contact_link_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(
-                async move { refresh_authoritative_contact_link_readiness_hook(&app_core).await },
-            )
-        }),
-    )
-    .await?;
-    spawn_coalesced_signal_refresh(
-        reactive.clone(),
-        &*CHAT_SIGNAL,
-        spawner.clone(),
-        Arc::clone(app_core),
-        "authoritative_chat_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(async move {
-                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
-            })
-        }),
-    )
-    .await?;
-    spawn_coalesced_signal_refresh(
-        reactive.clone(),
-        &*HOMES_SIGNAL,
-        spawner.clone(),
-        Arc::clone(app_core),
-        "authoritative_homes_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(async move {
-                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
-            })
-        }),
-    )
-    .await?;
-    spawn_coalesced_signal_refresh(
-        reactive.clone(),
-        &*TRANSPORT_PEERS_SIGNAL,
-        spawner.clone(),
-        Arc::clone(app_core),
-        "authoritative_transport_peers_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(async move {
-                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
-            })
-        }),
-    )
-    .await?;
-    spawn_coalesced_signal_refresh(
-        reactive.clone(),
-        &*SYNC_STATUS_SIGNAL,
-        spawner.clone(),
-        Arc::clone(app_core),
-        "authoritative_sync_status_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(async move {
-                refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
-            })
-        }),
-    )
-    .await?;
-    spawn_coalesced_signal_refresh(
-        reactive,
-        &*INVITATIONS_SIGNAL,
-        spawner,
-        Arc::clone(app_core),
-        "authoritative_invitations_readiness_hook",
-        Arc::new(|app_core| {
-            Box::pin(async move {
-                refresh_authoritative_invitation_and_channel_readiness_hook(&app_core).await
-            })
-        }),
-    )
-    .await?;
-
-    let mut best_effort = workflow_best_effort();
-    let _ = best_effort
-        .capture(refresh_authoritative_contact_link_readiness_hook(app_core))
-        .await;
-    let _ = best_effort
-        .capture(refresh_authoritative_invitation_and_channel_readiness_hook(
-            app_core,
-        ))
-        .await;
-    best_effort.finish()
-}
-
-#[cfg(not(feature = "signals"))]
-pub async fn install_authoritative_readiness_hook(
-    _app_core: &Arc<RwLock<AppCore>>,
-) -> Result<(), AuraError> {
-    Ok(())
+    Ok(group)
 }

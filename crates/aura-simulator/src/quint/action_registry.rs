@@ -197,7 +197,7 @@ impl NoOpHandler {
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
-            description: format!("No-op handler for '{}'", &name),
+            description: format!("No-op handler for '{name}'"),
             name,
         }
     }

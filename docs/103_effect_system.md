@@ -188,10 +188,13 @@ pub trait ReactiveEffects: Send + Sync {
 
     async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
     where T: Clone + Send + Sync + 'static;
+
+    async fn ensure_registered<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
+    where T: Clone + Send + Sync + 'static;
 }
 ```
 
-The trait defines four core operations for reactive state. The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method initializes a signal with a default value. See [Runtime](104_runtime.md) for reactive scheduling implementation. Subscribing an unregistered signal fails fast. Aura no longer permits "dead stream" subscription success for missing registrations.
+The `read` method returns the current value. The `emit` method updates the value. The `subscribe` method returns a stream of changes. The `register` method creates a new signal and rejects a duplicate ID. `ensure_registered` creates a missing signal while preserving the value and subscriptions of a matching existing signal; a different value type under the same ID is an error. See [Runtime](104_runtime.md) for reactive scheduling implementation. Subscribing an unregistered signal fails fast. Aura does not permit "dead stream" subscription success for missing registrations.
 
 ## QueryEffects Trait
 
@@ -219,6 +222,8 @@ pub trait QueryEffects: Send + Sync {
 ```
 
 The `Query` trait converts queries to Datalog programs and defines capability requirements. The `QueryEffects` trait executes queries and manages subscriptions. Query isolation levels control consistency requirements. See [Database Architecture](107_database.md) for complete query system documentation.
+
+A query-bound signal is active only after its initial query and signal emission succeed. Failed binding leaves no partial query subscription; retry keeps any existing signal value and subscribers and installs the binding once the query succeeds.
 
 ## Determinism Rules
 

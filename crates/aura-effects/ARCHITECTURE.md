@@ -62,6 +62,8 @@ Contract alignment:
 The following stateful mechanics are currently allowed because they are low-level adapter boundaries rather than product-semantic owners:
 
 - `reactive/*`: signal graph subscriptions and task registry used to drive the reactive effect surface
+- Reactive registration uses atomic check-and-insert per signal ID. Repeated `ensure_registered` calls retain the current value; a mismatched value type fails explicitly. An attached subscription establishes its graph receiver before returning a stream to the hook owner.
+- The `test-support` feature exposes a platform task spawner for lifecycle tests that must acknowledge a running listener. Production runtime ownership continues through its own task registry.
 - `query/handler.rs`: query-side caches, pending-consensus tracking, and subscription plumbing around the reactive/query effect boundary
 - `encrypted_storage.rs`: local master-key cache and one-time initialization guard for the encrypted-storage adapter
 

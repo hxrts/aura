@@ -29,10 +29,7 @@ fn test_operation(seed: u8) -> OperationId {
 }
 
 fn base_state() -> aura_consensus::core::state::ConsensusState {
-    let witnesses: BTreeSet<AuthorityId> = [b'A', b'B', b'C']
-        .iter()
-        .map(|&b| test_authority(b))
-        .collect();
+    let witnesses: BTreeSet<AuthorityId> = b"ABC".iter().map(|&b| test_authority(b)).collect();
     match start_consensus(
         test_consensus_id("cid-1"),
         test_operation(1),

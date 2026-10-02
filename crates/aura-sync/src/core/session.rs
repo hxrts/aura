@@ -855,11 +855,7 @@ where
             100.0
         };
 
-        let average_duration_ms = if total_sessions > 0 {
-            total_duration_ms / total_sessions
-        } else {
-            0
-        };
+        let average_duration_ms = total_duration_ms.checked_div(total_sessions).unwrap_or(0);
 
         SessionManagerStatistics {
             active_sessions: active_count,

@@ -184,7 +184,7 @@ impl Journal {
         let order = match &ts {
             TimeStamp::OrderClock(id) => id.clone(),
             // If not order clock, synthesize an order token for deterministic insertion
-            _ => OrderTime(aura_core::hash::hash(format!("{:?}", &ts).as_bytes())),
+            _ => OrderTime(aura_core::hash::hash(format!("{ts:?}").as_bytes())),
         };
         let envelope = FactEnvelope {
             type_id: FactTypeId::from("journal_fact"),

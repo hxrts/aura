@@ -972,7 +972,6 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
             fact,
             ChatFact::MessageSentSealed {
                 sender_id,
-                channel_id: _,
                 ..
             } if *sender_id == agent_a.authority_id()
         )
@@ -1021,7 +1020,6 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
             fact,
             ChatFact::MessageSentSealed {
                 sender_id,
-                channel_id: _,
                 ..
             } if *sender_id == agent_b.authority_id()
         )
@@ -1125,7 +1123,6 @@ async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestRes
             fact,
             ChatFact::MessageSentSealed {
                 sender_id,
-                channel_id: _,
                 ..
             } if *sender_id == agent_b.authority_id()
         )

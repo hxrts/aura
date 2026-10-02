@@ -272,6 +272,7 @@ Parity-critical reactive consumers must rely on one explicit subscription contra
 - there is no implicit registration wait for parity-critical consumers
 - if a subscriber lags behind the broadcast buffer, the handler logs the lag and resumes from a newer snapshot
 - parity-critical owners may not infer replay or lossless history from the reactive layer unless an explicit replay contract exists
+- hook ownership is explicit across installation: an `Installing` group cannot be reported ready, a `Ready` group owns one attached stream and acknowledged listener per required signal, and `Stopped` cancels those streams on detach or failed installation
 
 This means reactive delivery is a transport for authoritative snapshots, not an alternate owner of semantic truth. Owner code must tolerate "newer snapshot after lag" semantics without silently treating a missed update as "no change."
 

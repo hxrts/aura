@@ -586,16 +586,15 @@ impl QueryHandler {
             deps,
         };
 
-        self.query_bindings
-            .write()
-            .await
-            .insert(signal.id().clone(), Box::new(registration));
-
+        // Serialize installation with refresh. A failed query or emission must
+        // leave the old binding intact so the caller can retry safely.
+        let mut bindings = self.query_bindings.write().await;
         let result = self.query(&query).await?;
         self.reactive
             .emit(signal, result)
             .await
             .map_err(|e| QueryError::execution_error(e.to_string()))?;
+        bindings.insert(signal.id().clone(), Box::new(registration));
 
         Ok(())
     }
@@ -1077,6 +1076,30 @@ mod tests {
     async fn test_handler_creation() {
         let handler = QueryHandler::default();
         assert!(handler.facts.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_query_binding_can_retry_without_leaving_partial_binding() {
+        let reactive = Arc::new(ReactiveHandler::new());
+        let handler = QueryHandler::new_with_policy(reactive.clone(), CapabilityPolicy::AllowAll);
+        let signal: Signal<usize> = Signal::new("retry_query_binding");
+
+        let first = handler
+            .register_query_binding(&signal, PublicContactQuery)
+            .await;
+        assert!(matches!(first, Err(QueryError::ExecutionError { .. })));
+        assert!(handler.query_bindings.read().await.is_empty());
+
+        reactive.register(&signal, 0).await.unwrap();
+        handler
+            .register_query_binding(&signal, PublicContactQuery)
+            .await
+            .unwrap();
+        assert_eq!(handler.query_bindings.read().await.len(), 1);
+
+        handler.add_fact("user", vec!["alice".to_string()]).await;
+        handler.invalidate(&FactPredicate::new("user")).await;
+        assert_eq!(reactive.read(&signal).await.unwrap(), 1);
     }
 
     #[tokio::test]

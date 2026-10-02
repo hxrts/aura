@@ -50,7 +50,7 @@ pub fn threshold_selector(props: &ThresholdSelectorProps) -> impl Into<AnyElemen
         View(
             padding: Spacing::SM,
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
         ) {

@@ -549,11 +549,7 @@ impl GridNav {
     /// Get current row
     #[must_use]
     pub fn row(&self) -> usize {
-        if self.cols == 0 {
-            0
-        } else {
-            self.index / self.cols
-        }
+        self.index.checked_div(self.cols).unwrap_or(0)
     }
 
     /// Get current column

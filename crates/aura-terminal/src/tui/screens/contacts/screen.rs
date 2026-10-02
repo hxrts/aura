@@ -202,7 +202,7 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
@@ -217,7 +217,7 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
             }
             View(
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
                 overflow: Overflow::Hidden,
@@ -291,7 +291,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
@@ -302,7 +302,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             }
             View(
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
                 overflow: Overflow::Hidden,

@@ -143,7 +143,7 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: panel_padding,
@@ -163,13 +163,13 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
             }))
             View(
                 flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 overflow: Overflow::Hidden,
             ) {
                 // Messages area
                 View(
                     flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
+                    flex_grow: 1.0_f32,
                     overflow: Overflow::Hidden,
                     gap: 0,
                 ) {

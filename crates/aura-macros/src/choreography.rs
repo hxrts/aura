@@ -767,10 +767,10 @@ fn extract_choice_block(group: &Group) -> Option<(Ident, TokenStream)> {
     for (idx, stmt) in block.stmts.iter().enumerate() {
         match stmt {
             Stmt::Item(item) => items.push(item),
-            Stmt::Expr(Expr::Path(path), None) if idx == block.stmts.len().saturating_sub(1) => {
-                if path.path.segments.len() == 1 {
-                    tail_ident = Some(path.path.segments[0].ident.clone());
-                }
+            Stmt::Expr(Expr::Path(path), None)
+                if idx == block.stmts.len().saturating_sub(1) && path.path.segments.len() == 1 =>
+            {
+                tail_ident = Some(path.path.segments[0].ident.clone());
             }
             _ => {}
         }

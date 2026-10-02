@@ -95,6 +95,23 @@ impl From<ContactConfirmationError> for AgentError {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ContactAcceptancePrecondition {
+    #[error("{0} is not an awaitable contact invitation")]
+    NotAwaitable(InvitationId),
+    #[error("contact invitation {0} was not imported")]
+    NotImported(InvitationId),
+}
+
+impl From<ContactAcceptancePrecondition> for AgentError {
+    fn from(error: ContactAcceptancePrecondition) -> Self {
+        AgentError::Aura(aura_core::AuraError::Invalid {
+            message: error.to_string(),
+            source: Some(Arc::new(error)),
+        })
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct ContactInvitationResponse {
     pub(super) invitation_id: InvitationId,
@@ -117,10 +134,22 @@ pub(super) struct ContactInvitationResponseTranscriptPayload {
 
 pub(super) struct ContactInvitationResponseTranscript<'a>(pub(super) &'a ContactInvitationResponse);
 
+const CONTACT_RESPONSE_TRANSCRIPT_DOMAIN: &str = "aura.invitation.contact-response";
+
+impl SecurityTranscript for ContactInvitationResponseTranscriptPayload {
+    type Payload = Self;
+
+    const DOMAIN_SEPARATOR: &'static str = CONTACT_RESPONSE_TRANSCRIPT_DOMAIN;
+
+    fn transcript_payload(&self) -> Self::Payload {
+        self.clone()
+    }
+}
+
 impl SecurityTranscript for ContactInvitationResponseTranscript<'_> {
     type Payload = ContactInvitationResponseTranscriptPayload;
 
-    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.contact-response";
+    const DOMAIN_SEPARATOR: &'static str = CONTACT_RESPONSE_TRANSCRIPT_DOMAIN;
 
     fn transcript_payload(&self) -> Self::Payload {
         ContactInvitationResponseTranscriptPayload {
@@ -194,21 +223,29 @@ impl InvitationHandler {
             );
             return Ok(());
         };
-        let mut response = ContactInvitationResponse {
+        let transcript = ContactInvitationResponseTranscriptPayload {
             invitation_id: invitation_id.clone(),
             inviter_id,
             acceptor_id,
             decision,
             acceptance_digest,
-            signature: Vec::new(),
         };
-        response.signature = sign_ed25519_transcript(
-            effects,
-            &ContactInvitationResponseTranscript(&response),
-            &private_key,
-        )
-        .await
-        .map_err(|error| AgentError::effects(format!("sign contact response: {error}")))?;
+        let signature = sign_ed25519_transcript(effects, &transcript, &private_key)
+            .await
+            .map_err(|error| {
+                AgentError::Aura(aura_core::AuraError::Crypto {
+                    message: "sign contact response".to_owned(),
+                    source: Some(Arc::new(error)),
+                })
+            })?;
+        let response = ContactInvitationResponse {
+            invitation_id: transcript.invitation_id,
+            inviter_id: transcript.inviter_id,
+            acceptor_id: transcript.acceptor_id,
+            decision: transcript.decision,
+            acceptance_digest: transcript.acceptance_digest,
+            signature,
+        };
         let payload =
             serde_json::to_vec(&response).map_err(|e| AgentError::internal(e.to_string()))?;
 
@@ -287,7 +324,9 @@ impl InvitationHandler {
             );
             return Ok(None);
         }
-        let Some(sender_key) = stored.sender_proof_key.clone() else {
+        // This self_certified_sender_key only proves continuity with the
+        // imported invitation; it does not establish trusted device identity.
+        let Some(self_certified_sender_key) = stored.sender_proof_key.clone() else {
             tracing::warn!(
                 invitation_id = %response.invitation_id,
                 "Cannot authenticate contact invitation response: no sender proof key"
@@ -298,7 +337,7 @@ impl InvitationHandler {
             effects,
             &ContactInvitationResponseTranscript(&response),
             &response.signature,
-            &sender_key,
+            &self_certified_sender_key,
         )
         .await
         .unwrap_or(false);
@@ -346,16 +385,12 @@ impl InvitationHandler {
             .build_contact_invitation_acceptance(effects.as_ref(), invitation_id)
             .await?
         else {
-            return Err(AgentError::invalid(format!(
-                "{invitation_id} is not an awaitable contact invitation"
-            )));
+            return Err(ContactAcceptancePrecondition::NotAwaitable(invitation_id.clone()).into());
         };
         let Some(mut stored) =
             Self::load_imported_invitation(effects.as_ref(), own_id, invitation_id, None).await
         else {
-            return Err(AgentError::invalid(format!(
-                "contact invitation {invitation_id} was not imported"
-            )));
+            return Err(ContactAcceptancePrecondition::NotImported(invitation_id.clone()).into());
         };
         stored.pending_acceptance_digest = Some(contact_acceptance_digest(&payload));
         Self::persist_imported_invitation(effects.as_ref(), own_id, &stored).await?;
@@ -416,5 +451,36 @@ impl InvitationHandler {
             }
             let _ = effects.sleep_ms(CONTACT_CONFIRMATION_POLL_MS).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod transcript_tests {
+    use super::*;
+
+    #[test]
+    fn response_signing_payload_matches_verification_transcript() {
+        let payload = ContactInvitationResponseTranscriptPayload {
+            invitation_id: InvitationId::new("contact-response-transcript"),
+            inviter_id: AuthorityId::new_from_entropy([41; 32]),
+            acceptor_id: AuthorityId::new_from_entropy([42; 32]),
+            decision: ContactInvitationDecision::Confirmed,
+            acceptance_digest: [43; 32],
+        };
+        let response = ContactInvitationResponse {
+            invitation_id: payload.invitation_id.clone(),
+            inviter_id: payload.inviter_id,
+            acceptor_id: payload.acceptor_id,
+            decision: payload.decision,
+            acceptance_digest: payload.acceptance_digest,
+            signature: vec![44; 64],
+        };
+
+        assert_eq!(
+            payload.transcript_bytes().unwrap(),
+            ContactInvitationResponseTranscript(&response)
+                .transcript_bytes()
+                .unwrap()
+        );
     }
 }

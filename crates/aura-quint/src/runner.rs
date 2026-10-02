@@ -541,7 +541,7 @@ impl QuintRunner {
         }
 
         // Optimize individual property traces
-        for (_property_name, property_result) in verification_result.properties.iter_mut() {
+        for property_result in verification_result.properties.values_mut() {
             let normalized_trace = property_result.get("trace").map(normalize_trace_artifact);
             if let (Some(trace), Some(result_obj)) =
                 (normalized_trace, property_result.as_object_mut())

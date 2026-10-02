@@ -487,18 +487,11 @@ mod tests {
     use std::future::Future;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
+    use std::task::{Context, Poll, Waker};
 
     fn block_on<F: Future>(future: F) -> F::Output {
-        struct NoopWake;
-
-        impl Wake for NoopWake {
-            fn wake(self: Arc<Self>) {}
-        }
-
-        let waker = Waker::from(Arc::new(NoopWake));
         let mut future = std::pin::pin!(future);
-        let mut context = Context::from_waker(&waker);
+        let mut context = Context::from_waker(Waker::noop());
         loop {
             match future.as_mut().poll(&mut context) {
                 Poll::Ready(value) => return value,

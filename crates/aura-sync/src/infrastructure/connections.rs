@@ -477,7 +477,7 @@ impl ConnectionPool {
         // Step 1: Collect all expired connections to close
         let mut all_connections_to_remove = Vec::new();
 
-        for (_peer_id, connections) in self.connections.iter_mut() {
+        for connections in self.connections.values_mut() {
             let before = connections.len();
 
             let mut peer_connections_to_remove = Vec::new();

@@ -1279,21 +1279,21 @@ impl<'ast> Visit<'ast> for OwnershipVisitor<'_> {
                     );
                 }
             }
-            LintMode::AuthoritativeRefNoReresolution => {
+            LintMode::AuthoritativeRefNoReresolution
                 if self
                     .function_ownership_tags
                     .iter()
                     .any(|tag| tag == "authoritative-ref-only")
-                    && (method_name.contains("_or_fallback") || method_name.contains("fallback"))
-                {
-                    self.push_violation(
-                        node.span(),
-                        format!(
-                            "authoritative-ref-only workflow `{}` may not use fallback helpers: {}",
-                            self.function_name, tokens
-                        ),
-                    );
-                }
+                    && (method_name.contains("_or_fallback")
+                        || method_name.contains("fallback")) =>
+            {
+                self.push_violation(
+                    node.span(),
+                    format!(
+                        "authoritative-ref-only workflow `{}` may not use fallback helpers: {}",
+                        self.function_name, tokens
+                    ),
+                );
             }
             _ => {}
         }

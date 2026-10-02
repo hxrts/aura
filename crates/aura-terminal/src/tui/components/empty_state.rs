@@ -32,7 +32,7 @@ pub fn EmptyState(props: &EmptyStateProps) -> impl Into<AnyElement<'static>> {
 
     element! {
         View(
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             flex_direction: FlexDirection::Column,
@@ -128,7 +128,7 @@ pub fn LoadingState(props: &LoadingStateProps) -> impl Into<AnyElement<'static>>
 
     element! {
         View(
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             flex_direction: FlexDirection::Row,

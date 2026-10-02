@@ -284,8 +284,10 @@ impl RecoveryState {
         });
         recovery.approvals_received += 1;
 
-        if recovery.approvals_required > 0 {
-            recovery.progress = (recovery.approvals_received * 100) / recovery.approvals_required;
+        if let Some(progress) =
+            (recovery.approvals_received * 100).checked_div(recovery.approvals_required)
+        {
+            recovery.progress = progress;
         }
 
         if recovery.approvals_received >= recovery.approvals_required {

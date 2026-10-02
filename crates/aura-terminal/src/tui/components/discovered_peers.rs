@@ -268,7 +268,7 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                                     None
                                 })
                                 Text(content: address, color: Theme::TEXT_MUTED)
-                                View(flex_grow: 1.0) {}
+                                View(flex_grow: 1.0_f32) {}
                                 Text(content: age, color: Theme::TEXT_MUTED)
                             }
                         }

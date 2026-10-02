@@ -14,9 +14,13 @@ use serde::{Deserialize, Serialize};
 const DEVICE_SEALED_PROTOCOL_VERSION: u8 = 1;
 const DEVICE_SEALED_KDF_DOMAIN: &[u8] = b"aura.sync.device-sealed.v1";
 
-/// A payload only `recipient_device_id` of `authority` can open.
+/// A payload only `recipient_device_id` of `authority` can open. Deserialized
+/// identity and public keys are untrusted key material until `open_for_device`
+/// checks the recipient against the caller's local device key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceSealedPayload {
+    /// Untrusted key material in this wire value is checked against the
+    /// caller's local device identity before decryption.
     pub protocol_version: u8,
     pub recipient_device_id: DeviceId,
     pub recipient_public_key: Vec<u8>,

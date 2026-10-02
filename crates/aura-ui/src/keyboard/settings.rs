@@ -46,10 +46,10 @@ pub(super) fn handle_settings_char(model: &mut UiModel, ch: char) {
                 model.active_modal = Some(ActiveModal::SwitchAuthority);
             }
         }
-        'm' if matches!(model.settings_section, SettingsSection::Authority) => {
-            if can_open_mfa_setup_wizard(model) {
-                open_mfa_setup_wizard(model);
-            }
+        'm' if matches!(model.settings_section, SettingsSection::Authority)
+            && can_open_mfa_setup_wizard(model) =>
+        {
+            open_mfa_setup_wizard(model);
         }
         _ => {}
     }

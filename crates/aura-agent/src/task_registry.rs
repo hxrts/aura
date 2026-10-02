@@ -516,7 +516,7 @@ impl TaskGroup {
 
         let mut aborted_tasks = Vec::with_capacity(tasks.len());
         #[cfg(not(target_arch = "wasm32"))]
-        for (_, entry) in tasks.iter() {
+        for entry in tasks.values() {
             if let Some(handle) = &entry.handle {
                 handle.abort();
             }
@@ -539,7 +539,7 @@ impl TaskGroup {
         }
 
         #[cfg(target_arch = "wasm32")]
-        for (_, entry) in tasks.iter() {
+        for entry in tasks.values() {
             aborted_tasks.push(entry.task_name.clone());
         }
 

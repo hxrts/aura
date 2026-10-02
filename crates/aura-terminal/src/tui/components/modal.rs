@@ -236,7 +236,7 @@ pub fn ConfirmModal(props: &ConfirmModalProps) -> impl Into<AnyElement<'static>>
             // Message
             View(
                 width: 100pct,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
                 justify_content: JustifyContent::Center,
@@ -340,7 +340,7 @@ pub fn InputModal(props: &InputModalProps) -> impl Into<AnyElement<'static>> {
                 width: 100pct,
                 padding: Spacing::PANEL_PADDING,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 gap: Spacing::XS,
             ) {

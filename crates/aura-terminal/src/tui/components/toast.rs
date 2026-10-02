@@ -338,7 +338,7 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
                 align_items: Some(AlignItems::Center),
             ) {
                 Text(content: icon, color: color, weight: Weight::Bold, wrap: TextWrap::NoWrap)
-                View(flex_grow: 1.0) {
+                View(flex_grow: 1.0_f32) {
                     Text(content: message, color: Theme::TEXT, wrap: TextWrap::NoWrap)
                 }
                 Text(content: "[Esc] dismiss", color: Theme::TEXT_MUTED, wrap: TextWrap::NoWrap)

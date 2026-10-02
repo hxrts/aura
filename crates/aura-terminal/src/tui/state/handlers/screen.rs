@@ -74,12 +74,10 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
                     NavKey::Down,
                 );
             }
-            ChatFocus::Messages => {
+            ChatFocus::Messages if state.chat.message_scroll > 0 => {
                 // Scroll down = decrease offset (show newer messages, toward bottom)
                 // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                if state.chat.message_scroll > 0 {
-                    state.chat.message_scroll = state.chat.message_scroll.saturating_sub(1);
-                }
+                state.chat.message_scroll = state.chat.message_scroll.saturating_sub(1);
             }
             _ => {}
         },
@@ -94,11 +92,9 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             // Open channel info modal via dispatch (shell populates selected channel details)
             commands.push(TuiCommand::Dispatch(DispatchCommand::OpenChatInfoModal));
         }
-        KeyCode::Char('r') => {
+        KeyCode::Char('r') if state.chat.focus == ChatFocus::Messages => {
             // Retry message (when focused on messages)
-            if state.chat.focus == ChatFocus::Messages {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::RetryMessage));
-            }
+            commands.push(TuiCommand::Dispatch(DispatchCommand::RetryMessage));
         }
         _ => {}
     }
@@ -245,14 +241,12 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 state.contacts.focus = TwoPanelFocus::List;
             }
         }
-        KeyCode::Enter => {
-            if state.contacts.focus.is_list() {
-                if state.contacts.list_focus.is_lan() && state.contacts.lan_peer_count > 0 {
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::InviteLanPeer));
-                } else {
-                    // Show detail panel for selected contact
-                    state.contacts.focus = TwoPanelFocus::Detail;
-                }
+        KeyCode::Enter if state.contacts.focus.is_list() => {
+            if state.contacts.list_focus.is_lan() && state.contacts.lan_peer_count > 0 {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteLanPeer));
+            } else {
+                // Show detail panel for selected contact
+                state.contacts.focus = TwoPanelFocus::Detail;
             }
         }
         _ => {}

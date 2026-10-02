@@ -136,13 +136,12 @@ pub(super) fn handle_add_device_modal_char(
             if matches!(
                 state.step,
                 AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm
-            ) =>
+            ) && matches!(ch, 'c' | 'y')
+                && !state.enrollment_code.is_empty() =>
         {
-            if matches!(ch, 'c' | 'y') && !state.enrollment_code.is_empty() {
-                clipboard.write(&state.enrollment_code);
-                state.code_copied = true;
-                set_toast(model, '✓', "Copied to clipboard");
-            }
+            clipboard.write(&state.enrollment_code);
+            state.code_copied = true;
+            set_toast(model, '✓', "Copied to clipboard");
         }
         _ => {}
     }

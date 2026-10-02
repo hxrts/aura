@@ -65,7 +65,7 @@ pub fn MessageInput(props: &MessageInputProps) -> impl Into<AnyElement<'static>>
                     ) {
                         Text(content: "↩ Reply to: ", color: Theme::TEXT_MUTED)
                         Text(content: reply_text, color: Theme::TEXT)
-                        View(flex_grow: 1.0)
+                        View(flex_grow: 1.0_f32)
                         Text(content: "[Esc] Cancel", color: Theme::TEXT_MUTED)
                     }
                 })

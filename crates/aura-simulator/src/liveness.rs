@@ -427,7 +427,7 @@ impl BoundedLivenessChecker {
 
     /// Reset tracking state for all properties.
     pub fn reset(&mut self) {
-        for (_, tracking) in self.tracking.iter_mut() {
+        for tracking in self.tracking.values_mut() {
             *tracking = PropertyTracking::default();
         }
         self.current_step = 0;

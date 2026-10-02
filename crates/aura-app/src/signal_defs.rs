@@ -361,7 +361,7 @@ pub struct SettingsState {
 
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError};
 
-/// Register all application signals with a reactive handler.
+/// Ensure all application signals exist without resetting live values.
 ///
 /// This should be called during app initialization to set up the signal graph.
 ///
@@ -377,45 +377,47 @@ use aura_core::effects::reactive::{ReactiveEffects, ReactiveError};
 pub async fn register_app_signals<R: ReactiveEffects>(handler: &R) -> Result<(), ReactiveError> {
     // Register domain signals with default values
     handler
-        .register(&*CHAT_SIGNAL, ChatState::default())
+        .ensure_registered(&*CHAT_SIGNAL, ChatState::default())
         .await?;
     handler
-        .register(&*RECOVERY_SIGNAL, RecoveryState::default())
+        .ensure_registered(&*RECOVERY_SIGNAL, RecoveryState::default())
         .await?;
     handler
-        .register(&*INVITATIONS_SIGNAL, InvitationsState::default())
+        .ensure_registered(&*INVITATIONS_SIGNAL, InvitationsState::default())
         .await?;
     handler
-        .register(&*CONTACTS_SIGNAL, ContactsState::default())
+        .ensure_registered(&*CONTACTS_SIGNAL, ContactsState::default())
         .await?;
     handler
-        .register(&*HOMES_SIGNAL, HomesState::default())
+        .ensure_registered(&*HOMES_SIGNAL, HomesState::default())
         .await?;
     handler
-        .register(&*NEIGHBORHOOD_SIGNAL, NeighborhoodState::default())
+        .ensure_registered(&*NEIGHBORHOOD_SIGNAL, NeighborhoodState::default())
         .await?;
 
     // Register derived/status signals
     handler
-        .register(&*CONNECTION_STATUS_SIGNAL, ConnectionStatus::default())
+        .ensure_registered(&*CONNECTION_STATUS_SIGNAL, ConnectionStatus::default())
         .await?;
     handler
-        .register(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
+        .ensure_registered(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
         .await?;
     handler
-        .register(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
-        .await?;
-    handler.register(&*TRANSPORT_PEERS_SIGNAL, 0usize).await?;
-    handler.register(&*ERROR_SIGNAL, None).await?;
-    handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
-    handler
-        .register(&*DISCOVERED_PEERS_SIGNAL, DiscoveredPeersState::default())
+        .ensure_registered(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
         .await?;
     handler
-        .register(&*SETTINGS_SIGNAL, SettingsState::default())
+        .ensure_registered(&*TRANSPORT_PEERS_SIGNAL, 0usize)
+        .await?;
+    handler.ensure_registered(&*ERROR_SIGNAL, None).await?;
+    handler.ensure_registered(&*UNREAD_COUNT_SIGNAL, 0).await?;
+    handler
+        .ensure_registered(&*DISCOVERED_PEERS_SIGNAL, DiscoveredPeersState::default())
         .await?;
     handler
-        .register(
+        .ensure_registered(&*SETTINGS_SIGNAL, SettingsState::default())
+        .await?;
+    handler
+        .ensure_registered(
             &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
             crate::ui_contract::AuthoritativeSemanticFactsSnapshot::default(),
         )
@@ -481,21 +483,29 @@ pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
         .register_query_signal(&*NEIGHBORHOOD_SIGNAL, NeighborhoodQuery::default())
         .await?;
 
-    // Register derived/status signals (not query-bound, updated manually)
+    // Ensure derived/status signals (not query-bound, updated manually).
     handler
-        .register(&*CONNECTION_STATUS_SIGNAL, ConnectionStatus::default())
+        .ensure_registered(&*CONNECTION_STATUS_SIGNAL, ConnectionStatus::default())
         .await?;
     handler
-        .register(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
+        .ensure_registered(&*SYNC_STATUS_SIGNAL, SyncStatus::default())
         .await?;
     handler
-        .register(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
+        .ensure_registered(&*NETWORK_STATUS_SIGNAL, NetworkStatus::default())
         .await?;
-    handler.register(&*TRANSPORT_PEERS_SIGNAL, 0usize).await?;
-    handler.register(&*ERROR_SIGNAL, None).await?;
-    handler.register(&*UNREAD_COUNT_SIGNAL, 0).await?;
     handler
-        .register(
+        .ensure_registered(&*TRANSPORT_PEERS_SIGNAL, 0usize)
+        .await?;
+    handler.ensure_registered(&*ERROR_SIGNAL, None).await?;
+    handler.ensure_registered(&*UNREAD_COUNT_SIGNAL, 0).await?;
+    handler
+        .ensure_registered(&*DISCOVERED_PEERS_SIGNAL, DiscoveredPeersState::default())
+        .await?;
+    handler
+        .ensure_registered(&*SETTINGS_SIGNAL, SettingsState::default())
+        .await?;
+    handler
+        .ensure_registered(
             &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
             crate::ui_contract::AuthoritativeSemanticFactsSnapshot::default(),
         )
@@ -559,6 +569,191 @@ impl Default for BoundSignals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::reactive::SignalStream;
+    use aura_core::query::{FactPredicate, Query};
+    use aura_effects::ReactiveHandler;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FailOneRegistration<'a> {
+        inner: &'a ReactiveHandler,
+        fail_at: usize,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ReactiveEffects for FailOneRegistration<'_> {
+        async fn read<T>(&self, signal: &Signal<T>) -> Result<T, ReactiveError>
+        where
+            T: Clone + Send + Sync + 'static,
+        {
+            self.inner.read(signal).await
+        }
+
+        async fn emit<T>(&self, signal: &Signal<T>, value: T) -> Result<(), ReactiveError>
+        where
+            T: Clone + Send + Sync + 'static,
+        {
+            self.inner.emit(signal, value).await
+        }
+
+        fn subscribe<T>(&self, signal: &Signal<T>) -> Result<SignalStream<T>, ReactiveError>
+        where
+            T: Clone + Send + Sync + 'static,
+        {
+            self.inner.subscribe(signal)
+        }
+
+        async fn register<T>(&self, signal: &Signal<T>, initial: T) -> Result<(), ReactiveError>
+        where
+            T: Clone + Send + Sync + 'static,
+        {
+            self.inner.register(signal, initial).await
+        }
+
+        async fn ensure_registered<T>(
+            &self,
+            signal: &Signal<T>,
+            initial: T,
+        ) -> Result<(), ReactiveError>
+        where
+            T: Clone + Send + Sync + 'static,
+        {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == self.fail_at {
+                return Err(ReactiveError::Internal {
+                    reason: format!("injected registration failure at {}", self.fail_at),
+                });
+            }
+            self.inner.ensure_registered(signal, initial).await
+        }
+
+        fn is_registered(&self, signal_id: &aura_core::effects::reactive::SignalId) -> bool {
+            self.inner.is_registered(signal_id)
+        }
+
+        async fn register_query<Q: Query>(
+            &self,
+            signal: &Signal<Q::Result>,
+            query: Q,
+        ) -> Result<(), ReactiveError> {
+            self.inner.register_query(signal, query).await
+        }
+
+        fn query_dependencies(
+            &self,
+            signal_id: &aura_core::effects::reactive::SignalId,
+        ) -> Option<Vec<FactPredicate>> {
+            self.inner.query_dependencies(signal_id)
+        }
+
+        async fn invalidate_queries(&self, changed: &FactPredicate) {
+            self.inner.invalidate_queries(changed).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn register_app_signals_recovers_from_failure_at_every_step() {
+        const REGISTRATION_STEPS: usize = 15;
+        for fail_at in 0..REGISTRATION_STEPS {
+            let handler = ReactiveHandler::new();
+            handler.register(&*TRANSPORT_PEERS_SIGNAL, 0).await.unwrap();
+            handler.emit(&*TRANSPORT_PEERS_SIGNAL, 41).await.unwrap();
+            let faulty = FailOneRegistration {
+                inner: &handler,
+                fail_at,
+                calls: AtomicUsize::new(0),
+            };
+
+            let error = register_app_signals(&faulty).await.unwrap_err();
+            assert!(
+                matches!(error, ReactiveError::Internal { ref reason } if reason == &format!("injected registration failure at {fail_at}")),
+                "registration step {fail_at} did not return its injected failure"
+            );
+            assert_eq!(faulty.calls.load(Ordering::SeqCst), fail_at + 1);
+
+            register_app_signals(&faulty).await.unwrap();
+            assert_eq!(handler.stats().await.signal_count, REGISTRATION_STEPS);
+            assert_eq!(handler.read(&*TRANSPORT_PEERS_SIGNAL).await.unwrap(), 41);
+        }
+    }
+
+    #[tokio::test]
+    async fn query_bound_registration_retries_after_binding_failure() {
+        let handler = crate::effects::unified_handler::UnifiedHandler::new();
+        handler.register(&*TRANSPORT_PEERS_SIGNAL, 0).await.unwrap();
+        handler.emit(&*TRANSPORT_PEERS_SIGNAL, 41).await.unwrap();
+        let first = register_app_signals_with_queries(&handler).await;
+        assert!(matches!(first, Err(ReactiveError::Internal { .. })));
+        assert!(handler.is_registered(CHAT_SIGNAL.id()));
+
+        handler.allow_unrestricted_queries().await;
+        register_app_signals_with_queries(&handler).await.unwrap();
+        register_app_signals_with_queries(&handler).await.unwrap();
+
+        assert_eq!(handler.reactive_handler().stats().await.signal_count, 15);
+        assert_eq!(handler.read(&*TRANSPORT_PEERS_SIGNAL).await.unwrap(), 41);
+        for signal_id in [
+            CHAT_SIGNAL.id(),
+            RECOVERY_SIGNAL.id(),
+            INVITATIONS_SIGNAL.id(),
+            CONTACTS_SIGNAL.id(),
+            HOMES_SIGNAL.id(),
+            NEIGHBORHOOD_SIGNAL.id(),
+        ] {
+            assert!(handler.query_dependencies_for(signal_id).is_some());
+        }
+        for signal_id in [
+            CONNECTION_STATUS_SIGNAL.id(),
+            SYNC_STATUS_SIGNAL.id(),
+            NETWORK_STATUS_SIGNAL.id(),
+            TRANSPORT_PEERS_SIGNAL.id(),
+            ERROR_SIGNAL.id(),
+            UNREAD_COUNT_SIGNAL.id(),
+            DISCOVERED_PEERS_SIGNAL.id(),
+            SETTINGS_SIGNAL.id(),
+            AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL.id(),
+        ] {
+            assert!(handler.is_registered(signal_id));
+        }
+    }
+
+    #[tokio::test]
+    async fn register_app_signals_retry_preserves_existing_status_and_subscription() {
+        let handler = ReactiveHandler::new();
+        register_app_signals(&handler).await.unwrap();
+        let mut stream = handler
+            .subscribe_attached(&*TRANSPORT_PEERS_SIGNAL)
+            .await
+            .unwrap();
+        handler.emit(&*TRANSPORT_PEERS_SIGNAL, 3).await.unwrap();
+
+        register_app_signals(&handler).await.unwrap();
+
+        assert_eq!(handler.read(&*TRANSPORT_PEERS_SIGNAL).await.unwrap(), 3);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), stream.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            3
+        );
+        assert_eq!(handler.stats().await.signal_count, 15);
+    }
+
+    #[tokio::test]
+    async fn register_app_signals_completes_partial_registration() {
+        let handler = ReactiveHandler::new();
+        handler
+            .register(&*CHAT_SIGNAL, ChatState::default())
+            .await
+            .unwrap();
+        assert_eq!(handler.stats().await.signal_count, 1);
+
+        register_app_signals(&handler).await.unwrap();
+
+        assert_eq!(handler.stats().await.signal_count, 15);
+        assert!(handler.is_registered(TRANSPORT_PEERS_SIGNAL.id()));
+        assert!(handler.is_registered(AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL.id()));
+    }
 
     #[test]
     fn test_signal_ids_are_unique() {

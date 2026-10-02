@@ -76,6 +76,7 @@ impl From<IntentError> for CallbackError {
                 IntentError::ValidationFailed { .. } => "validation_failed",
                 IntentError::JournalError { .. } => "journal_error",
                 IntentError::InternalError { .. } => "internal_error",
+                IntentError::ReactiveFailure { .. } => "reactive_failure",
                 IntentError::ContextNotFound { .. } => "context_not_found",
                 IntentError::NetworkError { .. } => "network_error",
                 IntentError::StorageError { .. } => "storage_error",
@@ -89,6 +90,7 @@ impl From<IntentError> for CallbackError {
                 IntentError::NetworkError { .. }
                     | IntentError::ValidationFailed { .. }
                     | IntentError::ServiceError { .. }
+                    | IntentError::ReactiveFailure { .. }
             ),
         }
     }

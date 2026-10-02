@@ -2,7 +2,18 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 
+use crate::runtime_bridge::OfflineRuntimeBridge;
 use crate::{AppConfig, AppCore, RuntimeBridge};
+use aura_core::{AuthorityId, OwnedShutdownToken, OwnedTaskSpawner};
+
+pub(crate) fn running_offline_runtime(authority: AuthorityId) -> Arc<OfflineRuntimeBridge> {
+    let mut runtime = OfflineRuntimeBridge::new(authority);
+    runtime.use_test_task_spawner(OwnedTaskSpawner::new(
+        Arc::new(aura_effects::reactive::TestTaskSpawner),
+        OwnedShutdownToken::detached(),
+    ));
+    Arc::new(runtime)
+}
 
 #[track_caller]
 pub(crate) fn test_app_core(config: AppConfig) -> Arc<RwLock<AppCore>> {

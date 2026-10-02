@@ -206,43 +206,41 @@ pub(super) fn handle_chat_create_key_queue(
                     }
                 });
             }
-            Enter => {
+            Enter if modal_state.can_submit() => {
                 // Create channel directly from Threshold step
-                if modal_state.can_submit() {
-                    let topic = if modal_state.topic.trim().is_empty() {
-                        None
-                    } else {
-                        Some(modal_state.topic.clone())
+                let topic = if modal_state.topic.trim().is_empty() {
+                    None
+                } else {
+                    Some(modal_state.topic.clone())
+                };
+                let members = modal_state.selected_member_ids();
+                let mut parsed_members = Vec::with_capacity(members.len());
+                for member in members {
+                    let Some(parsed) = parse_authority_id(state, &member, "channel creation")
+                    else {
+                        return;
                     };
-                    let members = modal_state.selected_member_ids();
-                    let mut parsed_members = Vec::with_capacity(members.len());
-                    for member in members {
-                        let Some(parsed) = parse_authority_id(state, &member, "channel creation")
-                        else {
-                            return;
-                        };
-                        parsed_members.push(parsed);
-                    }
-                    let channel_name = modal_state.name.clone();
-
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
-                        name: channel_name,
-                        topic,
-                        members: parsed_members,
-                        threshold_k: match super::super::super::commands::ThresholdK::try_from(
-                            modal_state.threshold_k,
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                state.toast_error(error);
-                                return;
-                            }
-                        },
-                    }));
-
-                    // Dismiss modal; success/error toasts are emitted from async callbacks.
-                    state.modal_queue.dismiss();
+                    parsed_members.push(parsed);
                 }
+                let channel_name = modal_state.name.clone();
+
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
+                    name: channel_name,
+                    topic,
+                    members: parsed_members,
+                    threshold_k: match super::super::super::commands::ThresholdK::try_from(
+                        modal_state.threshold_k,
+                    ) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            state.toast_error(error);
+                            return;
+                        }
+                    },
+                }));
+
+                // Dismiss modal; success/error toasts are emitted from async callbacks.
+                state.modal_queue.dismiss();
             }
             _ => {}
         },

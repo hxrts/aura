@@ -239,7 +239,7 @@ pub(super) fn read_selected_notification(
     let mut notifications = invitation_items;
     notifications.extend(recovery_items);
     notifications.extend(runtime_items);
-    notifications.sort_by(|left, right| right.0.cmp(&left.0));
+    notifications.sort_by_key(|item| std::cmp::Reverse(item.0));
 
     // Resolve through the row the screen rendered at this index; the screen
     // omits some items (e.g. sent invitations), so positions can differ.

@@ -83,7 +83,7 @@ pub fn Panel(props: &PanelProps) -> impl Into<AnyElement<'static>> {
             // Content area
             View(
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 padding: Spacing::PANEL_PADDING,
             ) {
                 Text(content: content)

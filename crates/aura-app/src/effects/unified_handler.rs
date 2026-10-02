@@ -401,6 +401,17 @@ impl ReactiveEffects for UnifiedHandler {
         self.reactive.register(signal, initial).await
     }
 
+    async fn ensure_registered<T>(
+        &self,
+        signal: &Signal<T>,
+        initial: T,
+    ) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.ensure_registered(signal, initial).await
+    }
+
     fn is_registered(&self, signal_id: &SignalId) -> bool {
         self.reactive.is_registered(signal_id)
     }

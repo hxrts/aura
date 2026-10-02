@@ -151,7 +151,7 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
             // Content based on step - fills available space
             View(
                 width: 100pct,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {
@@ -182,7 +182,7 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
             View(
                 padding: Spacing::MD,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
             ) {
@@ -262,7 +262,7 @@ fn render_ceremony_progress(props: &GuardianSetupModalProps) -> AnyElement<'stat
         View(
             padding: Spacing::SM,
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
         ) {
             // Header with counts inline
             View(flex_direction: FlexDirection::Row, gap: 2) {

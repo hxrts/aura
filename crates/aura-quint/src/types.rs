@@ -181,7 +181,7 @@ impl fmt::Display for QuintType {
             Self::Set(inner) => write!(f, "Set[{inner}]"),
             Self::Record(fields) => {
                 let mut field_entries = fields.iter().collect::<Vec<_>>();
-                field_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+                field_entries.sort_by_key(|(left, _)| *left);
                 let rendered = field_entries
                     .into_iter()
                     .map(|(name, quint_type)| format!("{name}: {quint_type}"))

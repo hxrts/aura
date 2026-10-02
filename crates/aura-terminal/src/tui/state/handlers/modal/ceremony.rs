@@ -46,14 +46,12 @@ pub(super) fn handle_guardian_setup_key_queue(
                         }
                     });
                 }
-                KeyCode::Enter => {
-                    if modal_state.can_proceed_to_threshold() {
-                        state.modal_queue.update_active(|modal| {
-                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                                s.advance_to_threshold();
-                            }
-                        });
-                    }
+                KeyCode::Enter if modal_state.can_proceed_to_threshold() => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
+                            s.advance_to_threshold();
+                        }
+                    });
                 }
                 _ => {}
             }
@@ -82,38 +80,34 @@ pub(super) fn handle_guardian_setup_key_queue(
                         }
                     });
                 }
-                KeyCode::Enter => {
-                    if modal_state.can_start_ceremony() {
-                        let selected_ids = modal_state.selected_contact_ids();
-                        let mut contact_ids = Vec::with_capacity(selected_ids.len());
-                        for contact in selected_ids {
-                            let Some(parsed) =
-                                parse_authority_id(state, &contact, "guardian ceremony")
-                            else {
-                                return;
-                            };
-                            contact_ids.push(parsed);
-                        }
-                        // Dispatch command to start guardian setup ceremony
-                        commands.push(TuiCommand::Dispatch(
-                            DispatchCommand::StartGuardianCeremony {
-                                contact_ids,
-                                threshold_k:
-                                    match super::super::super::commands::ThresholdK::try_from(
-                                        modal_state.threshold_k(),
-                                    ) {
-                                        Ok(value) => value,
-                                        Err(error) => {
-                                            state.toast_error(error);
-                                            return;
-                                        }
-                                    },
-                            },
-                        ));
-
-                        // Dismiss modal after sending invitation (mirrors contact invitation flow)
-                        state.modal_queue.dismiss();
+                KeyCode::Enter if modal_state.can_start_ceremony() => {
+                    let selected_ids = modal_state.selected_contact_ids();
+                    let mut contact_ids = Vec::with_capacity(selected_ids.len());
+                    for contact in selected_ids {
+                        let Some(parsed) = parse_authority_id(state, &contact, "guardian ceremony")
+                        else {
+                            return;
+                        };
+                        contact_ids.push(parsed);
                     }
+                    // Dispatch command to start guardian setup ceremony
+                    commands.push(TuiCommand::Dispatch(
+                        DispatchCommand::StartGuardianCeremony {
+                            contact_ids,
+                            threshold_k: match super::super::super::commands::ThresholdK::try_from(
+                                modal_state.threshold_k(),
+                            ) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    state.toast_error(error);
+                                    return;
+                                }
+                            },
+                        },
+                    ));
+
+                    // Dismiss modal after sending invitation (mirrors contact invitation flow)
+                    state.modal_queue.dismiss();
                 }
                 _ => {}
             }
@@ -198,14 +192,12 @@ pub(super) fn handle_mfa_setup_key_queue(
                         }
                     });
                 }
-                KeyCode::Enter => {
-                    if modal_state.can_proceed_to_threshold() {
-                        state.modal_queue.update_active(|modal| {
-                            if let QueuedModal::MfaSetup(ref mut s) = modal {
-                                s.advance_to_threshold();
-                            }
-                        });
-                    }
+                KeyCode::Enter if modal_state.can_proceed_to_threshold() => {
+                    state.modal_queue.update_active(|modal| {
+                        if let QueuedModal::MfaSetup(ref mut s) = modal {
+                            s.advance_to_threshold();
+                        }
+                    });
                 }
                 _ => {}
             }
@@ -232,28 +224,26 @@ pub(super) fn handle_mfa_setup_key_queue(
                     }
                 });
             }
-            KeyCode::Enter => {
-                if modal_state.can_start_ceremony() {
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::StartMfaCeremony {
-                        device_ids: modal_state
-                            .selected_contact_ids()
-                            .into_iter()
-                            .map(Into::into)
-                            .collect(),
-                        threshold_k: match super::super::super::commands::ThresholdK::try_from(
-                            modal_state.threshold_k(),
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                state.toast_error(error);
-                                return;
-                            }
-                        },
-                    }));
+            KeyCode::Enter if modal_state.can_start_ceremony() => {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::StartMfaCeremony {
+                    device_ids: modal_state
+                        .selected_contact_ids()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                    threshold_k: match super::super::super::commands::ThresholdK::try_from(
+                        modal_state.threshold_k(),
+                    ) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            state.toast_error(error);
+                            return;
+                        }
+                    },
+                }));
 
-                    // Dismiss modal after sending invitation (mirrors guardian invitation flow)
-                    state.modal_queue.dismiss();
-                }
+                // Dismiss modal after sending invitation (mirrors guardian invitation flow)
+                state.modal_queue.dismiss();
             }
             _ => {}
         },

@@ -644,9 +644,9 @@ mod tests {
             device_id: aura_core::DeviceId::new_from_entropy([seed; 32]),
             ..AgentConfig::default()
         };
-        AuraEffectSystem::simulation_with_shared_transport_for_authority(
+        AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
             &config,
-            0x5_1C00 + u64::from(seed),
+            &format!("network_sync_agent_{seed}"),
             AuthorityId::new_from_entropy([seed.wrapping_add(1); 32]),
             shared.clone(),
         )

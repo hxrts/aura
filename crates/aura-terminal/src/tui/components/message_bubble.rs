@@ -137,7 +137,7 @@ pub fn CompactMessage(props: &CompactMessageProps) -> impl Into<AnyElement<'stat
                 padding_right: Spacing::PANEL_PADDING,
                 gap: Spacing::SM,
             ) {
-                View(flex_grow: 1.0) {
+                View(flex_grow: 1.0_f32) {
                     Text(content: content, wrap: TextWrap::Wrap)
                 }
                 Text(content: timestamp, color: Theme::TEXT_MUTED)

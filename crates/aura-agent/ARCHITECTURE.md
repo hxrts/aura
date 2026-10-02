@@ -46,6 +46,7 @@ Summary:
 
 - All production async work uses structured concurrency with explicit task ownership.
 - External events reach session state only through typed ingress and the current owner.
+- Sibling fact exchange preserves codec, tree-operation, and frame-order causes as typed error categories with their original sources; contact acceptance preconditions and response signing likewise retain typed causes through agent error conversion.
 - Each active session has exactly one local owner at any time.
 - Runtime composition assembles existing handlers; it does not create new effects or protocol logic.
 - Runtime telltale integration consumes bridge artifacts but does not redefine bridge schema.

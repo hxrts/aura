@@ -156,7 +156,7 @@ pub fn CommandPalette(props: &CommandPaletteProps) -> impl Into<AnyElement<'stat
                 // Command list
                 View(
                     flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
+                    flex_grow: 1.0_f32,
                     overflow: Overflow::Scroll,
                     padding: Spacing::PANEL_PADDING,
                 ) {

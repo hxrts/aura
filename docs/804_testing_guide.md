@@ -285,6 +285,8 @@ Use this as the authoritative ownership map for the shared semantic stack. If co
 
 The required split is that actor-owned subsystems own long-lived mutable async state and lifecycle. Move-owned surfaces own exclusive right-to-act and ownership transfer. Observed surfaces render, wait, and diagnose without authoring semantic truth.
 
+App bootstrap tests must fail each required signal-registration and refresh-hook attachment step, then retry the same runtime generation. A successful hook installation means every signal receiver is attached and its listener has acknowledged startup; tests assert one live subscriber per required signal. Detach must cancel that generation's hook group before rebootstrap attaches another. Query-bound signal registration has the same retry contract, including a failed query binding after signals were registered. A task spawner that discards listeners must fail installation rather than report readiness.
+
 Do not use this table to justify ambient shared ownership. If a subsystem needs both actor and move semantics, the actor owns mutable lifecycle state while the move-owned handle or token defines who may advance or transfer it.
 
 ### Reactive Subscription Policy

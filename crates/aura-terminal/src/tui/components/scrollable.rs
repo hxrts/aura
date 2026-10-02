@@ -38,7 +38,7 @@ pub fn Scrollable(props: &ScrollableProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             overflow: Overflow::Scroll,
         ) {
             #(visible_items.into_iter().map(|content| {

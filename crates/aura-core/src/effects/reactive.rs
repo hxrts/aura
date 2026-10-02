@@ -372,6 +372,18 @@ pub trait ReactiveEffects: Send + Sync {
     where
         T: Clone + Send + Sync + 'static;
 
+    /// Ensure a signal exists without resetting an already registered value.
+    ///
+    /// Implementations should make the check and insertion atomic. A signal
+    /// registered under the same ID with a different value type is an error.
+    async fn ensure_registered<T>(
+        &self,
+        signal: &Signal<T>,
+        initial: T,
+    ) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static;
+
     /// Check if a signal is registered.
     fn is_registered(&self, signal_id: &SignalId) -> bool;
 
@@ -516,6 +528,17 @@ impl<T: ReactiveEffects + ?Sized> ReactiveEffects for Arc<T> {
         V: Clone + Send + Sync + 'static,
     {
         (**self).register(signal, initial).await
+    }
+
+    async fn ensure_registered<V>(
+        &self,
+        signal: &Signal<V>,
+        initial: V,
+    ) -> Result<(), ReactiveError>
+    where
+        V: Clone + Send + Sync + 'static,
+    {
+        (**self).ensure_registered(signal, initial).await
     }
 
     fn is_registered(&self, signal_id: &SignalId) -> bool {

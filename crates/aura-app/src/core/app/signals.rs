@@ -47,16 +47,9 @@ impl AppCore {
             }
         }
 
-        let sentinel_id = (*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).id();
-        if self.reactive.is_registered(sentinel_id) {
-            return Ok(());
-        }
-
         crate::signal_defs::register_app_signals(&self.reactive)
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to initialize signals: {e}"))
-            })?;
+            .map_err(|error| IntentError::reactive_failure("app_signals", error))?;
 
         // The runtime may already have replayed its journal before these
         // signals existed; replay into the now-registered signals.
@@ -168,6 +161,17 @@ impl ReactiveEffects for AppCore {
         T: Clone + Send + Sync + 'static,
     {
         self.reactive.register(signal, initial).await
+    }
+
+    async fn ensure_registered<T>(
+        &self,
+        signal: &Signal<T>,
+        initial: T,
+    ) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.reactive.ensure_registered(signal, initial).await
     }
 
     fn is_registered(&self, signal_id: &SignalId) -> bool {

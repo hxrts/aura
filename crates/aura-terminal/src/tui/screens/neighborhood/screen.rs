@@ -68,7 +68,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -83,7 +83,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
             View(height: 1)
             View(
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 gap: 1,
                 overflow: Overflow::Scroll,
             ) {
@@ -159,7 +159,7 @@ fn HomeHeader(props: &HomeHeaderProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -188,7 +188,7 @@ fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -231,7 +231,7 @@ fn MemberList(props: &MemberListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
             padding_left: 1,
@@ -310,7 +310,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             border_color: Theme::BORDER,
             padding_left: 1,
             padding_right: 1,
-            flex_grow: 1.0,
+            flex_grow: 1.0_f32,
             gap: 1,
         ) {
             Text(content: "Social View", weight: Weight::Bold, color: Theme::PRIMARY)
@@ -618,7 +618,7 @@ pub fn NeighborhoodScreen(
                         }]
                     } else {
                         vec![element! {
-                            View(flex_grow: 1.0) {
+                            View(flex_grow: 1.0_f32) {
                                 HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]

@@ -1023,7 +1023,6 @@ fn send_chat_command_dismisses_toast_then_sends_slash_command() {
             ToolRequest::WaitFor {
                 instance_id,
                 pattern,
-                timeout_ms: _,
                 ..
             } => {
                 assert_eq!(instance_id, "alice");

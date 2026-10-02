@@ -440,6 +440,10 @@ The runtime must preserve coherence-sensitive session and edge state, harmony-se
 The `FactRegistry` provides domain-specific fact type registration and reduction for reactive scheduling. It lives in `aura-journal` and is integrated via `AuraEffectSystem::fact_registry()`. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for home and mute facts.
 
 Reactive subscription policy is explicit:
+- application signal setup ensures every required signal individually; retry after partial setup preserves registered values and subscriptions
+- query-bound signal setup registers the same required signal set; a failed query binding leaves no partial binding and a later retry can attach it without resetting the signal
+- runtime refresh hooks attach one receiver per required signal and acknowledge every listener's startup before reporting readiness; failure rolls back the group and permits retry with a typed reactive failure
+- detaching an `AppCore` runtime cancels its hook group before another generation attaches
 - subscribing to an unregistered signal fails fast with `ReactiveError::SignalNotFound`
 - there is no implicit wait-for-registration or dead-stream fallback
 - subscriber delivery is eventually consistent rather than lossless

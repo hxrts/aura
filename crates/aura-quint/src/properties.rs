@@ -143,7 +143,7 @@ impl PropertySpec {
 
         // Add context variables as constants or variables
         let mut context_entries = self.context.iter().collect::<Vec<_>>();
-        context_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        context_entries.sort_by_key(|(left, _)| *left);
         for (name, var_type) in context_entries {
             spec.push_str(&format!("  const {}: {}\n", name, var_type));
         }
@@ -255,7 +255,7 @@ impl PropertySuite {
 
         // Shared context
         let mut shared_entries = self.shared_context.iter().collect::<Vec<_>>();
-        shared_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        shared_entries.sort_by_key(|(left, _)| *left);
         for (name, var_type) in shared_entries {
             module.push_str(&format!("  const {}: {}\n", name, var_type));
         }
@@ -266,7 +266,7 @@ impl PropertySuite {
 
             // Property-specific context
             let mut property_entries = property.context.iter().collect::<Vec<_>>();
-            property_entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            property_entries.sort_by_key(|(left, _)| *left);
             for (name, var_type) in property_entries {
                 if !self.shared_context.contains_key(name) {
                     module.push_str(&format!("  const {}: {}\n", name, var_type));

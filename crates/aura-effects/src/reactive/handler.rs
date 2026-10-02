@@ -24,6 +24,95 @@ use super::graph::SignalGraph;
 
 const REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY: usize = 256;
 
+/// Platform task spawner for reactive lifecycle tests.
+#[cfg(feature = "test-support")]
+#[derive(Debug)]
+pub struct TestTaskSpawner;
+
+#[cfg(all(feature = "test-support", not(target_arch = "wasm32")))]
+impl aura_core::effects::task::TaskSpawner for TestTaskSpawner {
+    fn spawn(&self, fut: futures::future::BoxFuture<'static, ()>) {
+        tokio::spawn(fut);
+    }
+
+    fn spawn_cancellable(
+        &self,
+        fut: futures::future::BoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = token.cancelled() => {},
+                _ = fut => {},
+            }
+        });
+    }
+
+    fn spawn_local(&self, fut: futures::future::LocalBoxFuture<'static, ()>) {
+        tokio::task::spawn_local(fut);
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: futures::future::LocalBoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        tokio::task::spawn_local(async move {
+            tokio::select! {
+                _ = token.cancelled() => {},
+                _ = fut => {},
+            }
+        });
+    }
+
+    fn cancellation_token(&self) -> Arc<dyn aura_core::effects::task::CancellationToken> {
+        Arc::new(aura_core::effects::task::NeverCancel)
+    }
+}
+
+#[cfg(all(feature = "test-support", target_arch = "wasm32"))]
+impl aura_core::effects::task::TaskSpawner for TestTaskSpawner {
+    fn spawn(&self, fut: futures::future::BoxFuture<'static, ()>) {
+        wasm_bindgen_futures::spawn_local(fut);
+    }
+
+    fn spawn_cancellable(
+        &self,
+        fut: futures::future::BoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        use futures::FutureExt;
+        wasm_bindgen_futures::spawn_local(async move {
+            futures::select! {
+                _ = token.cancelled().fuse() => {},
+                _ = fut.fuse() => {},
+            }
+        });
+    }
+
+    fn spawn_local(&self, fut: futures::future::LocalBoxFuture<'static, ()>) {
+        wasm_bindgen_futures::spawn_local(fut);
+    }
+
+    fn spawn_local_cancellable(
+        &self,
+        fut: futures::future::LocalBoxFuture<'static, ()>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) {
+        use futures::FutureExt;
+        wasm_bindgen_futures::spawn_local(async move {
+            futures::select! {
+                _ = token.cancelled().fuse() => {},
+                _ = fut.fuse() => {},
+            }
+        });
+    }
+
+    fn cancellation_token(&self) -> Arc<dyn aura_core::effects::task::CancellationToken> {
+        Arc::new(aura_core::effects::task::NeverCancel)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Reactive Handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +180,54 @@ impl ReactiveHandler {
     /// Get statistics about the handler's signal graph.
     pub async fn stats(&self) -> super::graph::SignalGraphStats {
         self.graph.stats().await
+    }
+
+    /// Subscribe after the graph receiver has attached. The returned stream
+    /// cannot miss an emission between subscription setup and task scheduling.
+    pub async fn subscribe_attached<T>(
+        &self,
+        signal: &Signal<T>,
+    ) -> Result<SignalStream<T>, ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.graph.read::<T>(signal.id()).await?;
+        let receiver = self.graph.subscribe(signal.id()).await?;
+        Ok(self.forward_subscription(signal.id().clone(), receiver))
+    }
+
+    fn forward_subscription<T>(
+        &self,
+        signal_id: SignalId,
+        mut receiver: broadcast::Receiver<super::graph::AnyValue>,
+    ) -> SignalStream<T>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        let (tx, rx) = broadcast::channel::<T>(REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY);
+        let stream_id = signal_id.clone();
+        self.tasks.spawn_cancellable(async move {
+            loop {
+                tokio::select! {
+                    _ = tx.closed() => break,
+                    received = receiver.recv() => match received {
+                        Ok(any_value) => {
+                            if let Some(value) = any_value.0.downcast_ref::<T>() {
+                                if tx.send(value.clone()).is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(signal_id = %signal_id, skipped,
+                                "reactive subscription lagged; updates were dropped");
+                        }
+                    }
+                }
+            }
+        });
+        SignalStream::new(rx, stream_id)
     }
 
     /// Get all signals that depend on a given fact predicate.
@@ -231,17 +368,17 @@ impl ReactiveEffects for ReactiveHandler {
         // method isn't async. We'll wrap the async operation in a blocking call.
         // In practice, signals should be pre-registered before subscribing.
 
-        // Create a channel for this subscription
-        let (tx, rx) = broadcast::channel::<T>(REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY);
-
         // Spawn a task to forward from the graph's subscription
         let graph = self.graph.clone();
         let signal_id = signal.id().clone();
+        let (tx, rx) = broadcast::channel::<T>(REACTIVE_SUBSCRIPTION_BUFFER_CAPACITY);
 
         self.tasks.spawn_cancellable(async move {
             match graph.subscribe(&signal_id).await {
                 Ok(mut receiver) => loop {
-                    match receiver.recv().await {
+                    tokio::select! {
+                    _ = tx.closed() => break,
+                    received = receiver.recv() => match received {
                         Ok(any_value) => {
                             if let Some(value) = any_value.0.downcast_ref::<T>() {
                                 if tx.send(value.clone()).is_err() {
@@ -259,6 +396,7 @@ impl ReactiveEffects for ReactiveHandler {
                             );
                             continue;
                         }
+                    }
                     }
                 },
                 Err(error) => {
@@ -289,6 +427,26 @@ impl ReactiveEffects for ReactiveHandler {
         Ok(())
     }
 
+    async fn ensure_registered<T>(
+        &self,
+        signal: &Signal<T>,
+        initial: T,
+    ) -> Result<(), ReactiveError>
+    where
+        T: Clone + Send + Sync + 'static,
+    {
+        self.graph
+            .ensure_registered(signal.id().clone(), initial)
+            .await?;
+        self.registered_ids
+            .write()
+            .map_err(|_| ReactiveError::Internal {
+                reason: "reactive registration tracking lock poisoned".to_string(),
+            })?
+            .insert(signal.id().clone());
+        Ok(())
+    }
+
     fn is_registered(&self, signal_id: &SignalId) -> bool {
         // Use our sync-safe registration tracking set
         // This avoids needing to block on async operations
@@ -306,11 +464,11 @@ impl ReactiveEffects for ReactiveHandler {
         // Get the query's dependencies for invalidation tracking
         let deps = query.dependencies();
 
-        // Register the signal with default value.
+        // Retain the current value and subscribers on binding retries.
         // Initial query execution is the caller's responsibility via QueryEffects.
         // This separation keeps ReactiveHandler focused on signal management.
         let initial: Q::Result = Default::default();
-        self.register(signal, initial).await?;
+        self.ensure_registered(signal, initial).await?;
 
         // Store dependencies for predicate-based invalidation
         if let Ok(mut deps_map) = self.query_deps.write() {
@@ -368,6 +526,55 @@ mod tests {
 
         let value = handler.read(&signal).await.unwrap();
         assert_eq!(value, 42);
+    }
+
+    #[tokio::test]
+    async fn ensure_registered_keeps_live_value_and_attached_subscription() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<u32> = Signal::new("handler_idempotent");
+        handler.ensure_registered(&signal, 1).await.unwrap();
+        let mut stream = handler.subscribe_attached(&signal).await.unwrap();
+
+        handler.emit(&signal, 2).await.unwrap();
+        handler.ensure_registered(&signal, 99).await.unwrap();
+
+        assert_eq!(handler.read(&signal).await.unwrap(), 2);
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), stream.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            2
+        );
+        assert_eq!(handler.stats().await.signal_count, 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_attached_fails_before_registration() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<u32> = Signal::new("missing_attached");
+        let result = handler.subscribe_attached(&signal).await;
+        assert!(
+            matches!(result, Err(ReactiveError::SignalNotFound { id }) if id == "missing_attached")
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_attached_receives_emit_before_forwarder_is_scheduled() {
+        let handler = ReactiveHandler::new();
+        let signal: Signal<u32> = Signal::new("attached_first_emit");
+        handler.register(&signal, 0).await.unwrap();
+        let mut stream = handler.subscribe_attached(&signal).await.unwrap();
+
+        // No yield between attachment and emission: forwarding may not have run yet.
+        handler.emit(&signal, 1).await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), stream.recv())
+                .await
+                .unwrap()
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]

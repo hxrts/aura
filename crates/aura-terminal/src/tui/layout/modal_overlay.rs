@@ -70,7 +70,7 @@ pub fn SimpleModal<'a>(props: &SimpleModalProps<'a>) -> impl Into<AnyElement<'a>
             // Content area
             View(
                 width: 100pct,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 padding: 1,
                 overflow: Overflow::Hidden,

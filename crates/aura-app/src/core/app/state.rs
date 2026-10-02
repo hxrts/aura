@@ -1,6 +1,7 @@
 //! Core `AppCore` state, configuration, and constructors.
 
 use super::config::AppConfig;
+use super::hooks::HookInstallState;
 use crate::core::IntentError;
 use crate::runtime_bridge::RuntimeBridge;
 use crate::ui_contract::AuthoritativeSemanticFact;
@@ -26,10 +27,8 @@ pub struct AppCore {
     pub(super) reactive: ReactiveHandler,
     #[cfg(feature = "callbacks")]
     pub(super) observer_registry: crate::bridge::callback::ObserverRegistry,
-    pub(super) contacts_refresh_hook_installed: bool,
-    pub(super) chat_refresh_hook_installed: bool,
-    #[cfg(feature = "signals")]
-    pub(super) authoritative_readiness_hook_installed: bool,
+    pub(super) hook_install_gate: Arc<async_lock::Mutex<()>>,
+    pub(super) hook_install_state: HookInstallState,
 }
 
 impl AppCore {
@@ -54,10 +53,8 @@ impl AppCore {
             reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
-            contacts_refresh_hook_installed: false,
-            chat_refresh_hook_installed: false,
-            #[cfg(feature = "signals")]
-            authoritative_readiness_hook_installed: false,
+            hook_install_gate: Arc::new(async_lock::Mutex::new(())),
+            hook_install_state: HookInstallState::Stopped,
         })
     }
 
@@ -93,10 +90,8 @@ impl AppCore {
             reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
-            contacts_refresh_hook_installed: false,
-            chat_refresh_hook_installed: false,
-            #[cfg(feature = "signals")]
-            authoritative_readiness_hook_installed: false,
+            hook_install_gate: Arc::new(async_lock::Mutex::new(())),
+            hook_install_state: HookInstallState::Stopped,
         })
     }
 

@@ -190,18 +190,17 @@ pub fn handle_queued_modal_key(
                 KeyCode::Esc | KeyCode::Enter => {
                     state.modal_queue.dismiss();
                 }
-                KeyCode::Char('c') => {
+                KeyCode::Char('c')
+                    if !modal_state.code.is_empty()
+                        && copy_to_clipboard(&modal_state.code).is_ok() =>
+                {
                     // Copy code to clipboard (c or Cmd+C)
-                    if !modal_state.code.is_empty() && copy_to_clipboard(&modal_state.code).is_ok()
-                    {
-                        // Update state to show "copied" feedback
-                        state.modal_queue.update_active(|m| {
-                            if let QueuedModal::ContactsCode(s) = m {
-                                s.set_copied();
-                            }
-                        });
-                        state.toast_success("Copied to clipboard");
-                    }
+                    state.modal_queue.update_active(|m| {
+                        if let QueuedModal::ContactsCode(s) = m {
+                            s.set_copied();
+                        }
+                    });
+                    state.toast_success("Copied to clipboard");
                 }
                 _ => {}
             }

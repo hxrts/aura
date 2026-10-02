@@ -400,7 +400,7 @@ pub fn NotificationsScreen(
                 )
             }),
     );
-    notifications.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    notifications.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
 
     // Filter out dismissed notifications.
     notifications.retain(|item| !props.view.dismissed_ids.contains(&item.id));
@@ -443,7 +443,7 @@ pub fn NotificationsScreen(
                     gap: Spacing::XS,
                 ) {
                     Text(content: item.kind.icon().to_string(), color: item.kind.color())
-                    View(flex_direction: FlexDirection::Column, flex_grow: 1.0) {
+                    View(flex_direction: FlexDirection::Column, flex_grow: 1.0_f32) {
                         Text(content: item.title.clone(), color: text_color)
                         Text(content: item.subtitle.clone(), color: Theme::TEXT_MUTED)
                     }

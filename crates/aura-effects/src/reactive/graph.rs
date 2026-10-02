@@ -123,9 +123,43 @@ impl SignalGraph {
         Ok(())
     }
 
+    /// Install a missing signal or verify the type of an existing one.
+    /// Existing values and subscriptions are retained across retries.
+    pub async fn ensure_registered<T: Clone + Send + Sync + 'static>(
+        &self,
+        id: SignalId,
+        initial: T,
+    ) -> Result<(), ReactiveError> {
+        let mut signals = self.signals.write().await;
+        if let Some(slot) = signals.get(&id) {
+            slot.read::<T>().map(|_| ()).map_err(|error| match error {
+                ReactiveError::TypeMismatch {
+                    expected, actual, ..
+                } => ReactiveError::TypeMismatch {
+                    id: id.to_string(),
+                    expected,
+                    actual,
+                },
+                other => other,
+            })
+        } else {
+            signals.insert(id, SignalSlot::new(initial));
+            Ok(())
+        }
+    }
+
     /// Check if a signal is registered.
     pub async fn is_registered(&self, id: &SignalId) -> bool {
         self.signals.read().await.contains_key(id)
+    }
+
+    /// Number of receivers currently attached to one signal.
+    pub async fn subscriber_count(&self, id: &SignalId) -> usize {
+        self.signals
+            .read()
+            .await
+            .get(id)
+            .map_or(0, |slot| slot.sender.receiver_count())
     }
 
     /// Read the current value of a signal.
@@ -296,6 +330,58 @@ mod tests {
         graph.register(id.clone(), 42u32).await.unwrap();
 
         assert!(graph.is_registered(&id).await);
+    }
+
+    #[tokio::test]
+    async fn ensure_registered_preserves_value_and_existing_subscriber() {
+        let graph = SignalGraph::new();
+        let id = SignalId::new("idempotent");
+        graph.ensure_registered(id.clone(), 1u32).await.unwrap();
+        let mut receiver = graph.subscribe(&id).await.unwrap();
+
+        graph.emit(&id, 2u32).await.unwrap();
+        graph.ensure_registered(id.clone(), 99u32).await.unwrap();
+
+        assert_eq!(graph.read::<u32>(&id).await.unwrap(), 2);
+        graph.emit(&id, 3u32).await.unwrap();
+        assert_eq!(
+            *receiver
+                .recv()
+                .await
+                .unwrap()
+                .0
+                .downcast_ref::<u32>()
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            *receiver
+                .recv()
+                .await
+                .unwrap()
+                .0
+                .downcast_ref::<u32>()
+                .unwrap(),
+            3
+        );
+        assert_eq!(graph.stats().await.signal_count, 1);
+    }
+
+    #[tokio::test]
+    async fn ensure_registered_rejects_type_conflict_without_resetting_slot() {
+        let graph = SignalGraph::new();
+        let id = SignalId::new("typed_registration");
+        graph.ensure_registered(id.clone(), 7u32).await.unwrap();
+
+        let error = graph
+            .ensure_registered(id.clone(), String::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ReactiveError::TypeMismatch { ref id, .. } if id == "typed_registration")
+        );
+        assert_eq!(graph.read::<u32>(&id).await.unwrap(), 7);
+        assert_eq!(graph.stats().await.signal_count, 1);
     }
 
     #[tokio::test]

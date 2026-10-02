@@ -33,6 +33,7 @@ Single source of truth for domain types and effect trait definitions. Provides f
 
 - Zero internal dependencies (foundation constraint).
 - Effect trait definitions only (no implementations).
+- `ReactiveEffects::ensure_registered` requires atomic per-signal check-and-insert without resetting live values; registration under an existing ID with a different type is an error. Subscription to an unregistered signal fails explicitly.
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
 - Context isolation prevents cross-context information flow.
 - Secret-bearing wrappers such as `PrivateKeyBytes` are the canonical Layer 1

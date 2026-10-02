@@ -72,14 +72,12 @@ pub(super) fn handle_contact_select_key_queue(
 
     let contact_count = modal_state.contacts.len();
     match key.code {
-        KeyCode::Enter => {
-            if contact_count > 0 {
-                commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::SelectContactByIndex {
-                        index: modal_state.selected_index,
-                    },
-                ));
-            }
+        KeyCode::Enter if contact_count > 0 => {
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::SelectContactByIndex {
+                    index: modal_state.selected_index,
+                },
+            ));
             // Note: Don't dismiss here - let command handler do it
         }
         _ => {}

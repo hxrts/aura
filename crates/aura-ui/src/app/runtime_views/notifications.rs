@@ -297,7 +297,7 @@ fn build_notifications_runtime_view(
         });
     }
 
-    items.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    items.sort_by_key(|item| std::cmp::Reverse(item.timestamp));
     NotificationsRuntimeView {
         loaded: true,
         items,

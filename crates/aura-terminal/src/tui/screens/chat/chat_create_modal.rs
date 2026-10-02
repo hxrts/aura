@@ -143,7 +143,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 padding_top: Spacing::XS,
                 padding_bottom: Spacing::MODAL_PADDING,
                 flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
             ) {

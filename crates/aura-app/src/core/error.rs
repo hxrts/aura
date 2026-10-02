@@ -1,7 +1,35 @@
 //! # Error Types for Intent Dispatch
 
 use aura_core::effects::intent::IntentDispatchError;
+use aura_core::effects::reactive::ReactiveError;
 use thiserror::Error;
+
+/// Stable class of a reactive failure at an app boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum ReactiveFailureKind {
+    SignalNotFound,
+    TypeMismatch,
+    SubscriptionClosed,
+    EmissionFailed,
+    CycleDetected,
+    HandlerUnavailable,
+    Internal,
+}
+
+impl From<&ReactiveError> for ReactiveFailureKind {
+    fn from(error: &ReactiveError) -> Self {
+        match error {
+            ReactiveError::SignalNotFound { .. } => Self::SignalNotFound,
+            ReactiveError::TypeMismatch { .. } => Self::TypeMismatch,
+            ReactiveError::SubscriptionClosed { .. } => Self::SubscriptionClosed,
+            ReactiveError::EmissionFailed { .. } => Self::EmissionFailed,
+            ReactiveError::CycleDetected { .. } => Self::CycleDetected,
+            ReactiveError::HandlerUnavailable => Self::HandlerUnavailable,
+            ReactiveError::Internal { .. } => Self::Internal,
+        }
+    }
+}
 
 /// Errors that can occur when dispatching an intent
 #[derive(Debug, Error, Clone)]
@@ -32,6 +60,17 @@ pub enum IntentError {
     #[error("{reason}")]
     InternalError {
         /// Reason for internal error
+        reason: String,
+    },
+
+    /// A required reactive signal could not be registered or attached.
+    #[error("Reactive {kind:?} for {signal_id}: {reason}")]
+    ReactiveFailure {
+        /// The stable reactive failure category.
+        kind: ReactiveFailureKind,
+        /// The signal being registered or attached.
+        signal_id: String,
+        /// Detail from the underlying reactive error.
         reason: String,
     },
 
@@ -97,6 +136,22 @@ impl IntentError {
     pub fn internal_error(reason: impl Into<String>) -> Self {
         Self::InternalError {
             reason: reason.into(),
+        }
+    }
+
+    /// Preserve the reactive failure class and signal at an app boundary.
+    pub fn reactive_failure(signal_id: impl Into<String>, error: ReactiveError) -> Self {
+        let signal_id = match &error {
+            ReactiveError::SignalNotFound { id }
+            | ReactiveError::TypeMismatch { id, .. }
+            | ReactiveError::SubscriptionClosed { id }
+            | ReactiveError::EmissionFailed { id, .. } => id.clone(),
+            _ => signal_id.into(),
+        };
+        Self::ReactiveFailure {
+            kind: ReactiveFailureKind::from(&error),
+            signal_id,
+            reason: error.to_string(),
         }
     }
 

@@ -547,15 +547,15 @@ pub fn check_recovery_operation(
                 }));
             }
         }
-        RecoveryOperationType::EmergencyFreeze => {
-            // Emergency freeze requires emergency flag or explicit capability
-            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Initiate.as_name()) {
-                return Some(deny(GuardReject {
-                    code: "emergency-freeze-requires-capability",
-                    category: "auth",
-                    message: "Emergency freeze requires recovery:initiate capability",
-                }));
-            }
+        RecoveryOperationType::EmergencyFreeze
+            if !snapshot.has_capability(&RecoveryAuthorizationCapability::Initiate.as_name()) =>
+        {
+            // Emergency freeze requires emergency flag or explicit capability.
+            return Some(deny(GuardReject {
+                code: "emergency-freeze-requires-capability",
+                category: "auth",
+                message: "Emergency freeze requires recovery:initiate capability",
+            }));
         }
         _ => {
             // Other operations allowed with standard capabilities

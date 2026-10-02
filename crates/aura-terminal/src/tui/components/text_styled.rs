@@ -198,7 +198,7 @@ pub fn Divider(props: &DividerProps) -> impl Into<AnyElement<'static>> {
             margin_bottom: 1,
         ) {
             View(
-                flex_grow: 1.0,
+                flex_grow: 1.0_f32,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -216,7 +216,7 @@ pub fn Divider(props: &DividerProps) -> impl Into<AnyElement<'static>> {
             #(if has_label {
                 Some(element! {
                     View(
-                        flex_grow: 1.0,
+                        flex_grow: 1.0_f32,
                         border_style: BorderStyle::Single,
                         border_edges: Edges::Bottom,
                         border_color: Theme::BORDER,

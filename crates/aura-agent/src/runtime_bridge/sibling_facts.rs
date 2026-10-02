@@ -20,6 +20,23 @@ use crate::runtime::AuraEffectSystem;
 /// Wire content type for sibling fact frames, kept apart from sync frames.
 pub(crate) const SIBLING_FACTS_CONTENT_TYPE: &str = "application/aura-sibling-facts";
 
+fn sibling_codec_error(
+    stage: &'static str,
+    source: aura_core::util::serialization::SerializationError,
+) -> AuraError {
+    AuraError::Serialization {
+        message: stage.to_owned(),
+        source: Some(std::sync::Arc::new(source)),
+    }
+}
+
+fn sibling_tree_error(stage: &'static str, source: crate::core::AgentError) -> AuraError {
+    AuraError::Crypto {
+        message: stage.to_owned(),
+        source: Some(std::sync::Arc::new(source)),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 enum SiblingFactsFrame {
     Digest([u8; 32]),
@@ -32,7 +49,7 @@ enum SiblingFactsFrame {
 
 fn fact_key(fact: &TypedFact) -> Result<Vec<u8>, AuraError> {
     aura_core::util::serialization::to_vec(&fact.order)
-        .map_err(|error| AuraError::internal(format!("encode fact order: {error}")))
+        .map_err(|error| sibling_codec_error("encode fact order", error))
 }
 
 async fn send_frame(
@@ -41,7 +58,7 @@ async fn send_frame(
     frame: &SiblingFactsFrame,
 ) -> Result<(), AuraError> {
     let bytes = aura_core::util::serialization::to_vec(frame)
-        .map_err(|error| AuraError::internal(format!("encode sibling frame: {error}")))?;
+        .map_err(|error| sibling_codec_error("encode sibling frame", error))?;
     effects
         .send_device_payload(peer.uuid(), SIBLING_FACTS_CONTENT_TYPE, bytes)
         .await
@@ -57,7 +74,7 @@ async fn receive_frame(
         .await
         .map_err(|error| AuraError::network(format!("receive sibling facts: {error}")))?;
     aura_core::util::serialization::from_slice(&bytes)
-        .map_err(|error| AuraError::internal(format!("decode sibling frame: {error}")))
+        .map_err(|error| sibling_codec_error("decode sibling frame", error))
 }
 
 /// Upper bound on stale frames dropped while waiting for one step.
@@ -83,9 +100,18 @@ async fn receive_expected(
 }
 
 fn protocol_error(expected: &str) -> AuraError {
-    AuraError::internal(format!(
-        "sibling fact exchange out of step: expected {expected}"
-    ))
+    AuraError::Invalid {
+        message: format!("sibling fact exchange out of step: expected {expected}"),
+        source: Some(std::sync::Arc::new(SiblingFrameOrderError {
+            expected: expected.to_owned(),
+        })),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("expected sibling fact frame {expected}")]
+struct SiblingFrameOrderError {
+    expected: String,
 }
 
 /// Exchange committed facts with another device of this authority.
@@ -107,7 +133,7 @@ pub(crate) async fn exchange_facts_with_sibling(
     // AMP channel state lives in the authority journal's facts, not the typed store.
     let mut journal = aura_core::effects::JournalEffects::get_journal(effects).await?;
     let journal_bytes = aura_core::util::serialization::to_vec(&journal.facts)
-        .map_err(|error| AuraError::internal(format!("encode journal facts: {error}")))?;
+        .map_err(|error| sibling_codec_error("encode journal facts", error))?;
     // Held bootstrap keys are part of the digest, so a sibling missing a key
     // still runs the full exchange after the channel facts have converged.
     let held_keys = held_bootstrap_keys(effects).await?;
@@ -117,7 +143,7 @@ pub(crate) async fn exchange_facts_with_sibling(
             .map(|key| (key.context, key.channel, key.bootstrap_id))
             .collect::<Vec<_>>(),
     )
-    .map_err(|error| AuraError::internal(format!("encode held key ids: {error}")))?;
+    .map_err(|error| sibling_codec_error("encode held key ids", error))?;
     let mut digest_input: Vec<u8> = by_key.keys().flatten().copied().collect();
     digest_input.extend_from_slice(&hash(&journal_bytes));
     digest_input.extend_from_slice(&hash(&held_ids));
@@ -126,9 +152,9 @@ pub(crate) async fn exchange_facts_with_sibling(
     let tree_ops = effects
         .export_tree_ops()
         .await
-        .map_err(|error| AuraError::internal(format!("export tree ops: {error}")))?;
+        .map_err(|error| sibling_tree_error("export tree ops", error))?;
     let tree_bytes = aura_core::util::serialization::to_vec(&tree_ops)
-        .map_err(|error| AuraError::internal(format!("encode tree ops: {error}")))?;
+        .map_err(|error| sibling_codec_error("encode tree ops", error))?;
     digest_input.extend_from_slice(&hash(&tree_bytes));
     let digest = hash(&digest_input);
 
@@ -163,7 +189,7 @@ pub(crate) async fn exchange_facts_with_sibling(
     effects
         .import_verified_tree_ops(&peer_tree_ops)
         .await
-        .map_err(|error| AuraError::internal(format!("import tree ops: {error}")))?;
+        .map_err(|error| sibling_tree_error("import tree ops", error))?;
 
     // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
     // travel sealed to the sibling device's leaf key. They go first so the
@@ -328,7 +354,7 @@ async fn seal_bootstrap_keys(
         return Ok(None);
     }
     let bundle = aura_core::util::serialization::to_vec(&held)
-        .map_err(|error| AuraError::internal(format!("encode bootstrap keys: {error}")))?;
+        .map_err(|error| sibling_codec_error("encode bootstrap keys", error))?;
     aura_sync::protocols::device_sealed::seal_for_device(
         effects,
         SIBLING_AMP_KEYS_PURPOSE,
@@ -364,7 +390,7 @@ async fn store_bootstrap_keys(
     )
     .await?;
     let keys: Vec<SiblingBootstrapKey> = aura_core::util::serialization::from_slice(&bundle)
-        .map_err(|error| AuraError::internal(format!("decode bootstrap keys: {error}")))?;
+        .map_err(|error| sibling_codec_error("decode bootstrap keys", error))?;
     let mut newly_keyed = std::collections::BTreeSet::new();
     tracing::debug!(received = keys.len(), "opened bootstrap keys from sibling");
     for key in keys {
@@ -412,9 +438,9 @@ mod tests {
             device_id: DeviceId::new_from_entropy([seed; 32]),
             ..AgentConfig::default()
         };
-        AuraEffectSystem::simulation_with_shared_transport_for_authority(
+        AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
             &config,
-            0x51B1_0000 + u64::from(seed),
+            &format!("sibling_facts_device_{seed}"),
             authority,
             shared.clone(),
         )

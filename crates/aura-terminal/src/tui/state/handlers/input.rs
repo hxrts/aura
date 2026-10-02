@@ -52,15 +52,12 @@ pub fn handle_mouse_event(
                 Screen::Neighborhood => {
                     // No dedicated scroll region on Neighborhood; keep mouse wheel a no-op here.
                 }
-                Screen::Settings => {
+                Screen::Settings if state.settings.selected_index > 0 => {
                     // Navigate up in settings list
-                    if state.settings.selected_index > 0 {
-                        state.settings.selected_index =
-                            state.settings.selected_index.saturating_sub(1);
-                        state.settings.section = crate::tui::types::SettingsSection::from_index(
-                            state.settings.selected_index,
-                        );
-                    }
+                    state.settings.selected_index = state.settings.selected_index.saturating_sub(1);
+                    state.settings.section = crate::tui::types::SettingsSection::from_index(
+                        state.settings.selected_index,
+                    );
                 }
                 _ => {}
             }
@@ -462,52 +459,48 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
             _ => {}
         },
         KeyCode::Enter => match screen {
-            Screen::Chat => {
-                if !state.chat.input_buffer.is_empty() {
-                    let content = state.chat.input_buffer.clone();
-                    state.chat.input_buffer.clear();
-                    if content.starts_with('/') {
-                        match crate::tui::commands::parse_chat_command(&content) {
-                            // Handle /help locally so deterministic UI guidance is shown even
-                            // when command callbacks are unavailable or delayed.
-                            Ok(crate::tui::commands::ChatCommand::Help { command }) => {
-                                let message = if let Some(raw_name) = command
-                                    .as_deref()
-                                    .map(str::trim)
-                                    .filter(|value| !value.is_empty())
+            Screen::Chat if !state.chat.input_buffer.is_empty() => {
+                let content = state.chat.input_buffer.clone();
+                state.chat.input_buffer.clear();
+                if content.starts_with('/') {
+                    match crate::tui::commands::parse_chat_command(&content) {
+                        // Handle /help locally so deterministic UI guidance is shown even
+                        // when command callbacks are unavailable or delayed.
+                        Ok(crate::tui::commands::ChatCommand::Help { command }) => {
+                            let message = if let Some(raw_name) = command
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                            {
+                                let normalized = raw_name.trim_start_matches('/').to_lowercase();
+                                if let Some(help) = crate::tui::commands::command_help(&normalized)
                                 {
-                                    let normalized =
-                                        raw_name.trim_start_matches('/').to_lowercase();
-                                    if let Some(help) =
-                                        crate::tui::commands::command_help(&normalized)
-                                    {
-                                        format!("{} — {}", help.syntax, help.description)
-                                    } else {
-                                        format!("Unknown command: /{normalized}")
-                                    }
+                                    format!("{} — {}", help.syntax, help.description)
                                 } else {
-                                    "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink".to_string()
-                                };
-                                state.toast_info(message);
-                            }
-                            _ => {
-                                // Route other slash commands through the chat callback
-                                // strong-command pipeline (`ParsedCommand -> ResolvedCommand
-                                // -> CommandPlan`).
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::SendChatMessage { content },
-                                ));
-                            }
+                                    format!("Unknown command: /{normalized}")
+                                }
+                            } else {
+                                "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink".to_string()
+                            };
+                            state.toast_info(message);
                         }
-                    } else {
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
-                            content,
-                        }));
+                        _ => {
+                            // Route other slash commands through the chat callback
+                            // strong-command pipeline (`ParsedCommand -> ResolvedCommand
+                            // -> CommandPlan`).
+                            commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
+                                content,
+                            }));
+                        }
                     }
-                    // Stay in insert mode after sending — user exits with Esc.
-                    // Auto-scroll to bottom to show the sent message.
-                    state.chat.message_scroll = 0;
+                } else {
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
+                        content,
+                    }));
                 }
+                // Stay in insert mode after sending — user exits with Esc.
+                // Auto-scroll to bottom to show the sent message.
+                state.chat.message_scroll = 0;
             }
             _ => {}
         },

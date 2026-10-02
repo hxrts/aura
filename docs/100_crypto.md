@@ -185,6 +185,8 @@ The cryptographic architecture maintains these invariants.
 3. All crypto is controllable via mock handlers for testing
 4. Private keys remain in wrapper types, not exposed as raw bytes
 5. Production randomness comes from OS entropy via `OsRng`
+6. Identity and key bytes decoded from a remote payload are untrusted until checked against an authoritative local key source. A signature by the same key that signed an imported invitation proves continuity of that invitation, not trusted device identity.
+7. A response is constructed from a completed signature over its canonical transcript; production response construction does not create an unsigned placeholder.
 
 ## 6. Signing Modes
 

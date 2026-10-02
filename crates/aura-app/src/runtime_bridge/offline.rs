@@ -50,6 +50,11 @@ pub struct OfflineRuntimeBridge {
 }
 
 impl OfflineRuntimeBridge {
+    #[cfg(test)]
+    pub(crate) fn use_test_task_spawner(&mut self, spawner: OwnedTaskSpawner) {
+        self.task_spawner = spawner;
+    }
+
     /// Create a new offline runtime bridge
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {

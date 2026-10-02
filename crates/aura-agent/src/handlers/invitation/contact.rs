@@ -1277,7 +1277,6 @@ impl<'a> InvitationContactHandler<'a> {
                 sender_id,
                 receiver_id,
                 invitation_type,
-                message: _,
                 ..
             } = inv_fact
             else {

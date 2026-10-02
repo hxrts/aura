@@ -68,11 +68,7 @@ impl TransportStatsCounters {
     fn snapshot(&self) -> TransportStats {
         let sent = self.envelopes_sent.load(Ordering::Relaxed);
         let total_bytes = self.total_payload_bytes.load(Ordering::Relaxed);
-        let avg = if sent > 0 {
-            (total_bytes / sent) as u32
-        } else {
-            0
-        };
+        let avg = total_bytes.checked_div(sent).unwrap_or(0) as u32;
 
         TransportStats {
             envelopes_sent: sent,
