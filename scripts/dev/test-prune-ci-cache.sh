@@ -73,6 +73,10 @@ rm "$PROTECTED_FILE"
 mkdir -p "$project/target/wasm32-unknown-unknown/debug"
 printf 'stale\n' > "$project/target/wasm32-unknown-unknown/debug/cache"
 printf 'fake 123 %s\n' "$project/target/release/production" > "$OPEN_TARGET_FILE"
+expect_status 0 run_prune --dry-run
+rg -q 'Lane=wasm-debug mode=dry candidate=' "$test_root/output"
+[[ -f "$project/target/wasm32-unknown-unknown/debug/cache" ]]
+: > "$CALLS_FILE"
 expect_status 0 run_prune --apply
 if rg -v -- '--dry-run' "$CALLS_FILE" | rg -q .; then
   echo 'CI prune swept a target containing an open file' >&2

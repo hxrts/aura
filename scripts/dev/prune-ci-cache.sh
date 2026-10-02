@@ -68,7 +68,7 @@ printf 'CI cache: mode=%s root=%s cap=%s GiB; free=%s KiB target=%s KiB\n' \
 
 if [[ "$mode" == dry ]]; then
   preview_sweep
-  if (( release_candidates > 0 )); then
+  if (( release_candidates > 0 )) || target_has_open_files; then
     for lane in wasm-debug dylint debug; do
       bash "$repo_root/scripts/dev/prune-inactive-lane.sh" --root "$root" --lane "$lane" --dry-run
     done
