@@ -10,6 +10,7 @@ target="$root/target"
 active="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
 if [[ -n "$active" ]]; then state="busy: $active"; else state=idle; fi
 builders="$(ps -axo comm= | awk '{n=$1;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep)$/)print n}')"
+harness_consumers="$(ps -axo comm= | awk '{n=$1;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness)$/)print n}')"
 process_args="$(ps -axo args=)"
 open_files=''
 open_scan=unavailable
@@ -30,9 +31,13 @@ for path in "$target"/*; do
   size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"
   age=$(((now - modified) / 86400))
   (( age >= 0 )) || age=0
-  if [[ "$open_scan" == available ]] && printf '%s\n' "$open_files" | rg -F -q "$path"; then
+  lane_name="${path##*/}"
+  if [[ "$lane_name" == release && -n "$harness_consumers" ]]; then
+    use=harness-consumer
+  elif [[ "$open_scan" == available ]] && printf '%s\n' "$open_files" | rg -F -q "$path"; then
     use=open-files
-  elif printf '%s\n' "$process_args" | rg -F -q "$path"; then
+  elif printf '%s\n' "$process_args" | rg -F -q "$path" || \
+       printf '%s\n' "$process_args" | rg -F -q "target/$lane_name/"; then
     use=process-reference
   elif [[ -n "$builders" ]]; then
     use=builder-active
@@ -41,5 +46,5 @@ for path in "$target"/*; do
   else
     use=unknown
   fi
-  printf '%s\t%s\t%s\t%s\n' "$size" "$age" "$use" "${path##*/}"
+  printf '%s\t%s\t%s\t%s\n' "$size" "$age" "$use" "$lane_name"
 done
