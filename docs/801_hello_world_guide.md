@@ -55,6 +55,15 @@ just e2e-build-harness
 just disk-report
 ```
 
+To compare the clean disk cost of the deployable terminal build with the
+full workspace release gate, run
+`scripts/dev/compare-release-scopes.sh --dry-run` first. On an idle host
+with at least 40 GiB free, use `--apply`. The Bash script builds both scopes
+from one commit in separate temporary worktrees, copies the disk reports to
+`artifacts/disk-budget/comparisons/`, and removes each temporary target before
+starting the next build. It refuses to run while a build or LAN harness
+consumer is active.
+
 The tracked LAN entry point is `scripts/harness/lan/build.sh`; its lane is
 `terminal`, `terminal-live`, `terminal-dev`, `web`, or `harness`.
 It prints the host and commit before building, enters `nix develop` when
