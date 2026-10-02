@@ -1413,7 +1413,8 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
         });
     }
 
-    let port = choose_available_loopback_port(4173, 32)?;
+    let bind_host = owned_web_server_bind_host();
+    let port = choose_available_port(&bind_host, 4173, 32)?;
     let script = harness_repo_root().join("scripts/web/serve-static.sh");
     let artifact_root = config
         .run
@@ -1440,10 +1441,10 @@ fn provision_browser_app_url(config: &RunConfig) -> Result<BrowserAppUrlProvisio
             )
         })?;
     Ok(BrowserAppUrlProvision {
-        url: format!("http://127.0.0.1:{port}"),
+        url: format!("http://{bind_host}:{port}"),
         server: Some(OwnedWebServer {
             child,
-            url: format!("http://127.0.0.1:{port}"),
+            url: format!("http://{bind_host}:{port}"),
         }),
         log_path: Some(log_path),
     })
@@ -1546,18 +1547,29 @@ fn http_server_ready(url: &str) -> bool {
         .is_some_and(|read| read > 0)
 }
 
-fn choose_available_loopback_port(start: u16, attempts: u16) -> Result<u16> {
+/// Host the owned web server listens on. Loopback by default; multi-host LAN
+/// runs set `AURA_HARNESS_WEB_BIND_HOST` to the host's LAN address so the
+/// browser's advertised page-host relay is reachable from the other host.
+fn owned_web_server_bind_host() -> String {
+    std::env::var("AURA_HARNESS_WEB_BIND_HOST")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string())
+}
+
+fn choose_available_port(host: &str, start: u16, attempts: u16) -> Result<u16> {
     for offset in 0..attempts {
         let port = start.saturating_add(offset);
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if TcpStream::connect((host, port)).is_ok() {
             continue;
         }
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        if TcpListener::bind((host, port)).is_ok() {
             return Ok(port);
         }
     }
     bail!(
-        "failed to allocate loopback port in range 127.0.0.1:{}-{}",
+        "failed to allocate port in range {host}:{}-{}",
         start,
         start.saturating_add(attempts.saturating_sub(1))
     )
