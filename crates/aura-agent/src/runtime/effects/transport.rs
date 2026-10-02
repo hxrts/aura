@@ -228,17 +228,17 @@ async fn resolve_own_device_addr(
 ) -> Option<String> {
     let manager = effects.rendezvous_manager()?;
     let peer = manager.get_own_device_peer(device_id).await?;
-    let mut paths = peer.descriptor.advertised_move_paths();
-    paths.sort_by_key(|path| match path.route.destination.protocol {
-        LinkProtocol::Tcp => 0u8,
-        LinkProtocol::WebSocket => 1u8,
-        _ => 2u8,
-    });
-    paths
-        .into_iter()
-        .map(|path| path.route)
-        .find(|route| direct_route_allowed(effects, route))
-        .and_then(|route| route_destination_addr(&route.destination))
+    order_routes_for_local_dialer(
+        peer.descriptor
+            .advertised_move_paths()
+            .into_iter()
+            .map(|path| path.route)
+            .collect(),
+        LOCAL_DIALABLE_PROTOCOLS,
+    )
+    .into_iter()
+    .find(|route| direct_route_allowed(effects, route))
+    .and_then(|route| route_destination_addr(&route.destination))
 }
 
 async fn resolve_move_route(
@@ -258,21 +258,36 @@ async fn resolve_move_route(
         );
         return None;
     }
-    let paths = descriptor.advertised_move_paths();
-    #[cfg(not(target_arch = "wasm32"))]
-    let paths = {
-        let mut paths = paths;
-        paths.sort_by_key(|path| match path.route.destination.protocol {
-            LinkProtocol::Tcp => 0u8,
-            LinkProtocol::WebSocket => 1u8,
-            _ => 2u8,
-        });
-        paths
+    order_routes_for_local_dialer(
+        descriptor
+            .advertised_move_paths()
+            .into_iter()
+            .map(|path| path.route)
+            .collect(),
+        LOCAL_DIALABLE_PROTOCOLS,
+    )
+    .into_iter()
+    .find(|route| direct_route_allowed(effects, route))
+}
+
+/// Transport types this runtime can open, in preference order. Browsers can
+/// only open WebSockets.
+#[cfg(target_arch = "wasm32")]
+const LOCAL_DIALABLE_PROTOCOLS: &[LinkProtocol] = &[LinkProtocol::WebSocket];
+#[cfg(not(target_arch = "wasm32"))]
+const LOCAL_DIALABLE_PROTOCOLS: &[LinkProtocol] = &[LinkProtocol::Tcp, LinkProtocol::WebSocket];
+
+/// Keeps only direct routes whose transport type is dialable, ordered by
+/// preference; relayed routes are kept after them.
+fn order_routes_for_local_dialer(mut routes: Vec<Route>, dialable: &[LinkProtocol]) -> Vec<Route> {
+    let rank = |route: &Route| {
+        dialable
+            .iter()
+            .position(|protocol| *protocol == route.destination.protocol)
     };
-    paths
-        .into_iter()
-        .map(|path| path.route)
-        .find(|route| direct_route_allowed(effects, route))
+    routes.retain(|route| !route.is_direct() || rank(route).is_some());
+    routes.sort_by_key(|route| rank(route).unwrap_or(dialable.len()));
+    routes
 }
 
 fn descriptor_has_placeholder_crypto(descriptor: &RendezvousDescriptor) -> bool {
@@ -1003,6 +1018,22 @@ mod tests {
             None
         );
         assert_eq!(harness_browser_transport_ws_url("", true), None);
+    }
+
+    #[test]
+    fn local_dialer_skips_undialable_transport_types() {
+        let routes = vec![
+            Route::direct(LinkEndpoint::direct(LinkProtocol::Tcp, "tcp-endpoint")),
+            Route::direct(LinkEndpoint::direct(LinkProtocol::WebSocket, "ws-endpoint")),
+        ];
+        let ws_only = order_routes_for_local_dialer(routes.clone(), &[LinkProtocol::WebSocket]);
+        let protocols: Vec<_> = ws_only.iter().map(|r| r.destination.protocol).collect();
+        assert_eq!(protocols, vec![LinkProtocol::WebSocket]);
+
+        let both =
+            order_routes_for_local_dialer(routes, &[LinkProtocol::Tcp, LinkProtocol::WebSocket]);
+        let protocols: Vec<_> = both.iter().map(|r| r.destination.protocol).collect();
+        assert_eq!(protocols, vec![LinkProtocol::Tcp, LinkProtocol::WebSocket]);
     }
 
     #[test]
