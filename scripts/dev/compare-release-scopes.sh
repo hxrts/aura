@@ -65,11 +65,11 @@ build_one() {
   if (( allow_live_harness == 1 )); then budget_args+=(--allow-live-harness); fi
   if (
     unset CARGO_TARGET_DIR
-    cd "$repo_root"
+    cd "$worktree"
     CARGO_BUILD_JOBS="$jobs" AURA_BUILD_TARGET_CAP_GIB=1000 \
       AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES="$label" \
       nice -n 10 nix develop -c bash \
-      "$repo_root/scripts/dev/build-budget.sh" "${budget_args[@]}" -- "$@"
+      "$worktree/scripts/dev/build-budget.sh" "${budget_args[@]}" -- "$@"
   ) > "$log" 2>&1; then status=0; else status=$?; fi
   if [[ -d "$worktree/artifacts/disk-budget" ]]; then
     cp -R "$worktree/artifacts/disk-budget" "$results/$label-disk-budget"
