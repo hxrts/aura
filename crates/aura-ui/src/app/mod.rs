@@ -280,6 +280,21 @@ mod tests {
     }
 
     #[test]
+    fn hidden_toasts_do_not_intercept_clicks() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let rendering_path = repo_root.join("crates/aura-ui/src/app/shell/rendering.rs");
+        let source = std::fs::read_to_string(&rendering_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", rendering_path.display()));
+
+        let rule = source
+            .split(r#"[data-slot="toast"][data-state="hidden"]"#)
+            .nth(1)
+            .expect("hidden toast style rule should exist");
+        let body = &rule[..rule.find("}}").expect("rule should close")];
+        assert!(body.contains("pointer-events: none !important;"));
+    }
+
+    #[test]
     fn runtime_slash_commands_use_shared_typed_execution_and_owner_metadata() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let actions_path = repo_root.join("crates/aura-ui/src/app/shell/actions.rs");

@@ -20,6 +20,14 @@ pub fn AuraUiRoot(controller: Arc<UiController>) -> Element {
                     padding-bottom: 1.25rem !important;
                 }}
 
+                /* A dismissed toast stays in the DOM while hidden; it must not
+                   intercept clicks on the controls beneath it (e.g. a modal's
+                   confirm button). */
+                [data-slot="toast"][data-state="hidden"] {{
+                    pointer-events: none !important;
+                    visibility: hidden !important;
+                }}
+
                 button:focus-visible {{
                     outline: none;
                 }}
