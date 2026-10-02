@@ -849,25 +849,19 @@ fn current_browser_harness_enqueue_url() -> Option<String> {
 
 #[cfg(target_arch = "wasm32")]
 fn log_harness_mailbox_send(envelope: &TransportEnvelope, url: &str, use_harness_transport: bool) {
-    if !use_harness_transport {
-        return;
-    }
-
     let content_type = envelope
         .metadata
         .get("content-type")
         .map(String::as_str)
         .unwrap_or("<missing>");
-    if content_type != "application/aura-invitation"
-        && content_type != "application/aura-invitation-acceptance+json"
-    {
+    if !content_type.contains("invitation") {
         return;
     }
 
     web_sys::console::log_1(
         &format!(
-            "[web-harness-transport] mailbox_send destination={} context={} content_type={} via={}",
-            envelope.destination, envelope.context, content_type, url
+            "[web-harness-transport] send destination={} context={} content_type={} via={} mailbox={}",
+            envelope.destination, envelope.context, content_type, url, use_harness_transport
         )
         .into(),
     );
