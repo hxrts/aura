@@ -31,7 +31,7 @@ required-features = ["development"]
 
 [[test]]
 name = "e2e_terminal_state"
-required-features = ["testing"]
+# Runs under plain `cargo test`; app internals come from the dev-dependency below.
 
 [features]
 default = ["terminal"]
@@ -95,6 +95,7 @@ dirs = "6"
 arboard = "3"
 
 [dev-dependencies]
+aura-app = { package = "hxrts-aura-app", path = "../aura-app", version = "=0.2.0", features = ["native", "app-internals"] }
 aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 tempfile = { workspace = true }
 insta = "1.34"

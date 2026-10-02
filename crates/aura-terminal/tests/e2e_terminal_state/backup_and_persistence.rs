@@ -139,12 +139,7 @@ async fn test_snapshot_data_accuracy() {
         std::process::id()
     ));
 
-    let mut app_core =
-        AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
-    app_core
-        .init_signals()
-        .await
-        .expect("Failed to init signals");
+    let app_core = AppCore::new(aura_app::AppConfig::default()).expect("Failed to create AppCore");
     let app_core = Arc::new(RwLock::new(app_core));
     let initialized_app_core =
         aura_terminal::tui::context::InitializedAppCore::new(app_core.clone())
@@ -205,6 +200,8 @@ async fn test_snapshot_data_accuracy() {
             last_interaction: Some(1702000000000),
             is_online: true,
             read_receipt_policy: ReadReceiptPolicy::default(),
+            relationship_state: aura_app::views::contacts::ContactRelationshipState::default(),
+            invitation_code: None,
         },
         Contact {
             id: contact2_id,
@@ -215,6 +212,8 @@ async fn test_snapshot_data_accuracy() {
             last_interaction: Some(1702000000000),
             is_online: false,
             read_receipt_policy: ReadReceiptPolicy::default(),
+            relationship_state: aura_app::views::contacts::ContactRelationshipState::default(),
+            invitation_code: None,
         },
         Contact {
             id: contact3_id,
@@ -225,6 +224,8 @@ async fn test_snapshot_data_accuracy() {
             last_interaction: None,
             is_online: false,
             read_receipt_policy: ReadReceiptPolicy::default(),
+            relationship_state: aura_app::views::contacts::ContactRelationshipState::default(),
+            invitation_code: None,
         },
     ]);
     {
@@ -239,11 +240,7 @@ async fn test_snapshot_data_accuracy() {
             .as_ref()
             .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.nickname);
 
-        let expected = if contact.id == AuthorityId::new_from_entropy([11u8; 32]) {
-            true
-        } else {
-            false
-        };
+        let expected = contact.id == AuthorityId::new_from_entropy([11u8; 32]);
         assert_eq!(has_pending_suggestion, expected);
     }
 }

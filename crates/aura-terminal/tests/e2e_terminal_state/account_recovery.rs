@@ -32,8 +32,7 @@ async fn test_account_creation_callback_flow() {
     let create_result = env.ctx.create_account("Bob").await;
     assert!(
         create_result.is_ok(),
-        "create_account should succeed: {:?}",
-        create_result
+        "create_account should succeed: {create_result:?}"
     );
     assert!(env.ctx.has_account(), "Should have account after creation");
     assert!(

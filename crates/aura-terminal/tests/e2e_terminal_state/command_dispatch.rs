@@ -527,7 +527,7 @@ async fn test_neighborhood_navigation_flow() {
         let core = env.app_core.read().await;
         let neighborhood = core.views().get_neighborhood();
         assert!(neighborhood.is_at_home());
-        let position = neighborhood.position.clone().expect("position after home");
+        let position = neighborhood.position.expect("position after home");
         assert_eq!(position.current_home_id, home_home_id);
     }
 
