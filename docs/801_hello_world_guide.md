@@ -28,6 +28,13 @@ production terminal feature set and installs `bin/aura` atomically. Use
 `just build-workspace-release` when validating every workspace crate in the
 release profile. The browser bundle has its own Dioxus build path.
 
+On a clean fixed-commit comparison (`a9fabe9a`, macOS ARM), the terminal
+release retained 1,825,040 KiB versus 3,068,204 KiB for the full workspace:
+1,243,164 KiB (40.5%) less release output. The terminal compiled 330
+packages versus 498 for the workspace. Shared warm caches vary with later
+web, development and test builds; use the disk report to measure the current
+checkout.
+
 Repeated LAN test builds should use `just e2e-build-terminal`,
 `just e2e-build-web`, and `just e2e-build-harness` in the Nix environment on
 each host. These commands report free space, preview and collect idle Cargo
