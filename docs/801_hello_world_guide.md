@@ -58,10 +58,12 @@ just disk-report
 Run `just e2e-build-terminal-dev` separately when a test explicitly needs
 the development feature set. Each successful guarded build also saves its
 own disk report under `artifacts/disk-budget/`.
-The terminal production recipe can run during a live LAN harness when its
-owner permits it: it skips global Cargo sweeping and may collect only an
-idle WASM debug lane. Web and harness-tool rebuilds require the harness to
-stop before cache collection.
+When the LAN owner permits a terminal build during a live run, use
+`just e2e-build-terminal-live`. That recipe skips global Cargo sweeping and
+may collect only an idle WASM debug lane. The ordinary
+`just e2e-build-terminal` recipe enforces the full idle-lane cache policy;
+run it after the harness stops. Web and harness-tool rebuilds also require
+the harness to stop before cache collection.
 On Host B, pass its own `--root` ending in `/artifacts/runs` to the retention
 script; it never prunes the other host remotely.
 When only an unused debug lane can be released, inspect it with

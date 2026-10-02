@@ -103,6 +103,10 @@ build-budget-dry-run:
 
 # Guarded Work 8 production and harness builds (run separately on each host)
 e2e-build-terminal:
+    AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production -- just build-terminal-release
+
+# Terminal build during an approved live LAN run; only idle WASM debug may be collected
+e2e-build-terminal-live:
     AURA_BUILD_PROFILE=release AURA_BUILD_FEATURES=terminal nice -n 10 bash scripts/dev/build-budget.sh --lane terminal-production --allow-live-harness -- just build-terminal-release
 
 e2e-build-terminal-dev:
