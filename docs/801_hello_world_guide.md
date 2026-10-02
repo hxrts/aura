@@ -89,6 +89,9 @@ It prints the host and commit before building, enters `nix develop` when
 needed, and accepts `AURA_EXPECT_COMMIT=<full-hash>` to reject a host on a
 different revision or a checkout with uncommitted changes. Use its
 `--dry-run` flag to preview the selected recipe.
+On Host B, the macOS application firewall may need the newly signed
+`bin/aura` authorized again after a rebuild, as described in `work/8.md`.
+The build helper does not change firewall settings.
 
 Run `just e2e-build-terminal-dev` separately when a test explicitly needs
 the development feature set. Each successful guarded build also saves its
