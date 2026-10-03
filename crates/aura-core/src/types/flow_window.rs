@@ -175,6 +175,19 @@ impl FlowReceiveWindow {
         }
     }
 
+    /// Resume enforcement from persisted windows after a restart. Replay
+    /// tracking and the spacing count start empty, so at most one window of
+    /// receipts already accepted before the restart could be accepted again;
+    /// the window bounds themselves are kept.
+    #[must_use]
+    pub fn from_state(state: FlowWindowState) -> Self {
+        Self {
+            state,
+            seen: BTreeSet::new(),
+            accepted_in_epoch: 0,
+        }
+    }
+
     /// Accept a receipt or reject it. When this receipt completes half the
     /// current window, the receiver opens the successor epoch with
     /// `next_window` and returns its checkpoint for delivery to the sender.

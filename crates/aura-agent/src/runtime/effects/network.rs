@@ -144,6 +144,7 @@ impl NetworkCoreEffects for AuraEffectSystem {
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
+        self.restore_flow_windows().await;
         let taken = TransportEffects::receive_envelope(self).await;
         self.flush_flow_checkpoints().await;
         let envelope = match taken {
@@ -535,11 +536,72 @@ impl AuraEffectSystem {
             .map_err(|e| send_failed(e.to_string()))
     }
 
+    /// Restore persisted receive windows and allowances once after start, so a
+    /// restart does not reset flow accounting (work/8.md Task 54).
+    pub(crate) async fn restore_flow_windows(&self) {
+        use aura_core::effects::StorageCoreEffects;
+        let flow = self.transport.flow();
+        if !flow.needs_restore() {
+            return;
+        }
+        let mut windows = Vec::new();
+        if let Ok(keys) = self.list_keys(Some(FLOW_WINDOW_STORAGE_PREFIX)).await {
+            for key in keys {
+                if let Ok(Some(bytes)) = self.retrieve(&key).await {
+                    match aura_core::util::serialization::from_slice(&bytes) {
+                        Ok(window) => windows.push(window),
+                        Err(error) => {
+                            tracing::debug!(%key, %error, "skipping unreadable flow window");
+                        }
+                    }
+                }
+            }
+        }
+        let allowances = match self.retrieve(FLOW_ALLOWANCES_STORAGE_KEY).await {
+            Ok(Some(bytes)) => {
+                aura_core::util::serialization::from_slice(&bytes).unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        flow.restore(windows, allowances);
+    }
+
+    async fn persist_flow_windows(&self) {
+        use aura_core::effects::StorageCoreEffects;
+        let flow = self.transport.flow();
+        for window in flow.take_dirty_windows() {
+            let Ok(direction) = aura_core::util::serialization::to_vec(&(
+                window.context,
+                window.peer,
+                &window.device,
+            )) else {
+                continue;
+            };
+            let key = format!(
+                "{FLOW_WINDOW_STORAGE_PREFIX}{}",
+                hex::encode(aura_core::hash::hash(&direction))
+            );
+            if let Ok(bytes) = aura_core::util::serialization::to_vec(&window) {
+                if let Err(error) = self.store(&key, bytes).await {
+                    tracing::debug!(%error, "flow window not persisted");
+                }
+            }
+        }
+        if let Some(allowances) = flow.take_dirty_allowances() {
+            if let Ok(bytes) = aura_core::util::serialization::to_vec(&allowances) {
+                if let Err(error) = self.store(FLOW_ALLOWANCES_STORAGE_KEY, bytes).await {
+                    tracing::debug!(%error, "flow allowances not persisted");
+                }
+            }
+        }
+    }
+
     /// Deliver queued flow checkpoints (docs/111 §3.1): adopt the ones peers
     /// granted this runtime, and send the ones this runtime granted peers.
     /// Failures are logged; a lagging sender is offered the checkpoint again.
     pub(crate) async fn flush_flow_checkpoints(&self) {
         use aura_core::effects::JournalEffects;
+        self.persist_flow_windows().await;
         let flow = self.transport.flow();
         for notice in flow.take_inbound() {
             let adopted = match self.get_flow_budget(&notice.context, &notice.peer).await {
@@ -592,6 +654,7 @@ impl AuraEffectSystem {
     ) -> Result<Vec<u8>, NetworkError> {
         // Take only this peer's network frame; other sessions' envelopes stay queued.
         // Wait a bounded time so lockstep peers (sync) can answer before we give up.
+        self.restore_flow_windows().await;
         for _ in 0..RECEIVE_FROM_POLLS {
             let taken = self.take_inbound_envelope(|env| {
                 env.metadata.get("content-type").map(String::as_str) == Some(content_type)
@@ -618,6 +681,10 @@ impl AuraEffectSystem {
     }
 }
 const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
+/// Storage prefix for persisted flow receive windows (work/8.md Task 54).
+const FLOW_WINDOW_STORAGE_PREFIX: &str = "flow_window/recv/";
+/// Storage key for persisted flow allowance overrides.
+const FLOW_ALLOWANCES_STORAGE_KEY: &str = "flow_window/allowances";
 
 /// Sync peers are addressed by device; prefer the sender's device id when present.
 fn network_source_id(envelope: &aura_core::effects::TransportEnvelope) -> uuid::Uuid {

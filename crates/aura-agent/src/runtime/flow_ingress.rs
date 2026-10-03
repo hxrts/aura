@@ -57,14 +57,95 @@ pub(crate) struct FlowIngress {
     readmit: Mutex<HashSet<(Direction, u64, u64)>>,
     outbound: Mutex<Vec<FlowCheckpointNotice>>,
     inbound: Mutex<Vec<FlowCheckpointNotice>>,
+    /// Directions whose window bounds changed since the last persist.
+    dirty_windows: Mutex<HashSet<Direction>>,
+    /// Whether allowances changed since the last persist.
+    dirty_allowances: std::sync::atomic::AtomicBool,
+    /// Whether persisted state was restored after start.
+    restored: std::sync::atomic::AtomicBool,
 }
+
+/// A persisted receive window (work/8.md Task 54).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct PersistedFlowWindow {
+    pub context: ContextId,
+    pub peer: AuthorityId,
+    pub device: Option<String>,
+    pub state: aura_core::types::flow_window::FlowWindowState,
+}
+
+/// Persisted allowance overrides (work/8.md Task 54).
+pub(crate) type PersistedAllowances = Vec<(ContextId, AuthorityId, u64)>;
 
 impl FlowIngress {
     /// Override the window granted to `peer` in `context` from the next epoch.
-    // Callers arrive with persisted allowance overrides (work/8.md Task 54).
+    // Callers arrive with a user-facing allowance control (work/8.md Task 54).
     #[allow(dead_code)]
     pub(crate) fn set_allowance(&self, context: ContextId, peer: AuthorityId, window: u64) {
         self.allowances.lock().insert((context, peer), window);
+        self.dirty_allowances
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether persisted windows still need restoring after start.
+    pub(crate) fn needs_restore(&self) -> bool {
+        !self.restored.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Restore persisted windows and allowances. Windows already live in
+    /// memory (admitted before the restore ran) are kept.
+    pub(crate) fn restore(
+        &self,
+        windows: Vec<PersistedFlowWindow>,
+        allowances: PersistedAllowances,
+    ) {
+        {
+            let mut live = self.windows.lock();
+            for persisted in windows {
+                live.entry((persisted.context, persisted.peer, persisted.device))
+                    .or_insert_with(|| FlowReceiveWindow::from_state(persisted.state));
+            }
+        }
+        {
+            let mut live = self.allowances.lock();
+            for (context, peer, window) in allowances {
+                live.entry((context, peer)).or_insert(window);
+            }
+        }
+        self.restored
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Windows whose bounds changed since the last call, for persistence.
+    pub(crate) fn take_dirty_windows(&self) -> Vec<PersistedFlowWindow> {
+        let dirty = std::mem::take(&mut *self.dirty_windows.lock());
+        let windows = self.windows.lock();
+        dirty
+            .into_iter()
+            .filter_map(|direction| {
+                let state = windows.get(&direction)?.state.clone();
+                let (context, peer, device) = direction;
+                Some(PersistedFlowWindow {
+                    context,
+                    peer,
+                    device,
+                    state,
+                })
+            })
+            .collect()
+    }
+
+    /// All allowances if any changed since the last call.
+    pub(crate) fn take_dirty_allowances(&self) -> Option<PersistedAllowances> {
+        self.dirty_allowances
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+            .then(|| {
+                self.allowances
+                    .lock()
+                    .iter()
+                    .map(|((context, peer), window)| (*context, *peer, *window))
+                    .collect()
+            })
     }
 
     fn window_for(&self, context: ContextId, peer: AuthorityId) -> u64 {
@@ -98,6 +179,9 @@ impl FlowIngress {
         {
             return Err(FlowWindowRejection::BeyondWindow);
         }
+        if !windows.contains_key(&direction) {
+            self.dirty_windows.lock().insert(direction.clone());
+        }
         let state = windows.entry(direction.clone()).or_insert_with(|| {
             FlowReceiveWindow::from_checkpoint(FlowWindowCheckpoint {
                 epoch,
@@ -107,7 +191,10 @@ impl FlowIngress {
         });
         let current = state.state.current;
         match state.accept(epoch, receipt.nonce, window)? {
-            Some(checkpoint) => self.queue_outbound(direction, checkpoint),
+            Some(checkpoint) => {
+                self.dirty_windows.lock().insert(direction.clone());
+                self.queue_outbound(direction, checkpoint);
+            }
             // The sender is still stamping the previous epoch: it has not
             // adopted the current checkpoint, so offer it again.
             None if epoch != current.epoch => self.queue_outbound(direction, current),
@@ -287,6 +374,44 @@ mod tests {
         }
         assert_eq!(
             ingress.admit(&receipt(8, 0, 1), Some("one-too-many")),
+            Err(FlowWindowRejection::BeyondWindow)
+        );
+    }
+
+    #[test]
+    fn restored_windows_survive_a_restart_without_resetting_accounting() {
+        let context = ContextId::new_from_entropy([9; 32]);
+        let sender = AuthorityId::new_from_entropy([12; 32]);
+        let before = FlowIngress::default();
+        before.set_allowance(context, sender, 4);
+        for nonce in 1..=2 {
+            before
+                .admit(&receipt(12, 0, nonce), None)
+                .expect("admitted");
+        }
+        let windows = before.take_dirty_windows();
+        let allowances = before.take_dirty_allowances().expect("allowance changed");
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].state.current.epoch.value(), 1, "bump persisted");
+        assert!(before.take_dirty_windows().is_empty(), "dirty set drained");
+
+        // A fresh runtime restores instead of trusting the next receipt.
+        let after = FlowIngress::default();
+        assert!(after.needs_restore());
+        after.restore(windows, allowances);
+        assert!(!after.needs_restore());
+        // Epoch 0 is still open as the previous window; epoch 7 was never
+        // opened, so it is not adopted as a fresh checkpoint.
+        after
+            .admit(&receipt(12, 0, 3), None)
+            .expect("previous window");
+        assert_eq!(
+            after.admit(&receipt(12, 7, 50), None),
+            Err(FlowWindowRejection::UnknownEpoch)
+        );
+        // The restored allowance still bounds the current window.
+        assert_eq!(
+            after.admit(&receipt(12, 1, 7), None),
             Err(FlowWindowRejection::BeyondWindow)
         );
     }
