@@ -25,6 +25,7 @@ enum NotificationKind {
     ContactInvite,
     GuardianInvite,
     HomeInvite,
+    ChannelInvite,
     RecoveryApproval,
     SentInvite,
     ContactInviteAccepted,
@@ -39,6 +40,7 @@ impl NotificationKind {
             Self::ContactInvite => "@",
             Self::GuardianInvite => "◆",
             Self::HomeInvite => "■",
+            Self::ChannelInvite => "#",
             Self::RecoveryApproval => "⊗",
             Self::SentInvite => "↗",
             Self::ContactInviteAccepted => "✓",
@@ -53,6 +55,7 @@ impl NotificationKind {
             Self::ContactInvite => "Contact request",
             Self::GuardianInvite => "Guardian request",
             Self::HomeInvite => "Home invite",
+            Self::ChannelInvite => "Channel invite",
             Self::RecoveryApproval => "Approval request",
             Self::SentInvite => "Sent invite",
             Self::ContactInviteAccepted => "Contact invite accepted",
@@ -67,6 +70,7 @@ impl NotificationKind {
             Self::ContactInvite => Theme::PRIMARY,
             Self::GuardianInvite => Theme::WARNING,
             Self::HomeInvite => Theme::TEXT,
+            Self::ChannelInvite => Theme::PRIMARY,
             Self::RecoveryApproval => Theme::SUCCESS,
             Self::SentInvite => Theme::TEXT_MUTED,
             Self::ContactInviteAccepted => Theme::SUCCESS,
@@ -116,6 +120,31 @@ fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &
 }
 
 /// A pending invitation this account sent, offered for copying or revoking.
+/// Kind and title for an invitation this authority received.
+fn received_invitation_kind(
+    invitation_type: InvitationType,
+    from_name: &str,
+) -> (NotificationKind, String) {
+    match invitation_type {
+        InvitationType::Guardian => (
+            NotificationKind::GuardianInvite,
+            format!("Guardian request from {from_name}"),
+        ),
+        InvitationType::Contact => (
+            NotificationKind::ContactInvite,
+            format!("Contact request from {from_name}"),
+        ),
+        InvitationType::Chat => (
+            NotificationKind::ChannelInvite,
+            format!("Channel invite from {from_name}"),
+        ),
+        InvitationType::Home => (
+            NotificationKind::HomeInvite,
+            format!("Home invite from {from_name}"),
+        ),
+    }
+}
+
 fn sent_invitation_item(inv: &aura_app::ui::types::Invitation) -> NotificationItem {
     let kind_label = match inv.invitation_type {
         InvitationType::Guardian => "Guardian",
@@ -303,24 +332,8 @@ pub fn NotificationsScreen(
                         continue;
                     }
 
-                    let (kind, title) = match inv.invitation_type {
-                        InvitationType::Guardian => (
-                            NotificationKind::GuardianInvite,
-                            format!("Guardian request from {}", inv.from_name),
-                        ),
-                        InvitationType::Contact => (
-                            NotificationKind::ContactInvite,
-                            format!("Contact request from {}", inv.from_name),
-                        ),
-                        InvitationType::Chat => (
-                            NotificationKind::ContactInvite,
-                            format!("Channel invite from {}", inv.from_name),
-                        ),
-                        InvitationType::Home => (
-                            NotificationKind::HomeInvite,
-                            format!("Home invite from {}", inv.from_name),
-                        ),
-                    };
+                    let (kind, title) =
+                        received_invitation_kind(inv.invitation_type, &inv.from_name);
 
                     let subtitle = inv
                         .message
@@ -548,5 +561,42 @@ mod tests {
         assert_eq!(item.title, "Contact invite to Bob");
         assert!(item.subtitle.contains("x revoke"));
         assert_eq!(item.timestamp, 42);
+    }
+
+    #[test]
+    fn received_invitations_project_to_their_own_kind_and_title() {
+        let cases = [
+            (
+                InvitationType::Contact,
+                NotificationKind::ContactInvite,
+                "Contact request from Ann",
+                "Contact request",
+            ),
+            (
+                InvitationType::Guardian,
+                NotificationKind::GuardianInvite,
+                "Guardian request from Ann",
+                "Guardian request",
+            ),
+            (
+                InvitationType::Chat,
+                NotificationKind::ChannelInvite,
+                "Channel invite from Ann",
+                "Channel invite",
+            ),
+            (
+                InvitationType::Home,
+                NotificationKind::HomeInvite,
+                "Home invite from Ann",
+                "Home invite",
+            ),
+        ];
+        for (invitation_type, kind, title, label) in cases {
+            assert_eq!(
+                received_invitation_kind(invitation_type, "Ann"),
+                (kind, title.to_string())
+            );
+            assert_eq!(kind.label(), label);
+        }
     }
 }

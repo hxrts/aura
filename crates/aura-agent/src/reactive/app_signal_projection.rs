@@ -25,6 +25,7 @@ pub(crate) fn map_invitation_type(inv_type: &DomainInvitationType) -> Invitation
     match inv_type {
         DomainInvitationType::Contact { .. } => InvitationType::Contact,
         DomainInvitationType::Guardian { .. } => InvitationType::Guardian,
+        DomainInvitationType::Channel { home: true, .. } => InvitationType::Home,
         DomainInvitationType::Channel { .. } => InvitationType::Chat,
         DomainInvitationType::DeviceEnrollment { .. } => InvitationType::Home,
     }
@@ -156,6 +157,15 @@ mod tests {
                 home: false,
             }),
             InvitationType::Chat
+        );
+        assert_eq!(
+            map_invitation_type(&DomainInvitationType::Channel {
+                home_id: aura_core::types::identifiers::ChannelId::from_bytes([2; 32]),
+                nickname_suggestion: None,
+                bootstrap: None,
+                home: true,
+            }),
+            InvitationType::Home
         );
     }
 }
