@@ -1683,6 +1683,59 @@ mod tests {
         );
     }
 
+    /// Background sync charges one unit per send. Every receipt across many
+    /// spacing-rule epoch advances must still pass the receiver's LAN checks
+    /// (run 141 exhausted after 1024 sends; a zero nonce at an epoch boundary
+    /// would be rejected as a replay).
+    #[test]
+    fn lan_ingress_accepts_receipts_across_many_flow_budget_epochs() {
+        use aura_core::effects::FlowBudgetEffects;
+
+        let source = AuthorityId::new_from_entropy([12u8; 32]);
+        let destination = AuthorityId::new_from_entropy([13u8; 32]);
+        let context = ContextId::new_from_entropy([14u8; 32]);
+        let runtime = EffectSystemBuilder::testing()
+            .with_authority(source)
+            .build_sync()
+            .expect("build_sync should succeed in testing mode");
+        let effects = runtime.effects();
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+        let mut epochs = std::collections::BTreeSet::new();
+        for send in 0..5 * 1024 {
+            let receipt = rt
+                .block_on(effects.charge_flow(&context, &destination, aura_core::FlowCost::new(1)))
+                .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
+            epochs.insert(receipt.epoch.value());
+
+            let mut envelope = test_envelope();
+            envelope.source = source;
+            envelope.destination = destination;
+            envelope.context = context;
+            let mut transport_receipt = aura_core::effects::transport::TransportReceipt {
+                context: receipt.ctx,
+                src: receipt.src,
+                dst: receipt.dst,
+                epoch: receipt.epoch.value(),
+                cost: receipt.cost.value(),
+                nonce: receipt.nonce.value(),
+                prev: receipt.prev.0,
+                sig: Vec::new(),
+            };
+            crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
+                &mut transport_receipt,
+                &envelope,
+                &crate::runtime::receipt_model::test_receipt_signing_key(),
+            )
+            .expect("test receipt should sign");
+            envelope.receipt = Some(transport_receipt);
+
+            verify_lan_transport_ingress(envelope)
+                .unwrap_or_else(|error| panic!("send {send} rejected at ingress: {error}"));
+        }
+        assert!(epochs.len() >= 9, "budget epochs advanced: {epochs:?}");
+    }
+
     #[test]
     fn runtime_services_include_runtime_maintenance() {
         let authority_id = AuthorityId::new_from_entropy([11u8; 32]);
