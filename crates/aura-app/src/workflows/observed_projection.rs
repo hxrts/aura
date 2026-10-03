@@ -115,6 +115,20 @@ pub async fn mirror_homes_signal_into_view(
             });
             changed = true;
         }
+        // The active neighborhood is durable through the anchored home's
+        // committed joins: restore one after a restart, keeping a selection
+        // the user already made.
+        if neighborhood.neighborhood_id.is_none() {
+            if let Some((neighborhood_id, name)) = homes
+                .home_state(&neighborhood.home_home_id)
+                .and_then(|home| home.neighborhoods.iter().next())
+            {
+                neighborhood.neighborhood_id = Some(neighborhood_id.clone());
+                neighborhood.neighborhood_name = Some(name.clone());
+                neighborhood.add_member_home(neighborhood.home_home_id);
+                changed = true;
+            }
+        }
         // Every home this authority belongs to is listed, including homes
         // joined through an invitation after the anchor was set.
         for (home_id, home) in homes.iter() {
@@ -803,6 +817,41 @@ mod tests {
         let neighborhood = app_core.read().await.views().get_neighborhood();
         assert_eq!(neighborhood.home_home_id, first_id);
         assert!(neighborhood.neighbor(&joined_id).is_some());
+    }
+
+    // work/8.md Task 51: after a restart the homes signal is rebuilt from
+    // facts, including joined neighborhoods; the active neighborhood is
+    // restored from the anchored home.
+    #[tokio::test]
+    async fn mirror_homes_restores_the_active_neighborhood_after_restart() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+
+        let home_id = ChannelId::from_bytes(hash(b"mirror-neighborhood-home"));
+        let mut home = crate::views::home::HomeState::new(
+            home_id,
+            Some("Den".to_string()),
+            AuthorityId::new_from_entropy([23u8; 32]),
+            1,
+            ContextId::new_from_entropy([24u8; 32]),
+        );
+        home.join_neighborhood("block-1", "Block One")
+            .expect("within budget");
+        replace_homes_projection_observed(
+            &app_core,
+            HomesState::from_parts(
+                std::collections::HashMap::from([(home_id, home)]),
+                Some(home_id),
+            ),
+        )
+        .await
+        .unwrap();
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+
+        let neighborhood = app_core.read().await.views().get_neighborhood();
+        assert_eq!(neighborhood.neighborhood_id.as_deref(), Some("block-1"));
+        assert_eq!(neighborhood.neighborhood_name.as_deref(), Some("Block One"));
+        assert!(neighborhood.is_member_home(&home_id));
     }
 
     #[tokio::test]
