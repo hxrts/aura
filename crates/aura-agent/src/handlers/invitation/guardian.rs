@@ -188,6 +188,7 @@ impl<'a> InvitationGuardianHandler<'a> {
             )
             .await
             .map_err(|error| AgentError::internal(error.to_string()))?;
+            tracing::info!(invitation_id = %invitation.invitation_id, "guardian principal VM session opened");
             session.queue_send_bytes(
                 to_vec(&request).map_err(|error| AgentError::internal(error.to_string()))?,
             );
@@ -212,6 +213,12 @@ impl<'a> InvitationGuardianHandler<'a> {
                         )
                         .await
                         .map_err(|error| AgentError::internal(error.to_string()))?;
+                    tracing::info!(
+                        invitation_id = %invitation.invitation_id,
+                        blocked_receive = round.blocked_receive.is_some(),
+                        wait = ?round.host_wait_status,
+                        "guardian principal VM round"
+                    );
 
                     if let Some(blocked) = round.blocked_receive {
                         // The guardian's reply carries its signed recovery key.
