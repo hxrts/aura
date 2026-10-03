@@ -269,15 +269,18 @@ impl FlowBudget {
     /// - `epoch` advances monotonically (maximum)
     #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            limit: self.limit.min(other.limit),
-            spent: self.spent.max(other.spent),
-            epoch: if self.epoch.value() >= other.epoch.value() {
-                self.epoch
-            } else {
-                other.epoch
-            },
+        self.join(other)
+    }
+
+    /// Spacing rule (docs/111 §3.1): once half the window is spent, open the
+    /// successor epoch so the allowance replenishes on a logical clock rather
+    /// than exhausting for good. Returns whether the epoch advanced.
+    pub fn advance_if_due(&mut self) -> bool {
+        if self.limit == 0 || self.spent < self.limit / 2 {
+            return false;
         }
+        self.rotate_epoch(Epoch::new(self.epoch.value().saturating_add(1)));
+        true
     }
 
     /// Advance to a new epoch, resetting spent if the epoch increases.
@@ -303,9 +306,16 @@ impl Default for FlowBudget {
 
 impl JoinSemilattice for FlowBudget {
     fn join(&self, other: &Self) -> Self {
+        // Spend is per epoch: a later epoch supersedes an earlier one's spend,
+        // and replicas of the same epoch take the larger spend.
+        let spent = match self.epoch.value().cmp(&other.epoch.value()) {
+            std::cmp::Ordering::Greater => self.spent,
+            std::cmp::Ordering::Less => other.spent,
+            std::cmp::Ordering::Equal => self.spent.max(other.spent),
+        };
         Self {
             limit: self.limit.min(other.limit), // Meet for limit (more restrictive)
-            spent: self.spent.max(other.spent), // Join for spent (more spent)
+            spent,
             epoch: if self.epoch.value() >= other.epoch.value() {
                 self.epoch
             } else {
@@ -421,6 +431,26 @@ mod tests {
 
     // CRDT merge law tests (join convergence, idempotency, commutativity,
     // associativity) are in tests/laws/flow_budget_crdt.rs.
+
+    #[test]
+    fn spacing_rule_replenishes_instead_of_exhausting() {
+        let mut budget = FlowBudget::new(4, Epoch::initial());
+        for _ in 0..100 {
+            budget
+                .record_charge(FlowCost::new(1))
+                .expect("spacing keeps headroom");
+            budget.advance_if_due();
+        }
+        assert_eq!(budget.epoch.value(), 50);
+
+        // A replica still in an older epoch does not resurrect its spend.
+        let stale = FlowBudget {
+            limit: 4,
+            spent: 3,
+            epoch: Epoch::new(1),
+        };
+        assert_eq!(budget.join(&stale).spent, budget.spent);
+    }
 
     #[test]
     fn record_charge_enforces_limit() {

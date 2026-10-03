@@ -396,6 +396,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         current
             .record_charge(cost)
             .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
+        current.advance_if_due();
         self.update_flow_budget(context, peer, &current).await
     }
 }
