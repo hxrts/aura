@@ -396,6 +396,7 @@ impl RuntimeMaintenanceService {
             (self.sync_manager.clone(), self.rendezvous_manager.clone())
         {
             let interval = sync_peer_reconcile_interval(&sync_manager);
+            let local_device = self.device_id;
             let reconcile_service = self.clone();
             let _reconcile_task_handle = tasks.spawn_interval_until_named(
                 "sync_peer_reconcile",
@@ -407,7 +408,7 @@ impl RuntimeMaintenanceService {
                     let reconcile_service = reconcile_service.clone();
                     async move {
                         let desired_peers: HashSet<DeviceId> = rendezvous_manager
-                            .list_reachable_sibling_devices()
+                            .list_reachable_sibling_devices(local_device)
                             .await
                             .into_iter()
                             .collect();

@@ -1558,12 +1558,14 @@ impl RendezvousManager {
     /// commitment-tree op log journal anti-entropy can reconcile: tree ops
     /// belong to one authority, so comparing logs with another authority
     /// always diverges (work/8.md Task 57).
-    pub async fn list_reachable_sibling_devices(&self) -> Vec<DeviceId> {
+    pub async fn list_reachable_sibling_devices(&self, local_device: DeviceId) -> Vec<DeviceId> {
         let mut devices = self.list_own_device_peers().await;
         devices.extend(
             self.list_reachable_peer_devices_for_authority(self.authority_id)
                 .await,
         );
+        // Our own descriptor is cached too; a device is not its own sibling.
+        devices.retain(|device| *device != local_device);
         devices.sort();
         devices.dedup();
         devices

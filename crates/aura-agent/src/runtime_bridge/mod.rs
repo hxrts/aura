@@ -549,7 +549,11 @@ impl AgentRuntimeBridge {
             self.agent.runtime().sync(),
             self.agent.runtime().rendezvous(),
         ) {
-            for peer_device in rendezvous.list_reachable_sibling_devices().await {
+            let local_device = self.agent.runtime().effects().device_id();
+            for peer_device in rendezvous
+                .list_reachable_sibling_devices(local_device)
+                .await
+            {
                 sync.add_peer(peer_device).await;
             }
         }
