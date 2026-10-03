@@ -247,6 +247,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
+                                        lifecycle.status.error_message.as_deref(),
                                     ) {
                                         send_optional_ui_update_required(
                                             &update_tx_monitor,
@@ -425,6 +426,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
+                                        lifecycle.status.error_message.as_deref(),
                                     ) {
                                         send_optional_ui_update_required(
                                             &update_tx_monitor,

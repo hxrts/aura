@@ -1023,14 +1023,24 @@ fn open_ceremony_setup_modal(
                 return Some(EventCommandLoopAction::ContinueCommand);
             }
 
+            // Only contacts who accepted a guardian invitation have the
+            // verified key a guardian ceremony needs (work/8.md Task 56);
+            // offering others led to a ceremony that failed at once.
             let candidates: Vec<crate::tui::state::GuardianCandidate> = current_contacts
                 .iter()
+                .filter(|c| c.is_guardian)
                 .map(|c| crate::tui::state::GuardianCandidate {
                     id: c.id.clone(),
                     name: c.display_name(),
                     is_current_guardian: c.is_guardian,
                 })
                 .collect();
+            if candidates.is_empty() {
+                new_state.toast_error(
+                    "No guardians yet: select a contact and press G to invite them as a guardian",
+                );
+                return Some(EventCommandLoopAction::ContinueCommand);
+            }
             let selected: Vec<usize> = candidates
                 .iter()
                 .enumerate()

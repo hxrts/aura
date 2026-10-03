@@ -263,7 +263,11 @@ impl SettingsCallbacks {
                                     .await;
                                 }
                                 if let Some(toast) =
-                                    key_rotation_lifecycle_toast(lifecycle.status.kind, lifecycle.state)
+                                    key_rotation_lifecycle_toast(
+                                        lifecycle.status.kind,
+                                        lifecycle.state,
+                                        lifecycle.status.error_message.as_deref(),
+                                    )
                                 {
                                     send_ui_update_required(&tx_monitor, UiUpdate::ToastAdded(toast))
                                         .await;
