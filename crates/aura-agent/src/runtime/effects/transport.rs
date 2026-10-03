@@ -86,6 +86,7 @@ impl TransportEffects for AuraEffectSystem {
             .await
             .unwrap_or_else(|| fallback_direct_route(&envelope));
 
+        let destination_for_log = envelope.destination;
         if let Some(move_manager) = self.move_manager() {
             let batch = move_manager
                 .enqueue_for_delivery(envelope, route, now_ms, self)
@@ -94,6 +95,9 @@ impl TransportEffects for AuraEffectSystem {
                     details: error.to_string(),
                 })?;
 
+            if batch.is_empty() {
+                tracing::info!(destination = %destination_for_log, "move send produced an empty delivery batch");
+            }
             // The batch starts with this caller's envelope; later plans are
             // other queued envelopes. Every plan is attempted and settled so a
             // failure never strands the rest, and only the caller's own
@@ -384,6 +388,9 @@ async fn send_planned_envelope(
 ) -> Result<(), TransportError> {
     enforce_transport_payload_size(&envelope)?;
     if let Some(shared) = effects.transport.shared_transport() {
+        if is_choreography_envelope(&envelope) {
+            tracing::info!(destination = %envelope.destination, "choreography envelope routed through shared transport");
+        }
         shared.route_envelope(envelope);
         return Ok(());
     }
@@ -399,6 +406,9 @@ async fn send_planned_envelope(
         destination_device_id.is_some_and(|dst| dst == &self_device_id)
     };
     if is_local {
+        if is_choreography_envelope(&envelope) {
+            tracing::info!(destination = %envelope.destination, "choreography envelope queued locally");
+        }
         effects.queue_runtime_envelope(envelope);
         return Ok(());
     }
@@ -453,6 +463,7 @@ async fn send_planned_envelope(
         .metadata
         .get("content-type")
         .is_some_and(|value| value == "application/aura-invitation")
+        || is_choreography_envelope(&envelope)
     {
         tracing::info!(
             destination = %envelope.destination,
