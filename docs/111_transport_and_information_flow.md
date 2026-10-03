@@ -48,6 +48,14 @@ pub struct Receipt {
 
 This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The `nonce` ensures uniqueness and the `prev` field chains receipts for auditing. The recipient verifies the signature. Receipts support accountability in multi-hop routing.
 
+### 3.1 Budget Epochs and Grants
+
+A flow budget epoch is a logical value. No wall clock decides which epoch is in force. For each context and direction, the receiving authority grants budget to the sender by committing a `FlowBudgetGrant { context, sender, epoch, allowance }` fact to their shared relational journal. Grants merge by the highest epoch, so both parties converge on the same epoch through ordinary fact exchange.
+
+The sender adopts the highest grant it has observed. Adopting a new epoch resets `spent` for that `(ContextId, peer)` pair, and the effective limit is the minimum of the grant's `allowance` and the limit the sender derives from its Biscuit tokens and local policy. Receipts carry the adopted epoch. The receiver verifies each receipt against the epoch of its own latest grant, so receipts from an earlier epoch are rejected and cannot be replayed into a later one.
+
+The receiver's grant policy decides the allowance and when to issue the next grant. The baseline policy issues the next epoch once the verified receipts in the current epoch reach a fraction of its allowance, so a peer that stays within its allowance keeps sending. Because the allowance and the grant schedule are receiver policy, a receiver can raise, lower or withhold a peer's allowance, and an adaptive anti-spam policy can replace the baseline without changing the grant protocol. Before any grant exists, the sender uses the policy default allowance at the initial epoch.
+
 ## 4. Information Flow Budgets
 
 Information flow budgets define limits on metadata leakage. Budgets exist for external leakage, neighbor leakage, and group leakage. Each protocol message carries leakage annotations. These annotations specify the cost for each leakage dimension.
