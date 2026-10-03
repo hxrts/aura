@@ -1,12 +1,3 @@
-  config="$2"
-  # Configs name this host's LAN address as __HOST_ADDR__; render a copy.
-  if grep -q __HOST_ADDR__ "$config"; then
-    [ -n "$AURA_E2E_HOST_ADDR" ] || { echo 'set AURA_E2E_HOST_ADDR to this host''s LAN address' >&2; exit 2; }
-    rendered="$D/$(basename "$config")"
-    sed "s/__HOST_ADDR__/$AURA_E2E_HOST_ADDR/g" "$config" > "$rendered"
-    config="$rendered"
-  fi
-  set -- "$1" "$config"
 #!/usr/bin/env bash
 # Background tool_repl driver for multi-host harness runs. It runs without a
 # window or focus, reading requests from a FIFO. Settings: see env.sh.
