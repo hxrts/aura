@@ -934,6 +934,20 @@ impl ChatServiceApi {
         Ok(Self::reduce_group_view(group_id, facts))
     }
 
+    /// The context and channel a group's messages live in (as used by `aura amp`).
+    pub async fn group_transport_ids(
+        &self,
+        group_id: &ChatGroupId,
+    ) -> AgentResult<Option<(ContextId, ChannelId)>> {
+        let facts = self.load_group_facts(group_id).await?;
+        Ok(facts.iter().find_map(|fact| match fact {
+            aura_chat::ChatFact::ChannelCreated { channel_id, .. } => {
+                Some((Self::context_id_for_group(group_id), *channel_id))
+            }
+            _ => None,
+        }))
+    }
+
     /// List groups that this authority has created/observed locally.
     pub async fn list_user_groups(
         &self,

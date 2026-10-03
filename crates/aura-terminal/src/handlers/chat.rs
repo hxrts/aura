@@ -140,6 +140,10 @@ pub async fn handle_chat(
 
             ConsoleEffects::log_info(ctx.effects(), &format!("=== {} ===", group.name)).await?;
             ConsoleEffects::log_info(ctx.effects(), &format!("ID: {}", group.id)).await?;
+            if let Some((context_id, channel_id)) = chat.group_transport_ids(&group_id).await? {
+                ConsoleEffects::log_info(ctx.effects(), &format!("Context: {context_id}")).await?;
+                ConsoleEffects::log_info(ctx.effects(), &format!("Channel: {channel_id}")).await?;
+            }
             ConsoleEffects::log_info(
                 ctx.effects(),
                 &format!("Description: {}", group.description),
