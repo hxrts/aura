@@ -27,7 +27,14 @@ AURA_E2E_REMOTE="${AURA_E2E_REMOTE:-}"
 AURA_E2E_REMOTE_ROOT="${AURA_E2E_REMOTE_ROOT:-projects/aura}"
 AURA_E2E_REMOTE_PREFIX="${AURA_E2E_REMOTE_PREFIX:-barbara-}"
 if [[ -z "${AURA_E2E_HOST_ADDR:-}" ]]; then
-  AURA_E2E_HOST_ADDR="$( (ipconfig getifaddr en0 || ipconfig getifaddr en1 || hostname -I 2>/dev/null | awk '{print $1}') 2>/dev/null | head -1)"
+  # Absolute path: ssh and nix-develop shells may not have /usr/sbin on PATH.
+  for iface in en0 en1; do
+    AURA_E2E_HOST_ADDR="$(/usr/sbin/ipconfig getifaddr "$iface" 2>/dev/null || true)"
+    [[ -n "$AURA_E2E_HOST_ADDR" ]] && break
+  done
+  if [[ -z "$AURA_E2E_HOST_ADDR" ]]; then
+    AURA_E2E_HOST_ADDR="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  fi
 fi
 export AURA_E2E_ROOT AURA_E2E_RUN_DIR AURA_E2E_TOOL_REPL AURA_E2E_AURA_BIN \
   AURA_E2E_RUN_TOKEN AURA_E2E_REMOTE AURA_E2E_REMOTE_ROOT AURA_E2E_REMOTE_PREFIX \
