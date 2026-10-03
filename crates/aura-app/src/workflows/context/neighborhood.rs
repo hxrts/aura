@@ -263,7 +263,10 @@ pub async fn add_home_to_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
 ) -> Result<(), AuraError> {
-    let (homes_state, neighborhood_state) = {
+    let timestamp_ms =
+        crate::workflows::time::local_first_timestamp_ms(app_core, "context-local-first", &[])
+            .await?;
+    let (homes_state, neighborhood_state, durable_join) = {
         let core = app_core.read().await;
         let mut homes = core.views().get_homes();
         let mut neighborhood = core.views().get_neighborhood();
@@ -273,6 +276,11 @@ pub async fn add_home_to_neighborhood(
         let target_member_count = homes
             .home_state(&target_home_id)
             .map(|home| home.member_count);
+        let (neighborhood_id, neighborhood_name) = neighborhood
+            .neighborhood_id
+            .clone()
+            .zip(neighborhood.neighborhood_name.clone())
+            .ok_or_else(|| AuraError::invalid("Create a neighborhood before adding homes"))?;
 
         if target_home_id != neighborhood.home_home_id
             && neighborhood.neighbor(&target_home_id).is_none()
@@ -286,20 +294,75 @@ pub async fn add_home_to_neighborhood(
                 can_traverse: true,
             });
         }
+        neighborhood.add_member_home(target_home_id);
 
-        let newly_joined = neighborhood.add_member_home(target_home_id);
-        if newly_joined {
-            if let Some(home) = homes.home_mut(&target_home_id) {
-                home.storage
-                    .join_neighborhood()
+        // A materialized home records the join (charging its neighborhood
+        // budget once per neighborhood) and commits it in its own context.
+        let durable_join = match homes.home_mut(&target_home_id) {
+            Some(home) => {
+                let joined = home
+                    .join_neighborhood(&neighborhood_id, &neighborhood_name)
                     .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+                home.context_id
+                    .filter(|_| joined)
+                    .map(|context_id| (context_id, neighborhood_id))
             }
-        }
+            None => None,
+        };
 
-        (homes, neighborhood)
+        (
+            homes,
+            neighborhood,
+            durable_join.map(|join| (target_home_id, join)),
+        )
     };
 
+    if let Some((home_id, (context_id, neighborhood_id))) = durable_join {
+        persist_home_joined_neighborhood(
+            app_core,
+            home_id,
+            context_id,
+            &neighborhood_id,
+            timestamp_ms,
+        )
+        .await?;
+    }
     publish_homes_and_neighborhood_projection(app_core, homes_state, neighborhood_state).await
+}
+
+/// Commits a home's join of an existing neighborhood. Without a runtime the
+/// join stays local.
+async fn persist_home_joined_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: ChannelId,
+    context_id: ContextId,
+    neighborhood_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    let neighborhood: ChannelId = neighborhood_id
+        .parse()
+        .map_err(|_| AuraError::invalid("The active neighborhood id is malformed"))?;
+    let fact = aura_social::SocialFact::home_joined_neighborhood_ms(
+        aura_social::HomeId::from_bytes(*home_id.as_bytes()),
+        aura_social::NeighborhoodId::from_bytes(*neighborhood.as_bytes()),
+        context_id,
+        timestamp_ms,
+    )
+    .to_generic();
+    runtime
+        .commit_relational_facts(&[fact])
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "persist neighborhood membership".to_owned(),
+            source: Some(Arc::new(error)),
+        })
 }
 
 /// Force direct one_hop_link between local home and the target home in the active neighborhood.

@@ -1035,8 +1035,12 @@ impl AuraEffectSystem {
                 .get("aura-source-device-id")
                 .map(String::as_str);
             if let Err(rejection) = self.transport.flow().admit(receipt, device) {
-                tracing::debug!(
+                tracing::warn!(
                     source = %env.source,
+                    context = %receipt.context,
+                    epoch = receipt.epoch,
+                    generation = receipt.nonce,
+                    content_type = ?env.metadata.get("content-type"),
                     %rejection,
                     "dropping inbound envelope outside its flow window"
                 );

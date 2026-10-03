@@ -1554,6 +1554,21 @@ impl RendezvousManager {
         devices
     }
 
+    /// Reachable devices of this authority (siblings), the only peers whose
+    /// commitment-tree op log journal anti-entropy can reconcile: tree ops
+    /// belong to one authority, so comparing logs with another authority
+    /// always diverges (work/8.md Task 57).
+    pub async fn list_reachable_sibling_devices(&self) -> Vec<DeviceId> {
+        let mut devices = self.list_own_device_peers().await;
+        devices.extend(
+            self.list_reachable_peer_devices_for_authority(self.authority_id)
+                .await,
+        );
+        devices.sort();
+        devices.dedup();
+        devices
+    }
+
     /// List reachable device ids for a specific peer authority.
     ///
     /// Social semantics remain authority-based, but transport routing must target

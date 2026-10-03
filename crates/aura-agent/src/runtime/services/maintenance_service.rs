@@ -407,7 +407,7 @@ impl RuntimeMaintenanceService {
                     let reconcile_service = reconcile_service.clone();
                     async move {
                         let desired_peers: HashSet<DeviceId> = rendezvous_manager
-                            .list_reachable_peer_devices()
+                            .list_reachable_sibling_devices()
                             .await
                             .into_iter()
                             .collect();

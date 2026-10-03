@@ -549,7 +549,7 @@ impl AgentRuntimeBridge {
             self.agent.runtime().sync(),
             self.agent.runtime().rendezvous(),
         ) {
-            for peer_device in rendezvous.list_reachable_peer_devices().await {
+            for peer_device in rendezvous.list_reachable_sibling_devices().await {
                 sync.add_peer(peer_device).await;
             }
         }
@@ -1925,6 +1925,33 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .collect::<Vec<_>>();
 
         let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
+
+        // Step 0: every guardian must have accepted a guardian invitation, which
+        // records the verified key the ceremony needs. Fail before rotating
+        // keys instead of reporting a started ceremony that fails at once.
+        {
+            use aura_core::effects::StorageCoreEffects;
+            let effects = self.agent.runtime().effects();
+            for guardian in guardian_ids {
+                let key = effects
+                    .retrieve(
+                        &crate::handlers::recovery::recovery_guardian_public_key_storage_key(
+                            *guardian,
+                        ),
+                    )
+                    .await
+                    .map_err(|error| {
+                        IntentError::internal_error(format!(
+                            "Failed to read guardian key for {guardian}: {error}"
+                        ))
+                    })?;
+                if key.is_none() {
+                    return Err(IntentError::validation_failed(format!(
+                        "{guardian} has not accepted a guardian invitation yet; invite them as a guardian first"
+                    )));
+                }
+            }
+        }
 
         // Step 1: Generate FROST keys at new epoch
         let (new_epoch, key_packages, _public_key) = self
