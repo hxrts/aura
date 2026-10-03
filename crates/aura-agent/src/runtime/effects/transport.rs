@@ -96,7 +96,7 @@ impl TransportEffects for AuraEffectSystem {
                 })?;
 
             if batch.is_empty() {
-                tracing::info!(destination = %destination_for_log, "move send produced an empty delivery batch");
+                tracing::debug!(destination = %destination_for_log, "move send produced an empty delivery batch");
             }
             // The batch starts with this caller's envelope; later plans are
             // other queued envelopes. Every plan is attempted and settled so a
@@ -246,6 +246,34 @@ async fn resolve_peer_addr(
         .and_then(|route| route_destination_addr(&route.destination))
 }
 
+/// Any verified descriptor for `peer`, regardless of context, as a dialable
+/// address. Only for choreography envelopes, which travel on the peer's
+/// authority-scoped path: a browser never learns LAN-discovered descriptors,
+/// only the ones its invitations cached.
+async fn resolve_any_authority_addr(
+    effects: &AuraEffectSystem,
+    peer: AuthorityId,
+) -> Option<String> {
+    let manager = effects.rendezvous_manager()?;
+    let descriptor = manager.get_any_descriptor_for_authority(peer).await?;
+    if descriptor_has_placeholder_crypto(&descriptor)
+        && !(effects.is_testing() || effects.harness_mode_enabled())
+    {
+        return None;
+    }
+    order_routes_for_local_dialer(
+        descriptor
+            .advertised_move_paths()
+            .into_iter()
+            .map(|path| path.route)
+            .collect(),
+        LOCAL_DIALABLE_PROTOCOLS,
+    )
+    .into_iter()
+    .find(|route| direct_route_allowed(effects, route))
+    .and_then(|route| route_destination_addr(&route.destination))
+}
+
 async fn resolve_own_device_addr(
     effects: &AuraEffectSystem,
     device_id: aura_core::DeviceId,
@@ -389,7 +417,7 @@ async fn send_planned_envelope(
     enforce_transport_payload_size(&envelope)?;
     if let Some(shared) = effects.transport.shared_transport() {
         if is_choreography_envelope(&envelope) {
-            tracing::info!(destination = %envelope.destination, "choreography envelope routed through shared transport");
+            tracing::debug!(destination = %envelope.destination, "choreography envelope routed through shared transport");
         }
         shared.route_envelope(envelope);
         return Ok(());
@@ -407,7 +435,7 @@ async fn send_planned_envelope(
     };
     if is_local {
         if is_choreography_envelope(&envelope) {
-            tracing::info!(destination = %envelope.destination, "choreography envelope queued locally");
+            tracing::debug!(destination = %envelope.destination, "choreography envelope queued locally");
         }
         effects.queue_runtime_envelope(envelope);
         return Ok(());
@@ -445,14 +473,13 @@ async fn send_planned_envelope(
         // has a peer descriptor. Like invitation delivery, they ride the
         // receiver's authority-scoped peer path; the envelope keeps its session
         // context so the receiver can still match it.
-        None if is_choreography_envelope(&envelope) => {
-            resolve_peer_addr(
-                effects,
-                default_context_id_for_authority(envelope.destination),
-                envelope.destination,
-            )
-            .await
-        }
+        None if is_choreography_envelope(&envelope) => resolve_peer_addr(
+            effects,
+            default_context_id_for_authority(envelope.destination),
+            envelope.destination,
+        )
+        .await
+        .or(resolve_any_authority_addr(effects, envelope.destination).await),
         None => None,
     }
     .ok_or(TransportError::DestinationUnreachable {
@@ -463,7 +490,6 @@ async fn send_planned_envelope(
         .metadata
         .get("content-type")
         .is_some_and(|value| value == "application/aura-invitation")
-        || is_choreography_envelope(&envelope)
     {
         tracing::info!(
             destination = %envelope.destination,
@@ -1166,6 +1192,50 @@ mod tests {
 
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
         assert!(resolved.is_none());
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn choreography_fallback_uses_a_descriptor_from_any_context() {
+        let authority = AuthorityId::new_from_entropy([213u8; 32]);
+        let peer = AuthorityId::new_from_entropy([214u8; 32]);
+        // e.g. the context of an invitation exchange, not the peer default.
+        let invitation_context = ContextId::new_from_entropy([215u8; 32]);
+
+        let config = AgentConfig::default();
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
+        let manager = RendezvousManager::new_with_default_udp(
+            authority,
+            RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let service_context = RuntimeServiceContext::new(
+            Arc::new(TaskSupervisor::new()),
+            Arc::new(effects.time_effects().clone()),
+        );
+        RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
+        manager
+            .cache_descriptor(descriptor(
+                peer,
+                invitation_context,
+                vec![TransportHint::tcp_direct("192.168.1.20:55003").unwrap()],
+            ))
+            .await
+            .unwrap();
+
+        assert!(
+            resolve_peer_addr(&effects, default_context_id_for_authority(peer), peer)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            resolve_any_authority_addr(&effects, peer).await.as_deref(),
+            Some("192.168.1.20:55003")
+        );
         RuntimeService::stop(&manager).await.unwrap();
     }
 
