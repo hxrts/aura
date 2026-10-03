@@ -2799,3 +2799,20 @@ async fn inviting_a_contact_to_note_to_self_is_refused() {
     .expect_err("Note to Self must not be shared");
     assert!(error.to_string().contains("Note to Self is private"));
 }
+
+#[tokio::test]
+async fn joining_an_unknown_channel_with_a_runtime_is_not_found() {
+    let local = AuthorityId::new_from_entropy([173u8; 32]);
+    let runtime_bridge: Arc<dyn RuntimeBridge> =
+        Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    // `/join` only joins channels this authority can see; it does not create.
+    let error = join_channel_by_name(&app_core, "lounge")
+        .await
+        .expect_err("an unknown channel name is not created by /join");
+    assert!(error.to_string().contains("lounge"), "{error}");
+}
