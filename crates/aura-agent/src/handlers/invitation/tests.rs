@@ -4990,6 +4990,20 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
         principal_effects.retrieve(&key_path).await.unwrap().is_some(),
         "principal records the guardian recovery key"
     );
+    let bound = principal_effects
+        .load_committed_facts(principal_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|fact| {
+            matches!(
+                fact.content,
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id: bound, .. }
+                )) if bound == guardian_id
+            )
+        });
+    assert!(bound, "a verified acceptance commits the guardian binding");
 }
 
 large_stack_async_test!(guardian_choreography_completes_when_guardian_accepts_late, {
