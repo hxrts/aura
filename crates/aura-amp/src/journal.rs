@@ -17,6 +17,44 @@ use aura_journal::{
     reduce_context, ChannelEpochState, DomainFact, FactJournal, ProtocolRelationalFact,
 };
 
+/// A successful canonical reduction contained no checkpoint for one channel.
+/// Construction remains private to this journal reader. This error identifies
+/// a failed read result; it is not permission to mutate canonical state.
+/// ```compile_fail
+/// use aura_amp::ChannelStateUnavailable;
+/// use aura_core::{ContextId, ChannelId};
+/// let _ = ChannelStateUnavailable {
+///     context: ContextId::new_from_entropy([1; 32]),
+///     channel: ChannelId::from_bytes([2; 32]),
+/// };
+/// ```
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("channel state not found")]
+pub struct ChannelStateUnavailable {
+    context: ContextId,
+    channel: ChannelId,
+}
+
+impl ChannelStateUnavailable {
+    pub fn context(&self) -> ContextId {
+        self.context
+    }
+    pub fn channel(&self) -> ChannelId {
+        self.channel
+    }
+
+    pub fn find<'a>(error: &'a (dyn std::error::Error + 'static)) -> Option<&'a Self> {
+        let mut cause = Some(error);
+        while let Some(error) = cause {
+            if let Some(absence) = error.downcast_ref::<Self>() {
+                return Some(absence);
+            }
+            cause = error.source();
+        }
+        None
+    }
+}
+
 // ============================================================================
 // AmpJournalEffects Trait
 // ============================================================================
@@ -107,8 +145,13 @@ pub async fn list_channel_bootstraps<A: AmpJournalEffects>(
     contexts.dedup();
     let mut bootstraps = Vec::new();
     for context in contexts {
-        let state = reduce_context(&build_context_journal(context, contents.clone()))
-            .map_err(|e| AuraError::internal(format!("context reduction failed: {e}")))?;
+        let state =
+            reduce_context(&build_context_journal(context, contents.clone())).map_err(|error| {
+                AuraError::Internal {
+                    message: format!("context reduction failed: {error}"),
+                    source: Some(std::sync::Arc::new(error)),
+                }
+            })?;
         for (channel, epoch_state) in state.channel_epochs {
             if let Some(bootstrap) = epoch_state.bootstrap {
                 bootstraps.push((context, channel, bootstrap.bootstrap_id));
@@ -128,13 +171,50 @@ pub async fn get_channel_state<A: AmpJournalEffects>(
     channel: ChannelId,
 ) -> Result<ChannelEpochState> {
     let journal = effects.fetch_context_journal(context).await?;
-    let state = reduce_context(&journal)
-        .map_err(|e| AuraError::internal(format!("context reduction failed: {e}")))?;
+    let state = reduce_context(&journal).map_err(|error| AuraError::Internal {
+        message: format!("context reduction failed: {error}"),
+        source: Some(std::sync::Arc::new(error)),
+    })?;
+    state
+        .channel_epochs
+        .get(&channel)
+        .filter(|state| {
+            state
+                .canonical_checkpoint
+                .as_ref()
+                .is_some_and(|checkpoint| {
+                    checkpoint.context == context
+                        && checkpoint.channel == channel
+                        && checkpoint.chan_epoch <= state.chan_epoch
+                })
+        })
+        .cloned()
+        .ok_or_else(|| AuraError::NotFound {
+            message: "channel state not found".to_owned(),
+            source: Some(std::sync::Arc::new(ChannelStateUnavailable {
+                context,
+                channel,
+            })),
+        })
+}
+
+/// Observed staging state, including policies/bootstrap/transitions before a checkpoint.
+/// This read does not establish authoritative channel materialization.
+pub async fn get_reduced_channel_state<A: AmpJournalEffects>(
+    effects: &A,
+    context: ContextId,
+    channel: ChannelId,
+) -> Result<ChannelEpochState> {
+    let journal = effects.fetch_context_journal(context).await?;
+    let state = reduce_context(&journal).map_err(|error| AuraError::Internal {
+        message: format!("context reduction failed: {error}"),
+        source: Some(std::sync::Arc::new(error)),
+    })?;
     state
         .channel_epochs
         .get(&channel)
         .cloned()
-        .ok_or_else(|| AuraError::not_found("channel state not found"))
+        .ok_or_else(|| AuraError::not_found("channel has no reduced AMP state"))
 }
 
 /// Reduce the current AMP channel participants for a `(context, channel)` pair.
@@ -143,6 +223,7 @@ pub async fn list_channel_participants<A: AmpJournalEffects>(
     context: ContextId,
     channel: ChannelId,
 ) -> Result<Vec<AuthorityId>> {
+    let _canonical = get_channel_state(effects, context, channel).await?;
     let journal = effects.fetch_context_journal(context).await?;
     let mut participants = std::collections::BTreeSet::new();
 

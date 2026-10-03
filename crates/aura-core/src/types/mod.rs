@@ -13,6 +13,7 @@ pub mod identifiers;
 pub mod participants;
 pub mod relationships;
 pub mod scope;
+pub mod window;
 
 // Re-export all public types for convenience
 pub use authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};

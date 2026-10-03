@@ -32,8 +32,9 @@ use crate::ui_contract::{
 };
 use crate::workflows::runtime::{
     converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
-    execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
-    warn_workflow_timeout, workflow_best_effort, workflow_retry_policy, workflow_timeout_budget,
+    execute_with_runtime_timeout_budget, require_runtime, scaled_workflow_duration,
+    timeout_runtime_call, warn_workflow_timeout, workflow_best_effort, workflow_retry_policy,
+    workflow_timeout_budget,
 };
 use crate::workflows::runtime_error_classification::{
     classify_amp_channel_error, classify_invitation_accept_error, AmpChannelErrorClass,
@@ -93,7 +94,10 @@ pub use create::{
     create_generic_contact_invitation_code_terminal_status, create_guardian_invitation,
     create_guardian_invitation_with_instance, create_guardian_invitation_with_terminal_status,
 };
-pub use device_enrollment::accept_device_enrollment_invitation;
+pub use device_enrollment::{
+    accept_device_enrollment_invitation, import_device_enrollment_with_terminal_status,
+    DeviceEnrollmentImportCompleted,
+};
 pub(in crate::workflows) use export::export_invitation_runtime;
 pub use export::{
     export_invitation, export_invitation_by_str, export_invitation_by_str_with_terminal_status,
@@ -225,37 +229,31 @@ async fn timeout_channel_invitation_stage_with_deadline<T>(
     let Some(runtime) = runtime else {
         return future.await;
     };
-    let requested = deadline
-        .map(|deadline| {
-            Duration::from_millis(deadline.timeout_ms())
-                .min(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS))
-        })
-        .unwrap_or(Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS));
-    let budget = match workflow_timeout_budget(runtime, requested).await {
-        Ok(budget) => budget,
-        Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-            warn_workflow_timeout("create_channel_invitation", stage, 0);
-            return Err(AuraError::from(
-                crate::workflows::error::WorkflowError::TimedOut {
-                    operation: "create_channel_invitation",
-                    stage,
-                    timeout_ms: 0,
-                },
-            ));
+    let requested = Duration::from_millis(CHANNEL_INVITATION_CREATE_TIMEOUT_MS);
+    let budget = match deadline.as_ref() {
+        Some(parent) => {
+            let now = runtime
+                .current_time_ms()
+                .await
+                .map_err(TimeoutBudgetError::time_source_failure)?;
+            parent.child_budget(
+                &aura_core::time::PhysicalTime::exact(now),
+                scaled_workflow_duration(requested)?,
+            )?
         }
-        Err(error) => return Err(error.into()),
+        None => workflow_timeout_budget(runtime, requested).await?,
     };
     match execute_with_runtime_timeout_budget(runtime, &budget, || future).await {
         Ok(value) => Ok(value),
-        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+        Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout("create_channel_invitation", stage, budget.timeout_ms());
-            Err(AuraError::from(
-                crate::workflows::error::WorkflowError::TimedOut {
-                    operation: "create_channel_invitation",
-                    stage,
-                    timeout_ms: budget.timeout_ms(),
-                },
-            ))
+            Err(AuraError::Internal {
+                message: format!(
+                    "create_channel_invitation timed out in stage {stage} after {}ms",
+                    budget.timeout_ms()
+                ),
+                source: Some(Arc::new(source)),
+            })
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
@@ -284,7 +282,7 @@ async fn publish_invitation_owner_status(
     timeout_channel_invitation_stage_with_deadline(
         None,
         stage,
-        deadline,
+        deadline.clone(),
         owner.publish_phase(phase),
     )
     .await
@@ -355,18 +353,6 @@ fn invitation_accept_reconcile_timeout_ms(
     }
 }
 
-async fn publish_invitation_operation_failure(
-    app_core: &Arc<RwLock<AppCore>>,
-    operation_id: OperationId,
-    instance_id: Option<OperationInstanceId>,
-    deadline: Option<TimeoutBudget>,
-    kind: SemanticOperationKind,
-    error: crate::ui_contract::SemanticOperationError,
-) -> Result<(), AuraError> {
-    let owner = SemanticWorkflowOwner::new(app_core, operation_id, instance_id, kind);
-    publish_invitation_owner_failure(&owner, deadline, error).await
-}
-
 async fn publish_invitation_owner_failure(
     owner: &SemanticWorkflowOwner,
     deadline: Option<TimeoutBudget>,
@@ -375,7 +361,7 @@ async fn publish_invitation_owner_failure(
     timeout_channel_invitation_stage_with_deadline(
         None,
         "publish_failure",
-        deadline,
+        deadline.clone(),
         owner.publish_failure(error),
     )
     .await
@@ -2313,23 +2299,20 @@ mod tests {
     #[test]
     fn test_channel_invitation_timeout_maps_to_typed_semantic_failure() {
         let channel_id = ChannelId::from_bytes([51u8; 32]);
-        let receiver_id = AuthorityId::new_from_entropy([52u8; 32]);
-        let error = create::ChannelInvitationBootstrapError::CreateTimedOut {
+        let error = create::ChannelInvitationBootstrapError::BudgetFailure {
             channel_id,
-            receiver_id,
-            timeout_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+            source: TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS,
+                observed_at_ms: CHANNEL_INVITATION_CREATE_TIMEOUT_MS + 1,
+            },
         };
         let semantic = error.semantic_error();
-        assert_eq!(semantic.domain, SemanticFailureDomain::Invitation);
+        assert_eq!(semantic.domain, SemanticFailureDomain::Ceremony);
         assert_eq!(semantic.code, SemanticFailureCode::OperationTimedOut);
         assert!(semantic
             .detail
             .as_deref()
             .is_some_and(|detail| detail.contains(&channel_id.to_string())));
-        assert!(semantic
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains(&receiver_id.to_string())));
         assert!(semantic.detail.as_deref().is_some_and(|detail| {
             detail.contains(&CHANNEL_INVITATION_CREATE_TIMEOUT_MS.to_string())
         }));

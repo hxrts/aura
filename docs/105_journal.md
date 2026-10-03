@@ -61,6 +61,13 @@ The `order` field provides an opaque, privacy-preserving total order for determi
 
 This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
 
+Bootstrap genesis completion requires an authenticated device-creation
+`AttestedOp` under the retained epoch-zero key, together with its durable
+operation bytes and tree index entry. An in-memory reducer/cache entry alone
+cannot prove commit after a failed storage write. A persisted completion record
+binds the exact creation-operation digest; matching device IDs without matching
+keys and signed creation evidence cannot establish bootstrap readiness.
+
 ## 2.2 Protocol-Level vs Domain-Level Relational Facts
 
 `RelationalFact` has only two variants:
@@ -209,7 +216,47 @@ Domain-specific facts use `Generic { context_id, binding_type, binding_data }` a
 
 Reduction verifies that relational facts reference valid authority commitments and applies them in dependency order.
 
+### Enrollment response evidence and recovery
+
+Enrollment acceptance requires the expected verifier selected by explicit setup
+transfer and retained for that ceremony. A participant count, a persisted
+terminal outcome, or a deserialized response does not establish acceptance
+provenance. Recording and activation require an opaque witness minted after
+verification of the exact response against that retained verifier.
+
+Durable recovery retains the original response and its subject, invitation,
+ceremony, device, pending epoch and setup binding. Recovery revalidates this
+material before issuing a new process-local witness. Missing, corrupt or legacy
+active records without verifier evidence fail closed. Observing a historical
+terminal result does not authorize a new activation.
+
+The first durable response decision is stable under duplicate, concurrent and
+contradictory delivery. Required persistence failure must prevent acceptance
+from becoming visible to activation owners. Runtime receipts and committed
+journal facts have distinct provenance; a receipt alone cannot establish a
+consensus-finalized membership transition.
+
+Enrollment VM control messages are authenticated against the independently
+selected initiator verifier retained with the signed manifest. Requests and
+confirmations bind the exact manifest digest and ceremony decision. Peer
+receipt keys or supplied digest strings cannot select that verifier. A response
+signer derives its physical identity and policy from locally retained setup
+possession and the sealed admitted manifest. Live response signing requires
+the current signer to match that original setup; retained evidence does not
+grant historical signing authority.
+
+An established confirmation requires the authoritative committed terminal
+decision. Pending state is not a timeout. Recovery revalidates original retained
+independent pins before minting process-local admission evidence.
+
 ### 6.1 AMP Channel Epoch Transition Reduction
+
+Reduced AMP epoch entries may contain staged policies, bootstrap metadata, or
+transition observations before creation. Canonical materialization requires
+the selected checkpoint for the exact context and channel. The reduced state
+retains checkpoint presence explicitly; an absent checkpoint cannot establish
+channel existence, readiness, or duplicate creation. Checkpoint evidence is
+observed journal content, not an authorization capability.
 
 AMP channel epoch transition reduction is fact-only and deterministic. It
 refines the existing A1/A2/A3 operation model for channel epoch state without
@@ -498,3 +545,19 @@ The Journal API provides methods for acknowledgment tracking: `record_ack` recor
 - [Maintenance](116_maintenance.md) for snapshot and garbage collection pipeline
 - [Relational Contexts](114_relational_contexts.md) for context journal structure
 - [Authority and Identity](102_authority_and_identity.md) for commitment tree operations
+
+### Required moderation evidence
+
+Required moderation queries reject corrupt ban/mute and reversal payloads, unsupported schemas, declared-codec mismatch, oversized inventories, and wrapper/payload context mismatch before returning a denial decision. Observational compatibility decoding is separate; decoding success alone is not journal commit/authentication provenance.
+
+### Canonical codec failure provenance
+
+Required canonical serialization retains the original concrete ciborium failure through the standard error source chain. Display diagnostics keep their existing prefixes; pure canonical-format validation failures have no invented codec source. Canonical bytes and strict decoding rules are unchanged. Native semantic classification remains SerializationFailure, including when a codec cause is carried through storage or checkpoint context. Serialized presentation diagnostics do not establish native failure provenance.
+
+### Enrollment baseline publication
+
+An enrollment baseline is installed only after independent manifest verification. Its storage owner retains the original local history digest before replacement and publishes complete operation content before the canonical ordered index. Failed index acknowledgment is an uncertain publication outcome and requires canonical reread. Replaying an already installed baseline preserves later local operations. An original-publication record is coordination evidence, not authorization.
+
+### Immutable local enrollment decision records
+
+Locally retained enrollment setup, pending-generation, registration, response, and issued-manifest records preserve the first canonical decision via atomic absent-only provider publication. A competing existing value must pass bounded exact binding validation; accepted-response and issued-manifest evidence must be cryptographically revalidated. Different valid signature bytes do not replace the original decision. These local records are recovery evidence, not consensus facts. Generic mutable secure-provider write access does not establish domain authorization or lifetime immutability.

@@ -8,9 +8,14 @@
 #![allow(missing_docs)]
 
 pub mod bridge_trait;
+pub mod error;
 pub mod offline;
 pub mod types;
 
+pub use aura_invitation::enrollment_setup::{EnrollmentIssuanceError, EnrollmentIssuanceStage};
 pub use bridge_trait::*;
+pub use error::{
+    AmpFailureReason, InvitationAcceptFailureReason, RuntimeBridgeError, RuntimeBridgeErrorKind,
+};
 pub use offline::*;
 pub use types::*;

@@ -110,6 +110,13 @@ pub enum StorageError {
         /// Details about the detected corruption
         details: String,
     },
+    /// A native backend failure keeps its concrete source through AuraError.
+    #[error("storage backend {operation} failed: {source}")]
+    BackendFailure {
+        operation: String,
+        #[source]
+        source: crate::AuraError,
+    },
 }
 
 /// Storage statistics

@@ -5,6 +5,63 @@ use super::*;
 const PENDING_ACCEPT_AUTHORITATIVE_ATTEMPTS: u32 = 60;
 const PENDING_ACCEPT_AUTHORITATIVE_BACKOFF_MS: u64 = 250;
 
+#[derive(Debug, thiserror::Error)]
+#[error("pending channel invitation is not yet materialized")]
+struct PendingInvitationNotMaterialized;
+
+#[cfg(test)]
+mod readiness_failure_tests {
+    use super::*;
+
+    #[test]
+    fn history_recovery_requires_actual_readiness_exhaustion() {
+        for error in [
+            TimeoutBudgetError::time_source_failure(
+                aura_core::effects::time::TimeError::ServiceUnavailable,
+            ),
+            TimeoutBudgetError::invalid_policy("invalid"),
+            TimeoutBudgetError::attempt_budget_exhausted(1, 1),
+        ] {
+            assert!(!pending_selection_can_read_history(
+                &RetryRunError::Timeout(error)
+            ));
+        }
+        let lookalike = RetryRunError::AttemptsExhausted {
+            attempts_used: 1,
+            last_error: AuraError::internal("pending channel invitation is not yet materialized"),
+        };
+        assert!(!pending_selection_can_read_history(&lookalike));
+        let readiness = RetryRunError::AttemptsExhausted {
+            attempts_used: 1,
+            last_error: AuraError::Internal {
+                message: "unrelated diagnostic".into(),
+                source: Some(Arc::new(PendingInvitationNotMaterialized)),
+            },
+        };
+        assert!(pending_selection_can_read_history(&readiness));
+        assert!(pending_selection_can_read_history(&RetryRunError::Timeout(
+            TimeoutBudgetError::deadline_exceeded(10, 10),
+        )));
+    }
+}
+
+fn pending_selection_can_read_history(error: &RetryRunError<AuraError>) -> bool {
+    match error {
+        RetryRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => true,
+        RetryRunError::AttemptsExhausted { last_error, .. } => {
+            let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(last_error);
+            while let Some(error) = cause {
+                if error.is::<PendingInvitationNotMaterialized>() {
+                    return true;
+                }
+                cause = error.source();
+            }
+            false
+        }
+        RetryRunError::Timeout(_) => false,
+    }
+}
+
 #[derive(Clone)]
 enum PendingChannelInvitationSelection {
     Runtime(InvitationInfo),
@@ -200,19 +257,25 @@ async fn pending_home_or_channel_invitation_for_accept(
             {
                 return Ok(selection);
             }
-            let _ = crate::workflows::system::refresh_account(&app_core).await;
+            refresh_authoritative_invitation_readiness(&app_core).await?;
+            // Account-wide settings/recovery enrichment is secondary to this
+            // invitation's required readiness and authoritative lookup.
+            let mut best_effort = workflow_best_effort();
+            let _ = best_effort
+                .capture(crate::workflows::system::refresh_account(&app_core))
+                .await;
+            let _ = best_effort.finish();
             converge_runtime(&runtime).await;
-            Err(AuraError::from(
-                crate::workflows::error::WorkflowError::Precondition(
-                    "pending channel invitation is not yet materialized",
-                ),
-            ))
+            Err(AuraError::Internal {
+                message: PendingInvitationNotMaterialized.to_string(),
+                source: Some(Arc::new(PendingInvitationNotMaterialized)),
+            })
         }
     })
     .await
     {
         Ok(selection) => Ok(Some(selection)),
-        Err(RetryRunError::Timeout(_)) => {
+        Err(error) if pending_selection_can_read_history(&error) => {
             #[cfg(feature = "signals")]
             {
                 let invitations = list_invitations(&app_core).await;
@@ -226,24 +289,7 @@ async fn pending_home_or_channel_invitation_for_accept(
                 Ok(None)
             }
         }
-        Err(RetryRunError::AttemptsExhausted { last_error, .. })
-            if last_error
-                .to_string()
-                .contains("pending channel invitation is not yet materialized") =>
-        {
-            #[cfg(feature = "signals")]
-            {
-                let invitations = list_invitations(&app_core).await;
-                Ok(
-                    select_accepted_home_or_channel_invitation_from_signal(&invitations)
-                        .map(PendingChannelInvitationSelection::Signal),
-                )
-            }
-            #[cfg(not(feature = "signals"))]
-            {
-                Ok(None)
-            }
-        }
+        Err(RetryRunError::Timeout(error)) => Err(AuraError::from(error)),
         Err(RetryRunError::AttemptsExhausted { last_error, .. }) => Err(last_error),
     }
 }
@@ -252,7 +298,20 @@ async fn select_pending_home_or_channel_invitation_once(
     app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
 ) -> Result<Option<PendingChannelInvitationSelection>, AuraError> {
-    match authoritative_pending_home_or_channel_invitation_for_accept(app_core, runtime).await {
+    select_pending_home_or_channel_invitation_from_query(
+        app_core,
+        authoritative_pending_home_or_channel_invitation_for_accept(app_core, runtime),
+    )
+    .await
+}
+
+async fn select_pending_home_or_channel_invitation_from_query(
+    app_core: &Arc<RwLock<AppCore>>,
+    query: impl std::future::Future<Output = Result<Option<InvitationInfo>, AuraError>>,
+) -> Result<Option<PendingChannelInvitationSelection>, AuraError> {
+    #[cfg(not(feature = "signals"))]
+    let _ = app_core;
+    match query.await {
         Ok(Some(invitation)) => Ok(Some(PendingChannelInvitationSelection::Runtime(invitation))),
         Ok(None) => {
             #[cfg(feature = "signals")]
@@ -268,23 +327,7 @@ async fn select_pending_home_or_channel_invitation_once(
                 Ok(None)
             }
         }
-        Err(error) => {
-            #[cfg(feature = "signals")]
-            {
-                let invitations = list_invitations(app_core).await;
-                if let Some(invitation) =
-                    select_pending_home_or_channel_invitation_from_signal(&invitations)
-                {
-                    return Ok(Some(PendingChannelInvitationSelection::Signal(invitation)));
-                }
-                if let Some(invitation) =
-                    select_accepted_home_or_channel_invitation_from_signal(&invitations)
-                {
-                    return Ok(Some(PendingChannelInvitationSelection::Signal(invitation)));
-                }
-            }
-            Err(error)
-        }
+        Err(error) => Err(error),
     }
 }
 
@@ -316,9 +359,7 @@ async fn accept_pending_channel_invitation_id_owned(
     let Some(invitation) = pending_home_or_channel_invitation_for_accept(app_core).await? else {
         return fail_pending_invitation_accept_owned(
             owner,
-            AcceptInvitationError::AcceptFailed {
-                detail: "No pending channel invitation found".to_string(),
-            },
+            AcceptInvitationError::PendingInvitationNotFound,
         )
         .await;
     };
@@ -474,9 +515,7 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         else {
             return fail_pending_invitation_accept_owned(
                 &owner,
-                AcceptInvitationError::AcceptFailed {
-                    detail: "No pending channel invitation found".to_string(),
-                },
+                AcceptInvitationError::PendingInvitationNotFound,
             )
             .await;
         };
@@ -484,9 +523,7 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
         if !pending_invitation.is_channel() {
             return fail_pending_invitation_accept_owned(
                 &owner,
-                AcceptInvitationError::AcceptFailed {
-                    detail: "pending invitation is not a channel invitation".to_string(),
-                },
+                AcceptInvitationError::PendingInvitationKindMismatch,
             )
             .await;
         }
@@ -512,6 +549,7 @@ pub async fn accept_pending_channel_invitation_with_binding_terminal_status(
                     &owner,
                     AcceptInvitationError::AcceptFailed {
                         detail: error.to_string(),
+                        source: Some(error),
                     },
                 )
                 .await;
@@ -545,6 +583,74 @@ mod tests {
     use super::*;
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+
+    #[tokio::test]
+    async fn authoritative_lookup_failure_survives_populated_pending_and_accepted_signals() {
+        use crate::views::invitations::{
+            Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
+        };
+        use std::error::Error;
+        let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        for status in [InvitationStatus::Pending, InvitationStatus::Accepted] {
+            let invitation = Invitation {
+                id: "cached-invitation".into(),
+                invitation_type: InvitationType::Chat,
+                status,
+                direction: InvitationDirection::Received,
+                from_id: AuthorityId::new_from_entropy([174; 32]),
+                from_name: "Alice".into(),
+                to_id: None,
+                to_name: None,
+                created_at: 1,
+                expires_at: None,
+                message: None,
+                home_id: Some(ChannelId::from_bytes([175; 32])),
+                home_name: Some("cached-channel".into()),
+            };
+            let state = if status == InvitationStatus::Pending {
+                InvitationsState::from_parts(vec![invitation], Vec::new(), Vec::new())
+            } else {
+                InvitationsState::from_parts(Vec::new(), Vec::new(), vec![invitation])
+            };
+            emit_signal(&app_core, &*INVITATIONS_SIGNAL, state, "invitations")
+                .await
+                .unwrap();
+            for kind in [
+                std::io::ErrorKind::PermissionDenied,
+                std::io::ErrorKind::ConnectionReset,
+                std::io::ErrorKind::InvalidData,
+            ] {
+                let failure = AuraError::Storage {
+                    message: "required lookup failed".into(),
+                    source: Some(Arc::new(std::io::Error::new(kind, "actual lookup cause"))),
+                };
+                let result = select_pending_home_or_channel_invitation_from_query(
+                    &app_core,
+                    std::future::ready(Err(failure)),
+                )
+                .await;
+                let error = match result {
+                    Err(error) => error,
+                    Ok(_) => panic!("cached history must not repair a required lookup failure"),
+                };
+                assert_eq!(
+                    error
+                        .source()
+                        .unwrap()
+                        .downcast_ref::<std::io::Error>()
+                        .unwrap()
+                        .kind(),
+                    kind
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn pending_selector_uses_accepted_signal_history_as_browser_recovery_fallback() {

@@ -216,8 +216,8 @@ pub(super) fn scope_channel_id(
 ) -> Result<ResolvedChannelId, AuraError> {
     match scope {
         CommandScope::Channel { channel_id, .. } => Ok(*channel_id),
-        _ => Err(AuraError::invalid(format!(
-            "missing channel scope for /{command}"
-        ))),
+        _ => Err(
+            super::execution_model::CommandExecutionFailure::MissingChannelScope { command }.into(),
+        ),
     }
 }

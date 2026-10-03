@@ -19,6 +19,15 @@ enum ExecutionBindingKey {
     Thread(ThreadId),
 }
 
+/// Native failures while retiring a task-bound choreography session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SessionEndError {
+    #[error("no choreography session bound to current task")]
+    MissingCurrentBinding,
+    #[error("missing choreography state for bound session {0}")]
+    MissingBoundSession(RuntimeChoreographySessionId),
+}
+
 /// Runtime choreography session identity bound to one active protocol execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuntimeChoreographySessionId(Uuid);
@@ -349,20 +358,30 @@ impl ChoreographyState {
     }
 
     /// End the current task-bound session and clean up all session bindings.
-    pub fn end_session(&mut self, now_ms: u64) -> Result<RuntimeChoreographySessionId, String> {
+    pub fn end_session(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<RuntimeChoreographySessionId, SessionEndError> {
+        self.end_session_observed(Some(now_ms))
+    }
+
+    /// Retire resources even when required clock evidence is unavailable.
+    pub(crate) fn end_session_observed(
+        &mut self,
+        now_ms: Option<u64>,
+    ) -> Result<RuntimeChoreographySessionId, SessionEndError> {
         let task_id = Self::current_binding_key();
         let session_id = self
             .task_bindings
             .remove(&task_id)
-            .ok_or_else(|| "no choreography session bound to current task".to_string())?;
+            .ok_or(SessionEndError::MissingCurrentBinding)?;
 
         let Some(mut session) = self.sessions.remove(&session_id) else {
-            return Err(format!(
-                "missing choreography session state for bound session {session_id}"
-            ));
+            self.cancel_session(session_id);
+            return Err(SessionEndError::MissingBoundSession(session_id));
         };
 
-        if let Some(started) = session.started_at_ms {
+        if let (Some(started), Some(now_ms)) = (session.started_at_ms, now_ms) {
             session.metrics.total_duration_ms = now_ms.saturating_sub(started);
         }
         if let Some(notify) = self.session_inbox_notifiers.remove(&session_id) {

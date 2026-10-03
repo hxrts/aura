@@ -187,6 +187,27 @@ pub struct DeviceEnrollmentAccept {
     pub acceptor_id: AuthorityId,
     /// Acceptor signature over the device-enrollment acceptance transcript.
     pub signature: aura_core::threshold::ThresholdSignature,
+    /// Digest of the actual independently admitted signed enrollment manifest.
+    /// Legacy payloads decode but cannot authorize enrollment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<[u8; 32]>,
+}
+
+/// A response is accepted or refused under separate signing domains.
+/// The payload shape never proves either disposition without verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum DeviceEnrollmentResponse {
+    Accepted(DeviceEnrollmentAccept),
+    Refused(DeviceEnrollmentRefusal),
+}
+
+/// Refusal shares the same complete ceremony binding as acceptance, but its
+/// signature covers the dedicated refusal transcript and cannot count a device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceEnrollmentRefusal {
+    pub binding: DeviceEnrollmentAccept,
 }
 
 /// Device enrollment confirmation (finalizes the enrollment).
@@ -200,6 +221,74 @@ pub struct DeviceEnrollmentConfirm {
     pub established: bool,
     /// Resulting epoch after enrollment (if successful)
     pub new_epoch: Option<u64>,
+}
+
+/// A received enrollment message does not establish its expected postcondition.
+/// These checks bind message contents; authentication is required separately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DeviceEnrollmentMessageError {
+    /// The message belongs to another invitation.
+    #[error("device enrollment invitation mismatch")]
+    InvitationMismatch,
+    /// The request modifies another authority.
+    #[error("device enrollment subject authority mismatch")]
+    SubjectMismatch,
+    /// The message belongs to another ceremony.
+    #[error("device enrollment ceremony mismatch")]
+    CeremonyMismatch,
+    /// The request enrolls another device.
+    #[error("device enrollment device mismatch")]
+    DeviceMismatch,
+    /// The message carries another or missing epoch.
+    #[error("device enrollment epoch mismatch")]
+    EpochMismatch,
+    /// The principal did not establish enrollment.
+    #[error("device enrollment was not established")]
+    NotEstablished,
+}
+
+impl DeviceEnrollmentRequest {
+    /// Require the request to match the invitation-owned expected request.
+    pub fn validate_against(&self, expected: &Self) -> Result<(), DeviceEnrollmentMessageError> {
+        if self.invitation_id != expected.invitation_id {
+            return Err(DeviceEnrollmentMessageError::InvitationMismatch);
+        }
+        if self.subject_authority != expected.subject_authority {
+            return Err(DeviceEnrollmentMessageError::SubjectMismatch);
+        }
+        if self.ceremony_id != expected.ceremony_id {
+            return Err(DeviceEnrollmentMessageError::CeremonyMismatch);
+        }
+        if self.device_id != expected.device_id {
+            return Err(DeviceEnrollmentMessageError::DeviceMismatch);
+        }
+        if self.pending_epoch != expected.pending_epoch {
+            return Err(DeviceEnrollmentMessageError::EpochMismatch);
+        }
+        Ok(())
+    }
+}
+
+impl DeviceEnrollmentConfirm {
+    /// Require successful confirmation of the exact matched request.
+    pub fn validate_against(
+        &self,
+        request: &DeviceEnrollmentRequest,
+    ) -> Result<(), DeviceEnrollmentMessageError> {
+        if self.invitation_id != request.invitation_id {
+            return Err(DeviceEnrollmentMessageError::InvitationMismatch);
+        }
+        if self.ceremony_id != request.ceremony_id {
+            return Err(DeviceEnrollmentMessageError::CeremonyMismatch);
+        }
+        if !self.established {
+            return Err(DeviceEnrollmentMessageError::NotEstablished);
+        }
+        if self.new_epoch != Some(request.pending_epoch) {
+            return Err(DeviceEnrollmentMessageError::EpochMismatch);
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -428,6 +517,105 @@ mod tests {
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
+    }
+
+    #[test]
+    fn device_enrollment_messages_bind_every_invitation_dimension() {
+        use DeviceEnrollmentMessageError::*;
+        let request = DeviceEnrollmentRequest {
+            invitation_id: InvitationId::new("enrollment-message-binding"),
+            subject_authority: test_authority(),
+            ceremony_id: CeremonyId::new("enrollment-message-ceremony"),
+            pending_epoch: 7,
+            device_id: DeviceId::new_from_entropy([2; 32]),
+        };
+        assert_eq!(request.validate_against(&request), Ok(()));
+        for (changed, error) in [
+            (
+                DeviceEnrollmentRequest {
+                    invitation_id: InvitationId::new("other"),
+                    ..request.clone()
+                },
+                InvitationMismatch,
+            ),
+            (
+                DeviceEnrollmentRequest {
+                    subject_authority: AuthorityId::new_from_entropy([3; 32]),
+                    ..request.clone()
+                },
+                SubjectMismatch,
+            ),
+            (
+                DeviceEnrollmentRequest {
+                    ceremony_id: CeremonyId::new("other"),
+                    ..request.clone()
+                },
+                CeremonyMismatch,
+            ),
+            (
+                DeviceEnrollmentRequest {
+                    device_id: DeviceId::new_from_entropy([4; 32]),
+                    ..request.clone()
+                },
+                DeviceMismatch,
+            ),
+            (
+                DeviceEnrollmentRequest {
+                    pending_epoch: 8,
+                    ..request.clone()
+                },
+                EpochMismatch,
+            ),
+        ] {
+            assert_eq!(changed.validate_against(&request), Err(error));
+        }
+
+        let confirmation = DeviceEnrollmentConfirm {
+            invitation_id: request.invitation_id.clone(),
+            ceremony_id: request.ceremony_id.clone(),
+            established: true,
+            new_epoch: Some(request.pending_epoch),
+        };
+        assert_eq!(confirmation.validate_against(&request), Ok(()));
+        for (changed, error) in [
+            (
+                DeviceEnrollmentConfirm {
+                    invitation_id: InvitationId::new("other"),
+                    ..confirmation.clone()
+                },
+                InvitationMismatch,
+            ),
+            (
+                DeviceEnrollmentConfirm {
+                    ceremony_id: CeremonyId::new("other"),
+                    ..confirmation.clone()
+                },
+                CeremonyMismatch,
+            ),
+            (
+                DeviceEnrollmentConfirm {
+                    established: false,
+                    ..confirmation.clone()
+                },
+                NotEstablished,
+            ),
+            (
+                DeviceEnrollmentConfirm {
+                    new_epoch: None,
+                    ..confirmation.clone()
+                },
+                EpochMismatch,
+            ),
+            (
+                DeviceEnrollmentConfirm {
+                    new_epoch: Some(8),
+                    ..confirmation
+                },
+                EpochMismatch,
+            ),
+        ] {
+            assert_eq!(changed.validate_against(&request), Err(error));
+        }
     }
 
     #[test]

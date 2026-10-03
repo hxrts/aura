@@ -22,10 +22,10 @@ mod terminal;
 use consistency::consistency_for_resolved;
 pub use execute::execute_planned;
 pub use execution_model::{
-    CommandCompletionOutcome, CommandConsistencySpec, CommandExecutionResult,
-    CommandTerminalClassification, CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
-    ConsistencyDegradedReason, ConsistencyRequirement, ConsistencyWitness, PlannedCommand,
-    COMMAND_CONSISTENCY_TABLE,
+    CommandCompletionOutcome, CommandConsistencySpec, CommandExecutionFailure,
+    CommandExecutionResult, CommandTerminalClassification, CommandTerminalOutcomeStatus,
+    CommandTerminalReasonCode, ConsistencyDegradedReason, ConsistencyRequirement,
+    ConsistencyWitness, InvalidCommandPlanFamily, PlannedCommand, COMMAND_CONSISTENCY_TABLE,
 };
 pub use parse::ParsedCommand;
 pub use plan::{
@@ -998,18 +998,38 @@ mod tests {
 
     #[test]
     fn classify_terminal_execution_error_maps_unknown_precondition_to_not_found() {
-        let classification = classify_terminal_execution_error(&AuraError::invalid(
-            "precondition failed: unknown channel target: channel-123",
+        let error = AuraError::from(CommandExecutionFailure::Precondition(
+            CommandResolverError::UnknownTarget {
+                target: ResolveTarget::Channel,
+                input: "channel-123".into(),
+            },
         ));
+        let classification = classify_terminal_execution_error(&error);
+        assert_eq!(
+            classify_terminal_execution_error(&AuraError::invalid(
+                "precondition failed: unknown channel target: channel-123"
+            ))
+            .reason,
+            CommandTerminalReasonCode::InvalidArgument
+        );
 
         assert_eq!(classification.status, CommandTerminalOutcomeStatus::Invalid);
         assert_eq!(classification.reason, CommandTerminalReasonCode::NotFound);
     }
 
     #[test]
-    fn classify_terminal_execution_error_maps_permission_detail_without_terminal_string_parsing() {
-        let classification =
-            classify_terminal_execution_error(&AuraError::permission_denied("target is muted"));
+    fn classify_terminal_execution_error_requires_typed_moderation_denial() {
+        let error = AuraError::from(crate::workflows::moderation::ModerationDenial::Muted {
+            context: ContextId::new_from_entropy([211; 32]),
+            channel: ChannelId::from_bytes([212; 32]),
+            authority: AuthorityId::new_from_entropy([213; 32]),
+        });
+        let classification = classify_terminal_execution_error(&error);
+        assert_eq!(
+            classify_terminal_execution_error(&AuraError::permission_denied("target is muted"))
+                .reason,
+            CommandTerminalReasonCode::PermissionDenied
+        );
 
         assert_eq!(classification.status, CommandTerminalOutcomeStatus::Denied);
         assert_eq!(classification.reason, CommandTerminalReasonCode::Muted);

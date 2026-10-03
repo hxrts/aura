@@ -248,11 +248,12 @@ pub(in crate::app) fn modal_view(
             if let Some(state) = model.add_device_modal() {
                 match state.step {
                     AddDeviceWizardStep::Name => {
-                        details
-                            .push("Step 1 of 3: Name the device you want to invite.".to_string());
-                        details.push("This is the new device, not the current one.".to_string());
                         details.push(
-                            "Press Enter to generate an out-of-band enrollment code.".to_string(),
+                            "Step 1 of 3: Name the new device and paste its setup code."
+                                .to_string(),
+                        );
+                        details.push(
+                            "Export the setup code on that device, transfer it here, then press Enter.".to_string(),
                         );
                         if let Some(draft_name) =
                             state.draft_name().filter(|name| !name.trim().is_empty())
@@ -262,10 +263,24 @@ pub(in crate::app) fn modal_view(
                         inputs.push(ModalInputView {
                             label: "Device Name".to_string(),
                             field_id: FieldId::DeviceName,
-                            value: model.modal_text_value().unwrap_or_default(),
+                            value: state.name_input.clone(),
+                        });
+                        inputs.push(ModalInputView {
+                            label: "New Device Setup Code".to_string(),
+                            field_id: FieldId::DeviceSetupCode,
+                            value: state.setup_code_input.clone(),
                         });
                     }
                     AddDeviceWizardStep::ShareCode => {
+                        if let Some(transfer) = state.manifest_transfer.as_ref() {
+                            details.push(format!("Signed manifest: {}", transfer.manifest_code));
+                            details.push(format!(
+                                "Initiator verifier (transfer separately): {}",
+                                transfer.initiator_verifier_code
+                            ));
+                        } else {
+                            details.push("Authenticated manifest transfer unavailable".to_string());
+                        }
                         details.push(
                             "Step 2 of 3: Share this code out-of-band with that device."
                                 .to_string(),
@@ -308,12 +323,33 @@ pub(in crate::app) fn modal_view(
             }
         }
         ModalState::ImportDeviceEnrollmentCode => {
-            details.push("Import a device enrollment code and press Enter.".to_string());
-            inputs.push(ModalInputView {
-                label: "Enrollment Code".to_string(),
-                field_id: FieldId::DeviceImportCode,
-                value: model.modal_text_value().unwrap_or_default(),
-            });
+            details.push(
+                "Transfer the initiator verifier separately from the enrollment payload."
+                    .to_string(),
+            );
+            if let Some(crate::model::ActiveModal::ImportDeviceEnrollmentCode(state)) =
+                model.active_modal.as_ref()
+            {
+                for (label, field_id, value) in [
+                    ("Enrollment Code", FieldId::DeviceImportCode, &state.value),
+                    (
+                        "Signed Manifest",
+                        FieldId::DeviceImportManifest,
+                        &state.manifest_code,
+                    ),
+                    (
+                        "Initiator Verifier",
+                        FieldId::DeviceImportInitiatorVerifier,
+                        &state.initiator_verifier_code,
+                    ),
+                ] {
+                    inputs.push(ModalInputView {
+                        label: label.to_string(),
+                        field_id,
+                        value: value.clone(),
+                    });
+                }
+            }
         }
         ModalState::SelectDeviceToRemove => {
             details.push("Select the device to remove.".to_string());
@@ -621,6 +657,24 @@ mod tests {
     use super::*;
     use crate::model::CreateInvitationModalState;
     use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot};
+
+    #[test]
+    fn enrollment_modal_renders_separate_name_and_setup_code_inputs() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.active_modal = Some(ActiveModal::AddDevice(crate::model::AddDeviceModalState {
+            name_input: "Laptop".to_owned(),
+            setup_code_input: "transferred-request".to_owned(),
+            active_field: FieldId::DeviceSetupCode,
+            ..crate::model::AddDeviceModalState::default()
+        }));
+        let modal = modal_view(&model, &ChatRuntimeView::default()).unwrap();
+        assert_eq!(modal.inputs.len(), 2);
+        assert_eq!(modal.inputs[0].field_id, FieldId::DeviceName);
+        assert_eq!(modal.inputs[0].value, "Laptop");
+        assert_eq!(modal.inputs[1].field_id, FieldId::DeviceSetupCode);
+        assert_eq!(modal.inputs[1].value, "transferred-request");
+        assert!(model.add_device_modal().unwrap().enrollment_code.is_empty());
+    }
 
     #[test]
     fn enrollment_modal_needs_authoritative_completion_before_claiming_success() {

@@ -203,3 +203,21 @@ Choreography-level guard semantics and protocol-machine-level hardening are addi
 Aura uses choreographic programming to define global protocols. Projection produces local session types. Session types enforce structured communication. Handlers execute protocol steps using effect traits. Extension effects provide authorization, budgeting, and journal updates. Execution modes support testing, simulation, and production. Choreographies define distributed coordination for CRDT sync, FROST signing, and consensus.
 
 Not all multi-party operations need choreography. Operations within established cryptographic contexts use optimistic CRDT facts. Choreography is reserved for Category C operations where partial state would be dangerous.
+
+### Authenticated enrollment refusal
+
+The device-enrollment response carries either acceptance or refusal. Both are
+bound to the independently transferred setup signer, the exact invitation,
+manifest digest, ceremony, subject authority, and physical invitee device.
+Acceptance and refusal use distinct signature domains and decision values. A
+wire disposition is untrusted data; only the runtime verifier issues the opaque
+capability used to settle a response. Invalid or malformed responses neither
+advance the receive coroutine nor settle the ceremony.
+
+The issuer signs the terminal control only from its persisted terminal decision.
+A signed `Failed` control carries the exact invitation, ceremony, and failure
+reason. It is distinct from `Committed`: neither a verified failure nor its
+receipt authorizes key activation, profile adoption, or current membership.
+Required verification, clock, storage, and VM-close failures retain their native
+causes. A missing invitee during the initial request may be retried only from the
+actual transport cause, within the original enrollment window.

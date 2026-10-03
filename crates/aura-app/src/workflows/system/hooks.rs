@@ -50,17 +50,92 @@ pub(crate) enum HookInstallError {
         #[source]
         source: AuraError,
     },
+    #[error("required hook attachment failed: {source}")]
+    RequiredFailed {
+        #[source]
+        source: Arc<HookExecutionError>,
+    },
     #[cfg(test)]
     #[error("injected hook attachment failure at step {step}")]
     Injected { step: usize },
 }
 
-fn log_refresh_hook_error(refresh_name: &'static str, error: &AuraError) {
-    #[cfg(feature = "instrumented")]
-    tracing::warn!(refresh_name, error = %error, "system refresh hook pass failed");
+/// Required refresh operation that failed within an owned attachment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HookFailureStage {
+    /// Receiving the authoritative signal failed.
+    SignalReceive,
+    /// Refreshing required state failed.
+    Refresh,
+    /// The required refresh interval provider failed.
+    Interval,
+}
 
-    #[cfg(not(feature = "instrumented"))]
-    let _ = (refresh_name, error);
+/// First required failure retained by a runtime refresh attachment.
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("refresh hook {name} failed during {stage:?}: {source}")]
+pub struct HookExecutionError {
+    name: &'static str,
+    stage: HookFailureStage,
+    #[source]
+    source: AuraError,
+}
+impl HookExecutionError {
+    /// Name of the failed owned listener.
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+    /// Structural stage of the original failure.
+    pub fn stage(&self) -> HookFailureStage {
+        self.stage
+    }
+    /// Original native failure, independent of tracing configuration.
+    pub fn native_error(&self) -> &AuraError {
+        &self.source
+    }
+}
+
+struct HookHealth {
+    first_failure: async_lock::Mutex<Option<Arc<HookExecutionError>>>,
+    cancelled: AtomicBool,
+    abort: futures::future::AbortHandle,
+}
+impl HookHealth {
+    fn new() -> (Arc<Self>, HookCancellation) {
+        let (abort, registration) = futures::future::AbortHandle::new_pair();
+        let cancellation =
+            futures::future::Abortable::new(futures::future::pending::<()>(), registration)
+                .map(|_| ())
+                .boxed()
+                .shared();
+        (
+            Arc::new(Self {
+                first_failure: async_lock::Mutex::new(None),
+                cancelled: AtomicBool::new(false),
+                abort,
+            }),
+            cancellation,
+        )
+    }
+    async fn fail(
+        &self,
+        name: &'static str,
+        stage: HookFailureStage,
+        source: AuraError,
+    ) -> AuraError {
+        let error = Arc::new(HookExecutionError {
+            name,
+            stage,
+            source: source.clone(),
+        });
+        let mut first = self.first_failure.lock().await;
+        if first.is_none() {
+            *first = Some(error);
+        }
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.abort.abort();
+        source
+    }
 }
 
 async fn refresh_chat_projection_and_readiness(
@@ -179,23 +254,30 @@ async fn spawn_owned_signal_refresh<T>(
     app_core: Arc<RwLock<AppCore>>,
     refresh_name: &'static str,
     refresh: RefreshHook,
-    cancel: HookCancellation,
+    attachment: (HookCancellation, Arc<HookHealth>),
 ) -> Result<(), HookInstallError>
 where
     T: Clone + Send + Sync + 'static,
 {
+    let (cancel, health) = attachment;
     let (started_tx, started_rx) = oneshot::channel();
 
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+    spawn_cancellable_runtime_refresh_task(&spawner, refresh_name, async move {
         let _ = started_tx.send(());
         loop {
             let received = futures::select! {
                 _ = cancel.clone().fuse() => break,
                 received = stream.recv().fuse() => received,
             };
-            let Ok(_) = received else {
-                break;
-            };
+            if let Err(source) = received {
+                let source = AuraError::Internal {
+                    message: "required refresh signal failed".into(),
+                    source: Some(Arc::new(source)),
+                };
+                return Err(health
+                    .fail(refresh_name, HookFailureStage::SignalReceive, source)
+                    .await);
+            }
 
             // This task is the sole refresh owner. Updates received while the
             // refresh awaits remain in the bounded signal stream; after a lag,
@@ -205,10 +287,17 @@ where
                 outcome = refresh(app_core.clone()).fuse() => outcome,
             };
             if let Err(error) = outcome {
-                log_refresh_hook_error(refresh_name, &error);
+                return Err(health
+                    .fail(refresh_name, HookFailureStage::Refresh, error)
+                    .await);
             }
         }
-    });
+        Ok(())
+    })
+    .map_err(|source| HookInstallError::ListenerStart {
+        name: refresh_name,
+        source,
+    })?;
     crate::workflows::runtime::timeout_runtime_call(
         &runtime,
         "install_system_refresh_hooks",
@@ -235,10 +324,11 @@ async fn spawn_owned_enrollment_completion_refresh(
     runtime: Arc<dyn RuntimeBridge>,
     app_core: Arc<RwLock<AppCore>>,
     cancel: HookCancellation,
+    health: Arc<HookHealth>,
 ) -> Result<(), HookInstallError> {
     let (started_tx, started_rx) = oneshot::channel();
     let startup_runtime = runtime.clone();
-    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+    spawn_cancellable_runtime_refresh_task(&spawner, "device_enrollment_completion_hook", async move {
         let _ = started_tx.send(());
         loop {
             let result = futures::select! {
@@ -246,13 +336,18 @@ async fn spawn_owned_enrollment_completion_refresh(
                 result = crate::workflows::ceremonies::refresh_device_enrollment_completions(&app_core).fuse() => result,
             };
             if let Err(error) = result {
-                log_refresh_hook_error("device_enrollment_completion_hook", &error);
+                return Err(health.fail("device_enrollment_completion_hook", HookFailureStage::Refresh, error).await);
             }
-            if !await_enrollment_refresh_interval(&runtime, cancel.clone()).await {
-                break;
+            match await_enrollment_refresh_interval(&runtime, cancel.clone()).await {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(error) => {
+                    return Err(health.fail("device_enrollment_completion_hook", HookFailureStage::Interval, error).await);
+                }
             }
         }
-    });
+        Ok(())
+    }).map_err(|source| HookInstallError::ListenerStart { name: "device_enrollment_completion_hook", source })?;
     crate::workflows::runtime::timeout_runtime_call(
         &startup_runtime,
         "install_system_refresh_hooks",
@@ -277,41 +372,66 @@ async fn spawn_owned_enrollment_completion_refresh(
 async fn await_enrollment_refresh_interval(
     runtime: &Arc<dyn RuntimeBridge>,
     cancel: HookCancellation,
-) -> bool {
+) -> Result<bool, AuraError> {
     futures::select! {
-        _ = cancel.fuse() => false,
-        _ = runtime.wait_for_background_refresh(1_000).fuse() => true,
+        _ = cancel.fuse() => Ok(false),
+        result = runtime.wait_for_background_refresh(1_000).fuse() => result.map(|_| true).map_err(|error| crate::workflows::error::runtime_call("enrollment refresh interval", error).into()),
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_cancellable_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
+fn spawn_cancellable_runtime_refresh_task<F>(
+    spawner: &OwnedTaskSpawner,
+    name: &'static str,
+    fut: F,
+) -> Result<(), AuraError>
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = Result<(), AuraError>> + Send + 'static,
 {
-    spawner.spawn_cancellable(Box::pin(fut));
+    spawner.spawn_fallible_cancellable(name, Box::pin(fut))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_cancellable_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
+fn spawn_cancellable_runtime_refresh_task<F>(
+    spawner: &OwnedTaskSpawner,
+    name: &'static str,
+    fut: F,
+) -> Result<(), AuraError>
 where
-    F: Future<Output = ()> + 'static,
+    F: Future<Output = Result<(), AuraError>> + 'static,
 {
-    spawner.spawn_local_cancellable(Box::pin(fut));
+    spawner.spawn_local_fallible_cancellable(name, Box::pin(fut))
 }
 
 /// Owns all refresh subscriptions for one runtime generation.
 pub(crate) struct HookGroup {
-    cancel: Option<oneshot::Sender<()>>,
-    cancelled: Arc<AtomicBool>,
+    health: Arc<HookHealth>,
     #[cfg(test)]
     cancellation: HookCancellation,
     shutdown: aura_core::OwnedShutdownToken,
 }
 
 impl HookGroup {
+    /// Serialize attachment-ready publication with the first required fault.
+    pub(crate) async fn publish_ready(
+        self,
+        publish: impl FnOnce(Self),
+    ) -> Result<(), Arc<HookExecutionError>> {
+        let health = self.health.clone();
+        let failure = health.first_failure.lock().await;
+        if let Some(source) = failure.as_ref() {
+            return Err(source.clone());
+        }
+        publish(self);
+        Ok(())
+    }
+
+    pub(crate) async fn failure(&self) -> Option<Arc<HookExecutionError>> {
+        self.health.first_failure.lock().await.clone()
+    }
+
     pub(crate) fn is_active(&self) -> bool {
-        !self.cancelled.load(Ordering::SeqCst) && !self.shutdown.is_cancelled()
+        !self.health.cancelled.load(Ordering::SeqCst) && !self.shutdown.is_cancelled()
     }
 
     #[cfg(test)]
@@ -322,10 +442,8 @@ impl HookGroup {
 
 impl Drop for HookGroup {
     fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        if let Some(cancel) = self.cancel.take() {
-            let _ = cancel.send(());
-        }
+        self.health.cancelled.store(true, Ordering::SeqCst);
+        self.health.abort.abort();
     }
 }
 
@@ -397,11 +515,9 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
     #[cfg(feature = "signals")]
     let recovery_projection = attempt.attach(&reactive, &*RECOVERY_SIGNAL).await?;
 
-    let (cancel, cancel_rx) = oneshot::channel();
-    let cancel_rx = cancel_rx.map(|_| ()).boxed().shared();
+    let (health, cancel_rx) = HookHealth::new();
     let group = HookGroup {
-        cancel: Some(cancel),
-        cancelled: Arc::new(AtomicBool::new(false)),
+        health: health.clone(),
         #[cfg(test)]
         cancellation: cancel_rx.clone(),
         shutdown: spawner.shutdown_token().clone(),
@@ -418,7 +534,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         Arc::new(|app_core| {
             Box::pin(async move { refresh_contacts_and_readiness(&app_core).await })
         }),
-        cancel_rx.clone(),
+        (cancel_rx.clone(), health.clone()),
     )
     .await?;
     spawn_owned_signal_refresh(
@@ -430,7 +546,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         Arc::new(|app_core| {
             Box::pin(async move { refresh_chat_projection_and_readiness(&app_core).await })
         }),
-        cancel_rx.clone(),
+        (cancel_rx.clone(), health.clone()),
     )
     .await?;
     #[cfg(feature = "signals")]
@@ -446,7 +562,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
                     refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
                 })
             }),
-            cancel_rx.clone(),
+            (cancel_rx.clone(), health.clone()),
         )
         .await?;
         spawn_owned_signal_refresh(
@@ -460,7 +576,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
                     refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
                 })
             }),
-            cancel_rx.clone(),
+            (cancel_rx.clone(), health.clone()),
         )
         .await?;
         spawn_owned_signal_refresh(
@@ -474,7 +590,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
                     refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
                 })
             }),
-            cancel_rx.clone(),
+            (cancel_rx.clone(), health.clone()),
         )
         .await?;
         spawn_owned_signal_refresh(
@@ -488,7 +604,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
                     refresh_authoritative_invitation_and_channel_readiness_hook(&app_core).await
                 })
             }),
-            cancel_rx.clone(),
+            (cancel_rx.clone(), health.clone()),
         )
         .await?;
         spawn_owned_signal_refresh(
@@ -505,7 +621,7 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
                     .await
                 })
             }),
-            cancel_rx,
+            (cancel_rx, health.clone()),
         )
         .await?;
 
@@ -536,9 +652,13 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         enrollment_runtime,
         Arc::clone(app_core),
         enrollment_cancel,
+        health.clone(),
     )
     .await?;
 
+    if let Some(source) = group.failure().await {
+        return Err(HookInstallError::RequiredFailed { source });
+    }
     Ok(group)
 }
 
@@ -562,7 +682,9 @@ mod tests {
         let mut wait = Box::pin(await_enrollment_refresh_interval(&runtime, cancel));
         assert!(wait.as_mut().now_or_never().is_none());
         cancel_tx.send(()).unwrap();
-        assert!(!wait.await);
+        assert!(!wait
+            .await
+            .expect("cancellation must park without a timer failure"));
     }
 
     #[tokio::test]
@@ -814,7 +936,7 @@ mod tests {
             app_core,
             "test_owned_refresh",
             refresh,
-            cancel,
+            (cancel, HookHealth::new().0),
         )
         .await
         .unwrap();
@@ -1011,5 +1133,107 @@ mod tests {
                 core.authoritative_semantic_facts(),
             );
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod required_hook_health_tests {
+    use super::*;
+    use aura_core::OwnedShutdownToken;
+    use aura_effects::reactive::CountingTestTaskSpawner;
+    use std::error::Error;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("required projection storage unavailable")]
+    struct ProjectionStorageFault;
+
+    #[tokio::test]
+    async fn actual_signal_owner_retains_required_fault_and_cancels_attachment() {
+        let spawner = Arc::new(CountingTestTaskSpawner::default());
+        let mut runtime = crate::runtime_bridge::OfflineRuntimeBridge::new(
+            aura_core::AuthorityId::new_from_entropy([173; 32]),
+        );
+        runtime.use_test_task_spawner(OwnedTaskSpawner::new(
+            spawner.clone(),
+            OwnedShutdownToken::detached(),
+        ));
+        let runtime = Arc::new(runtime);
+        let app = crate::testing::test_app_core_with_runtime(
+            crate::core::AppConfig::default(),
+            runtime.clone(),
+        );
+        let reactive = app.read().await.reactive().clone();
+        let signal = Signal::<u32>::new("test:required-hook-fault");
+        reactive
+            .graph()
+            .ensure_registered(signal.id().clone(), 0u32)
+            .await
+            .expect("register real signal");
+        let stream = reactive
+            .subscribe_attached(&signal)
+            .await
+            .expect("attach real signal");
+        let (health, cancellation) = HookHealth::new();
+        let group = HookGroup {
+            health: health.clone(),
+            cancellation: cancellation.clone(),
+            shutdown: OwnedShutdownToken::detached(),
+        };
+        let refresh: RefreshHook = Arc::new(|_| {
+            Box::pin(async {
+                Err(AuraError::Storage {
+                    message: "required projection read failed".into(),
+                    source: Some(Arc::new(ProjectionStorageFault)),
+                })
+            })
+        });
+        spawn_owned_signal_refresh(
+            stream,
+            runtime.task_spawner(),
+            runtime,
+            app,
+            "actual-required-hook",
+            refresh,
+            (cancellation.clone(), health),
+        )
+        .await
+        .expect("admit actual owned listener");
+        reactive
+            .graph()
+            .emit(signal.id(), 1u32)
+            .await
+            .expect("emit real signal");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if spawner.failure().await.is_some() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("required fault must reach retained supervisor");
+        let failure = group
+            .failure()
+            .await
+            .expect("attachment retains structural health");
+        assert_eq!(failure.stage(), HookFailureStage::Refresh);
+        assert_eq!(failure.name(), "actual-required-hook");
+        assert!(failure
+            .native_error()
+            .source()
+            .expect("provider source")
+            .is::<ProjectionStorageFault>());
+        assert!(!group.is_active());
+        let rejected = group
+            .publish_ready(|_| panic!("already-failed owner must not publish Ready"))
+            .await
+            .expect_err("retain first admission failure");
+        assert_eq!(rejected.stage(), HookFailureStage::Refresh);
+        cancellation.await;
+        assert!(matches!(
+            spawner.failure().await,
+            Some(AuraError::Storage { .. })
+        ));
     }
 }

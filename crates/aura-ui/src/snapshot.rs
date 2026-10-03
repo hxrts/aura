@@ -440,6 +440,8 @@ fn apply_modal_overlay(
                             *center = "Add Device — Step 1 of 3".to_string();
                         } else if row_idx == 1 {
                             *center = state.draft_name().unwrap_or_default().to_string();
+                        } else if row_idx == 2 {
+                            *center = format!("Setup code: {}", state.setup_code_input);
                         }
                     }
                     AddDeviceWizardStep::ShareCode => {

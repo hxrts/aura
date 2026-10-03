@@ -113,17 +113,22 @@ pub(crate) type GuardianSelectCallback = IdHandoffCallback;
 pub(crate) type UpdateNicknameSuggestionCallback = StringLocalOwnedCallback;
 pub(crate) type UpdateMfaCallback =
     Arc<dyn Fn(MfaPolicy, LocalTerminalOperationOwner) + Send + Sync>;
-/// Callback for adding a device: (nickname, invitee_authority_id, operation)
+/// Callback for adding a device: (nickname, setup_code, operation)
 #[doc(hidden)]
 #[allow(private_interfaces)]
-pub type AddDeviceCallback =
-    Arc<dyn Fn(String, AuthorityId, LocalTerminalOperationOwner) + Send + Sync>;
+pub type AddDeviceCallback = Arc<dyn Fn(String, String, LocalTerminalOperationOwner) + Send + Sync>;
 #[doc(hidden)]
 #[allow(private_interfaces)]
 pub type RemoveDeviceCallback = Arc<dyn Fn(DeviceId, CeremonySubmissionOwner) + Send + Sync>;
 pub(crate) type UpdateThresholdCallback = ThresholdLocalOwnedCallback;
-pub(crate) type ImportDeviceEnrollmentCallback =
-    Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;
+pub(crate) type ImportDeviceEnrollmentCallback = Arc<
+    dyn Fn(
+            String,
+            Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
+            WorkflowHandoffOperationOwner,
+        ) + Send
+        + Sync,
+>;
 
 // --- Invitations Screen ---
 pub type InvitationCallback = IdCallback;

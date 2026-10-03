@@ -13,8 +13,10 @@
 //! and that accepting the enrollment code on a second simulated device commits
 //! the ceremony and updates SETTINGS_SIGNAL device list.
 
+#[path = "../support/enrollment.rs"]
+mod enrollment_support;
+
 use async_lock::RwLock;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,8 +39,6 @@ struct TestEnv {
     app_core_a: Arc<RwLock<AppCore>>,
     _agent_a: Arc<aura_agent::AuraAgent>, // Kept alive to maintain agent state
     shared_transport: SharedTransport,
-    authority_id: aura_core::AuthorityId,
-    context_id: aura_core::ContextId,
     test_dir: std::path::PathBuf,
 }
 
@@ -101,8 +101,6 @@ async fn setup_test_env() -> TestEnv {
         app_core_a,
         _agent_a: agent_a,
         shared_transport,
-        authority_id,
-        context_id,
         test_dir,
     }
 }
@@ -149,47 +147,21 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
         .await
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
-    // Start the ceremony via the same path used by Settings → Add device.
+    // Export from the same real invitee runtime that imports and accepts later.
+    let new_device_id = DeviceId::new_from_entropy([2; 32]);
+    let (agent_b, setup_code) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("device-b"),
+        new_device_id,
+        2025,
+        env.shared_transport.clone(),
+    )
+    .await;
     let start = env
         .ctx_a
-        .start_device_enrollment(
-            "Laptop",
-            aura_core::AuthorityId::new_from_entropy([2u8; 32]),
-        )
+        .start_device_enrollment("Laptop", setup_code)
         .await
         .expect("start_device_enrollment should succeed");
-
-    // Build the invited device agent using the device_id from the ceremony start.
-    let new_device_id = DeviceId::from_str(&start.device_id).expect("device_id should parse");
-    let seed_b = 2025u64;
-    let effect_ctx_b = EffectContext::new(
-        env.authority_id,
-        env.context_id,
-        ExecutionMode::Simulation { seed: seed_b },
-    );
-
-    let storage_base_path = env.test_dir.join("device-b");
-    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-b storage dir");
-    let agent_config_b = AgentConfig {
-        device_id: new_device_id,
-        storage: StorageConfig {
-            base_path: storage_base_path,
-            ..StorageConfig::default()
-        },
-        ..AgentConfig::default()
-    };
-
-    let agent_b = AgentBuilder::new()
-        .with_config(agent_config_b)
-        .with_authority(env.authority_id)
-        .build_simulation_async_with_shared_transport(
-            seed_b,
-            &effect_ctx_b,
-            env.shared_transport.clone(),
-        )
-        .await
-        .expect("Failed to build invited device agent");
-    let agent_b = Arc::new(agent_b);
+    assert_eq!(start.device_id, new_device_id.to_string());
 
     // Import and accept the enrollment code on the invited device.
     let runtime_b = agent_b.as_runtime_bridge();

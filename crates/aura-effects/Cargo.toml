@@ -95,3 +95,9 @@ wasm-bindgen = { workspace = true }
 web-time = "1"
 web-sys = { workspace = true, features = ["Window", "Storage", "Crypto", "SubtleCrypto", "CryptoKey", "AesGcmParams"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.4", features = ["fs", "process"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["process"] }

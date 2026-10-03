@@ -485,12 +485,7 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Char('a') => {
             if state.settings.section == SettingsSection::Devices {
                 // Open add device modal via queue
-                let mut modal_state = AddDeviceModalState::default();
-                // In demo mode, pre-fill Mobile's authority ID for device enrollment
-                if !state.settings.demo_mobile_authority_id.is_empty() {
-                    modal_state.invitee_authority_id =
-                        state.settings.demo_mobile_authority_id.clone();
-                }
+                let modal_state = AddDeviceModalState::default();
                 state
                     .modal_queue
                     .enqueue(QueuedModal::SettingsAddDevice(modal_state));

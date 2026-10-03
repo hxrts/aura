@@ -40,8 +40,9 @@ pub use aura_app::ui::contract::ScreenId;
 pub use modal::{
     AccessOverrideModalState, ActiveModal, AddDeviceModalState, AddDeviceWizardStep,
     CapabilityConfigModalState, CreateChannelDetailsField, CreateChannelModalState,
-    CreateChannelWizardStep, CreateInvitationModalState, EditChannelInfoModalState, ModalState,
-    SelectDeviceModalState, TextModalState, ThresholdWizardModalState, ThresholdWizardStep,
+    CreateChannelWizardStep, CreateInvitationModalState, EditChannelInfoModalState,
+    EnrollmentImportModalState, ModalState, SelectDeviceModalState, TextModalState,
+    ThresholdWizardModalState, ThresholdWizardStep,
 };
 pub use settings::{
     AccessOverrideLevel, CapabilityTier, SettingsSection, DEFAULT_CAPABILITY_FULL,
@@ -217,7 +218,6 @@ pub struct UiModel {
     pub input_buffer: String,
     pub modal_hint: String,
     pub active_modal: Option<ActiveModal>,
-    pub device_enrollment_counter: u64,
     pub selected_home: Option<SelectedHome>,
     pub neighborhood_mode: NeighborhoodMode,
     pub access_depth: AccessDepth,
@@ -307,7 +307,6 @@ impl UiModel {
             input_buffer: String::new(),
             modal_hint: String::new(),
             active_modal: None,
-            device_enrollment_counter: 0,
             selected_home: None,
             neighborhood_mode: NeighborhoodMode::Map,
             access_depth: AccessDepth::Limited,
@@ -1017,15 +1016,6 @@ impl UiModel {
             name: name.into(),
             invitee_authority_id,
         });
-    }
-
-    pub fn demo_device_invitee_authority_id(&self, device_name: &str) -> Option<AuthorityId> {
-        self.demo.device_shortcut.as_ref().and_then(|shortcut| {
-            shortcut
-                .name
-                .eq_ignore_ascii_case(device_name)
-                .then_some(shortcut.invitee_authority_id)
-        })
     }
 
     pub fn set_secondary_device_name(&mut self, value: Option<String>) {

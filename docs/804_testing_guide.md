@@ -1,5 +1,26 @@
 # Testing Guide
 
+For runtime tests that manually advance physical time, inject
+`aura_testkit::time::ManualPhysicalClock` before service assembly. Its sleeps wait
+for explicit clock advancement, so background cleanup loops cannot consume the
+ceremony lifetime by advancing time themselves. Retain the same provider across
+participants where the scenario requires one physical clock; restart tests must
+also retain original durable window evidence. Use real held ownership capabilities
+for persistent enrollment fixtures rather than constructing raw registration state.
+
+## AMP lifecycle replay
+
+`just ci-test` first runs `just ci-amp-lifecycle-trace`, which regenerates the
+seed-424242, 24-step AMP harness trace and compares it with
+`verification/quint/traces/amp_channel.itf.json`. The workspace test lane runs
+`amp_channel_itf::replay_amp_channel_lifecycle_trace` against real simulation
+agents. Missing artifacts and replay failures fail the test; they cannot skip
+execution. To regenerate the fixture, run:
+
+```sh
+QUINT_TRACE_MAIN=harness_amp_channel QUINT_TRACE_MAX_STEPS=24 scripts/verify/quint-trace.sh generate verification/quint/harness/amp_channel.qnt verification/quint/traces/amp_channel.itf.json
+```
+
 This guide covers how to write tests for Aura protocols using the testing infrastructure. It includes unit testing, integration testing, property-based testing, conformance testing, and runtime harness validation.
 
 For infrastructure details, see [Test Infrastructure Reference](118_testkit.md). For the deterministic shared-flow design rules, see [User Flow Harness](121_user_flow_harness.md).
@@ -95,6 +116,42 @@ state and failure domain/code in `ui_state` on both frontends. Exercise refusal,
 timeout, cancellation, duplicate terminal delivery, and restart with an
 authoritative ceremony result; local wizard completion and device counts are
 diagnostics only.
+
+The bounded `enrollment_host_injection_resumes_separate_role_owners` test runs
+the actual manifest on separate VM owners and reports scheduler/coroutine state
+on stalled progress. `device_enrollment_owned_sessions_exchange_request_accept_confirm`
+exercises device-addressed shared transport and repeats admission after terminal
+VM reaping to catch leaked runtime owners. The actual invitee handler test
+`device_enrollment_invitee_rejects_wrong_request_and_negative_confirmation`
+requires typed permanent failure before the human retry window. These tests
+cover transport, teardown and message binding; authenticated confirmation and
+cross-machine terminal parity still require their own end-to-end evidence.
+
+The `enrollment_setup` domain tests reject substituted identities, nonce,
+validity, epoch, package and signatures, along with proof-policy mismatches and
+oversized codes. Compile-fail doctests prevent constructing or deserializing
+possession evidence directly. Signing-owner tests check runtime device capture,
+exact retained code, serialized concurrent bootstrap, corrupt/partial bootstrap
+without key replacement, and missing wrapping keys without regeneration.
+Service recreation with shared effects tests verifier continuity at that scope;
+it does not prove native/browser process restart, explicit user transfer,
+request consumption, or authenticated ceremony completion.
+
+Signing lifecycle regressions additionally cover recovery after service-only
+rotation, immediate removal of stale local membership, pending-package overwrite
+rejection, stale commit and active rollback rejection. Retained-share tests must
+check a share from another group before activation and after recovery; requiring
+a whole quorum is not necessary to prove one local share matches its group.
+These checks do not replace genesis failure/restart or effects/service activation
+boundary coverage.
+
+Genesis readiness tests inject a corrupt tree index before materialization and
+require retry to use the original key without exposing a signing context early.
+They reject a wrong completion digest and a cached creation without its durable
+index, and allow legacy migration only with an authenticated existing creation.
+A missing active epoch after completion requires recovery, rather than defaulting
+to epoch zero. These service/checkpoint tests do not establish process-restart
+coverage or every native/browser storage failure boundary.
 
 Channel list item ids and selected-channel snapshot ids must stay keyed by canonical channel ids when the runtime projection already provides them. Harness and browser code should not round-trip through display labels on those paths. Diagnostic tool and query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen or DOM capture rather than authoritative semantic state. Onboarding must publish through the same semantic snapshot path as the rest of the UI.
 
@@ -240,6 +297,27 @@ submission for `remove_selected_device` must therefore fall back to the
 authoritative removable device from settings state when the snapshot has no
 explicit list selection, and the canonical mixed-runtime anchor remains
 `scenario12-mixed-device-enrollment-removal-e2e.toml`.
+
+For enrollment, create the invitee's real provisional account before
+`prepare_device_enrollment_setup`. That variable action exports its signed setup
+code through the runtime semantic queue and stores the exact code for the
+initiator's `setup_code` input. Successful export establishes signing readiness;
+an unavailable or unready exporter fails explicitly. Authority staging files,
+derived browser device identifiers, and synthetic setup codes cannot replace
+this transfer. Keep setup codes out of diagnostic event payloads.
+Acceptance fixtures must retain the explicitly transferred verifier before
+checking the response. Sign the canonical response with the real prepared
+runtime, verify it against that retained key and policy, and record the sealed
+evidence. A participant-count fixture or a signature checked only against its
+own embedded key is negative coverage. Distinguish crypto/activation tests from
+VM delivery, authority adoption and process-restart tests in reported evidence.
+The semantic `ExportDeviceEnrollmentSetup` command returns the exact code in
+an immediate `DeviceEnrollmentSetup { setup_code }` response with no operation
+handle. Both shells call the bounded app export workflow; the native socket
+ingress and browser page queue are transport owners, while the runtime owns
+the signed retained request. An unavailable runtime or signing context fails
+explicitly. Contract roundtrip tests check the value and absent ceremony handle;
+they do not establish native/browser end-to-end enrollment completion.
 
 LAN bootstrap candidates are observable as `ListId::BootstrapCandidates` in the
 TUI `ui_state`: items are the candidate authority ids in Contacts display
@@ -903,3 +981,82 @@ For mixed-runtime debugging, inspect `runtime_events` before logs when a code ex
 - [Test Infrastructure Reference](118_testkit.md) for infrastructure details
 - [Simulation Guide](805_simulation_guide.md) for fault injection testing
 - [Verification and MBT Guide](806_verification_guide.md) for formal methods
+
+### Testing independent enrollment transfer
+
+Create the invitee's real provisional account and export its signed setup request. Transfer that request to the initiator's app pin workflow, issue enrollment, then transfer the actual resulting enrollment code, manifest code, and separately obtained initiator verifier code to the invitee. Both native and browser forms expose all three inputs. Shared semantic commands carry the same explicit values and hand off to the app's single import owner.
+
+Capture `device_enrollment_code_ready` as `device_code` to obtain `${device_code}`, `${device_code_manifest}`, and `${device_code_initiator_verifier}`. Supply the latter two using the scenario's `manifest_code` and `initiator_verifier_code` fields. Readiness capture requires the authoritative runtime payload; clipboard reads are not enrollment evidence. Do not fabricate a digest, key, physical device, or trusted admission witness in a positive fixture.
+
+Security integration coverage must exercise actual export → app setup pin → reserved issuance → independent manifest pin → immutable admission → signed response → issuer expected-manifest verification. Negative cases include missing or substituted external pins, wrong physical invitee, altered baseline/parent/node/package/roster/policy, legacy unbound records, and corrupt admission storage. Process restart must reverify retained evidence. Unsupported exact-node inventory, unclosed profile storage ownership, or unavailable threshold quorum signing cannot count as a completed enrollment test.
+
+### Enrollment observation durability regressions
+
+Drive the registered timeout owner before asserting that a restarted readout sees a timed-out terminal decision. Advancing a fake clock alone does not authorize an observed read to publish failure. Exercise secure checkpoint recovery after progress, rollback above the original start, missing state, injected storage failures before operation polling and after completion, and cancellation before checkpoint acknowledgment. Inspect standard error source chains for the original concrete storage error. The Rust-native enrollment boundary fixtures must reject raw/no-op executor aliases and weaker budget parameters while accepting the sealed owner.
+
+### Shared window laws
+
+Core `types::window` tests enforce inclusive start/exclusive end, empty generation allowance, checked endpoint overflow, exact validated serde restore and membership arithmetic near `u64::MAX`. Its two compile-fail examples prevent physical/receipt coordinate interchange. Physical policy tests additionally reject empty/sub-millisecond and invalid restored budgets while preserving the existing timeout snapshot fields. Existing clone/child/retry/restart rollback and required-checkpoint tests remain mandatory. The flow owner must exercise dual-window epoch closure and checked progression when adopting the shared primitive.
+
+### Native semantic failure codes
+
+Native failure projection coverage must assert the operation domain and stable shared code after JSON snapshot roundtrip, alongside the concrete Rust source chain before the foreign boundary. Test cryptographic and codec failures independently of display text, and preserve typed invitation rejection overrides only when actual rejection evidence exists.
+
+### Enrollment window phase faults
+
+Inject interruption after immutable allocation but before initial clock/live registration; recovery must retain the exact original start/deadline despite a later clock. Delete the clock after live admission and assert registration/execution fail without recreating it. Delete a legacy live marker together with the clock while retaining canonical registration and assert conservative rejection. Replace a live budget with the same interval and lease but a distinct observation owner and assert no checkpoint overwrite. Existing tests also require durable highwater/sticky-state monotonicity and allocation continuity through acknowledged writes.
+
+For enrollment receipt tests, use actual setup export, explicit app pin transfer,
+issuer-owned ceremony registration, cryptographically verified invitee acceptance
+and authoritative finalizer completion. Obtain the committed frame through the
+real owner signer and verify it under the retained independent initiator pin.
+Exercise immutable receipt publication, recovery signature verification, exact
+generation matching, missing/corrupt receipts, modified confirmation epochs,
+expired-but-originally-valid acknowledgements, later epoch rollback refusal and
+retirement. Raw statuses, manually completed tracker counts and fabricated
+manifest digests are not positive trust fixtures. Resource-level process/frame
+death tests complement, and do not replace, actual enrollment/profile restart
+and cross-frontend user-flow tests.
+
+### Enrollment task source continuity
+
+Persistent profile fixtures allocate a fresh OS temporary directory for each test participant. Process-local counters alone repeat across test binaries and can reuse immutable admissions or secure keys. A restart case reuses its captured original profile path intentionally; unrelated participants and later test runs receive new paths. This applies to simulation effect factories as well as runtime builders.
+
+Exercise an actual registered-window admission rejection through the required enrollment initiator failure settlement path and the fallible one-shot supervisor. Assert the original concrete `AgentError` is reachable from both retained health failure and drain error, and any failed terminal settlement retains its own native cause. Do not replace real window admission with a fabricated error or synthetic successful task.
+
+Required enhanced-time scheduling propagates actual provider query and sleep failures. A failed timer does not constitute deadline expiration or successful wake-up. Native source traversal retains the concrete time-effect error through runtime scheduling and effect-system forwarding.
+
+Sync command service ownership requires source-preserving timer, shutdown-signal and runtime supervision outcomes. Every daemon run exit awaits service stop. Failed execution remains primary when stop also fails, with a separately retained typed cleanup cause. A failed timer or backward physical clock cannot publish a tick or successful shutdown. Native terminal diagnostics retain concrete sources; cloned source-bearing errors compare retained source identity rather than matching message text.
+
+### Enrollment import publication regressions
+
+The protocol tree tests inject failure before and after canonical index publication, reload the handler, and require a complete original or complete replacement history. Replay tests require preservation of later operations and reject an unrelated replacement. The actual two-runtime committed-confirmation fixture installs the independently admitted generation through the production import owner, verifies activation, and then checks that import replay preserves the adopted encrypted share and final configuration. Native encrypted-storage tests share a real profile lease/provider between independently initialized wrappers and preserve a malformed original master key. These tests do not establish the still-required frontend profile WAL, same-epoch revocation authorization, or quorum path.
+
+### VM send custody regressions
+
+Exercise the actual runtime bridge queue under an exclusive delivery lease.
+Require rejection of a second owner, retained FIFO order after a successful
+prefix and definitely-unsent failure, and enqueue behind the retained suffix.
+Cancel an awaited in-flight future and verify that the original frame remains
+with `DeliveryUnknown`, preventing automatic replay. Native flush failures must
+retain their concrete transport or configuration source and pending frame.
+Compile-fail coverage prevents cloning the lease and using a destructive drain
+API. Match typed variants; matching rendered diagnostics does not prove custody
+or retry authorization. The stateful test provider implements the same delivery
+contract instead of claiming success from a drained queue.
+
+### Required refresh supervision checks
+
+Exercise the actual signal subscription and refresh owner with a failing native provider, then assert the typed attachment failure, original concrete source, group cancellation, and retained supervisor failure. Required task admission tests cover native/local execution and rejection dropping the supplied unpolled future. Keep the required-owned-task compile-fail guard: a unit future must not satisfy the required task API. Runtime health remains failed until its owner replaces the failed runtime generation; app reattachment alone is not a health reset.
+
+### Enrollment first-decision provider tests
+
+Use a real runtime-exported setup and actual app transfer pin to test duplicate retained binding and contradictory generation rejection; verify original secure bytes remain unchanged. Pair owner tests with `aura-effects/tests/secure_immutable_publication.rs` actual process contention, asserting exactly one complete first publication. Provider lifetime protection must additionally prove generic mutable write cannot replace a previously immutable value; absence-only races do not establish that stronger property.
+
+### Held registration boundary checks
+
+Use an actual prepared unissued rotation reservation to reject another runtime's effects and a previous ceremony's authentic invitation/state. Assert structural native causes. Existing real issuance tests supply the positive owned path; rerun them after changes to roster or deadline checks. Keep the reservation type private-field and non-deserializable, and require it in the live registration signature. Raw registration snapshots alone must not satisfy that API.
+
+### Persistent allocation owner regression
+
+In the actual prepared unissued-rotation fixture, attempt generic tracker registration while the real generation reservation is held. Assert typed `HeldEnrollmentRegistrationError::RequiredOwner` and absence of the durable allocated record. Existing actual issuance fixtures exercise successful owned registration. Persistent enrollment clock tests must obtain the real held reservation; do not re-enable raw snapshot allocation or add a test-only authorization bypass to simplify those fixtures. Nonpersistent tracker state-model tests can keep generic registration because they cannot authorize production activation.

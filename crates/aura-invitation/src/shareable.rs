@@ -17,6 +17,7 @@ pub enum ShareableInvitationError {
     MissingSenderProof,
     InvalidSenderProof,
     MissingChannelContext,
+    MissingEnrollmentSetupBinding,
     Expired,
     VerificationFailed,
 }
@@ -36,6 +37,9 @@ impl std::fmt::Display for ShareableInvitationError {
             Self::InvalidSenderProof => write!(f, "invite code sender proof is invalid"),
             Self::MissingChannelContext => {
                 write!(f, "channel invitation missing authoritative context")
+            }
+            Self::MissingEnrollmentSetupBinding => {
+                write!(f, "legacy enrollment requires a new setup transfer")
             }
             Self::Expired => write!(f, "invite code expired"),
             Self::VerificationFailed => write!(f, "invite code sender proof verification failed"),
@@ -150,7 +154,21 @@ impl SecurityTranscript for ShareableInvitationTranscript<'_> {
 }
 
 impl ShareableInvitation {
-    pub const CURRENT_VERSION: u8 = 1;
+    /// Decoding a legacy code permits inspection; it does not authorize an
+    /// addressed enrollment with no device-issued setup nonce.
+    pub fn require_enrollment_setup_binding(&self) -> Result<(), ShareableInvitationError> {
+        if matches!(
+            &self.invitation_type,
+            InvitationType::DeviceEnrollment {
+                setup_binding: None,
+                ..
+            }
+        ) {
+            return Err(ShareableInvitationError::MissingEnrollmentSetupBinding);
+        }
+        Ok(())
+    }
+    pub const CURRENT_VERSION: u8 = 2;
     pub const PREFIX: &'static str = "aura";
     pub const MAX_JSON_BYTES: usize = aura_core::envelope::MAX_PAYLOAD_BYTES;
     pub const MAX_PAYLOAD_BASE64_CHARS: usize =
@@ -280,7 +298,7 @@ impl ShareableInvitation {
             .parse()
             .map_err(|_| ShareableInvitationError::InvalidFormat)?;
 
-        if version != Self::CURRENT_VERSION {
+        if version != 1 && version != Self::CURRENT_VERSION {
             return Err(ShareableInvitationError::UnsupportedVersion(version));
         }
 
@@ -313,6 +331,11 @@ impl ShareableInvitation {
                 ),
             };
         invitation.validate_size_limits()?;
+        if invitation.version != version {
+            return Err(ShareableInvitationError::UnsupportedVersion(
+                invitation.version,
+            ));
+        }
         validate_transport_metadata(&transport)?;
         #[cfg(not(any(test, feature = "test-support")))]
         if proof.is_none() {
@@ -554,6 +577,66 @@ impl From<&Invitation> for ShareableInvitation {
     }
 }
 
+#[cfg(test)]
+mod setup_binding_migration_tests {
+    use super::*;
+    use aura_core::effects::CryptoCoreEffects;
+    use aura_effects::crypto::RealCryptoHandler;
+
+    #[tokio::test]
+    async fn version_one_contact_sender_proof_remains_verifiable() {
+        let crypto = RealCryptoHandler::for_simulation_seed([129; 32]);
+        let (private, public) = crypto.ed25519_generate_keypair().await.unwrap();
+        let old = ShareableInvitation {
+            version: 1,
+            invitation_id: InvitationId::new("historical contact code"),
+            sender_id: AuthorityId::new_from_entropy([130; 32]),
+            context_id: Some(ContextId::new_from_entropy([131; 32])),
+            invitation_type: InvitationType::Contact {
+                nickname: Some("old contact".to_string()),
+            },
+            expires_at: Some(200),
+            message: None,
+        };
+        let transport = ShareableInvitationTransportMetadata::default();
+        let signature = aura_signature::sign_ed25519_transcript(
+            &crypto,
+            &old.signing_transcript_with_transport(&transport),
+            &private,
+        )
+        .await
+        .unwrap();
+        let code = old
+            .to_signed_code_with_transport(
+                ShareableInvitationSenderProof {
+                    scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+                    public_key: public,
+                    signature,
+                    sender_device_id: None,
+                    key_epoch: None,
+                },
+                transport,
+            )
+            .unwrap();
+        assert!(code.starts_with("aura:v1:"));
+        let validated = ValidatedImportedInvitation::verify_code(
+            &crypto,
+            &code,
+            AuthorityId::new_from_entropy([132; 32]),
+            ContextId::new_from_entropy([133; 32]),
+            150,
+        )
+        .await
+        .unwrap();
+        assert_eq!(validated.invitation().invitation_id, old.invitation_id);
+        assert_eq!(ShareableInvitation::CURRENT_VERSION, 2);
+        let mismatched = code.replacen("aura:v1:", "aura:v2:", 1);
+        assert!(
+            ShareableInvitation::from_code(&mismatched).is_err(),
+            "outer version cannot reinterpret a historical signed payload"
+        );
+    }
+}
 /// An imported invitation proven by the shareable-code verifier. Its fields
 /// are private so callers cannot turn a raw cached record into creation evidence.
 pub struct ValidatedImportedInvitation {
@@ -571,6 +654,7 @@ impl ValidatedImportedInvitation {
     ) -> Result<Self, ShareableInvitationError> {
         let (shareable, proof, transport) =
             ShareableInvitation::from_code_with_proof_and_transport(code)?;
+        shareable.require_enrollment_setup_binding()?;
         let proof = proof.ok_or(ShareableInvitationError::MissingSenderProof)?;
         // This checks code integrity against the key carried in the code.
         // Known-sender identity trust is resolved separately by the importer.

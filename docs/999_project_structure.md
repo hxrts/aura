@@ -1553,3 +1553,11 @@ This matrix provides a single cross-reference for contract names, owning crate d
 | `InvariantCompromisedNoncesExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt` |
 
 Use `just check-invariants` to validate system invariants across the workspace.
+
+### Ownership annotation changes
+
+The annotation ratchet inspects the attributes attached to current Rust function,
+impl-method and actor declarations. Signature-only changes preserve their existing
+declarations even when an attribute is unchanged diff context. A nearby attribute
+or an annotated namesake does not authorize an unannotated boundary. Explicit
+semantic wrapper declarations continue to identify their corresponding owner.

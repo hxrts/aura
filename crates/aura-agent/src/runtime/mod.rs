@@ -77,7 +77,9 @@ pub mod time_handler;
 
 // Re-export main types for convenience
 #[allow(unused_imports)] // Re-exported for public API
-pub use crate::task_registry::{TaskGroup, TaskSupervisionError, TaskSupervisor};
+pub use crate::task_registry::{
+    TaskAdmissionKind, TaskGroup, TaskSupervisionError, TaskSupervisor,
+};
 pub use aura_core::OperationSessionId;
 pub use builder::EffectSystemBuilder;
 #[allow(unused_imports)] // Re-exported for public API

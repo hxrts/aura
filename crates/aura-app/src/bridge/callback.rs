@@ -68,6 +68,34 @@ pub struct CallbackError {
     pub recoverable: bool,
 }
 
+/// Explicit terminal adapter retaining the existing foreign callback payload.
+impl From<crate::runtime_bridge::RuntimeBridgeError> for CallbackError {
+    fn from(error: crate::runtime_bridge::RuntimeBridgeError) -> Self {
+        use crate::runtime_bridge::RuntimeBridgeErrorKind as K;
+        let (code, recoverable) = match error.kind() {
+            K::Crypto => ("crypto_error", false),
+            K::Serialization => ("serialization_error", false),
+            K::Unauthorized => ("unauthorized", false),
+            K::Validation => ("validation_failed", true),
+            K::Journal => ("journal_error", false),
+            K::Internal => ("internal_error", false),
+            K::Reactive => ("reactive_failure", true),
+            K::ContextNotFound => ("context_not_found", false),
+            K::NotFound => ("not_found", false),
+            K::Network => ("network_error", true),
+            K::Storage => ("storage_error", false),
+            K::NoAgent => ("no_agent", false),
+            K::Service => ("service_error", true),
+            K::TimedOut => ("timed_out", true),
+        };
+        Self {
+            code: code.into(),
+            message: error.to_string(),
+            recoverable,
+        }
+    }
+}
+
 impl From<IntentError> for CallbackError {
     fn from(err: IntentError) -> Self {
         Self {
@@ -218,6 +246,18 @@ impl ObserverRegistry {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn native_runtime_callback_adapter_preserves_foreign_payload() {
+        let native = crate::runtime_bridge::RuntimeBridgeError::with_source(
+            IntentError::storage_error("Read journal failed"),
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        );
+        let foreign = CallbackError::from(native);
+        assert_eq!(foreign.code, "storage_error");
+        assert_eq!(foreign.message, "Storage error: Read journal failed");
+        assert!(!foreign.recoverable);
+    }
 
     struct PanicObserver;
 

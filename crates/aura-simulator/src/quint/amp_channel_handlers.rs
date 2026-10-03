@@ -3,13 +3,14 @@
 //! Drives real Aura agents (Bob, Alice, Carol) with shared transport wiring and
 //! maps Quint actions to AMP channel operations (create/invite/accept/join/send/recv/leave).
 
-use super::action_registry::{ActionBuilder, ActionRegistry, NoOpHandler};
+use super::action_registry::{ActionBuilder, ActionRegistry};
 use aura_agent::core::{default_context_id_for_authority, AgentBuilder, AgentConfig};
-use aura_agent::handlers::{InvitationServiceApi, InvitationStatus, InvitationType};
+use aura_agent::handlers::{InvitationStatus, InvitationType};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_amp::{amp_recv, get_channel_state, AmpJournalEffects};
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::random::RandomCoreEffects;
+use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::transport::TransportError;
 use aura_core::effects::{
     time::PhysicalTimeEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
@@ -23,6 +24,7 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId}
 use aura_core::{AuraError, Hash32, Result};
 use aura_journal::fact::ProtocolRelationalFact;
 use aura_journal::fact::{ChannelBootstrap, CommittedChannelEpochBump, RelationalFact};
+use aura_journal::DomainFact;
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -31,6 +33,25 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 const AMP_MESSAGE_CONTENT_TYPE: &str = "application/aura-amp";
+
+/// A bounded AMP scan borrows unrelated envelopes from their ingress owner.
+/// Restore them on success, failure, and cancellation of the scanning future.
+struct DeferredIngressEnvelopes<'a> {
+    effects: &'a aura_agent::AuraEffectSystem,
+    envelopes: Vec<TransportEnvelope>,
+}
+
+impl Drop for DeferredIngressEnvelopes<'_> {
+    fn drop(&mut self) {
+        for envelope in self.envelopes.drain(..) {
+            assert_eq!(
+                self.effects.requeue_envelope(envelope),
+                aura_agent::QueueEnvelopeOutcome::Queued,
+                "AMP scan failed to restore an envelope to its ingress owner",
+            );
+        }
+    }
+}
 
 /// AMP channel harness using real simulation agents.
 pub struct AmpChannelHarness {
@@ -121,11 +142,13 @@ impl AmpChannelHarness {
         effects: &Arc<aura_agent::AuraEffectSystem>,
         channel: ChannelId,
     ) -> Result<()> {
-        if get_channel_state(effects.as_ref(), self.context_id, channel)
-            .await
-            .is_ok()
-        {
-            return Ok(());
+        match get_channel_state(effects.as_ref(), self.context_id, channel).await {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if aura_amp::ChannelStateUnavailable::find(&error).is_some_and(|absence| {
+                    absence.context() == self.context_id && absence.channel() == channel
+                }) => {}
+            Err(error) => return Err(error),
         }
 
         effects
@@ -136,7 +159,10 @@ impl AmpChannelHarness {
                 topic: None,
             })
             .await
-            .map_err(|e| AuraError::invalid(format!("create channel failed: {e}")))?;
+            .map_err(|error| AuraError::Internal {
+                message: "create channel failed".into(),
+                source: Some(Arc::new(error)),
+            })?;
 
         Ok(())
     }
@@ -279,6 +305,10 @@ impl AmpChannelHarness {
     ) -> Result<()> {
         let effects = agent.runtime().effects();
 
+        let mut deferred = DeferredIngressEnvelopes {
+            effects: effects.as_ref(),
+            envelopes: Vec::new(),
+        };
         let mut attempts = 0usize;
         while attempts < 64 {
             attempts += 1;
@@ -308,6 +338,8 @@ impl AmpChannelHarness {
                             )));
                         }
                         return Ok(());
+                    } else {
+                        deferred.envelopes.push(envelope);
                     }
                 }
                 Err(TransportError::NoMessage) => break,
@@ -411,6 +443,44 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                             .await
                             .map_err(|e| AuraError::invalid(format!("join channel failed: {e}")))?;
 
+                        // The creation action owns both protocol checkpoint and
+                        // canonical chat identity. Invitations consume that
+                        // committed identity rather than reconstructing context
+                        // from the AMP id or an observed membership event.
+                        let created_at =
+                            effects
+                                .physical_time()
+                                .await
+                                .map_err(|error| AuraError::Internal {
+                                    message: "read channel creation time".into(),
+                                    source: Some(Arc::new(error)),
+                                })?;
+                        let creation = aura_chat::ChatFact::channel_created_ms(
+                            harness.context_id(),
+                            channel,
+                            cid,
+                            None,
+                            false,
+                            created_at.ts_ms,
+                            authority,
+                        )
+                        .to_generic();
+                        effects.commit_relational_facts(vec![creation]).await?;
+
+                        // This closed three-actor lifecycle owns its complete
+                        // invitation roster before issuing any bootstrap code.
+                        let recipients = harness
+                            .authorities
+                            .values()
+                            .copied()
+                            .filter(|recipient| *recipient != authority)
+                            .collect::<BTreeSet<_>>()
+                            .into_iter()
+                            .collect();
+                        harness
+                            .ensure_bootstrap(&effects, authority, channel, recipients)
+                            .await?;
+
                         Ok(success_result(result_state, vec![]))
                     })
                 }
@@ -475,9 +545,12 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                             .await
                             .map_err(|e| AuraError::internal(format!("invite failed: {e}")))?;
 
-                        let code =
-                            InvitationServiceApi::export_invitation(&invitation).map_err(|e| {
-                                AuraError::internal(format!("invite export failed: {e}"))
+                        let code = invitation_service
+                            .export_invitation_with_sender_hint(&invitation)
+                            .await
+                            .map_err(|error| AuraError::Internal {
+                                message: "export signed channel invitation".into(),
+                                source: Some(Arc::new(error)),
                             })?;
                         let key = (normalize_name(&receiver), channel.to_string());
                         {
@@ -691,7 +764,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                 "required": []
             }))
             .execute_fn({
-                let harness = harness;
+                let harness = harness.clone();
                 move |params, _, state| {
                     let result_state = state.clone();
                     let leaver = param_string(params, &["leaver", "actor", "member"]);
@@ -722,13 +795,17 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
 
                         for agent in [bob.clone(), alice.clone()] {
                             let effects = agent.runtime().effects();
-                            let _ = effects
+                            effects
                                 .leave_channel(ChannelLeaveParams {
                                     context: harness.context_id(),
                                     channel,
                                     participant: leaver_id,
                                 })
-                                .await;
+                                .await
+                                .map_err(|error| AuraError::Internal {
+                                    message: "replicate channel leave".into(),
+                                    source: Some(Arc::new(error)),
+                                })?;
                         }
 
                         let channel_state = get_channel_state(
@@ -752,8 +829,44 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
     );
 
     registry.register(
-        NoOpHandler::new("assertInvariant")
-            .with_description("No-op assertion marker emitted by Quint AMP harness"),
+        ActionBuilder::new("assertInvariant")
+            .description("Check runtime epoch and membership after the channel leave")
+            .execute_fn(move |params, _, state| {
+                let result_state = state.clone();
+                let cid = param_string(params, &["cid", "channel"]);
+                let harness = harness.clone();
+                Box::pin(async move {
+                    let cid = cid.ok_or_else(|| AuraError::invalid("missing channel id"))?;
+                    let channel = channel_id_from_input(&cid);
+                    let expected = BTreeSet::from([
+                        harness.authority_for("bob")?,
+                        harness.authority_for("alice")?,
+                    ]);
+                    for name in ["bob", "alice"] {
+                        let agent = harness.agent_for(name)?;
+                        let effects = agent.runtime().effects();
+                        let current = get_channel_state(
+                            effects.as_ref(), harness.context_id(), channel,
+                        ).await?;
+                        if current.chan_epoch != 1 {
+                            return Err(AuraError::invalid(format!(
+                                "{name} has epoch {}, expected 1 after Carol leaves",
+                                current.chan_epoch,
+                            )));
+                        }
+                        let participants = aura_amp::list_channel_participants(
+                            effects.as_ref(), harness.context_id(), channel,
+                        ).await?.into_iter().collect::<BTreeSet<_>>();
+                        if participants != expected {
+                            return Err(AuraError::invalid(format!(
+                                "{name} has divergent canonical channel membership: {participants:?}",
+                            )));
+                        }
+                    }
+                    Ok(success_result(result_state, vec![]))
+                })
+            })
+            .build(),
     );
 
     registry

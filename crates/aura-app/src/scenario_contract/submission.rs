@@ -76,6 +76,7 @@ pub enum SubmissionState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubmissionValueContract {
+    DeviceEnrollmentSetup,
     None,
     ContactInvitationCode,
     AuthoritativeChannelBinding,
@@ -125,6 +126,9 @@ impl<T> SubmittedAction<T> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SemanticCommandValue {
+    DeviceEnrollmentSetup {
+        setup_code: String,
+    },
     None,
     ContactInvitationCode {
         code: String,
@@ -176,5 +180,30 @@ impl SemanticCommandResponse {
             channel_id,
             context_id,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_export_is_an_immediate_typed_value_without_ceremony_ownership() {
+        let request = SemanticCommandRequest::new(IntentAction::ExportDeviceEnrollmentSetup);
+        assert_eq!(request.kind(), IntentKind::ExportDeviceEnrollmentSetup);
+        assert_eq!(
+            request.contract.submission,
+            SubmissionContract::Immediate {
+                value: SubmissionValueContract::DeviceEnrollmentSetup,
+            }
+        );
+        let response =
+            SemanticCommandResponse::accepted(SemanticCommandValue::DeviceEnrollmentSetup {
+                setup_code: "opaque retained code".to_string(),
+            });
+        let encoded = serde_json::to_vec(&response).unwrap();
+        let decoded: SemanticCommandResponse = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(decoded, response);
+        assert!(decoded.handle.ui_operation.is_none());
     }
 }

@@ -19,8 +19,9 @@ pub(crate) type AmpChannelParticipants =
 pub(crate) type ModerationStatuses =
     Arc<Mutex<HashMap<(ContextId, ChannelId, AuthorityId), AuthoritativeModerationStatus>>>;
 #[cfg(test)]
-pub(crate) type OfflineAcceptInvitationResult =
-    Arc<Mutex<Option<Result<InvitationMutationOutcome, IntentError>>>>;
+pub(crate) type OfflineAcceptInvitationResult = Arc<
+    Mutex<Option<Result<InvitationMutationOutcome, crate::runtime_bridge::RuntimeBridgeError>>>,
+>;
 #[cfg(test)]
 pub(crate) type OfflineProcessCeremonyResult =
     Arc<Mutex<Option<Result<CeremonyProcessingOutcome, IntentError>>>>;

@@ -182,6 +182,7 @@ impl UiController {
         &self,
         name: &str,
         enrollment_code: &str,
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     ) {
         let mut model = write_model(&self.model);
         model.modal_hint = "Add Device — Step 2 of 3".to_string();
@@ -189,10 +190,12 @@ impl UiController {
             step: AddDeviceWizardStep::ShareCode,
             device_name: name.to_string(),
             enrollment_code: enrollment_code.to_string(),
+            manifest_transfer: manifest_transfer.clone(),
             code_copied: false,
             ..AddDeviceModalState::default()
         }));
         model.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+            manifest_transfer,
             device_name: Some(name.to_string()),
             code_len: Some(enrollment_code.len()),
             code: Some(enrollment_code.to_string()),

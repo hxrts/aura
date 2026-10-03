@@ -170,8 +170,11 @@ impl DeviceLeafMetadata {
             return Ok(Self::default());
         }
 
-        let result: Self = serialization::from_slice(meta.as_bytes())
-            .map_err(|e| AuraError::serialization(format!("DeviceLeafMetadata decode: {e}")))?;
+        let result: Self =
+            serialization::from_slice(meta.as_bytes()).map_err(|e| AuraError::Serialization {
+                message: "DeviceLeafMetadata decode".into(),
+                source: Some(std::sync::Arc::new(e)),
+            })?;
 
         // Paired assertion: verify constraints hold after decode
         debug_assert!(
@@ -205,6 +208,14 @@ impl DeviceLeafMetadata {
 #[allow(clippy::expect_used)] // Tests use expect for simplicity
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_metadata_retains_native_codec_source() {
+        let metadata = LeafMetadata::try_new(vec![0xff]).expect("bounded malformed metadata");
+        let error = DeviceLeafMetadata::decode(&metadata).expect_err("reject malformed metadata");
+        assert!(matches!(error, AuraError::Serialization { .. }));
+        assert!(std::error::Error::source(&error).is_some());
+    }
 
     #[test]
     fn test_round_trip() {

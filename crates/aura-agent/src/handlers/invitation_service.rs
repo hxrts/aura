@@ -27,6 +27,60 @@ use std::sync::Arc;
 const DEFERRED_INVITATION_DELIVERY_ATTEMPTS: usize = 12;
 const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
 
+/// Retains the original choreography failure and a distinct settlement failure.
+/// The standard source chain follows the original concrete execution cause.
+#[derive(Debug)]
+pub(crate) struct EnrollmentInitiatorTaskFailure {
+    execution: AgentError,
+    terminal_publication: Option<aura_core::AuraError>,
+}
+impl EnrollmentInitiatorTaskFailure {
+    pub(crate) fn terminal_publication_error(&self) -> Option<&aura_core::AuraError> {
+        self.terminal_publication.as_ref()
+    }
+}
+impl std::fmt::Display for EnrollmentInitiatorTaskFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "device enrollment initiator failed: {}",
+            self.execution
+        )?;
+        if let Some(secondary) = self.terminal_publication_error() {
+            write!(formatter, "; terminal publication also failed: {secondary}")?;
+        }
+        Ok(())
+    }
+}
+impl std::error::Error for EnrollmentInitiatorTaskFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.execution)
+    }
+}
+async fn settle_required_enrollment_initiator_failure(
+    runner: &CeremonyRunner,
+    ceremony: &CeremonyId,
+    execution: AgentError,
+) -> aura_core::AuraError {
+    let reason = if execution.is_timeout() {
+        aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
+    } else {
+        aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
+    };
+    let terminal_publication = runner
+        .fail_with_reason(ceremony, reason, Some(execution.to_string()))
+        .await
+        .err();
+    let failure = EnrollmentInitiatorTaskFailure {
+        execution,
+        terminal_publication,
+    };
+    aura_core::AuraError::Internal {
+        message: failure.to_string(),
+        source: Some(Arc::new(failure)),
+    }
+}
+
 /// Invitation service API
 ///
 /// Provides invitation operations through a clean public API.
@@ -36,6 +90,30 @@ pub struct InvitationServiceApi {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
     tasks: Arc<TaskSupervisor>,
+}
+
+/// Actual issuer-owned signed binding. No Clone/Deserialize/raw constructor.
+pub(crate) struct IssuedEnrollmentManifestBinding {
+    manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    digest: [u8; 32],
+    signed_code: String,
+    confirmation_verifier: Vec<u8>,
+}
+impl IssuedEnrollmentManifestBinding {
+    pub(crate) fn manifest(
+        &self,
+    ) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+        &self.manifest
+    }
+    pub(crate) fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+    pub(crate) fn signed_code(&self) -> &str {
+        &self.signed_code
+    }
+    pub(crate) fn confirmation_verifier(&self) -> &[u8] {
+        &self.confirmation_verifier
+    }
 }
 
 impl std::fmt::Debug for InvitationServiceApi {
@@ -135,7 +213,7 @@ impl InvitationServiceApi {
                     }
                 }
                 (Err(error), Ok(Some(ceremony_id))) => {
-                    let reason = if matches!(error, AgentError::Timeout(_)) {
+                    let reason = if error.is_timeout() {
                         aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
                     } else {
                         aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
@@ -193,21 +271,6 @@ impl InvitationServiceApi {
                 .execute_device_enrollment_initiator(effects, &invitation, ceremony_runner.clone())
                 .await
             {
-                let reason = if matches!(error, AgentError::Timeout(_)) {
-                    aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
-                } else {
-                    aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
-                };
-                if let Err(settle_error) = ceremony_runner
-                    .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
-                    .await
-                {
-                    tracing::warn!(
-                        ceremony_id = %ceremony_id,
-                        error = %settle_error,
-                        "device enrollment terminal outcome publication failed"
-                    );
-                }
                 tracing::error!(
                     invitation_id = %invitation_id,
                     sender_id = %sender_id,
@@ -215,14 +278,21 @@ impl InvitationServiceApi {
                     error = %error,
                     "device enrollment initiator choreography failed"
                 );
+                return Err(settle_required_enrollment_initiator_failure(
+                    &ceremony_runner,
+                    &ceremony_id,
+                    error,
+                )
+                .await);
             }
+            Ok::<(), aura_core::AuraError>(())
         };
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = tasks.spawn_local_named("device_enrollment_initiator", fut);
+                let _task_handle = tasks.spawn_local_try_named("device_enrollment_initiator", fut);
             } else {
-                let _task_handle = tasks.spawn_named("device_enrollment_initiator", fut);
+                let _task_handle = tasks.spawn_try_named("device_enrollment_initiator", fut);
             }
         }
     }
@@ -678,8 +748,139 @@ impl InvitationServiceApi {
     ///
     /// This is intended for out-of-band transfer (copy/paste, QR).
     #[allow(clippy::too_many_arguments)]
-    pub async fn invite_device_enrollment(
+    pub(crate) async fn export_owned_enrollment_manifest(
         &self,
+        reserved: &super::invitation::ReservedInvitationIssuance,
+        selected_setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> AgentResult<(
+        aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
+        IssuedEnrollmentManifestBinding,
+    )> {
+        use aura_invitation::enrollment_manifest::{
+            encode_initiator_verifier_transfer, SignedEnrollmentTrustManifest,
+        };
+        if manifest.invitation != *reserved.invitation_id()
+            || manifest.subject != self.handler.authority_context().authority_id()
+            || manifest.initiator_device != self.effects.device_id()
+            || manifest.setup.nonce != selected_setup.statement().nonce
+            || manifest.setup.digest != selected_setup.digest()
+            || manifest.invitee_authority != selected_setup.statement().authority
+            || manifest.invitee_device != selected_setup.statement().device
+        {
+            return Err(crate::core::AgentError::invalid(
+                "manifest issuer/reservation/setup mismatch",
+            ));
+        }
+        let (private, public) = crate::handlers::rendezvous_identity::require_identity_keys(
+            self.effects.as_ref(),
+            &manifest.subject,
+        )
+        .await
+        .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        if manifest.initiator_confirmation_verifier != public {
+            return Err(crate::core::AgentError::invalid(
+                "manifest confirmation key mismatch",
+            ));
+        }
+        let signature = sign_ed25519_transcript(self.effects.as_ref(), &manifest, &private)
+            .await
+            .map_err(|e| {
+                crate::core::AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Transcript(e),
+                )
+            })?;
+        let baseline = self
+            .effects
+            .export_tree_ops()
+            .await?
+            .iter()
+            .map(|op| {
+                aura_core::util::serialization::to_vec(op).map_err(|e| {
+                    crate::core::AgentError::EnrollmentManifest(
+                        aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                            Box::new(e),
+                        ),
+                    )
+                })
+            })
+            .collect::<AgentResult<Vec<_>>>()?;
+        let checked = manifest
+            .clone()
+            .verify_signature(self.effects.as_ref(), &public, &signature)
+            .await
+            .map_err(crate::core::AgentError::EnrollmentManifest)?
+            .verify_baseline(&baseline)
+            .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        let manifest_subject = manifest.subject;
+        let manifest_device = manifest.initiator_device;
+        let digest = checked.manifest_digest();
+        let manifest_code = SignedEnrollmentTrustManifest {
+            manifest: manifest.clone(),
+            signature,
+        }
+        .encode()
+        .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        let initiator_verifier_code =
+            encode_initiator_verifier_transfer(manifest_subject, manifest_device, &public)
+                .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        let binding = IssuedEnrollmentManifestBinding {
+            manifest,
+            digest,
+            signed_code: manifest_code.clone(),
+            confirmation_verifier: public.to_vec(),
+        };
+        Ok((
+            aura_app::runtime_bridge::EnrollmentManifestTransferCodes {
+                manifest_code,
+                initiator_verifier_code,
+            },
+            binding,
+        ))
+    }
+
+    pub(crate) async fn reserve_device_enrollment_invitation(
+        &self,
+    ) -> AgentResult<super::invitation::ReservedInvitationIssuance> {
+        self.handler
+            .reserve_invitation_issuance(self.effects.as_ref())
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "registered_enrollment_generation",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn start_registered_device_enrollment(
+        &self,
+        registered: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability,
+    ) -> AgentResult<()> {
+        let invitation = registered.canonical_invitation();
+        let InvitationType::DeviceEnrollment {
+            initiator_device_id,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        };
+        if invitation.sender_id != self.handler.authority_context().authority_id()
+            || *initiator_device_id != self.effects.device_id()
+        {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        self.spawn_device_enrollment_initiator(registered.canonical_invitation());
+        Ok(())
+    }
+
+    pub(crate) async fn invite_device_enrollment(
+        &self,
+        reserved: super::invitation::ReservedInvitationIssuance,
         receiver_id: AuthorityId,
         subject_authority: AuthorityId,
         initiator_device_id: DeviceId,
@@ -691,14 +892,17 @@ impl InvitationServiceApi {
         threshold_config: Vec<u8>,
         public_key_package: Vec<u8>,
         baseline_tree_ops: Vec<Vec<u8>>,
+        setup_binding: aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
         let prepared = self
             .handler
-            .prepare_invitation_with_context(
+            .prepare_reserved_invitation_with_context(
                 self.effects.clone(),
+                reserved,
                 receiver_id,
                 InvitationType::DeviceEnrollment {
+                    setup_binding: Some(setup_binding),
                     subject_authority,
                     invitee_authority: Some(receiver_id),
                     initiator_device_id,
@@ -719,7 +923,7 @@ impl InvitationServiceApi {
             .await?;
         let invitation = prepared.invitation;
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
-        self.spawn_device_enrollment_initiator(&invitation);
+
         Ok(invitation)
     }
 
@@ -731,6 +935,11 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        Box::pin(self.accept_owned(invitation_id)).await
+    }
+
+    /// Keep the shared caller future bounded while retaining lexical ownership.
+    async fn accept_owned(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         let result = self
             .handler
             .accept_invitation(self.effects.clone(), invitation_id)
@@ -783,22 +992,7 @@ impl InvitationServiceApi {
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
         {
-            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
-                &invitation.invitation_type
-            {
-                // A validated local decline has no authority to settle the
-                // initiator's tracker until its signed response is verified
-                // there. Settle an invitee-local tracker only if one exists.
-                if self.ceremony_runner.status(ceremony_id).await.is_ok() {
-                    self.ceremony_runner
-                        .fail_with_reason(
-                            ceremony_id,
-                            aura_app::runtime_bridge::CeremonyFailureReason::Rejected,
-                            Some("Invitation declined".to_string()),
-                        )
-                        .await
-                        .map_err(|error| AgentError::runtime(error.to_string()))?;
-                }
+            if let InvitationType::DeviceEnrollment { .. } = &invitation.invitation_type {
                 return Ok(result);
             }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
@@ -809,7 +1003,7 @@ impl InvitationServiceApi {
                         Some("Invitation declined".to_string()),
                     )
                     .await
-                    .map_err(|error| AgentError::runtime(error.to_string()))?;
+                    .map_err(AgentError::from)?;
             }
         }
 
@@ -824,65 +1018,47 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the cancellation
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
-        if let Some(invitation) = self
+        let record = self
             .handler
-            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
-            .await
-        {
-            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
-                &invitation.invitation_type
-            {
-                if self
-                    .ceremony_runner
-                    .terminal_outcome(ceremony_id)
-                    .await
-                    .map_err(|error| AgentError::runtime(error.to_string()))?
-                    .is_some()
-                {
-                    return Err(AgentError::invalid(
-                        "device enrollment ceremony is already complete",
-                    ));
-                }
-            }
-        }
-        let result = self
-            .handler
-            .cancel_invitation(self.effects.clone(), invitation_id)
+            .created_invitation_required(self.effects.clone(), invitation_id)
             .await?;
-
-        if let Some(invitation) = self
-            .handler
-            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
-            .await
-        {
-            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
-                &invitation.invitation_type
-            {
-                self.ceremony_runner
-                    .fail_with_reason(
-                        ceremony_id,
-                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
-                        Some("Invitation canceled".to_string()),
-                    )
-                    .await
-                    .map_err(|error| AgentError::runtime(error.to_string()))?;
-                return Ok(result);
-            }
-            if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
-                self.ceremony_runner
-                    .fail_with_reason(
-                        &ceremony_id,
-                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
-                        Some("Invitation canceled".to_string()),
-                    )
-                    .await
-                    .map_err(|error| AgentError::runtime(error.to_string()))?;
-            }
+        let invitation = record.invitation().clone();
+        if matches!(
+            invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            let issued = super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load(
+                record.runtime_owner(),
+                &invitation,
+            )
+            .await?;
+            let prepared = self
+                .handler
+                .prepare_enrollment_cancellation(&issued, record)
+                .await?;
+            let cancelled = self
+                .ceremony_runner
+                .cancel_verified_enrollment(&issued)
+                .await
+                .map_err(AgentError::from)?;
+            return self
+                .handler
+                .publish_verified_enrollment_cancellation(self.effects.clone(), prepared, cancelled)
+                .await;
         }
-
+        let result = self.handler.cancel_required_invitation(record).await?;
+        if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
+            self.ceremony_runner
+                .fail_with_reason(
+                    &ceremony_id,
+                    aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+                    Some("Invitation canceled".into()),
+                )
+                .await
+                .map_err(AgentError::from)?;
+        }
         Ok(result)
     }
-
     /// List pending invitations
     ///
     /// # Returns
@@ -899,7 +1075,16 @@ impl InvitationServiceApi {
         self.handler.list_cached_matching(predicate).await
     }
 
-    /// List invitations from cache plus persisted stores.
+    /// Read persisted channel invitations for required membership queries.
+    pub async fn list_channel_invitations_with_storage_required(
+        &self,
+    ) -> Result<Vec<Invitation>, aura_core::AuraError> {
+        self.handler
+            .list_channel_invitations_with_storage_required(&self.effects)
+            .await
+    }
+
+    /// Observed-only best-effort listing from cache and persisted stores.
     pub async fn list_with_storage(&self) -> Vec<Invitation> {
         self.handler.list_with_storage(&self.effects).await
     }
@@ -1513,5 +1698,65 @@ mod tests {
 
             assert!(!receiver_service.is_pending(&imported.invitation_id).await);
         });
+    }
+}
+
+#[cfg(test)]
+mod required_enrollment_task_tests {
+    use super::*;
+    use crate::runtime::services::CeremonyTracker;
+    use std::error::Error;
+
+    #[tokio::test]
+    async fn required_window_rejection_retains_execution_and_settlement_sources() {
+        let config = crate::core::AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_named_test(
+                &config,
+                "required_window_rejection_retains_execution_and_settlement_sources",
+            )
+            .expect("distinct simulation effects"),
+        );
+        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let runner = CeremonyRunner::new(CeremonyTracker::new_with_storage(time, effects));
+        let missing = CeremonyId::new("required-window-unregistered".to_owned());
+        let rejection = match runner.registered_enrollment_window(&missing).await {
+            Err(error) => error,
+            Ok(_) => panic!("unregistered ceremony must not mint a window"),
+        };
+        let execution = AgentError::from(rejection);
+        let supervisor = TaskSupervisor::new();
+        let _handle = supervisor.spawn_try_named("required-enrollment-rejection", async move {
+            Err(settle_required_enrollment_initiator_failure(&runner, &missing, execution).await)
+        });
+        let drained = supervisor
+            .wait_for_idle(std::time::Duration::from_secs(1))
+            .await
+            .expect_err("required failure must fail drain");
+        let retained = supervisor
+            .terminal_failure()
+            .expect("health retains required failure");
+        for failure in [&drained, &retained] {
+            let mut cause = failure.source();
+            let mut found = false;
+            while let Some(current) = cause {
+                if let Some(enrollment) = current.downcast_ref::<EnrollmentInitiatorTaskFailure>() {
+                    assert!(enrollment
+                        .source()
+                        .expect("original execution")
+                        .is::<AgentError>());
+                    assert!(
+                        enrollment.terminal_publication_error().is_some(),
+                        "unregistered terminal publication independently fails"
+                    );
+                    found = true;
+                }
+                cause = current.source();
+            }
+            assert!(
+                found,
+                "standard supervision source chain retains actual admission failure"
+            );
+        }
     }
 }

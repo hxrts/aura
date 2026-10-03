@@ -19,7 +19,6 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::effects::{EffectCommand, OpResponse, OperationalHandler};
 use crate::tui::types::ChannelMode;
-use aura_app::ui::types::BootstrapRuntimeIdentity;
 
 const BOOTSTRAP_RUNTIME_HANDOFF_READY_FILENAME: &str = ".bootstrap-runtime-handoff-ready";
 
@@ -117,55 +116,17 @@ impl AccountFilesHelper {
         }
     }
 
-    pub async fn create_account_with_device_enrollment(
+    pub async fn persist_completed_enrollment_identity(
         &self,
-        nickname_suggestion: &str,
-        device_enrollment_code: &str,
-    ) -> TerminalResult<(AuthorityId, ContextId)> {
-        match crate::handlers::tui::create_account_with_device_enrollment(
+        completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+    ) -> Result<(), aura_core::AuraError> {
+        crate::handlers::tui::persist_completed_enrollment_runtime_identity(
             &self.base_path,
-            nickname_suggestion,
-            device_enrollment_code,
+            completed,
         )
-        .await
-        {
-            Ok((authority_id, context_id)) => {
-                self.set_account_created();
-                Ok((authority_id, context_id))
-            }
-            Err(e) => {
-                tracing::error!("Failed to create account with device enrollment: {}", e);
-                Err(TerminalError::Operation(e.to_string()))
-            }
-        }
-    }
-
-    pub async fn create_account_with_device_enrollment_runtime_identity(
-        &self,
-        runtime_identity: BootstrapRuntimeIdentity,
-        nickname_suggestion: &str,
-        device_enrollment_code: &str,
-    ) -> TerminalResult<(AuthorityId, ContextId)> {
-        match crate::handlers::tui::create_account_with_device_enrollment_runtime_identity(
-            &self.base_path,
-            runtime_identity,
-            nickname_suggestion,
-            device_enrollment_code,
-        )
-        .await
-        {
-            Ok((authority_id, context_id)) => {
-                self.set_account_created();
-                Ok((authority_id, context_id))
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create account with device enrollment runtime identity: {}",
-                    e
-                );
-                Err(TerminalError::Operation(e.to_string()))
-            }
-        }
+        .await?;
+        self.set_account_created();
+        Ok(())
     }
 
     pub async fn restore_recovered_account(
@@ -412,6 +373,7 @@ impl DispatchHelper {
                 Ok(())
             }
             OpResponse::DeviceEnrollmentStarted {
+                manifest_transfer: _,
                 ceremony_id: _,
                 enrollment_code,
                 pending_epoch: _,

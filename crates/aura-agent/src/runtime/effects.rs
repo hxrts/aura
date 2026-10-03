@@ -98,6 +98,11 @@ mod amp;
 mod aura;
 mod choreography;
 mod crypto;
+pub(crate) use crypto::{
+    held_registration_error, EnrollmentGenerationReservation, HeldEnrollmentRegistrationError,
+    RegisteredEnrollmentGenerationCapability,
+};
+
 mod effect_api;
 mod flow;
 mod guard;
@@ -207,6 +212,9 @@ pub struct AuraEffectSystem {
     // === Subsystems (grouped related fields) ===
     /// Cryptographic operations subsystem
     crypto: CryptoSubsystem,
+    enrollment_generation_gate: tokio::sync::Mutex<()>,
+    #[cfg(all(test, not(target_arch = "wasm32")))]
+    enrollment_retirement_fault: std::sync::Mutex<Option<u64>>,
     /// Network transport subsystem
     transport: TransportSubsystem,
     /// Journal and fact management subsystem
@@ -271,6 +279,9 @@ pub struct AuraEffectSystem {
 
     /// Runtime-owned in-memory ledger surface for EffectApiEffects consumers.
     effect_api_ledger: parking_lot::Mutex<EffectApiLedgerState>,
+    enrollment_manifest_admission_gate: tokio::sync::Mutex<()>,
+    enrollment_profile_handoff_gate: tokio::sync::Mutex<()>,
+    enrollment_invitee_window_owner: Arc<tokio::sync::Semaphore>,
 
     /// Runtime-owned config overrides exposed through SystemEffects.
     system_config: parking_lot::RwLock<HashMap<String, String>>,
@@ -284,6 +295,8 @@ pub struct AuraEffectSystem {
     /// Browser websocket endpoints keyed by opaque connection handle UUID.
     #[cfg(target_arch = "wasm32")]
     network_connections: parking_lot::RwLock<HashMap<uuid::Uuid, String>>,
+    // Declared last: storage subsystems drop before the actual profile owner.
+    profile_owner: Option<std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>>,
 }
 
 #[derive(Default)]
@@ -338,7 +351,39 @@ impl BiscuitAuthorizationEffects for JournalBiscuitAuthorizationHandler {
     }
 }
 
+pub(crate) struct AdmittedEnrollmentWindowLeaseCapability {
+    permit: tokio::sync::OwnedSemaphorePermit,
+}
+impl AdmittedEnrollmentWindowLeaseCapability {
+    pub(crate) fn into_permit(self) -> tokio::sync::OwnedSemaphorePermit {
+        self.permit
+    }
+}
 impl AuraEffectSystem {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "admitted_enrollment_execution_window",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn acquire_admitted_enrollment_window_owner(
+        &self,
+        admitted: &crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+    ) -> Result<AdmittedEnrollmentWindowLeaseCapability, aura_core::AuraError> {
+        if admitted.manifest().invitee_device != self.device_id() {
+            return Err(aura_core::AuraError::invalid(
+                "enrollment window must name actual physical device",
+            ));
+        }
+        self.enrollment_invitee_window_owner
+            .clone()
+            .try_acquire_owned()
+            .map(|permit| AdmittedEnrollmentWindowLeaseCapability { permit })
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "admitted enrollment execution already has a window owner".into(),
+                source: Some(Arc::new(source)),
+            })
+    }
+
     fn unique_test_storage_path(label: &str) -> std::path::PathBuf {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -422,46 +467,12 @@ impl AuraEffectSystem {
                 "production runtime rejects filesystem secure-storage fallback; use platform credential storage or an explicit test/harness/simulation constructor",
             )),
             SecureStorageBackend::PlatformCredentialStore => {
-                if harness_mode_enabled || !Self::current_process_allows_platform_secret_store() {
-                    let base_path = if config.storage.base_path == default_storage_path() {
-                        Self::unique_test_storage_path("secure-store")
-                    } else {
-                        config.storage.base_path.clone()
-                    };
-                    return Ok(
-                        ProductionSecureStorageHandler::filesystem_fallback_for_non_production(base_path),
-                    );
-                }
+                // Preserve the configured backend without migrating keyring state.
                 Ok(ProductionSecureStorageHandler::for_production(
                     config.storage.base_path.clone(),
                 ))
             }
         }
-    }
-
-    fn current_process_allows_platform_secret_store() -> bool {
-        if std::env::var_os("AURA_ALLOW_OS_SECRET_STORE_IN_TESTS").is_some()
-            || std::env::var_os("AURA_ALLOW_OS_SECRET_STORE").is_some()
-        {
-            return true;
-        }
-
-        #[cfg(test)]
-        {
-            false
-        }
-        #[cfg(not(test))]
-        {
-            Self::current_executable_is_production_binary()
-        }
-    }
-
-    #[cfg(not(test))]
-    fn current_executable_is_production_binary() -> bool {
-        let Ok(exe) = std::env::current_exe() else {
-            return false;
-        };
-        exe.file_stem().and_then(|name| name.to_str()) == Some("aura")
     }
 
     /// Internal helper that builds the effect system with the given composite handler.
@@ -486,6 +497,81 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         test_filesystem_secure_storage_allowed: bool,
     ) -> Result<Self, crate::core::AgentError> {
+        Self::build_internal_owned(
+            config,
+            composite,
+            execution_mode,
+            crypto_seed,
+            shared_transport,
+            shared_inbox,
+            authority_id,
+            test_filesystem_secure_storage_allowed,
+            None,
+        )
+    }
+
+    fn build_internal_owned(
+        config: AgentConfig,
+        composite: CompositeHandlerAdapter,
+        execution_mode: ExecutionMode,
+        crypto_seed: Option<[u8; 32]>,
+        shared_transport: Option<SharedTransport>,
+        shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
+        authority_id: AuthorityId,
+        test_filesystem_secure_storage_allowed: bool,
+        selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        if execution_mode.is_production()
+            && matches!(
+                config.storage.encryption_policy,
+                crate::core::config::StorageEncryptionPolicy::PlaintextForTests
+            )
+        {
+            return Err(crate::core::AgentError::config(
+                "production runtime rejects plaintext storage policy",
+            ));
+        }
+        let profile_error = |source: aura_core::effects::profile_storage::ProfileStorageError| {
+            crate::core::AgentError::from(AuraError::Storage {
+                message: "runtime profile ownership failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        };
+        let profile_owner = if execution_mode.is_production() {
+            let owned = match selected_profile_owner {
+                Some(owned) => owned,
+                None => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        aura_effects::profile_storage::FilesystemProfileStorageHandler::new(
+                            config.storage.base_path.clone(),
+                        )
+                        .acquire_owned_native()
+                        .map(Arc::new)
+                        .map_err(profile_error)?
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        return Err(profile_error(
+                            aura_core::effects::profile_storage::ProfileStorageError::Unsupported,
+                        ));
+                    }
+                }
+            };
+            if !owned
+                .matches_profile(&config.storage.base_path)
+                .map_err(profile_error)?
+            {
+                return Err(profile_error(
+                    aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                        "runtime configuration differs from selected physical profile".into(),
+                    ),
+                ));
+            }
+            Some(owned)
+        } else {
+            None
+        };
         Self::maybe_start_deadlock_detector();
         assert!(
             !execution_mode.is_production() || crypto_seed.is_none(),
@@ -507,12 +593,60 @@ impl AuraEffectSystem {
             Some(seed) => CryptoRng::deterministic(StdRng::from_seed(seed)),
             None => CryptoRng::thread_local(),
         };
-        let secure_storage_handler = Arc::new(Self::secure_storage_handler_for_config(
+        // The actual filesystem provider must receive the owner before touching
+        // its wrapping key. Platform providers retain their separate namespace.
+        #[cfg(unix)]
+        let owned_filesystem_backend = match profile_owner.as_ref() {
+            Some(owner)
+                if config.storage.secure_storage_backend
+                    == SecureStorageBackend::FilesystemFallback =>
+            {
+                if execution_mode.is_production()
+                    && !harness_mode_enabled
+                    && !test_filesystem_secure_storage_allowed
+                {
+                    return Err(crate::core::AgentError::config(
+                        "production runtime rejects filesystem secure-storage fallback",
+                    ));
+                }
+                Some(
+                    ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                        owner.clone(),
+                    )
+                    .map_err(crate::core::AgentError::from)?,
+                )
+            }
+            _ => None,
+        };
+        #[cfg(unix)]
+        let already_owned = owned_filesystem_backend.is_some();
+        #[cfg(not(unix))]
+        let already_owned = false;
+        #[cfg(unix)]
+        let secure_storage_backend = if let Some(backend) = owned_filesystem_backend {
+            backend
+        } else {
+            Self::secure_storage_handler_for_config(
+                &config,
+                execution_mode,
+                harness_mode_enabled,
+                test_filesystem_secure_storage_allowed,
+            )?
+        };
+        #[cfg(not(unix))]
+        let secure_storage_backend = Self::secure_storage_handler_for_config(
             &config,
             execution_mode,
             harness_mode_enabled,
             test_filesystem_secure_storage_allowed,
-        )?);
+        )?;
+        let secure_storage_backend = match profile_owner.as_ref() {
+            Some(owner) if !already_owned => secure_storage_backend
+                .retain_profile_owner(owner.clone())
+                .map_err(profile_error)?,
+            _ => secure_storage_backend,
+        };
+        let secure_storage_handler = Arc::new(secure_storage_backend);
         let crypto = CryptoSubsystem::from_parts(
             crypto_handler.clone(),
             random_rng,
@@ -561,8 +695,15 @@ impl AuraEffectSystem {
             let _ = test_mode; // Suppress unused warning
             cfg
         };
+        let plain_storage = FilesystemStorageHandler::new(config.storage.base_path.clone());
+        let plain_storage = match profile_owner.as_ref() {
+            Some(owner) => plain_storage
+                .retain_profile_owner(owner.clone())
+                .map_err(profile_error)?,
+            None => plain_storage,
+        };
         let storage_handler = Arc::new(EncryptedStorage::new(
-            FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            plain_storage,
             Arc::new(crypto_handler),
             secure_storage_handler,
             encrypted_storage_config,
@@ -636,6 +777,9 @@ impl AuraEffectSystem {
             execution_mode,
             harness_mode_enabled,
             crypto,
+            enrollment_generation_gate: tokio::sync::Mutex::new(()),
+            #[cfg(all(test, not(target_arch = "wasm32")))]
+            enrollment_retirement_fault: std::sync::Mutex::new(None),
             transport,
             journal,
             composite,
@@ -656,11 +800,15 @@ impl AuraEffectSystem {
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             receipt_signing_key,
             effect_api_ledger: parking_lot::Mutex::new(EffectApiLedgerState::default()),
+            enrollment_manifest_admission_gate: tokio::sync::Mutex::new(()),
+            enrollment_profile_handoff_gate: tokio::sync::Mutex::new(()),
+            enrollment_invitee_window_owner: Arc::new(tokio::sync::Semaphore::new(1)),
             system_config: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(not(target_arch = "wasm32"))]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
             #[cfg(target_arch = "wasm32")]
             network_connections: parking_lot::RwLock::new(HashMap::new()),
+            profile_owner,
         };
 
         tracing::info!(
@@ -770,13 +918,69 @@ impl AuraEffectSystem {
         self.reactive_handler.clone()
     }
 
+    /// Retain actual local tree mutation custody through a checked decision.
+    pub(crate) async fn lock_tree_decision(
+        &self,
+    ) -> aura_protocol::handlers::tree::TreeDecisionLease<'_> {
+        self.tree_handler.lock_decision().await
+    }
+
+    /// Install the exact signed post-commit extension under the actual tree gate.
+    /// Historical evidence cannot overwrite a later current local tree decision.
+    pub(crate) async fn install_confirmed_enrollment_transition(
+        &self,
+        confirmed: &crate::handlers::invitation::enrollment_manifest_admission::DurableConfirmedEnrollmentCapability,
+    ) -> Result<aura_protocol::handlers::tree::TreeDecisionLease<'_>, AuraError> {
+        #[derive(Debug, thiserror::Error)]
+        #[error(
+            "current local tree evidence does not authorize the retained enrollment activation"
+        )]
+        struct LaterEnrollmentEvidence;
+        let proof = confirmed.confirmation();
+        let manifest = proof.manifest();
+        let transition = proof.committed_transition();
+        if manifest.invitee_device != self.device_id() {
+            return Err(AuraError::PermissionDenied {
+                message: "committed tree belongs to another physical device".into(),
+                source: Some(Arc::new(LaterEnrollmentEvidence)),
+            });
+        }
+        let lease = self.tree_handler.lock_decision().await;
+        let current = lease
+            .install_authenticated_extension(manifest.baseline_count as usize, transition.ops())
+            .await?;
+        let verified =
+            proof
+                .verify_local_extension(&current)
+                .map_err(|source| AuraError::Internal {
+                    message: "authenticate current local enrollment tree extension".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        let state = verified.state();
+        if state.epoch.value() != manifest.pending_epoch
+            || ![manifest.initiator_device, manifest.invitee_device]
+                .iter()
+                .all(|device| {
+                    state.leaves.values().any(|leaf| {
+                        leaf.device_id == *device && leaf.role == aura_core::LeafRole::Device
+                    })
+                })
+        {
+            return Err(AuraError::PermissionDenied {
+                message: "verified committed tree lacks required device membership".into(),
+                source: Some(Arc::new(LaterEnrollmentEvidence)),
+            });
+        }
+        Ok(lease)
+    }
+
     pub async fn export_tree_ops(
         &self,
     ) -> Result<Vec<aura_core::AttestedOp>, crate::core::AgentError> {
         self.tree_handler
             .export_ops()
             .await
-            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
+            .map_err(crate::core::AgentError::from)
     }
 
     /// Import tree ops replicated from another device of this authority.
@@ -862,7 +1066,18 @@ impl AuraEffectSystem {
         self.tree_handler
             .replace_ops(ops)
             .await
-            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
+            .map_err(crate::core::AgentError::from)
+    }
+
+    /// The strong independently admitted baseline is required on this owner path.
+    pub(crate) async fn install_admitted_enrollment_baseline(
+        &self,
+        admitted:&crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        original: [u8; 32],
+    ) -> Result<(), AuraError> {
+        self.tree_handler
+            .install_baseline_if_original(original, admitted.baseline().ops())
+            .await
     }
 
     /// Attach a fact sink for reactive scheduling (facts → scheduler ingestion).
@@ -1592,7 +1807,10 @@ impl AuraEffectSystem {
         let mut keys = self
             .list_keys(Some(&prefix))
             .await
-            .map_err(|e| AuraError::storage(format!("list_keys: {e}")))?;
+            .map_err(|error| AuraError::Storage {
+                message: "list committed fact keys".into(),
+                source: Some(Arc::new(error)),
+            })?;
         keys.sort();
 
         let mut facts = Vec::new();
@@ -1600,13 +1818,23 @@ impl AuraEffectSystem {
             let Some(bytes) = self
                 .retrieve(&key)
                 .await
-                .map_err(|e| AuraError::storage(format!("retrieve: {e}")))?
+                .map_err(|error| AuraError::Storage {
+                    message: "read committed fact".into(),
+                    source: Some(Arc::new(error)),
+                })?
             else {
-                continue;
+                return Err(AuraError::invalid(
+                    "committed fact index references absent storage",
+                ));
             };
 
-            let fact: TypedFact = aura_core::util::serialization::from_slice(&bytes)
-                .map_err(|e| AuraError::internal(format!("deserialize fact: {e}")))?;
+            let fact: TypedFact =
+                aura_core::util::serialization::from_slice(&bytes).map_err(|error| {
+                    AuraError::Serialization {
+                        message: "decode committed fact".into(),
+                        source: Some(Arc::new(error)),
+                    }
+                })?;
             facts.push(fact);
         }
 
@@ -2050,6 +2278,37 @@ impl AuraEffectSystem {
         Self::production(config, authority_id)
     }
 
+    /// Owned production assembly accepts only the concrete audited adapter token.
+    /// Retain the exact concrete preassembly lease across bootstrap/runtime owners.
+    /// A caller-provided boxed core lease cannot manufacture this provider resource.
+    pub(crate) fn production_for_authority_shared_profile(
+        config: AgentConfig,
+        authority_id: AuthorityId,
+        owner: Arc<aura_effects::profile_storage::OwnedProfileLease>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let mut composite = CompositeHandlerAdapter::for_production(config.device_id());
+        composite
+            .composite_mut()
+            .register_all(RegisterAllOptions::allow_impure())
+            .map_err(|source| {
+                crate::core::AgentError::from(AuraError::Internal {
+                    message: "assemble owned production effect handlers".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        Self::build_internal_owned(
+            config,
+            composite,
+            ExecutionMode::Production,
+            None,
+            None,
+            None,
+            authority_id,
+            false,
+            Some(owner),
+        )
+    }
+
     /// Create effect system for testing, overriding the authority identity.
     ///
     /// Prefer `simulation_for_test_for_authority(...)` for deterministic per-test seeding.
@@ -2092,6 +2351,18 @@ impl AuraEffectSystem {
     }
 
     /// Get configuration
+    pub(crate) async fn lock_enrollment_manifest_admission(
+        &self,
+    ) -> tokio::sync::MutexGuard<'_, ()> {
+        self.enrollment_manifest_admission_gate.lock().await
+    }
+
+    /// Serialize account projection decisions with sealed enrollment handoff.
+    /// The production adapters additionally retain their cross-process profile lease.
+    pub(crate) async fn enrollment_profile_handoff_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.enrollment_profile_handoff_gate.lock().await
+    }
+
     pub fn config(&self) -> &AgentConfig {
         &self.config
     }
@@ -2102,6 +2373,15 @@ impl AuraEffectSystem {
     }
 
     /// Get access to time effects
+    /// Configure the physical-time owner before runtime service assembly.
+    pub(crate) fn with_physical_time_provider(
+        mut self,
+        provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Self {
+        self.time_handler = EnhancedTimeHandler::with_provider(provider);
+        self
+    }
+
     pub fn time_effects(&self) -> &EnhancedTimeHandler {
         &self.time_handler
     }
@@ -2234,29 +2514,99 @@ mod tests {
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
-    use std::ffi::OsString;
-
-    struct EnvRestore {
-        key: &'static str,
-        value: Option<OsString>,
+    #[test]
+    fn required_parent_metadata_keeps_injected_io_failure_as_storage() {
+        use std::error::Error;
+        let error = AuraEffectSystem::decode_required_threshold_metadata(Err(AuraError::Storage {
+            message: "injected metadata read fault".into(),
+            source: Some(std::sync::Arc::new(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            ))),
+        }))
+        .expect_err("storage failure must not become absent metadata");
+        assert!(matches!(error, AuraError::Storage { .. }));
+        assert_eq!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::PermissionDenied)
+        );
     }
 
-    impl EnvRestore {
-        fn capture(key: &'static str) -> Self {
-            Self {
-                key,
-                value: std::env::var_os(key),
-            }
-        }
-    }
-
-    impl Drop for EnvRestore {
-        fn drop(&mut self) {
-            match self.value.take() {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
+    #[tokio::test]
+    async fn actual_retained_parent_metadata_rejects_corruption_and_duplicate_roster() {
+        use std::error::Error;
+        let (issuer, _invitee, invitation, _start, _accept, _proof) = Box::pin(
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "parent-metadata-faults",
+            ),
+        )
+        .await;
+        let effects = issuer.runtime().effects();
+        let retained =
+            crate::handlers::invitation::enrollment_trust::RetainedEnrollmentVmControl::load(
+                effects.clone(),
+                &invitation,
+            )
+            .await
+            .expect("actual retained signed issuer manifest");
+        let authority = retained.manifest().subject;
+        let epoch = retained.manifest().starting_epoch;
+        let location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            authority.to_string(),
+            epoch.to_string(),
+        );
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        let original = effects
+            .secure_retrieve(&location, &caps)
+            .await
+            .expect("actual retained parent policy");
+        effects
+            .require_threshold_config_metadata(&authority, epoch)
+            .await
+            .expect("original policy valid");
+        effects
+            .secure_store(&location, b"{", &caps)
+            .await
+            .expect("inject stored codec corruption");
+        let error = effects
+            .require_threshold_config_metadata(&authority, epoch)
+            .await
+            .expect_err("corrupt secure policy fails");
+        assert!(matches!(error, AuraError::Serialization { .. }));
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<serde_json::Error>())
+            .is_some());
+        let mut duplicate: ThresholdConfigMetadata =
+            serde_json::from_slice(&original).expect("original exact policy");
+        duplicate
+            .participants
+            .push(duplicate.participants[0].clone());
+        duplicate.total_n += 1;
+        let duplicate = serde_json::to_vec(&duplicate).expect("encode actual duplicated roster");
+        effects
+            .secure_store(&location, &duplicate, &caps)
+            .await
+            .expect("inject duplicate roster");
+        let error = effects
+            .require_threshold_config_metadata(&authority, epoch)
+            .await
+            .expect_err("duplicate roster cannot supply threshold cardinality");
+        assert!(matches!(error, AuraError::Crypto { .. }));
+        effects
+            .secure_store(&location, &original, &caps)
+            .await
+            .expect("restore exact secure policy");
+        effects
+            .require_threshold_config_metadata(&authority, epoch)
+            .await
+            .expect("original policy remains valid");
     }
 
     #[test]
@@ -2446,31 +2796,7 @@ mod tests {
     }
 
     #[test]
-    fn production_mode_tests_avoid_platform_secure_storage_prompts() {
-        let authority = AuthorityId::new_from_entropy([0xA7; 32]);
-        let temp = tempfile::tempdir().expect("tempdir should build");
-        let config = AgentConfig {
-            storage: StorageConfig {
-                base_path: temp.path().join("aura"),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        let effect_system =
-            AuraEffectSystem::production(config, authority).expect("production runtime builds");
-
-        assert!(matches!(
-            effect_system.crypto.secure_storage().as_ref(),
-            ProductionSecureStorageHandler::FilesystemFallback(_)
-        ));
-    }
-
-    #[test]
-    fn harness_mode_production_uses_filesystem_secure_storage_fallback() {
-        let _restore = EnvRestore::capture("AURA_HARNESS_MODE");
-        std::env::set_var("AURA_HARNESS_MODE", "1");
-
+    fn production_platform_storage_requires_its_own_namespace_owner() {
         let authority = AuthorityId::new_from_entropy([0xA7; 32]);
         let temp = tempfile::tempdir().expect("tempdir should build");
         let config = AgentConfig {
@@ -2481,14 +2807,44 @@ mod tests {
             },
             ..Default::default()
         };
-
-        let effect_system =
-            AuraEffectSystem::production(config, authority).expect("production runtime builds");
-
+        let error = AuraEffectSystem::production(config.clone(), authority)
+            .expect_err("filesystem lease must not authorize a shared platform namespace");
+        let mut source: &dyn std::error::Error = &error;
+        let ownership = loop {
+            if let Some(ownership) =
+                source.downcast_ref::<aura_core::effects::profile_storage::ProfileStorageError>()
+            {
+                break ownership;
+            }
+            source = source.source().expect("typed ownership source retained");
+        };
         assert!(matches!(
-            effect_system.crypto.secure_storage().as_ref(),
-            ProductionSecureStorageHandler::FilesystemFallback(_)
+            ownership,
+            aura_core::effects::profile_storage::ProfileStorageError::Unsupported
         ));
+        assert!(!config.storage.base_path.join("secure_store").exists());
+    }
+
+    #[test]
+    fn explicit_test_filesystem_production_retains_profile_owner() {
+        let authority = AuthorityId::new_from_entropy([0xA7; 32]);
+        let temp = tempfile::tempdir().expect("tempdir should build");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temp.path().join("aura"),
+                secure_storage_backend: SecureStorageBackend::FilesystemFallback,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let effect_system = AuraEffectSystem::production_for_test_for_authority(config, authority)
+            .expect("explicit test filesystem runtime builds");
+        match effect_system.crypto.secure_storage().as_ref() {
+            ProductionSecureStorageHandler::ProfileOwned(owned) => {
+                assert!(owned.uses_filesystem_fallback());
+            }
+            _ => panic!("production writer must retain actual profile owner"),
+        }
     }
 
     #[test]
@@ -2934,6 +3290,59 @@ impl AuraEffectSystem {
         Ok(())
     }
 
+    /// Required trusted-parent reader: storage and codec faults are not absence.
+    pub(crate) async fn require_threshold_config_metadata(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+    ) -> Result<ThresholdConfigMetadata, AuraError> {
+        let location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            authority.to_string(),
+            epoch.to_string(),
+        );
+        let data = self
+            .crypto
+            .secure_storage()
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await;
+        Self::decode_required_threshold_metadata(data)
+    }
+
+    fn decode_required_threshold_metadata(
+        read: Result<Vec<u8>, AuraError>,
+    ) -> Result<ThresholdConfigMetadata, AuraError> {
+        let data = read?;
+        if data.len() > 131_072 {
+            return Err(AuraError::crypto("trusted parent metadata exceeds bounds"));
+        }
+        let metadata: ThresholdConfigMetadata =
+            serde_json::from_slice(&data).map_err(|error| AuraError::Serialization {
+                message: "decode required trusted parent threshold metadata".into(),
+                source: Some(std::sync::Arc::new(error)),
+            })?;
+        let distinct: std::collections::HashSet<_> = metadata.participants.iter().collect();
+        if metadata.total_n == 0
+            || metadata.total_n > 1024
+            || metadata.threshold_k == 0
+            || metadata.threshold_k > metadata.total_n
+            || metadata.participants.len() != usize::from(metadata.total_n)
+            || distinct.len() != metadata.participants.len()
+        {
+            return Err(AuraError::crypto(
+                "invalid required trusted parent participant policy",
+            ));
+        }
+        if metadata.mode == SigningMode::SingleSigner
+            && (metadata.threshold_k != 1 || metadata.total_n != 1)
+        {
+            return Err(AuraError::crypto(
+                "invalid required trusted parent single-signer policy",
+            ));
+        }
+        Ok(metadata)
+    }
+
     /// Retrieve threshold configuration metadata for an epoch
     ///
     /// Returns None if no metadata exists for the epoch.
@@ -3006,7 +3415,7 @@ fn authenticated_browser_harness_mode() -> bool {
 /// This structure captures the full threshold configuration for an epoch,
 /// including the guardian IDs which are needed for recovery operations.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-struct ThresholdConfigMetadata {
+pub(crate) struct ThresholdConfigMetadata {
     /// Minimum signers required (k in k-of-n)
     threshold_k: u16,
     /// Total number of participants (n in k-of-n)
@@ -3022,6 +3431,15 @@ struct ThresholdConfigMetadata {
 }
 
 impl ThresholdConfigMetadata {
+    pub(crate) fn contains_participant(
+        &self,
+        participant: &aura_core::threshold::ParticipantIdentity,
+    ) -> bool {
+        self.participants.contains(participant)
+    }
+}
+
+impl ThresholdConfigMetadata {
     fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
         self.participants.clone()
     }
@@ -3031,6 +3449,7 @@ impl ThresholdConfigMetadata {
 impl std::fmt::Debug for AuraEffectSystem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuraEffectSystem")
+            .field("profile_owned", &self.profile_owner.is_some())
             .field("config", &self.config)
             .field("authority_id", &self.authority_id)
             .field("journal_policy", &self.journal.journal_policy().is_some())
@@ -3040,4 +3459,15 @@ impl std::fmt::Debug for AuraEffectSystem {
             )
             .finish_non_exhaustive()
     }
+}
+
+pub(crate) fn enrollment_generation_profile_location(
+    authority: &aura_core::AuthorityId,
+    epoch: u64,
+) -> aura_core::effects::SecureStorageLocation {
+    aura_core::effects::SecureStorageLocation::with_sub_key(
+        "device_enrollment_generation_profile_v1",
+        authority.to_string(),
+        epoch.to_string(),
+    )
 }

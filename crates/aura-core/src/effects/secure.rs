@@ -39,7 +39,25 @@ use serde::{Deserialize, Serialize};
 /// Secure storage operation error
 pub type SecureStorageError = AuraError;
 
+/// Linearized immutable publication. Existing never implies equal contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImmutableSecureStoreOutcome {
+    Created,
+    AlreadyExists,
+}
+
+/// A backend without transactional immutable publication must fail explicitly.
+#[derive(Debug, thiserror::Error)]
+#[error("atomic immutable secure storage is unsupported by this backend")]
+pub struct ImmutableSecureStoreUnsupported;
+
+/// A backend without atomic initial mutable publication fails explicitly.
+#[derive(Debug, thiserror::Error)]
+#[error("atomic initial mutable secure storage is unsupported by this backend")]
+pub struct MutableSecureCreateUnsupported;
+
 /// Location within secure storage
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SecureStorageLocation {
     /// Namespace for organizing secure data
@@ -213,6 +231,39 @@ pub trait SecureStorageEffects: Send + Sync {
         data: &[u8],
         capabilities: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError>;
+
+    /// Publish a complete encrypted record only if absent. Successful Created
+    /// includes data and directory durability. A failure after publication may
+    /// leave a complete record; callers recover by rereading/revalidating it.
+    /// Never implement this using exists followed by ordinary store.
+    async fn secure_store_immutable(
+        &self,
+        _location: &SecureStorageLocation,
+        _data: &[u8],
+        _capabilities: &[SecureStorageCapability],
+    ) -> Result<ImmutableSecureStoreOutcome, SecureStorageError> {
+        Err(crate::AuraError::Storage {
+            message: "atomic immutable secure storage unsupported".into(),
+            source: Some(std::sync::Arc::new(ImmutableSecureStoreUnsupported)),
+        })
+    }
+
+    /// Atomically allocate a mutable record only if absent. Existing bytes and
+    /// protection remain unchanged. Later updates require caller-owned mutation
+    /// discipline; this method supplies no domain mutation authority. Created
+    /// acknowledges publication. Interrupted calls may have published and must
+    /// recover by rereading and validating the actual original record.
+    async fn secure_create_mutable(
+        &self,
+        _location: &SecureStorageLocation,
+        _data: &[u8],
+        _capabilities: &[SecureStorageCapability],
+    ) -> Result<ImmutableSecureStoreOutcome, SecureStorageError> {
+        Err(crate::AuraError::Storage {
+            message: "atomic initial mutable secure storage unsupported".into(),
+            source: Some(std::sync::Arc::new(MutableSecureCreateUnsupported)),
+        })
+    }
 
     /// Retrieve data from secure storage
     ///

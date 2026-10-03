@@ -116,6 +116,9 @@ impl CreateInvitationModalState {
 pub struct ImportInvitationModalState {
     /// Code input buffer
     pub code: String,
+    pub manifest_code: String,
+    pub initiator_verifier_code: String,
+    pub focused_input: usize,
     /// Error message if any
     pub error: Option<String>,
     /// Whether import is in progress
@@ -134,6 +137,9 @@ impl ImportInvitationModalState {
     pub fn with_code(code: &str) -> Self {
         Self {
             code: code.to_string(),
+            manifest_code: String::new(),
+            initiator_verifier_code: String::new(),
+            focused_input: 0,
             error: None,
             importing: false,
         }
@@ -142,10 +148,25 @@ impl ImportInvitationModalState {
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
         self.code.clear();
+        self.manifest_code.clear();
+        self.initiator_verifier_code.clear();
+        self.focused_input = 0;
         self.error = None;
         self.importing = false;
     }
 
+    pub fn enrollment_input_mut(&mut self) -> &mut String {
+        match self.focused_input {
+            0 => &mut self.code,
+            1 => &mut self.manifest_code,
+            _ => &mut self.initiator_verifier_code,
+        }
+    }
+    pub fn can_submit_enrollment(&self) -> bool {
+        self.can_submit()
+            && !self.manifest_code.trim().is_empty()
+            && !self.initiator_verifier_code.trim().is_empty()
+    }
     #[must_use]
     pub fn can_submit(&self) -> bool {
         !self.code.trim().is_empty() && !self.importing

@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
+pub use aura_invitation::enrollment_manifest::EnrollmentManifestError;
 
 use super::error::{ceremony_op, WorkflowError};
 use crate::core::IntentError;
@@ -32,6 +33,181 @@ use std::time::Duration;
 const DEVICE_ENROLLMENT_START_TIMEOUT: Duration = Duration::from_millis(30_000);
 const DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DEVICE_REMOVAL_START_TIMEOUT: Duration = Duration::from_millis(20_000);
+
+/// App-owned selection of a setup code explicitly transferred by the user.
+/// This is scoped setup evidence, not durable authority/device trust.
+///
+/// Constructing a pin from possession evidence is forbidden:
+/// ```compile_fail
+/// use aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup;
+/// use aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession;
+/// fn forge(possession: VerifiedEnrollmentSetupPossession) -> UserTransferredEnrollmentSetup {
+///     UserTransferredEnrollmentSetup { possession }
+/// }
+/// ```
+/// Persisted bytes cannot restore a trusted pin without verification and selection:
+/// ```compile_fail
+/// use aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup;
+/// fn restore(bytes: &[u8]) -> UserTransferredEnrollmentSetup {
+///     serde_json::from_slice(bytes).unwrap()
+/// }
+/// ```
+/// A raw authority ID cannot replace the selected setup at issuance:
+/// ```compile_fail
+/// use aura_app::runtime_bridge::RuntimeBridge;
+/// use aura_core::AuthorityId;
+/// async fn downgrade(runtime: &dyn RuntimeBridge, authority: AuthorityId) {
+///     runtime.initiate_device_enrollment_ceremony("Device".into(), authority).await;
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct UserTransferredEnrollmentSetup {
+    possession: aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+}
+
+impl UserTransferredEnrollmentSetup {
+    /// The exact device-owned signing statement selected by the user.
+    pub fn statement(&self) -> &aura_invitation::enrollment_setup::DeviceEnrollmentSetupStatement {
+        self.possession.statement()
+    }
+
+    /// Digest of the canonical setup statement, not the encoded proof envelope.
+    pub fn digest(&self) -> [u8; 32] {
+        self.possession.digest()
+    }
+}
+
+/// Export the actual local device's setup code through a bounded runtime call.
+/// Signing identity must be ready; callers transfer the returned code unchanged.
+pub async fn export_device_enrollment_setup_code(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<String, aura_invitation::enrollment_setup::EnrollmentSetupExportError> {
+    use aura_invitation::enrollment_setup::EnrollmentSetupExportError;
+    let runtime = app_core
+        .read()
+        .await
+        .runtime()
+        .cloned()
+        .ok_or(EnrollmentSetupExportError::Unavailable)?;
+    let export_runtime = runtime.clone();
+    timeout_runtime_call(
+        &runtime,
+        "export_device_enrollment_setup_code",
+        "export_device_enrollment_setup_request",
+        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
+        move || async move {
+            export_runtime
+                .export_device_enrollment_setup_request()
+                .await
+        },
+    )
+    .await
+    .map_err(EnrollmentSetupExportError::Boundary)?
+}
+
+/// Explicitly select a user-transferred setup code after bounded verification.
+/// Call only from the user-transfer submission path, never discovery or inbox
+/// observation. Issuance must separately recheck validity and replay status.
+pub async fn pin_user_transferred_device_enrollment_setup(
+    app_core: &Arc<RwLock<AppCore>>,
+    code: String,
+) -> Result<
+    UserTransferredEnrollmentSetup,
+    aura_invitation::enrollment_setup::EnrollmentSetupVerificationError,
+> {
+    use aura_invitation::enrollment_setup::EnrollmentSetupVerificationError;
+    let runtime = app_core
+        .read()
+        .await
+        .runtime()
+        .cloned()
+        .ok_or(EnrollmentSetupVerificationError::Unavailable)?;
+    let verification_runtime = runtime.clone();
+    let possession = timeout_runtime_call(
+        &runtime,
+        "pin_user_transferred_device_enrollment_setup",
+        "verify_device_enrollment_setup_possession",
+        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
+        move || async move {
+            verification_runtime
+                .verify_device_enrollment_setup_possession(code)
+                .await
+        },
+    )
+    .await
+    .map_err(EnrollmentSetupVerificationError::Boundary)??;
+    Ok(UserTransferredEnrollmentSetup { possession })
+}
+
+/// Selection minted only by the explicit two-input user transfer workflow.
+/// Inbox observation and enrollment-code decoding cannot construct this pin.
+#[derive(Debug, Clone)]
+pub struct UserTransferredEnrollmentManifest {
+    verified: aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+    signed_code: String,
+}
+impl UserTransferredEnrollmentManifest {
+    pub fn manifest(&self) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+        self.verified.manifest()
+    }
+    pub fn digest(&self) -> [u8; 32] {
+        self.verified.digest()
+    }
+    pub fn signed_code(&self) -> &str {
+        &self.signed_code
+    }
+    pub fn verify_baseline(
+        &self,
+        baseline: &[Vec<u8>],
+    ) -> Result<
+        aura_invitation::enrollment_manifest::VerifiedEnrollmentBaseline,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    > {
+        self.verified.clone().verify_baseline(baseline)
+    }
+}
+
+/// Transfer the signed manifest and initiator verifier obtained independently
+/// from the account owner's confirmation screen. Never derive the second
+/// input from the manifest or imported invitation's embedded sender proof.
+pub async fn pin_user_transferred_enrollment_manifest(
+    app_core: &Arc<RwLock<AppCore>>,
+    manifest_code: String,
+    initiator_verifier_code: String,
+) -> Result<
+    UserTransferredEnrollmentManifest,
+    aura_invitation::enrollment_manifest::EnrollmentManifestError,
+> {
+    use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+    if initiator_verifier_code.trim().is_empty() {
+        return Err(EnrollmentManifestError::MissingPin);
+    }
+    let runtime = app_core
+        .read()
+        .await
+        .runtime()
+        .cloned()
+        .ok_or(EnrollmentManifestError::Unavailable)?;
+    let verification_runtime = runtime.clone();
+    let signed_code = manifest_code.clone();
+    let verified = timeout_runtime_call(
+        &runtime,
+        "pin_user_transferred_enrollment_manifest",
+        "verify_enrollment_manifest_transfer",
+        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
+        move || async move {
+            verification_runtime
+                .verify_enrollment_manifest_transfer(manifest_code, initiator_verifier_code)
+                .await
+        },
+    )
+    .await
+    .map_err(EnrollmentManifestError::Boundary)??;
+    Ok(UserTransferredEnrollmentManifest {
+        verified,
+        signed_code,
+    })
+}
 
 fn ceremony_start_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration {
     match kind {
@@ -119,13 +295,19 @@ where
             Ok(Err(error)) if retryable_ceremony_intent_error(&error) && attempts.can_attempt() => {
                 let delay_ms = u64::try_from(policy.delay_for_attempt(attempt).as_millis())
                     .unwrap_or(u64::MAX);
-                runtime.sleep_ms(delay_ms).await;
+                runtime
+                    .sleep_ms(delay_ms)
+                    .await
+                    .map_err(|error| super::error::runtime_call("ceremony retry delay", error))?;
             }
             Ok(Err(error)) => return Ok(Err(error)),
             Err(error) if error.is_retryable() && attempts.can_attempt() => {
                 let delay_ms = u64::try_from(policy.delay_for_attempt(attempt).as_millis())
                     .unwrap_or(u64::MAX);
-                runtime.sleep_ms(delay_ms).await;
+                runtime
+                    .sleep_ms(delay_ms)
+                    .await
+                    .map_err(|error| super::error::runtime_call("ceremony retry delay", error))?;
             }
             Err(error) => return Err(error),
         }
@@ -135,25 +317,46 @@ where
 async fn start_device_enrollment_from_runtime(
     runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     nickname_suggestion: String,
-    invitee_authority_id: AuthorityId,
-) -> Result<Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError>, AuraError> {
-    let retry_runtime = runtime.clone();
-    start_ceremony_with_retry(
-        &runtime,
-        crate::runtime_bridge::CeremonyKind::DeviceEnrollment,
-        "start_device_enrollment_ceremony",
-        "initiate_device_enrollment_ceremony",
-        move || {
-            let runtime = retry_runtime.clone();
-            let nickname_suggestion = nickname_suggestion.clone();
-            async move {
-                runtime
-                    .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
+    setup: UserTransferredEnrollmentSetup,
+) -> Result<
+    Result<
+        crate::runtime_bridge::DeviceEnrollmentStart,
+        aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+    >,
+    AuraError,
+> {
+    let policy =
+        ceremony_start_retry_policy(crate::runtime_bridge::CeremonyKind::DeviceEnrollment)?;
+    let mut attempts = AttemptBudget::new(policy.max_attempts());
+    loop {
+        let attempt = attempts.record_attempt().map_err(AuraError::from)?;
+        let next_runtime = runtime.clone();
+        let next_name = nickname_suggestion.clone();
+        let next_setup = setup.clone();
+        let outcome = timeout_runtime_call(
+            &runtime,
+            "start_device_enrollment_ceremony",
+            "initiate_device_enrollment_ceremony",
+            DEVICE_ENROLLMENT_START_TIMEOUT,
+            move || async move {
+                next_runtime
+                    .initiate_device_enrollment_ceremony(next_name, next_setup)
                     .await
+            },
+        )
+        .await?;
+        match outcome {
+            Err(error) if error.is_retryable() && attempts.can_attempt() => {
+                let delay_ms = u64::try_from(policy.delay_for_attempt(attempt).as_millis())
+                    .unwrap_or(u64::MAX);
+                runtime
+                    .sleep_ms(delay_ms)
+                    .await
+                    .map_err(|error| super::error::runtime_call("ceremony retry delay", error))?;
             }
-        },
-    )
-    .await
+            other => return Ok(other),
+        }
+    }
 }
 
 async fn start_device_removal_from_runtime(
@@ -279,25 +482,11 @@ impl CeremonyStatusHandle {
 pub struct DeviceEnrollmentCeremonyStart {
     pub ceremony_id: CeremonyId,
     pub enrollment_code: String,
+    pub manifest_transfer: Option<crate::ui_contract::EnrollmentManifestTransferInput>,
     pub pending_epoch: aura_core::types::Epoch,
     pub device_id: aura_core::types::identifiers::DeviceId,
     pub handle: CeremonyHandle,
     pub status_handle: CeremonyStatusHandle,
-}
-
-async fn fail_start_device_enrollment<T>(
-    owner: &SemanticWorkflowOwner,
-    detail: impl Into<String>,
-) -> Result<T, AuraError> {
-    let error = SemanticOperationError::new(
-        SemanticFailureDomain::Internal,
-        SemanticFailureCode::InternalError,
-    )
-    .with_detail(detail.into());
-    owner.publish_failure(error.clone()).await?;
-    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
-        "start device enrollment failed".to_string()
-    })))
 }
 
 /// Start a guardian key-rotation ceremony.
@@ -352,17 +541,17 @@ pub async fn start_device_threshold_ceremony(
 ///
 /// For the two-step exchange flow:
 /// 1. The new device creates its own authority first
-/// 2. The new device shares its authority_id with the initiator
-/// 3. The initiator passes the invitee's authority_id here
+/// 2. The new device exports its signed setup code and the user transfers it
+/// 3. The app verifies possession and pins the explicit transfer
 /// 4. An addressed enrollment invitation is created
 ///
 /// # Arguments
 /// * `nickname_suggestion` - Suggested name for the device
-/// * `invitee_authority_id` - The authority ID of the new device
+/// * `setup` - App-owned pin for the exact transferred device signing statement
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-    invitee_authority_id: AuthorityId,
+    setup: UserTransferredEnrollmentSetup,
 ) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
     let owner = SemanticWorkflowOwner::new(
         app_core,
@@ -370,14 +559,7 @@ pub async fn start_device_enrollment_ceremony(
         None,
         SemanticOperationKind::StartDeviceEnrollment,
     );
-    start_device_enrollment_ceremony_owned(
-        app_core,
-        nickname_suggestion,
-        invitee_authority_id,
-        &owner,
-        None,
-    )
-    .await
+    start_device_enrollment_ceremony_owned(app_core, nickname_suggestion, setup, &owner, None).await
 }
 
 #[aura_macros::semantic_owner(
@@ -394,7 +576,7 @@ pub async fn start_device_enrollment_ceremony(
 async fn start_device_enrollment_ceremony_owned(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-    invitee_authority_id: AuthorityId,
+    setup: UserTransferredEnrollmentSetup,
     owner: &SemanticWorkflowOwner,
     _operation_context: Option<
         &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
@@ -403,59 +585,199 @@ async fn start_device_enrollment_ceremony_owned(
     owner
         .publish_phase(SemanticOperationPhase::WorkflowDispatched)
         .await?;
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .cloned()
-            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
-    };
-    let start = match start_device_enrollment_from_runtime(
-        runtime,
-        nickname_suggestion,
-        invitee_authority_id,
-    )
-    .await
-    {
-        Ok(Ok(start)) => start,
-        Ok(Err(error)) => {
-            return fail_start_device_enrollment(
-                owner,
-                ceremony_op("start device enrollment", error).to_string(),
-            )
-            .await;
-        }
-        Err(error) => {
-            return fail_start_device_enrollment(
-                owner,
-                ceremony_op("start device enrollment", error).to_string(),
-            )
-            .await;
-        }
-    };
+    let start =
+        prepare_device_enrollment_start(app_core, nickname_suggestion, setup, owner).await?;
     owner
         .publish_success_with(issue_device_enrollment_started_proof(
             start.ceremony_id.clone(),
         ))
         .await?;
+    Ok(device_enrollment_handle_from_start(start))
+}
+
+fn enrollment_boundary_code(error: &(dyn std::error::Error + 'static)) -> SemanticFailureCode {
+    let mut current = Some(error);
+    while let Some(cause) = current {
+        if let Some(budget) = cause.downcast_ref::<aura_core::TimeoutBudgetError>() {
+            return crate::workflows::runtime_error_classification::timeout_budget_failure_code(
+                budget,
+            );
+        }
+        if let Some(workflow) = cause.downcast_ref::<WorkflowError>() {
+            if matches!(workflow, WorkflowError::TimedOut { .. }) {
+                return SemanticFailureCode::OperationTimedOut;
+            }
+            if matches!(workflow, WorkflowError::RuntimeUnavailable) {
+                return SemanticFailureCode::Unavailable;
+            }
+        }
+        current = cause.source();
+    }
+    SemanticFailureCode::CeremonyRuntimeFailed
+}
+
+fn enrollment_setup_failure(
+    error: &aura_invitation::enrollment_setup::EnrollmentSetupVerificationError,
+) -> SemanticOperationError {
+    use aura_invitation::enrollment_setup::{
+        EnrollmentSetupError, EnrollmentSetupVerificationError,
+    };
+    let code = match error {
+        EnrollmentSetupVerificationError::Unavailable => SemanticFailureCode::Unavailable,
+        EnrollmentSetupVerificationError::Time(_) => SemanticFailureCode::CeremonyRuntimeFailed,
+        EnrollmentSetupVerificationError::Boundary(error) => enrollment_boundary_code(error),
+        EnrollmentSetupVerificationError::Setup(error) => match error {
+            EnrollmentSetupError::InvalidFormat
+            | EnrollmentSetupError::SizeLimit
+            | EnrollmentSetupError::UnsupportedVersion(_)
+            | EnrollmentSetupError::InvalidValidity
+            | EnrollmentSetupError::OutsideValidity
+            | EnrollmentSetupError::InvalidSigningPolicy
+            | EnrollmentSetupError::Codec(_)
+            | EnrollmentSetupError::Transcript(_) => SemanticFailureCode::InvalidArgument,
+            EnrollmentSetupError::ProofBinding | EnrollmentSetupError::InvalidSignature => {
+                SemanticFailureCode::PermissionDenied
+            }
+            EnrollmentSetupError::Crypto(_) => SemanticFailureCode::CeremonyRuntimeFailed,
+        },
+    };
+    SemanticOperationError::new(SemanticFailureDomain::Ceremony, code)
+        .with_detail(error.to_string())
+}
+
+fn enrollment_issuance_failure(
+    error: &aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+) -> SemanticOperationError {
+    use aura_invitation::enrollment_setup::{EnrollmentIssuanceError, EnrollmentIssuanceStage};
+    let code = match error {
+        EnrollmentIssuanceError::Unavailable => SemanticFailureCode::Unavailable,
+        EnrollmentIssuanceError::OutsideValidity
+        | EnrollmentIssuanceError::CurrentIdentity
+        | EnrollmentIssuanceError::InvalidPolicy => SemanticFailureCode::InvalidArgument,
+        EnrollmentIssuanceError::AlreadyEnrolled => SemanticFailureCode::InvalidState,
+        EnrollmentIssuanceError::MissingPackage(_)
+        | EnrollmentIssuanceError::EmptyPendingPackage
+        | EnrollmentIssuanceError::EmptyPendingConfig
+        | EnrollmentIssuanceError::Time(_) => SemanticFailureCode::CeremonyRuntimeFailed,
+        EnrollmentIssuanceError::Failure { stage, source } => {
+            let stage_code = match stage {
+                EnrollmentIssuanceStage::PrestateValidation => SemanticFailureCode::InvalidState,
+                EnrollmentIssuanceStage::InvitationService => SemanticFailureCode::Unavailable,
+                EnrollmentIssuanceStage::TreeRead
+                | EnrollmentIssuanceStage::Rotation
+                | EnrollmentIssuanceStage::PendingPackageRead
+                | EnrollmentIssuanceStage::PendingConfigRead
+                | EnrollmentIssuanceStage::PrestateEncoding
+                | EnrollmentIssuanceStage::OperationEncoding
+                | EnrollmentIssuanceStage::Supersession
+                | EnrollmentIssuanceStage::CeremonyRegistration
+                | EnrollmentIssuanceStage::SetupVerifierRetention
+                | EnrollmentIssuanceStage::BaselineExport
+                | EnrollmentIssuanceStage::BaselineEncoding
+                | EnrollmentIssuanceStage::InvitationCreation
+                | EnrollmentIssuanceStage::InvitationExport => {
+                    SemanticFailureCode::CeremonyRuntimeFailed
+                }
+            };
+            let boundary_code = enrollment_boundary_code(source);
+            if boundary_code == SemanticFailureCode::CeremonyRuntimeFailed {
+                stage_code
+            } else {
+                boundary_code
+            }
+        }
+    };
+    SemanticOperationError::new(SemanticFailureDomain::Ceremony, code)
+        .with_detail(error.to_string())
+}
+
+fn enrollment_runtime_failure(error: &AuraError) -> SemanticOperationError {
+    SemanticOperationError::new(
+        SemanticFailureDomain::Ceremony,
+        enrollment_boundary_code(error),
+    )
+    .with_detail(error.to_string())
+}
+
+async fn prepare_device_enrollment_start(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup: UserTransferredEnrollmentSetup,
+    owner: &SemanticWorkflowOwner,
+) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
+    let runtime = app_core.read().await.runtime().cloned();
+    let Some(runtime) = runtime else {
+        let cause = WorkflowError::RuntimeUnavailable;
+        let detail = cause.to_string();
+        owner
+            .publish_failure(
+                SemanticOperationError::new(
+                    SemanticFailureDomain::Ceremony,
+                    SemanticFailureCode::Unavailable,
+                )
+                .with_detail(detail.clone()),
+            )
+            .await?;
+        return Err(AuraError::Internal {
+            message: detail,
+            source: Some(Arc::new(cause)),
+        });
+    };
+    let start =
+        match start_device_enrollment_from_runtime(runtime, nickname_suggestion, setup).await {
+            Ok(Ok(start)) => start,
+            Ok(Err(error)) => {
+                let detail = error.to_string();
+                owner
+                    .publish_failure(enrollment_issuance_failure(&error))
+                    .await?;
+                return Err(AuraError::Internal {
+                    message: detail,
+                    source: Some(Arc::new(error)),
+                });
+            }
+            Err(error) => {
+                let detail = error.to_string();
+                owner
+                    .publish_failure(enrollment_runtime_failure(&error))
+                    .await?;
+                return Err(AuraError::Internal {
+                    message: detail,
+                    source: Some(Arc::new(error)),
+                });
+            }
+        };
+    Ok(start)
+}
+
+fn device_enrollment_handle_from_start(
+    start: crate::runtime_bridge::DeviceEnrollmentStart,
+) -> DeviceEnrollmentCeremonyStart {
     let handle = CeremonyHandle::new(
         start.ceremony_id.clone(),
         crate::runtime_bridge::CeremonyKind::DeviceEnrollment,
     );
     let status_handle = handle.status_handle();
-    Ok(DeviceEnrollmentCeremonyStart {
+    DeviceEnrollmentCeremonyStart {
         ceremony_id: start.ceremony_id,
         enrollment_code: start.enrollment_code,
+        manifest_transfer: start.manifest_transfer.map(|transfer| {
+            crate::ui_contract::EnrollmentManifestTransferInput {
+                manifest_code: transfer.manifest_code,
+                initiator_verifier_code: transfer.initiator_verifier_code,
+            }
+        }),
         pending_epoch: start.pending_epoch,
         device_id: start.device_id,
         handle,
         status_handle,
-    })
+    }
 }
 
 pub async fn start_device_enrollment_ceremony_with_terminal_status(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
-    invitee_authority_id: AuthorityId,
+    setup: UserTransferredEnrollmentSetup,
     instance_id: Option<OperationInstanceId>,
 ) -> crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentCeremonyStart> {
     let owner = SemanticWorkflowOwner::new(
@@ -464,10 +786,54 @@ pub async fn start_device_enrollment_ceremony_with_terminal_status(
         instance_id,
         SemanticOperationKind::StartDeviceEnrollment,
     );
-    let result = start_device_enrollment_ceremony_owned(
+    let result =
+        start_device_enrollment_ceremony_owned(app_core, nickname_suggestion, setup, &owner, None)
+            .await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+/// Start enrollment from the setup code explicitly transferred by the user.
+pub async fn start_device_enrollment_ceremony_from_setup_code(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup_code: String,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        None,
+        SemanticOperationKind::StartDeviceEnrollment,
+    );
+    start_device_enrollment_from_setup_code_owned(
         app_core,
         nickname_suggestion,
-        invitee_authority_id,
+        setup_code,
+        &owner,
+        None,
+    )
+    .await
+}
+
+/// Preserve the frontend handoff instance across setup verification and issuance.
+pub async fn start_device_enrollment_ceremony_from_setup_code_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup_code: String,
+    instance_id: Option<OperationInstanceId>,
+) -> crate::ui_contract::WorkflowTerminalOutcome<DeviceEnrollmentCeremonyStart> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment(),
+        instance_id,
+        SemanticOperationKind::StartDeviceEnrollment,
+    );
+    let result = start_device_enrollment_from_setup_code_owned(
+        app_core,
+        nickname_suggestion,
+        setup_code,
         &owner,
         None,
     )
@@ -476,6 +842,52 @@ pub async fn start_device_enrollment_ceremony_with_terminal_status(
         result,
         terminal: owner.terminal_status().await,
     }
+}
+
+#[aura_macros::semantic_owner(
+    owner = "start_device_enrollment_from_setup_code_owned",
+    wrapper = "start_device_enrollment_ceremony_from_setup_code_with_terminal_status",
+    terminal = "publish_success_with",
+    postcondition = "device_enrollment_started",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentStartedProof,
+    authoritative_inputs = "runtime,authoritative_source",
+    depends_on = "runtime_device_enrollment_started",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn start_device_enrollment_from_setup_code_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    nickname_suggestion: String,
+    setup_code: String,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<DeviceEnrollmentCeremonyStart, AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    let setup = match pin_user_transferred_device_enrollment_setup(app_core, setup_code).await {
+        Ok(setup) => setup,
+        Err(error) => {
+            let detail = error.to_string();
+            owner
+                .publish_failure(enrollment_setup_failure(&error))
+                .await?;
+            return Err(AuraError::Invalid {
+                message: detail,
+                source: Some(Arc::new(error)),
+            });
+        }
+    };
+    let start =
+        prepare_device_enrollment_start(app_core, nickname_suggestion, setup, owner).await?;
+    owner
+        .publish_success_with(issue_device_enrollment_started_proof(
+            start.ceremony_id.clone(),
+        ))
+        .await?;
+    Ok(device_enrollment_handle_from_start(start))
 }
 
 fn device_enrollment_completion_failure(reason: CeremonyFailureReason) -> SemanticOperationError {
@@ -896,6 +1308,217 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enrollment_setup_failure_codes_are_structural() {
+        use aura_invitation::enrollment_setup::{
+            EnrollmentSetupError as S, EnrollmentSetupVerificationError as V,
+        };
+        let cases = [
+            (V::Unavailable, SemanticFailureCode::Unavailable),
+            (
+                V::Time(aura_core::effects::time::TimeError::ServiceUnavailable),
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                V::Setup(S::InvalidFormat),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (V::Setup(S::SizeLimit), SemanticFailureCode::InvalidArgument),
+            (
+                V::Setup(S::UnsupportedVersion(42)),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                V::Setup(S::InvalidValidity),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                V::Setup(S::OutsideValidity),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                V::Setup(S::InvalidSigningPolicy),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                V::Setup(S::ProofBinding),
+                SemanticFailureCode::PermissionDenied,
+            ),
+            (
+                V::Setup(S::InvalidSignature),
+                SemanticFailureCode::PermissionDenied,
+            ),
+            (
+                V::Setup(S::Codec(serde_json::from_str::<u8>("broken").unwrap_err())),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                V::Setup(S::Crypto(AuraError::agent("OperationTimedOut"))),
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                V::Boundary(AuraError::agent("PermissionDenied")),
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+        ];
+        for (error, expected) in cases {
+            let mapped = enrollment_setup_failure(&error);
+            assert_eq!(mapped.domain, SemanticFailureDomain::Ceremony);
+            assert_eq!(mapped.code, expected);
+            assert_eq!(mapped.detail.as_deref(), Some(error.to_string().as_str()));
+        }
+    }
+
+    #[test]
+    fn enrollment_issuance_failure_codes_cover_every_stage() {
+        use aura_invitation::enrollment_setup::{
+            EnrollmentIssuanceError as E, EnrollmentIssuanceStage as S,
+        };
+        let cases = [
+            (E::Unavailable, SemanticFailureCode::Unavailable),
+            (E::OutsideValidity, SemanticFailureCode::InvalidArgument),
+            (E::CurrentIdentity, SemanticFailureCode::InvalidArgument),
+            (E::AlreadyEnrolled, SemanticFailureCode::InvalidState),
+            (E::InvalidPolicy, SemanticFailureCode::InvalidArgument),
+            (
+                E::MissingPackage(aura_core::DeviceId::new_from_entropy([7; 32])),
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                E::EmptyPendingPackage,
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                E::EmptyPendingConfig,
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                E::Time(aura_core::effects::time::TimeError::ServiceUnavailable),
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(enrollment_issuance_failure(&error).code, expected);
+        }
+        for stage in [
+            S::TreeRead,
+            S::Rotation,
+            S::PendingPackageRead,
+            S::PendingConfigRead,
+            S::PrestateEncoding,
+            S::OperationEncoding,
+            S::PrestateValidation,
+            S::Supersession,
+            S::CeremonyRegistration,
+            S::SetupVerifierRetention,
+            S::InvitationService,
+            S::BaselineExport,
+            S::BaselineEncoding,
+            S::InvitationCreation,
+            S::InvitationExport,
+        ] {
+            let expected = match stage {
+                S::PrestateValidation => SemanticFailureCode::InvalidState,
+                S::InvitationService => SemanticFailureCode::Unavailable,
+                S::TreeRead
+                | S::Rotation
+                | S::PendingPackageRead
+                | S::PendingConfigRead
+                | S::PrestateEncoding
+                | S::OperationEncoding
+                | S::Supersession
+                | S::CeremonyRegistration
+                | S::SetupVerifierRetention
+                | S::BaselineExport
+                | S::BaselineEncoding
+                | S::InvitationCreation
+                | S::InvitationExport => SemanticFailureCode::CeremonyRuntimeFailed,
+            };
+            let error = E::Failure {
+                stage,
+                source: AuraError::agent("OperationTimedOut"),
+            };
+            let mapped = enrollment_issuance_failure(&error);
+            assert_eq!(mapped.domain, SemanticFailureDomain::Ceremony);
+            assert_eq!(mapped.code, expected);
+        }
+    }
+
+    #[test]
+    fn enrollment_timeout_mapping_preserves_original_source_chain() {
+        use aura_invitation::enrollment_setup::{
+            EnrollmentIssuanceError as E, EnrollmentIssuanceStage as S,
+            EnrollmentSetupVerificationError as V,
+        };
+        use std::error::Error;
+        fn timeout() -> AuraError {
+            AuraError::Internal {
+                message: "bounded enrollment call".into(),
+                source: Some(Arc::new(WorkflowError::TimedOut {
+                    operation: "enrollment",
+                    stage: "verification",
+                    timeout_ms: 30_000,
+                })),
+            }
+        }
+        let setup = V::Boundary(timeout());
+        assert_eq!(
+            enrollment_setup_failure(&setup).code,
+            SemanticFailureCode::OperationTimedOut
+        );
+        let returned = AuraError::Invalid {
+            message: setup.to_string(),
+            source: Some(Arc::new(setup)),
+        };
+        let original = returned.source().unwrap().downcast_ref::<V>().unwrap();
+        let boundary = original
+            .source()
+            .unwrap()
+            .downcast_ref::<AuraError>()
+            .unwrap();
+        assert!(matches!(
+            boundary.source().unwrap().downcast_ref::<WorkflowError>(),
+            Some(WorkflowError::TimedOut { .. })
+        ));
+        let issuance = E::Failure {
+            stage: S::Rotation,
+            source: timeout(),
+        };
+        assert_eq!(
+            enrollment_issuance_failure(&issuance).code,
+            SemanticFailureCode::OperationTimedOut
+        );
+        let returned = AuraError::Internal {
+            message: issuance.to_string(),
+            source: Some(Arc::new(issuance)),
+        };
+        let original = returned.source().unwrap().downcast_ref::<E>().unwrap();
+        assert!(original
+            .source()
+            .unwrap()
+            .downcast_ref::<AuraError>()
+            .unwrap()
+            .source()
+            .unwrap()
+            .is::<WorkflowError>());
+        assert_eq!(
+            enrollment_runtime_failure(&timeout()).code,
+            SemanticFailureCode::OperationTimedOut
+        );
+        let unavailable = AuraError::Internal {
+            message: "runtime".into(),
+            source: Some(Arc::new(WorkflowError::RuntimeUnavailable)),
+        };
+        assert_eq!(
+            enrollment_runtime_failure(&unavailable).code,
+            SemanticFailureCode::Unavailable
+        );
+        assert_eq!(
+            enrollment_setup_failure(&V::Boundary(unavailable)).code,
+            SemanticFailureCode::Unavailable
+        );
+    }
 
     #[test]
     fn device_enrollment_terminal_failures_keep_stable_codes() {

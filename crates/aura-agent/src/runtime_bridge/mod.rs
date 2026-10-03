@@ -16,7 +16,7 @@ use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
     DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
-    RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
+    RendezvousStatus, RuntimeBridge, RuntimeBridgeError, SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui_contract::{
@@ -44,6 +44,7 @@ use aura_core::effects::{
     TransportEnvelope,
 };
 use aura_core::hash::hash;
+use aura_core::threshold::ParticipantIdentity;
 use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -71,7 +72,7 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
-use aura_social::{is_user_banned, is_user_muted};
+
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
@@ -90,7 +91,7 @@ mod sync;
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use error_boundary::{
-    bridge_internal, bridge_network, bridge_service_unavailable,
+    bridge_internal, bridge_network, bridge_runtime_internal, bridge_service_unavailable,
     bridge_service_unavailable_with_detail, bridge_validation_message,
 };
 use invitation::convert_invitation_to_bridge_info;
@@ -306,52 +307,11 @@ where
     Fut: std::future::Future<Output = Result<T, E>>,
 {
     let started_at = time.physical_time().await.map_err(|error| {
-        TimeoutRunError::Timeout(aura_core::TimeoutBudgetError::time_source_unavailable(
-            error.to_string(),
-        ))
+        TimeoutRunError::Timeout(aura_core::TimeoutBudgetError::time_source_failure(error))
     })?;
     let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout)
         .map_err(TimeoutRunError::Timeout)?;
     execute_with_timeout_budget(time, &budget, operation).await
-}
-
-#[derive(Debug, Default)]
-struct ChannelFactInspection {
-    checkpoint_exists: bool,
-    bootstrap: Option<ChannelBootstrap>,
-}
-
-async fn inspect_channel_context_facts(
-    effects: &crate::runtime::AuraEffectSystem,
-    context: ContextId,
-    channel: ChannelId,
-) -> Result<ChannelFactInspection, IntentError> {
-    let journal = effects
-        .fetch_context_journal(context)
-        .await
-        .map_err(|error| bridge_internal("AMP context journal lookup failed", error))?;
-
-    let mut inspection = ChannelFactInspection::default();
-    for fact in journal.iter_facts() {
-        let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
-            continue;
-        };
-        match protocol_fact {
-            ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint)
-                if checkpoint.context == context && checkpoint.channel == channel =>
-            {
-                inspection.checkpoint_exists = true;
-            }
-            ProtocolRelationalFact::AmpChannelBootstrap(bootstrap)
-                if bootstrap.context == context && bootstrap.channel == channel =>
-            {
-                inspection.bootstrap = Some(bootstrap.clone());
-            }
-            _ => {}
-        }
-    }
-
-    Ok(inspection)
 }
 
 fn amp_transition_snapshot(
@@ -438,27 +398,49 @@ async fn resolve_channel_ids_from_local_chat_facts(
     effects: &crate::runtime::AuraEffectSystem,
     authority: AuthorityId,
     channel_name: &str,
-) -> Result<Vec<ChannelId>, IntentError> {
+) -> Result<Vec<ChannelId>, RuntimeBridgeError> {
     let normalized = channel_name.trim().to_ascii_lowercase();
     let facts = effects
         .load_committed_facts(authority)
         .await
-        .map_err(|error| {
-            bridge_internal(
-                "Load committed facts for channel-name resolution failed",
-                error,
-            )
-        })?;
+        .map_err(|error| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error)))?;
 
-    let chat_facts = facts.into_iter().rev().filter_map(|fact| {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
-            return None;
+    let mut chat_facts = Vec::new();
+    for fact in facts.into_iter().rev() {
+        let FactContent::Relational(RelationalFact::Generic {
+            context_id,
+            envelope,
+        }) = fact.content
+        else {
+            continue;
         };
-        (envelope.type_id.as_str() == CHAT_FACT_TYPE_ID)
-            .then(|| ChatFact::from_envelope(&envelope))
-            .flatten()
-    });
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            continue;
+        }
+        let decoded = decode_required_name_chat_fact(context_id, &envelope)?;
+        chat_facts.push(decoded);
+    }
     Ok(resolve_created_channel_ids_by_name(chat_facts, &normalized))
+}
+
+fn decode_required_name_chat_fact(
+    context: ContextId,
+    envelope: &aura_core::types::facts::FactEnvelope,
+) -> Result<ChatFact, RuntimeBridgeError> {
+    let decoded = ChatFact::try_from_envelope(envelope)
+        .map_err(|error| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error)))?;
+    if decoded.context_id() != context {
+        let error = aura_core::types::facts::FactError::InvalidEnvelope(
+            "committed chat envelope and payload contexts disagree".to_string(),
+        );
+        return Err(map_amp_error(
+            aura_core::effects::amp::AmpChannelError::Effect(aura_core::AuraError::Invalid {
+                message: error.to_string(),
+                source: Some(Arc::new(error)),
+            }),
+        ));
+    }
+    Ok(decoded)
 }
 
 fn resolve_created_channel_ids_by_name(
@@ -611,7 +593,7 @@ impl AgentRuntimeBridge {
 
     pub(super) async fn refresh_reachability_after_ceremony_processing(
         &self,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), RuntimeBridgeError> {
         let rounds = reachability_refresh_rounds();
         let backoff_ms = harness_sync_backoff_ms();
         let mut last_error = None;
@@ -626,12 +608,12 @@ impl AgentRuntimeBridge {
                 Err(error) => last_error = Some(error),
             }
             if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
-                self.sleep_ms(backoff_ms).await;
+                self.sleep_ms(backoff_ms).await?;
             }
         }
 
         match last_error {
-            Some(error) => Err(error),
+            Some(error) => Err(error.into()),
             None => Ok(()),
         }
     }
@@ -797,7 +779,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn amp_create_channel(
         &self,
         params: ChannelCreateParams,
-    ) -> Result<ChannelId, IntentError> {
+    ) -> Result<ChannelId, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         effects.create_channel(params).await.map_err(map_amp_error)
     }
@@ -807,29 +789,48 @@ impl RuntimeBridge for AgentRuntimeBridge {
         context: ContextId,
         channel: ChannelId,
         recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, IntentError> {
+    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError> {
         if recipients.is_empty() {
-            return Err(bridge_validation_message(
-                "bootstrap recipients cannot be empty",
-            ));
+            return Err(bridge_validation_message("bootstrap recipients cannot be empty").into());
         }
 
         let effects = self.agent.runtime().effects();
-        let inspection = inspect_channel_context_facts(&effects, context, channel).await?;
+        let _canonical = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .map_err(|error| {
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+            })?;
+        let journal = effects
+            .fetch_context_journal(context)
+            .await
+            .map_err(|error| {
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+            })?;
+        let mut existing_bootstrap = None;
+        for fact in journal.iter_facts() {
+            if let FactContent::Relational(RelationalFact::Protocol(
+                ProtocolRelationalFact::AmpChannelBootstrap(bootstrap),
+            )) = &fact.content
+            {
+                if bootstrap.context == context && bootstrap.channel == channel {
+                    existing_bootstrap = Some(bootstrap.clone());
+                }
+            }
+        }
 
         let mut requested_recipients = BTreeSet::new();
         for recipient in recipients {
             requested_recipients.insert(recipient);
         }
 
-        if let Some(existing) = inspection.bootstrap.clone() {
+        if let Some(existing) = existing_bootstrap {
             if !requested_recipients.is_empty() {
                 let existing_recipients: BTreeSet<_> =
                     existing.recipients.iter().copied().collect();
                 if !requested_recipients.is_subset(&existing_recipients) {
                     return Err(bridge_validation_message(
                         "AMP bootstrap already exists; refusing to add new recipients (late joiners cannot receive bootstrap keys)",
-                    ));
+                    ).into());
                 }
             }
 
@@ -843,25 +844,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let key = effects
                 .secure_retrieve(&location, read_capabilities)
                 .await
-                .map_err(|e| bridge_internal("Load AMP bootstrap key failed", e))?;
+                .map_err(|e| {
+                    RuntimeBridgeError::with_source(
+                        IntentError::storage_error("Load AMP bootstrap key failed"),
+                        e,
+                    )
+                })?;
             if key.len() != 32 {
-                return Err(bridge_internal(
-                    "AMP bootstrap key has invalid length",
-                    key.len(),
-                ));
+                return Err(IntentError::validation_failed(format!(
+                    "AMP bootstrap key has invalid length: {}",
+                    key.len()
+                ))
+                .into());
             }
 
             return Ok(ChannelBootstrapPackage {
                 bootstrap_id: existing.bootstrap_id,
                 key,
             });
-        }
-
-        if !inspection.checkpoint_exists {
-            return Err(bridge_internal(
-                "AMP channel checkpoint unavailable for bootstrap",
-                format!("context {context}, channel {channel}"),
-            ));
         }
 
         let key_bytes = effects.random_bytes_32().await;
@@ -872,9 +872,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
         effects
             .secure_store(&location, &key_bytes, &store_capabilities)
             .await
-            .map_err(|e| bridge_internal("Store AMP bootstrap key failed", e))?;
+            .map_err(|e| {
+                RuntimeBridgeError::with_source(
+                    IntentError::storage_error("Store AMP bootstrap key failed"),
+                    e,
+                )
+            })?;
 
-        let now = effects.physical_time().await.map_err(map_time_read_error)?;
+        let now = effects.physical_time().await.map_err(|error| {
+            RuntimeBridgeError::with_source(
+                IntentError::service_error("Physical clock read failed"),
+                error,
+            )
+        })?;
 
         let bootstrap_fact = ChannelBootstrap {
             context,
@@ -891,7 +901,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 aura_journal::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
             ))
             .await
-            .map_err(|e| bridge_internal("Commit AMP bootstrap fact failed", e))?;
+            .map_err(|e| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(e)))?;
 
         Ok(ChannelBootstrapPackage {
             bootstrap_id,
@@ -903,37 +913,52 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<bool, IntentError> {
+    ) -> Result<bool, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
-        Ok(inspect_channel_context_facts(&effects, context, channel)
-            .await?
-            .checkpoint_exists)
+        match aura_protocol::amp::get_channel_state(&effects, context, channel).await {
+            Ok(_) => Ok(true),
+            Err(error) => {
+                if aura_protocol::amp::ChannelStateUnavailable::find(&error).is_some_and(
+                    |absence| absence.context() == context && absence.channel() == channel,
+                ) {
+                    return Ok(false);
+                }
+                Err(map_amp_error(
+                    aura_core::effects::amp::AmpChannelError::Effect(error),
+                ))
+            }
+        }
     }
 
     async fn amp_list_channel_participants(
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Vec<AuthorityId>, IntentError> {
+    ) -> Result<Vec<AuthorityId>, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         let mut participants: BTreeSet<AuthorityId> =
             aura_protocol::amp::list_channel_participants(&effects, context, channel)
                 .await
                 .map_err(|error| {
-                    bridge_internal(
-                        "List authoritative AMP participants failed",
-                        format!("channel {channel} in context {context}: {error}"),
-                    )
+                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
                 })?
                 .into_iter()
                 .collect();
 
-        let invitation_service = self
-            .agent
-            .invitations()
-            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
+        let invitation_service = self.agent.invitations().map_err(|e| {
+            RuntimeBridgeError::with_source(
+                IntentError::service_error("Invitation service unavailable"),
+                e,
+            )
+        })?;
         let local_authority = self.agent.authority_id();
-        for invitation in invitation_service.list_with_storage().await {
+        for invitation in invitation_service
+            .list_channel_invitations_with_storage_required()
+            .await
+            .map_err(|error| {
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+            })?
+        {
             if invitation.status != aura_invitation::InvitationStatus::Accepted {
                 continue;
             }
@@ -980,15 +1005,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError> {
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
-        let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
+        let state = aura_protocol::amp::get_reduced_channel_state(&effects, context, channel)
             .await
             .map_err(|error| {
-                bridge_internal(
-                    "Read AMP transition diagnostics failed",
-                    format!("channel {channel} in context {context}: {error}"),
-                )
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
             })?;
         Ok(state
             .transition
@@ -1056,7 +1078,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         channel_id: ChannelId,
         authority_id: AuthorityId,
         current_time_ms: u64,
-    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+    ) -> Result<AuthoritativeModerationStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
         let committed_facts = self
             .agent
             .runtime()
@@ -1064,18 +1086,31 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .load_committed_facts(self.agent.authority_id())
             .await
             .map_err(|error| {
-                IntentError::internal_error(format!(
-                    "failed to load committed facts for moderation status: {error}"
-                ))
+                bridge_runtime_internal("Load committed moderation facts failed", error)
             })?;
+        let (is_banned, is_muted) = aura_social::try_is_user_banned_and_muted(
+            &committed_facts,
+            &context_id,
+            &authority_id,
+            current_time_ms,
+            Some(&channel_id),
+        )
+        .map_err(|error| {
+            bridge_runtime_internal(
+                "Decode required moderation facts failed",
+                aura_core::AuraError::from(error),
+            )
+        })?;
         let homes: HomesState =
             self.reactive_handler()
                 .read(&*HOMES_SIGNAL)
                 .await
                 .map_err(|error| {
-                    IntentError::internal_error(format!(
-                        "failed to read authoritative homes signal for moderation status: {error}"
-                    ))
+                    bridge_runtime_internal(
+                        "Read authoritative homes signal for moderation status failed",
+                        error,
+                    )
+                    .with_kind(aura_app::runtime_bridge::RuntimeBridgeErrorKind::Reactive)
                 })?;
         let candidates = collect_authoritative_moderation_homes(&homes, context_id, channel_id);
         let roster_known = candidates.iter().any(|home| !home.members.is_empty());
@@ -1084,20 +1119,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .any(|home| home.member(&authority_id).is_some());
 
         Ok(AuthoritativeModerationStatus {
-            is_banned: is_user_banned(
-                &committed_facts,
-                &context_id,
-                &authority_id,
-                current_time_ms,
-                Some(&channel_id),
-            ),
-            is_muted: is_user_muted(
-                &committed_facts,
-                &context_id,
-                &authority_id,
-                current_time_ms,
-                Some(&channel_id),
-            ),
+            is_banned,
+            is_muted,
             roster_known,
             is_member,
         })
@@ -1143,7 +1166,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
-    ) -> Result<Option<ContextId>, IntentError> {
+    ) -> Result<Option<ContextId>, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         let authority = self.agent.authority_id();
 
@@ -1154,17 +1177,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .list_contexts_for_authority(authority)
             .await
             .map_err(|error| {
-                IntentError::internal_error(format!(
-                    "failed to list registered contexts for channel resolution: {error}"
-                ))
+                RuntimeBridgeError::with_source(
+                    IntentError::service_error("Registered channel contexts unavailable"),
+                    error,
+                )
             })?;
 
         for context in contexts {
-            if inspect_channel_context_facts(&effects, context, channel)
-                .await?
-                .checkpoint_exists
-            {
-                return Ok(Some(context));
+            match aura_protocol::amp::get_channel_state(&effects, context, channel).await {
+                Ok(_) => return Ok(Some(context)),
+                Err(error)
+                    if aura_protocol::amp::ChannelStateUnavailable::find(&error).is_some_and(
+                        |absence| absence.context() == context && absence.channel() == channel,
+                    ) => {}
+                Err(error) => {
+                    return Err(map_amp_error(
+                        aura_core::effects::amp::AmpChannelError::Effect(error),
+                    ))
+                }
             }
         }
 
@@ -1174,7 +1204,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<ChannelId>, IntentError> {
+    ) -> Result<Vec<ChannelId>, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         let authority = self.agent.authority_id();
         let mut resolved = BTreeSet::new();
@@ -1197,7 +1227,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn identify_materialized_channel_bindings_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<AuthoritativeChannelBinding>, IntentError> {
+    ) -> Result<Vec<AuthoritativeChannelBinding>, RuntimeBridgeError> {
         let mut bindings = Vec::new();
 
         for channel_id in self
@@ -1221,19 +1251,29 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn amp_repair_local_channel_membership(
         &self,
         params: ChannelJoinParams,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
+        let _canonical =
+            aura_protocol::amp::get_channel_state(&effects, params.context, params.channel)
+                .await
+                .map_err(|error| {
+                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+                })?;
         let timestamp = execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            || async { Ok::<_, IntentError>(ChannelMembershipFact::random_timestamp(&effects).await) },
+            || async {
+                Ok::<_, aura_core::AuraError>(
+                    ChannelMembershipFact::random_timestamp(&effects).await,
+                )
+            },
         )
         .await
         .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
-                "amp_repair_local_channel_membership.random_timestamp timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
-            )),
-            TimeoutRunError::Operation(error) => error,
+            TimeoutRunError::Timeout(error) => amp::map_amp_budget_error(error),
+            TimeoutRunError::Operation(error) => {
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+            }
         })?;
         let membership = ChannelMembershipFact::new(
             params.context,
@@ -1249,28 +1289,30 @@ impl RuntimeBridge for AgentRuntimeBridge {
         )
         .await
         .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => IntentError::internal_error(format!(
-                "amp_repair_local_channel_membership.insert_relational_fact timed out after {AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS}ms"
-            )),
+            TimeoutRunError::Timeout(error) => amp::map_amp_budget_error(error),
             TimeoutRunError::Operation(error) => {
-                IntentError::internal_error(format!(
-                    "failed to repair local AMP membership: {error}"
-                ))
+                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
             }
         })
     }
 
-    async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError> {
+    async fn amp_close_channel(
+        &self,
+        params: ChannelCloseParams,
+    ) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         effects.close_channel(params).await.map_err(map_amp_error)
     }
 
-    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError> {
+    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         effects.join_channel(params).await.map_err(map_amp_error)
     }
 
-    async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError> {
+    async fn amp_leave_channel(
+        &self,
+        params: ChannelLeaveParams,
+    ) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         // Members to tell, read before the local leave removes the channel.
         let members = effects
@@ -1535,7 +1577,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,
-    ) -> Result<AmpCiphertext, IntentError> {
+    ) -> Result<AmpCiphertext, RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
         effects.send_message(params).await.map_err(map_amp_error)
     }
@@ -1843,7 +1885,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
-    async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
+    async fn bootstrap_signing_keys(
+        &self,
+    ) -> Result<Vec<u8>, aura_app::runtime_bridge::RuntimeBridgeError> {
         let authority = self.agent.authority_id();
         let signing_service = self.agent.threshold_signing();
 
@@ -1852,7 +1896,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .bootstrap_authority(&authority)
             .await
             .map_err(|e| {
-                IntentError::internal_error(format!("Failed to bootstrap signing keys: {}", e))
+                error_boundary::bridge_runtime_internal("Failed to bootstrap signing keys", e)
+            })?;
+
+        self.restore_owned_device_enrollment_ceremonies()
+            .await
+            .map_err(|error| {
+                error_boundary::bridge_runtime_internal("Restore enrollment ceremonies", error)
             })?;
 
         // The LAN identity key now exists; announce this account right away.
@@ -1893,6 +1943,67 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .sign(context)
             .await
             .map_err(|e| IntentError::internal_error(format!("Threshold signing failed: {}", e)))
+    }
+
+    async fn export_device_enrollment_setup_request(
+        &self,
+    ) -> Result<String, aura_invitation::enrollment_setup::EnrollmentSetupExportError> {
+        self.agent
+            .threshold_signing()
+            .export_device_enrollment_setup_request(self.agent.authority_id())
+            .await
+    }
+
+    async fn verify_device_enrollment_setup_possession(
+        &self,
+        code: String,
+    ) -> Result<
+        aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        aura_invitation::enrollment_setup::EnrollmentSetupVerificationError,
+    > {
+        let effects = self.agent.runtime().effects();
+        let now = effects.physical_time().await?.ts_ms;
+        Ok(
+            aura_invitation::enrollment_setup::DeviceEnrollmentSetupRequest::decode(&code)?
+                .verify_possession(effects.as_ref(), now)
+                .await?,
+        )
+    }
+
+    async fn verify_enrollment_manifest_transfer(
+        &self,
+        manifest_code: String,
+        initiator_verifier_code: String,
+    ) -> Result<
+        aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    > {
+        use aura_invitation::enrollment_manifest::{
+            decode_initiator_verifier_transfer, EnrollmentManifestError,
+            SignedEnrollmentTrustManifest,
+        };
+        if initiator_verifier_code.trim().is_empty() {
+            return Err(EnrollmentManifestError::MissingPin);
+        }
+        let selected = decode_initiator_verifier_transfer(&initiator_verifier_code)?;
+        let signed = SignedEnrollmentTrustManifest::decode(&manifest_code)?;
+        if signed.manifest.subject != selected.subject
+            || signed.manifest.initiator_device != selected.initiator_device
+        {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        let verifier = selected.verifying_key;
+        let effects = self.agent.runtime().effects();
+        if effects.physical_time().await?.ts_ms >= signed.manifest.expires_at_ms {
+            return Err(EnrollmentManifestError::Expired);
+        }
+        if signed.manifest.invitee_device != effects.device_id() {
+            return Err(EnrollmentManifestError::Pin);
+        }
+        signed
+            .manifest
+            .verify_signature(effects.as_ref(), &verifier, &signed.signature)
+            .await
     }
 
     async fn rotate_guardian_keys(
@@ -2277,7 +2388,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<aura_core::types::identifiers::CeremonyId, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-            ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
         use aura_core::threshold::{policy_for, CeremonyFlow, ParticipantIdentity};
@@ -2495,108 +2605,118 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: AuthorityId,
-    ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<
+        aura_app::runtime_bridge::DeviceEnrollmentStart,
+        aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+    > {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-            ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
         use aura_core::threshold::{
             policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
         };
+        use aura_invitation::enrollment_setup::{
+            EnrollmentIssuanceError as IssueError, EnrollmentIssuanceStage as Stage,
+        };
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
         let current_device_id = self.agent.context().device_id();
-
-        // Best-effort: derive current device participant set from the commitment tree.
-        let tree_state = effects
-            .get_current_state()
+        let statement = setup.statement();
+        let now_ms = effects
+            .physical_time()
             .await
-            .map_err(map_tree_read_error)?;
-
-        let mut device_ids: Vec<aura_core::DeviceId> = tree_state
-            .leaves
-            .values()
-            .filter(|leaf| leaf.role == aura_core::tree::LeafRole::Device)
-            .map(|leaf| leaf.device_id)
-            .collect();
-
-        if !device_ids.contains(&current_device_id) {
-            device_ids.push(current_device_id);
+            .map_err(IssueError::Time)?
+            .ts_ms;
+        if now_ms < statement.issued_at_ms || now_ms >= statement.expires_at_ms {
+            return Err(IssueError::OutsideValidity);
+        }
+        let invitee_authority_id = statement.authority;
+        let new_device_id = statement.device;
+        if invitee_authority_id == authority_id || new_device_id == current_device_id {
+            return Err(IssueError::CurrentIdentity);
         }
 
-        // Generate a new device id to enroll (demo override supported via env).
-        let entropy = effects.random_bytes(32).await;
-        let mut entropy_bytes = [0u8; 32];
-        entropy_bytes.copy_from_slice(&entropy[..32]);
-        let new_device_id = match std::env::var("AURA_DEMO_DEVICE_ID") {
-            Ok(override_id) => match override_id.parse::<aura_core::DeviceId>() {
-                Ok(id) => id,
-                Err(e) => {
-                    tracing::warn!(
-                        override_id = %override_id,
-                        error = %e,
-                        "Invalid AURA_DEMO_DEVICE_ID override; falling back to random device id"
-                    );
-                    aura_core::DeviceId::new_from_entropy(entropy_bytes)
-                }
-            },
-            Err(_) => aura_core::DeviceId::new_from_entropy(entropy_bytes),
-        };
-
-        // Prepare new key material for the updated participant set.
-        //
-        // Threshold policy:
-        // - Prefer existing device MFA threshold config, if present.
-        // - Otherwise fall back to a simple default (1-of-1, 2-of-2, else 2-of-n).
-        let mut other_device_ids: Vec<aura_core::DeviceId> = device_ids
-            .into_iter()
-            .filter(|id| *id != current_device_id)
-            .collect();
-        other_device_ids.sort_by_key(|a| a.to_string());
-
-        let mut participant_device_ids: Vec<aura_core::DeviceId> =
-            Vec::with_capacity(other_device_ids.len() + 2);
-        participant_device_ids.push(current_device_id);
-        participant_device_ids.extend(other_device_ids.iter().copied());
-        participant_device_ids.push(new_device_id);
-
-        let participants: Vec<ParticipantIdentity> = participant_device_ids
+        let plan = effects
+            .prepare_authenticated_enrollment_rotation(&setup)
+            .await
+            .map_err(|source| IssueError::at(Stage::TreeRead, source))?;
+        let participants = plan.participants().to_vec();
+        let participant_device_ids: Vec<_> = participants
+            .iter()
+            .map(|participant| match participant {
+                ParticipantIdentity::Device(id) => Ok(*id),
+                _ => Err(IssueError::InvalidPolicy),
+            })
+            .collect::<Result<_, _>>()?;
+        let other_device_ids: Vec<_> = participant_device_ids
             .iter()
             .copied()
-            .map(ParticipantIdentity::device)
+            .filter(|id| *id != current_device_id && *id != new_device_id)
             .collect();
-
+        let total_n = u16::try_from(participants.len())
+            .map_err(|source| IssueError::at(Stage::TreeRead, source))?;
+        let threshold_k = plan.threshold();
         let policy = policy_for(CeremonyFlow::DeviceEnrollment);
         if policy.keygen != KeyGenerationPolicy::K2DealerBased {
-            return Err(IntentError::internal_error(
-                "Device enrollment requires dealer-based DKG (K2)".to_string(),
-            ));
+            return Err(IssueError::InvalidPolicy);
         }
-
-        let total_n = participants.len() as u16;
-        let mut threshold_k = if let Some(config) = self.get_threshold_config().await {
-            config.threshold
-        } else if total_n <= 2 {
-            total_n
-        } else {
-            2
-        };
-        if threshold_k == 0 || threshold_k > total_n {
-            threshold_k = total_n;
-        }
-        if total_n > 1 && threshold_k < 2 {
-            threshold_k = 2.min(total_n);
-        }
-
-        let (pending_epoch, key_packages, _public_key) = effects
-            .rotate_keys(&authority_id, threshold_k, total_n, &participants)
+        let issuance_now = effects
+            .physical_time()
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to prepare device rotation: {e}"))
-            })?;
+            .map_err(IssueError::Time)?
+            .ts_ms;
+        if issuance_now < statement.issued_at_ms || issuance_now >= statement.expires_at_ms {
+            return Err(IssueError::OutsideValidity);
+        }
+
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| IssueError::at(Stage::InvitationService, e))?;
+
+        // The owner reserves identity before constructing signed admission or
+        // manifest payloads. The complete invitation is then committed once.
+        let reserved = invitation_service
+            .reserve_device_enrollment_invitation()
+            .await
+            .map_err(|e| IssueError::at(Stage::InvitationCreation, e))?;
+        tracing::debug!(invitation_id = %reserved.invitation_id(), created_at_ms = reserved.created_at_ms(),
+            "Reserved complete enrollment issuance identity before fact preparation");
+        // Bind ceremony to exact prestate/setup before generating pending keys.
+        let prestate_hash = plan.prestate();
+
+        let op_input = serde_json::to_vec(&(
+            new_device_id,
+            setup.digest(),
+            threshold_k,
+            total_n,
+            current_device_id,
+        ))
+        .map_err(|e| IssueError::at(Stage::OperationEncoding, e))?;
+        let op_hash = aura_core::Hash32(hash(&op_input));
+
+        let nonce_bytes = effects.random_bytes(8).await;
+        let nonce_bytes: [u8; 8] = nonce_bytes
+            .try_into()
+            .map_err(|_| IssueError::InvalidPolicy)?;
+        let nonce = u64::from_le_bytes(nonce_bytes);
+        let mut ceremony_seed = Vec::with_capacity(32 + 32 + 8);
+        ceremony_seed.extend_from_slice(prestate_hash.as_bytes());
+        ceremony_seed.extend_from_slice(op_hash.as_bytes());
+        ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
+        let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
+        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(format!(
+            "ceremony:{}",
+            hex::encode(ceremony_hash.as_bytes())
+        ));
+
+        let (pending_epoch, key_packages, _public_key, generation_reservation) = effects
+            .prepare_pinned_enrollment_rotation(&setup, &reserved, &ceremony_id, plan)
+            .await
+            .map_err(|e| IssueError::at(Stage::Rotation, e))?;
         let pending_epoch = Epoch::new(pending_epoch);
 
         let pubkey_location = SecureStorageLocation::with_sub_key(
@@ -2610,40 +2730,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
             format!("{}", pending_epoch.value()),
         );
 
-        let public_key_package = match effects
-            .secure_retrieve(
-                &pubkey_location,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
+        let public_key_package = effects
+            .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
             .await
-        {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::warn!(error = %e, "Missing device enrollment public key package");
-                Vec::new()
-            }
-        };
-
-        let threshold_config = match effects
-            .secure_retrieve(
-                &config_location,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
+            .map_err(|error| IssueError::at(Stage::PendingPackageRead, error))?;
+        if public_key_package.is_empty() {
+            return Err(IssueError::EmptyPendingPackage);
+        }
+        let threshold_config = effects
+            .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
             .await
-        {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::warn!(error = %e, "Missing device enrollment threshold config");
-                Vec::new()
-            }
-        };
-
+            .map_err(|error| IssueError::at(Stage::PendingConfigRead, error))?;
+        if threshold_config.is_empty() {
+            return Err(IssueError::EmptyPendingConfig);
+        }
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
         for (device_id, key_package) in participant_device_ids
@@ -2655,47 +2755,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         let Some(invited_key_package) = key_package_by_device.get(&new_device_id).cloned() else {
-            return Err(IntentError::internal_error(
-                "Key rotation returned no key package for invited device".to_string(),
-            ));
+            return Err(IssueError::MissingPackage(new_device_id));
         };
-
-        // Compute a best-effort prestate-bound ceremony id.
-        let prestate_input = serde_json::to_vec(&(
-            tree_state.epoch,
-            tree_state.root_commitment,
-            participant_device_ids.clone(),
-        ))
-        .map_err(|e| map_serialization_error("Serialize prestate", e))?;
-        let context_commitment = aura_core::Hash32(hash(&prestate_input));
-        let prestate = Prestate::new(
-            vec![(authority_id, Hash32(tree_state.root_commitment))],
-            context_commitment,
-        )
-        .map_err(|e| IntentError::internal_error(format!("Invalid enrollment prestate: {e}")))?;
-        let prestate_hash = prestate.compute_hash();
-
-        let op_input = serde_json::to_vec(&(
-            new_device_id,
-            pending_epoch.value(),
-            threshold_k,
-            total_n,
-            current_device_id,
-        ))
-        .map_err(|e| map_serialization_error("Serialize operation", e))?;
-        let op_hash = aura_core::Hash32(hash(&op_input));
-
-        let nonce_bytes = effects.random_bytes(8).await;
-        let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
-        let mut ceremony_seed = Vec::with_capacity(32 + 32 + 8);
-        ceremony_seed.extend_from_slice(prestate_hash.as_bytes());
-        ceremony_seed.extend_from_slice(op_hash.as_bytes());
-        ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
-        let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(format!(
-            "ceremony:{}",
-            hex::encode(ceremony_hash.as_bytes())
-        ));
 
         // Register ceremony (acceptance required from all non-initiator devices).
         let acceptor_device_ids: Vec<aura_core::DeviceId> = other_device_ids
@@ -2720,7 +2781,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now_ms = effects
             .physical_time()
             .await
-            .map_err(map_time_read_error)?
+            .map_err(IssueError::Time)?
             .ts_ms;
         for old_id in runner
             .check_supersession_candidates(
@@ -2729,33 +2790,181 @@ impl RuntimeBridge for AgentRuntimeBridge {
             )
             .await
         {
-            let _ = runner
+            runner
                 .supersede(
                     &old_id,
                     &ceremony_id,
                     SupersessionReason::NewerRequest,
                     now_ms,
                 )
-                .await;
+                .await
+                .map_err(|e| IssueError::at(Stage::Supersession, e))?;
         }
-        runner
-            .start(CeremonyInitRequest {
-                ceremony_id: ceremony_id.clone(),
-                kind: aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
-                initiator_id: authority_id,
-                threshold_k: acceptance_threshold,
-                total_n: acceptance_n,
-                participants: acceptors,
-                new_epoch: pending_epoch.value(),
-                enrollment_device_id: Some(new_device_id),
-                enrollment_nickname_suggestion: nickname_for_tracker,
-                prestate_hash,
-            })
+        let generation = self
+            .agent
+            .threshold_signing()
+            .capture_retained_pending_generation(&authority_id, pending_epoch.value())
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
-            })?;
+            .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        crate::handlers::invitation::enrollment_trust::retain_pending_signing_generation(
+            effects.as_ref(),
+            &ceremony_id,
+            &generation,
+            prestate_hash,
+        )
+        .await
+        .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        crate::handlers::invitation::enrollment_trust::retain_user_transferred_verifier(
+            effects.as_ref(),
+            authority_id,
+            &ceremony_id,
+            pending_epoch.value(),
+            current_device_id,
+            &setup,
+        )
+        .await
+        .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        runner
+            .start_owned_device_enrollment(
+                &generation_reservation,
+                CeremonyInitRequest {
+                    ceremony_id: ceremony_id.clone(),
+                    kind: aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
+                    initiator_id: authority_id,
+                    threshold_k: acceptance_threshold,
+                    total_n: acceptance_n,
+                    participants: acceptors,
+                    new_epoch: pending_epoch.value(),
+                    enrollment_device_id: Some(new_device_id),
+                    enrollment_nickname_suggestion: nickname_for_tracker,
+                    prestate_hash,
+                },
+            )
+            .await
+            .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
 
+        let baseline_tree_ops = effects
+            .export_tree_ops()
+            .await
+            .map_err(|e| IssueError::at(Stage::BaselineExport, e))?
+            .into_iter()
+            .map(|op| {
+                aura_core::util::serialization::to_vec(&op)
+                    .map_err(|e| IssueError::at(Stage::BaselineEncoding, e))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let baseline_ops: Vec<aura_core::AttestedOp> = baseline_tree_ops
+            .iter()
+            .map(|b| {
+                aura_core::util::serialization::from_slice(b)
+                    .map_err(|e| IssueError::at(Stage::BaselineEncoding, e))
+            })
+            .collect::<Result<_, _>>()?;
+        let parents = effects
+            .collect_enrollment_parent_inventory(&baseline_ops)
+            .await
+            .map_err(|e| IssueError::at(Stage::BaselineExport, e))?;
+        let final_state = aura_journal::commitment_tree::reduce(&baseline_ops)
+            .map_err(|e| IssueError::at(Stage::BaselineExport, e))?;
+        let (_, confirmation_key) = crate::handlers::rendezvous_identity::require_identity_keys(
+            effects.as_ref(),
+            &authority_id,
+        )
+        .await
+        .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
+        aura_invitation::enrollment_manifest::EnrollmentTrustManifest::validate_pending_policy(
+            &threshold_config,
+        )
+        .map_err(|e| IssueError::at(Stage::PendingConfigRead, e))?;
+        let manifest = aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+            version: 1,
+            subject: authority_id,
+            initiator_device: current_device_id,
+            invitee_authority: invitee_authority_id,
+            invitee_device: new_device_id,
+            setup: aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding {
+                nonce: setup.statement().nonce,
+                digest: setup.digest(),
+            },
+            invitation: reserved.invitation_id().clone(),
+            ceremony: ceremony_id.clone(),
+            expires_at_ms: setup.statement().expires_at_ms,
+            baseline_digest: aura_core::hash::hash(
+                &aura_core::util::serialization::to_vec(&baseline_tree_ops)
+                    .map_err(|e| IssueError::at(Stage::BaselineEncoding, e))?,
+            ),
+            baseline_count: baseline_tree_ops
+                .len()
+                .try_into()
+                .map_err(|e| IssueError::at(Stage::BaselineEncoding, e))?,
+            starting_epoch: 0,
+            starting_commitment: [0; 32],
+            parents,
+            final_epoch: final_state.epoch.value(),
+            final_commitment: final_state.root_commitment,
+            pending_epoch: pending_epoch.value(),
+            pending_share_digest: aura_core::hash::hash(&invited_key_package),
+            pending_public_key_package_digest: aura_core::hash::hash(&public_key_package),
+            pending_threshold_config_digest: aura_core::Hash32::from_bytes(&threshold_config),
+            initiator_confirmation_verifier: confirmation_key.to_vec(),
+        };
+        let (manifest_transfer, issued_manifest) = invitation_service
+            .export_owned_enrollment_manifest(&reserved, &setup, manifest)
+            .await
+            .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
+        crate::handlers::invitation::enrollment_trust::retain_issued_enrollment_manifest(
+            effects.as_ref(),
+            &issued_manifest,
+        )
+        .await
+        .map_err(|e| IssueError::at(Stage::SetupVerifierRetention, e))?;
+        let invitation = invitation_service
+            .invite_device_enrollment(
+                reserved,
+                invitee_authority_id,
+                authority_id,
+                current_device_id,
+                new_device_id,
+                Some(nickname_suggestion),
+                ceremony_id.clone(),
+                pending_epoch.value(),
+                invited_key_package,
+                threshold_config.clone(),
+                public_key_package.clone(),
+                baseline_tree_ops,
+                aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding {
+                    nonce: setup.statement().nonce,
+                    digest: setup.digest(),
+                },
+                None,
+            )
+            .await
+            .map_err(|e| IssueError::at(Stage::InvitationCreation, e))?;
+
+        let registration = self
+            .agent
+            .runtime()
+            .ceremony_tracker()
+            .get(&ceremony_id)
+            .await
+            .map_err(|error| IssueError::at(Stage::CeremonyRegistration, error))?;
+        crate::handlers::invitation::enrollment_trust::persist_pending_enrollment_registration(
+            effects.as_ref(),
+            &generation_reservation,
+            &registration,
+            &invitation,
+        )
+        .await
+        .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        let registered_generation = generation_reservation
+            .complete_registration()
+            .await
+            .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
+
+        invitation_service
+            .start_registered_device_enrollment(&registered_generation)
+            .map_err(|error| IssueError::at(Stage::CeremonyRegistration, error))?;
         // With no other devices, no rotation session will commit the enrollment;
         // finalize it here once the new device's signed acceptance is verified.
         if other_device_ids.is_empty() {
@@ -2767,10 +2976,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         if !other_device_ids.is_empty() {
             for device_id in &other_device_ids {
                 let Some(key_package) = key_package_by_device.get(device_id).cloned() else {
-                    return Err(IntentError::internal_error(format!(
-                        "Missing key package for existing device {}",
-                        device_id
-                    )));
+                    return Err(IssueError::MissingPackage(*device_id));
                 };
                 self.spawn_device_epoch_rotation(
                     crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
@@ -2786,44 +2992,6 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         }
 
-        // Create a shareable addressed device enrollment invitation.
-        let invitation_service = self
-            .agent
-            .invitations()
-            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
-
-        let baseline_tree_ops = effects
-            .export_tree_ops()
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Export baseline tree ops: {e}")))?
-            .into_iter()
-            .map(|op| {
-                aura_core::util::serialization::to_vec(&op).map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Serialize baseline tree op for device enrollment: {e}"
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let invitation = invitation_service
-            .invite_device_enrollment(
-                invitee_authority_id,
-                authority_id,
-                current_device_id,
-                new_device_id,
-                Some(nickname_suggestion),
-                ceremony_id.clone(),
-                pending_epoch.value(),
-                invited_key_package,
-                threshold_config.clone(),
-                public_key_package.clone(),
-                baseline_tree_ops,
-                None,
-            )
-            .await
-            .map_err(|e| IntentError::internal_error(format!("Create device invite: {e}")))?;
-
         tracing::info!(
             authority = %authority_id,
             websocket_addrs = ?effects
@@ -2837,13 +3005,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let enrollment_code = invitation_service
             .export_invitation_with_sender_hint(&invitation)
             .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?;
+            .map_err(|error| IssueError::at(Stage::InvitationExport, error))?;
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id: ceremony_id.clone(),
             enrollment_code,
             pending_epoch,
             device_id: new_device_id,
+            manifest_transfer: Some(manifest_transfer),
         })
     }
 
@@ -3239,19 +3408,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn get_ceremony_status(
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
-    ) -> Result<aura_app::runtime_bridge::CeremonyStatus, IntentError> {
-        let runner = self.agent.ceremony_runner().await;
+    ) -> Result<
+        aura_app::runtime_bridge::CeremonyStatus,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
         let tracker = self.agent.ceremony_tracker().await;
-        let _status = runner
-            .status(ceremony_id)
-            .await
-            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
-        let _timed_out = runner.is_timed_out(ceremony_id).await.unwrap_or(false);
 
         let state = tracker
             .get(ceremony_id)
             .await
-            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+            .map_err(|error| error_boundary::bridge_runtime_internal("Read ceremony", error))?;
 
         let accepted_guardians: Vec<AuthorityId> = state
             .accepted_participants
@@ -3280,22 +3446,40 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn get_ceremony_terminal_outcome(
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
-    ) -> Result<Option<aura_app::runtime_bridge::CeremonyTerminalOutcome>, IntentError> {
+    ) -> Result<
+        Option<aura_app::runtime_bridge::CeremonyTerminalOutcome>,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
+        let effects = self.agent.runtime().effects();
+        if let Some(failure) = crate::handlers::invitation::enrollment_manifest_admission::load_failed_enrollment_for_ceremony(
+    effects.as_ref(), self.agent.authority_id(), ceremony_id,
+).await.map_err(|error| error_boundary::bridge_runtime_internal("Read authenticated failed enrollment", error))? {
+    return Ok(Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(failure.evidence().reason())));
+}
         self.agent
             .ceremony_runner()
             .await
             .terminal_outcome(ceremony_id)
             .await
+            .map_err(|error| {
+                error_boundary::bridge_runtime_internal("Read durable ceremony", error)
+            })
     }
 
     async fn list_device_enrollment_ceremonies(
         &self,
-    ) -> Result<Vec<aura_core::types::identifiers::CeremonyId>, IntentError> {
+    ) -> Result<
+        Vec<aura_core::types::identifiers::CeremonyId>,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
         self.agent
             .ceremony_tracker()
             .await
             .list_device_enrollment_ceremonies()
             .await
+            .map_err(|error| {
+                error_boundary::bridge_runtime_internal("Read durable ceremony", error)
+            })
     }
 
     async fn get_guardian_invitation_terminal_outcome(
@@ -3346,18 +3530,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
-    ) -> Result<aura_app::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
-        let runner = self.agent.ceremony_runner().await;
+    ) -> Result<
+        aura_app::runtime_bridge::KeyRotationCeremonyStatus,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
         let tracker = self.agent.ceremony_tracker().await;
-        let _status = runner
-            .status(ceremony_id)
-            .await
-            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
-        let _timed_out = runner.is_timed_out(ceremony_id).await.unwrap_or(false);
         let state = tracker
             .get(ceremony_id)
             .await
-            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+            .map_err(|error| error_boundary::bridge_runtime_internal("Read ceremony", error))?;
 
         Ok(aura_app::runtime_bridge::KeyRotationCeremonyStatus {
             ceremony_id: ceremony_id.clone(),
@@ -3378,20 +3559,33 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn cancel_key_rotation_ceremony(
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
-        let state = tracker.get(ceremony_id).await?;
+        let state = tracker.get(ceremony_id).await.map_err(|error| {
+            error_boundary::bridge_runtime_internal("Read cancellation ceremony", error)
+        })?;
 
-        // Best-effort: rollback pending epoch if present and not committed.
-        if !state.is_committed {
+        // Settle cancellation under the runtime decision gate before rollback.
+        // An activation owner that already won cannot be rolled back by this caller.
+        runner
+            .abort(ceremony_id, Some("Canceled".to_string()))
+            .await
+            .map_err(|error| error_boundary::bridge_runtime_internal("Cancel ceremony", error))?;
+        if state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment {
+            tracker
+                .retire_failed_enrollment_generation(ceremony_id)
+                .await
+                .map_err(|error| {
+                    error_boundary::bridge_runtime_internal(
+                        "Retire cancelled enrollment generation",
+                        error,
+                    )
+                })?;
+        } else if !state.is_committed {
             self.rollback_guardian_key_rotation(Epoch::new(state.new_epoch))
                 .await?;
         }
-
-        runner
-            .abort(ceremony_id, Some("Canceled".to_string()))
-            .await?;
 
         Ok(())
     }
@@ -3544,11 +3738,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn accept_invitation(
         &self,
         invitation_id: &str,
-    ) -> Result<InvitationMutationOutcome, IntentError> {
-        let invitation_service = self
-            .agent
-            .invitations()
-            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
+    ) -> Result<InvitationMutationOutcome, aura_app::runtime_bridge::RuntimeBridgeError> {
+        let invitation_service = self.agent.invitations().map_err(|e| {
+            error_boundary::bridge_runtime_service_unavailable_with_cause("invitation_service", e)
+        })?;
 
         let invitation_id =
             aura_core::types::identifiers::InvitationId::new(invitation_id.to_string());
@@ -3559,9 +3752,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let result = invitation_service
             .accept(&invitation_id)
             .await
-            .map_err(|error| {
-                IntentError::internal_error(format!("Failed to accept invitation: {error}"))
-            })?;
+            .map_err(error_boundary::bridge_runtime_invitation_accept)?;
         self.adopt_enrolled_signing_epoch(&invitation_service, &invitation_id)
             .await?;
 
@@ -3667,6 +3858,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(convert_invitation_to_bridge_info(&invitation))
     }
 
+    async fn import_enrollment_invitation(
+        &self,
+        code: &str,
+        pin: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> Result<InvitationInfo, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
+        crate::handlers::invitation::enrollment_manifest_admission::admit_user_transfer(
+            self.agent.runtime().effects().as_ref(),
+            self.agent.authority_id(),
+            code,
+            &pin,
+        )
+        .await?;
+        self.import_invitation(code).await.map_err(|e| {
+            aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(Box::new(e))
+        })
+    }
+
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError> {
         let invitation_service = self
             .agent
@@ -3690,31 +3898,60 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Settings Operations
     // =========================================================================
 
-    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
+    async fn try_get_settings(
+        &self,
+    ) -> Result<SettingsBridgeState, aura_app::runtime_bridge::RuntimeBridgeError> {
         identity::get_settings(self).await
     }
 
-    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
+    async fn try_list_devices(
+        &self,
+    ) -> Result<Vec<BridgeDeviceInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         identity::list_devices(self).await
     }
 
-    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
+    async fn try_list_authorities(
+        &self,
+    ) -> Result<Vec<BridgeAuthorityInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         identity::list_authorities(self).await
     }
 
-    async fn has_account_config(&self) -> Result<bool, IntentError> {
+    async fn has_account_config(
+        &self,
+    ) -> Result<bool, aura_app::runtime_bridge::RuntimeBridgeError> {
         AgentRuntimeBridge::has_account_config(self).await
     }
 
-    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError> {
+    async fn initialize_account(
+        &self,
+        nickname_suggestion: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         AgentRuntimeBridge::initialize_account(self, nickname_suggestion).await
     }
 
-    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_nickname_submission",
+        family = "runtime_helper"
+    )]
+    async fn set_nickname_suggestion(
+        &self,
+        name: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        let _ = identity::RUNTIME_BRIDGE_IDENTITY_NICKNAME_MUTATION_CAPABILITY;
         identity::set_nickname_suggestion(self, name).await
     }
 
-    async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError> {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_mfa_policy_submission",
+        family = "runtime_helper"
+    )]
+    async fn set_mfa_policy(
+        &self,
+        policy: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        let _ = identity::RUNTIME_BRIDGE_IDENTITY_MFA_POLICY_MUTATION_CAPABILITY;
         identity::set_mfa_policy(self, policy).await
     }
 
@@ -3735,19 +3972,39 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // Time Operations
     // =========================================================================
 
-    async fn current_time_ms(&self) -> Result<u64, IntentError> {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_physical_time_query",
+        family = "runtime_helper"
+    )]
+    async fn current_time_ms(&self) -> Result<u64, aura_app::runtime_bridge::RuntimeBridgeError> {
+        let _ = identity::RUNTIME_BRIDGE_IDENTITY_TIME_QUERY_CAPABILITY;
         identity::current_time_ms(self).await
     }
 
-    async fn sleep_ms(&self, ms: u64) {
-        identity::sleep_ms(self, ms).await;
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_required_sleep",
+        family = "runtime_helper"
+    )]
+    async fn sleep_ms(&self, ms: u64) -> Result<(), RuntimeBridgeError> {
+        let _ = identity::RUNTIME_BRIDGE_IDENTITY_SLEEP_CAPABILITY;
+        identity::sleep_ms(self, ms).await
     }
 
     // =========================================================================
     // Authentication
     // =========================================================================
 
-    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "runtime_bridge_authentication_query",
+        family = "runtime_helper"
+    )]
+    async fn authentication_status(
+        &self,
+    ) -> Result<AuthenticationStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
+        let _ = identity::RUNTIME_BRIDGE_IDENTITY_AUTHENTICATION_QUERY_CAPABILITY;
         identity::authentication_status(self).await
     }
 }
@@ -3881,47 +4138,175 @@ impl AgentRuntimeBridge {
         &self,
         invitation_service: &crate::handlers::invitation_service::InvitationServiceApi,
         invitation_id: &aura_core::types::identifiers::InvitationId,
-    ) -> Result<(), IntentError> {
-        use aura_core::effects::ThresholdSigningEffects;
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         let Some(invitation) = invitation_service.get(invitation_id).await else {
-            return Ok(());
+            return Err(error_boundary::bridge_runtime_internal(
+                "Missing accepted invitation",
+                aura_core::AuraError::not_found("accepted invitation unavailable"),
+            ));
         };
-        let crate::handlers::invitation::InvitationType::DeviceEnrollment {
-            subject_authority,
-            pending_epoch,
-            ..
-        } = invitation.invitation_type
-        else {
+        if !matches!(
+            invitation.invitation_type,
+            crate::handlers::invitation::InvitationType::DeviceEnrollment { .. }
+        ) {
             return Ok(());
-        };
-        // The enrollment stored this device's share raw; the signing service
-        // only reads its own encrypted envelope.
-        let own_participant = aura_core::threshold::ParticipantIdentity::device(
-            self.agent.runtime().effects().device_id(),
-        );
-        self.agent
-            .runtime()
-            .threshold_signing()
-            .adopt_enrolled_participant_share(&subject_authority, pending_epoch, &own_participant)
+        }
+        // The ID locates immutable secure evidence; cached status/received IDs
+        // cannot authorize activation. The loader revalidates actual signed
+        // committed confirmation under the original independent transfer pin.
+        let confirmed =
+            crate::handlers::invitation::enrollment_manifest_admission::load_confirmed_enrollment(
+                self.agent.runtime().effects().as_ref(),
+                invitation.receiver_id,
+                invitation_id,
+            )
             .await
-            .map_err(|error| {
-                IntentError::internal_error(format!("Adopt enrolled share: {error}"))
+            .map_err(|source| {
+                error_boundary::bridge_runtime_internal(
+                    "Load confirmed enrolled generation",
+                    source,
+                )
             })?;
-        let effects = self.agent.runtime().effects();
-        effects
-            .commit_key_rotation(&subject_authority, pending_epoch)
-            .await
-            .map_err(|error| {
-                IntentError::internal_error(format!("Activate enrolled epoch: {error}"))
-            })?;
-        self.agent
-            .runtime()
-            .threshold_signing()
-            .commit_key_rotation(&subject_authority, pending_epoch)
-            .await
-            .map_err(|error| {
-                IntentError::internal_error(format!("Adopt enrolled signing context: {error}"))
-            })
+        crate::runtime::services::enrollment_profile::complete_confirmed_handoff(
+            self.agent.runtime().effects().as_ref(),
+            &self.agent.runtime().threshold_signing(),
+            confirmed,
+        )
+        .await
+        .map_err(|source| {
+            error_boundary::bridge_runtime_internal(
+                "Activate confirmed enrolled signing generation",
+                source,
+            )
+        })
+    }
+
+    /// Called after signing bootstrap restores the active context. No service-start
+    /// readiness shortcut is used; pending generations are verified before tasks start.
+    async fn restore_owned_device_enrollment_ceremonies(&self) -> Result<(), aura_core::AuraError> {
+        let runtime = self.agent.runtime();
+        let tracker = runtime.ceremony_tracker();
+        let effects = runtime.effects();
+        let signing = runtime.threshold_signing();
+        effects.retire_unissued_enrollment_allocation().await?;
+        for ceremony_id in tracker.list_device_enrollment_ceremonies().await? {
+            if effects
+                .secure_exists(&SecureStorageLocation::new(
+                    "device_enrollment_orphan_retirement_v1",
+                    ceremony_id.to_string(),
+                ))
+                .await?
+            {
+                tracker
+                    .restore_retired_orphan_registration(&ceremony_id)
+                    .await?;
+                continue;
+            }
+            // Legacy outcome observations cannot construct a new active registration.
+            if !effects
+                .secure_exists(&SecureStorageLocation::new(
+                    "device_enrollment_registration_v1",
+                    ceremony_id.to_string(),
+                ))
+                .await?
+            {
+                continue;
+            }
+            if !tracker
+                .restore_verified_enrollment_registration(&ceremony_id, &signing)
+                .await?
+            {
+                continue;
+            }
+            let state = tracker.get(&ceremony_id).await?;
+            if matches!(
+                state.terminal_outcome,
+                Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(_))
+            ) {
+                tracker
+                    .retire_failed_enrollment_generation(&ceremony_id)
+                    .await?;
+                continue;
+            }
+            if state.terminal_outcome.is_some() {
+                continue;
+            }
+            let registered_generation = effects
+                .resume_owned_enrollment_registration(
+                    state.initiator_id,
+                    state.new_epoch,
+                    &ceremony_id,
+                    state.prestate_hash,
+                )
+                .await?;
+            self.agent
+                .invitations()
+                .map_err(|error| aura_core::AuraError::Internal {
+                    message: "restore enrollment invitation owner".into(),
+                    source: Some(std::sync::Arc::new(error)),
+                })?
+                .start_registered_device_enrollment(&registered_generation)
+                .map_err(|error| aura_core::AuraError::Internal {
+                    message: "resume registered enrollment initiator".into(),
+                    source: Some(std::sync::Arc::new(error)),
+                })?;
+            let invitee = state
+                .enrollment_device_id
+                .ok_or_else(|| aura_core::AuraError::invalid("missing restored invitee"))?;
+            let peers = state
+                .participants
+                .iter()
+                .filter_map(|participant| match participant {
+                    ParticipantIdentity::Device(device) if *device != invitee => Some(*device),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if peers.is_empty() {
+                self.spawn_sole_device_enrollment_finalizer(ceremony_id);
+            } else {
+                let public_key_package = effects
+                    .secure_retrieve(
+                        &SecureStorageLocation::with_sub_key(
+                            "threshold_pubkey",
+                            state.initiator_id.to_string(),
+                            state.new_epoch.to_string(),
+                        ),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await?;
+                let threshold_config = effects
+                    .secure_retrieve(
+                        &SecureStorageLocation::with_sub_key(
+                            "threshold_config",
+                            state.initiator_id.to_string(),
+                            state.new_epoch.to_string(),
+                        ),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await?;
+                for device in peers {
+                    let key_package = signing
+                        .participant_key_package(
+                            &state.initiator_id,
+                            state.new_epoch,
+                            &ParticipantIdentity::device(device),
+                        )
+                        .await?;
+                    self.spawn_device_epoch_rotation(
+                        crate::handlers::device_epoch_rotation::DeviceEpochRotationInitRequest {
+                            ceremony_id: ceremony_id.clone(),
+                            kind: aura_sync::protocols::DeviceEpochRotationKind::Enrollment,
+                            pending_epoch: state.new_epoch,
+                            participant_device_id: device,
+                            key_package,
+                            public_key_package: public_key_package.clone(),
+                            threshold_config: threshold_config.clone(),
+                        },
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     fn spawn_sole_device_enrollment_finalizer(
@@ -3940,7 +4325,7 @@ impl AgentRuntimeBridge {
         let task_name = format!("device_enrollment_finalize.{ceremony_id}");
         let fut = async move {
             if let Err(error) = service.finalize_sole_device_enrollment(&ceremony_id).await {
-                let reason = if matches!(error, crate::core::AgentError::Timeout(_)) {
+                let reason = if error.is_timeout() {
                     aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
                 } else {
                     aura_app::runtime_bridge::CeremonyFailureReason::RuntimeFailed
@@ -4035,4 +4420,60 @@ impl AuraAgent {
 #[cfg(test)]
 mod tests {
     include!("tests.rs");
+}
+
+#[cfg(test)]
+mod required_name_read_tests {
+    use super::*;
+    use std::error::Error as _;
+    #[test]
+    fn corrupt_and_wrong_context_committed_chat_records_fail_native_name_read() {
+        let context = ContextId::new_from_entropy([0x54; 32]);
+        let fact = ChatFact::channel_created_ms(
+            context,
+            ChannelId::from_bytes([0x55; 32]),
+            "required-name".to_string(),
+            None,
+            false,
+            1,
+            AuthorityId::new_from_entropy([0x56; 32]),
+        );
+        let envelope = fact.to_envelope();
+        assert_eq!(
+            decode_required_name_chat_fact(context, &envelope).expect("matching committed context"),
+            fact
+        );
+        let mut corrupt = envelope.clone();
+        corrupt.payload = vec![0xff];
+        let error = decode_required_name_chat_fact(context, &corrupt)
+            .expect_err("corrupt required record cannot mean no name match");
+        assert_eq!(
+            error.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Serialization
+        );
+        let mut current = error.source();
+        let mut original = false;
+        while let Some(source) = current {
+            original |= source.is::<aura_core::util::serialization::SerializationError>();
+            current = source.source();
+        }
+        assert!(original, "actual required codec failure retained");
+        let error =
+            decode_required_name_chat_fact(ContextId::new_from_entropy([0x57; 32]), &envelope)
+                .expect_err("outer and payload context disagreement cannot identify a channel");
+        assert_eq!(
+            error.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Validation
+        );
+        let mut current = error.source();
+        let mut mismatch = false;
+        while let Some(source) = current {
+            mismatch |= matches!(
+                source.downcast_ref::<aura_core::types::facts::FactError>(),
+                Some(aura_core::types::facts::FactError::InvalidEnvelope(_))
+            );
+            current = source.source();
+        }
+        assert!(mismatch);
+    }
 }

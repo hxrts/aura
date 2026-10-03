@@ -1,5 +1,3 @@
-use std::fs;
-use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -25,8 +23,6 @@ use aura_effects::{
 use super::{AccountLoadResult, ACCOUNT_FILENAME, JOURNAL_FILENAME};
 
 const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
-const PREPARED_DEVICE_ENROLLMENT_INVITEE_AUTHORITY_FILENAME: &str =
-    ".harness-device-enrollment-invitee-authority";
 
 pub(super) type BootstrapStorage = EncryptedStorage<
     FilesystemStorageHandler,
@@ -204,30 +200,6 @@ pub(super) async fn load_selected_runtime_identity(
     })
 }
 
-pub(super) fn load_prepared_device_enrollment_invitee_authority(
-    base_path: &Path,
-) -> Result<Option<AuthorityId>, AuraError> {
-    let path = base_path.join(PREPARED_DEVICE_ENROLLMENT_INVITEE_AUTHORITY_FILENAME);
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(AuraError::internal(format!(
-                "Failed to read prepared device enrollment invitee authority: {error}"
-            )));
-        }
-    };
-    let authority = raw.trim();
-    if authority.is_empty() {
-        return Ok(None);
-    }
-    authority.parse::<AuthorityId>().map(Some).map_err(|error| {
-        AuraError::internal(format!(
-            "Invalid prepared device enrollment invitee authority: {error}"
-        ))
-    })
-}
-
 async fn persist_selected_runtime_identity(
     storage: &impl StorageCoreEffects,
     runtime_identity: &BootstrapRuntimeIdentity,
@@ -277,27 +249,59 @@ pub async fn create_account(
     create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
 }
 
-/// Create a new account and stage a device-enrollment import for the first runtime start.
-pub async fn create_account_with_device_enrollment(
+/// Persist only an app-issued accepted/adopted enrollment identity.
+pub async fn persist_completed_enrollment_runtime_identity(
     base_path: &Path,
-    nickname_suggestion: &str,
-    device_enrollment_code: &str,
-) -> Result<(AuthorityId, ContextId), AuraError> {
-    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?
-        .with_device_enrollment_code(device_enrollment_code.to_string());
-    create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
-}
-
-pub async fn create_account_with_device_enrollment_runtime_identity(
-    base_path: &Path,
-    runtime_identity: BootstrapRuntimeIdentity,
-    nickname_suggestion: &str,
-    device_enrollment_code: &str,
-) -> Result<(AuthorityId, ContextId), AuraError> {
-    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?
-        .with_device_enrollment_code(device_enrollment_code.to_string());
-    create_account_with_pending_bootstrap(base_path, pending_bootstrap, Some(runtime_identity))
+    completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+) -> Result<(), AuraError> {
+    let storage = open_bootstrap_storage(base_path);
+    let old = storage
+        .retrieve(ACCOUNT_FILENAME)
         .await
+        .map_err(|error| AuraError::Storage {
+            message: "Read actual provisional account profile".into(),
+            source: Some(Arc::new(error)),
+        })?
+        .ok_or_else(|| AuraError::storage("Missing actual provisional account profile"))?;
+    let mut config: AccountConfig =
+        serde_json::from_slice(&old).map_err(|error| AuraError::Internal {
+            message: "Decode actual provisional account profile".into(),
+            source: Some(Arc::new(error)),
+        })?;
+    config.authority_id = completed.subject_authority();
+    config.context_id = default_context_id_for_authority(completed.subject_authority());
+    let identity =
+        BootstrapRuntimeIdentity::new(completed.subject_authority(), completed.device_id());
+    let identity_bytes = serde_json::to_vec(&identity).map_err(|error| AuraError::Internal {
+        message: "Encode accepted runtime identity".into(),
+        source: Some(Arc::new(error)),
+    })?;
+    let config_bytes = serde_json::to_vec_pretty(&config).map_err(|error| AuraError::Internal {
+        message: "Encode accepted account profile".into(),
+        source: Some(Arc::new(error)),
+    })?;
+    storage
+        .store(SELECTED_RUNTIME_IDENTITY_FILENAME, identity_bytes)
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "Persist accepted runtime identity".into(),
+            source: Some(Arc::new(error)),
+        })?;
+    storage
+        .store(ACCOUNT_FILENAME, config_bytes)
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "Persist accepted account profile".into(),
+            source: Some(Arc::new(error)),
+        })?;
+    storage
+        .remove(PENDING_ACCOUNT_BOOTSTRAP_FILENAME)
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "Clear obsolete pending bootstrap".into(),
+            source: Some(Arc::new(error)),
+        })?;
+    Ok(())
 }
 
 async fn create_account_with_pending_bootstrap(

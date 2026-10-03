@@ -148,6 +148,9 @@ impl AmpChannelEffects for MockEffects {
         };
 
         let mut state = self.state.lock().unwrap();
+        if state.amp_channels.contains_key(&(context, channel)) {
+            return Err(AmpChannelError::AlreadyExists { context, channel });
+        }
         let entry = state
             .amp_channels
             .entry((context, channel))
@@ -988,6 +991,56 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl aura_core::effects::SecureStorageEffects for MockEffects {
+    async fn secure_create_mutable(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        data: &[u8],
+        _capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, AuraError> {
+        #[derive(Debug, thiserror::Error)]
+        #[error("mock secure storage state lock poisoned")]
+        struct MockSecureStoragePoisoned;
+        let key = format!("secure_{}", location.full_path());
+        let mut state = self.state.lock().map_err(|_| AuraError::Storage {
+            message: "publish immutable mock secure record".into(),
+            source: Some(std::sync::Arc::new(MockSecureStoragePoisoned)),
+        })?;
+        match state.storage.entry(key) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists)
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(data.to_vec());
+                Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::Created)
+            }
+        }
+    }
+
+    async fn secure_store_immutable(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        data: &[u8],
+        _capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, AuraError> {
+        #[derive(Debug, thiserror::Error)]
+        #[error("mock secure storage state lock poisoned")]
+        struct MockSecureStoragePoisoned;
+        let key = format!("secure_{}", location.full_path());
+        let mut state = self.state.lock().map_err(|_| AuraError::Storage {
+            message: "publish immutable mock secure record".into(),
+            source: Some(std::sync::Arc::new(MockSecureStoragePoisoned)),
+        })?;
+        match state.storage.entry(key) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists)
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(data.to_vec());
+                Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::Created)
+            }
+        }
+    }
+
     async fn secure_store(
         &self,
         location: &aura_core::effects::SecureStorageLocation,

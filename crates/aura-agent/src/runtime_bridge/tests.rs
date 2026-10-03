@@ -4,15 +4,14 @@ use crate::AgentBuilder;
 use crate::AuraEffectSystem;
 use async_lock::Mutex;
 use aura_core::context::EffectContext;
-use aura_core::effects::{CryptoCoreEffects, ExecutionMode};
 use aura_core::effects::storage::StorageCoreEffects;
+use aura_core::effects::{CryptoCoreEffects, ExecutionMode};
 use aura_core::hash::hash;
 use aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY;
 use std::ffi::OsString;
-use std::future::Future;
 use std::fs;
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 fn env_lock() -> &'static Mutex<()> {
@@ -47,11 +46,11 @@ impl Drop for EnvRestore {
 }
 
 fn unique_test_path(label: &str) -> PathBuf {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    std::env::temp_dir().join(format!(
-        "aura-agent-runtime-bridge-{label}-{}",
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ))
+    tempfile::Builder::new()
+        .prefix(&format!("aura-agent-runtime-bridge-{label}-"))
+        .tempdir()
+        .expect("independent runtime bridge profile")
+        .keep()
 }
 
 async fn generated_test_public_key(effects: &AuraEffectSystem) -> [u8; 32] {
@@ -221,22 +220,20 @@ async fn ensure_peer_channel_surfaces_service_unavailability_before_descriptor_f
         .clone();
     let peer_public_key = generated_test_public_key(agent.runtime().effects().as_ref()).await;
 
-    let make_descriptor =
-        move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
-            authority_id: peer,
-            device_id: None,
-            context_id: descriptor_context,
-            transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
-                "127.0.0.1:6556",
-            )
-            .expect("tcp hint")],
-            handshake_psk_commitment: [7u8; 32],
-            public_key: peer_public_key,
-            valid_from: 0,
-            valid_until: u64::MAX,
-            nonce: [9u8; 32],
-            nickname_suggestion: None,
-        };
+    let make_descriptor = move |descriptor_context| aura_rendezvous::facts::RendezvousDescriptor {
+        authority_id: peer,
+        device_id: None,
+        context_id: descriptor_context,
+        transport_hints: vec![
+            aura_rendezvous::facts::TransportHint::tcp_direct("127.0.0.1:6556").expect("tcp hint"),
+        ],
+        handshake_psk_commitment: [7u8; 32],
+        public_key: peer_public_key,
+        valid_from: 0,
+        valid_until: u64::MAX,
+        nonce: [9u8; 32],
+        nickname_suggestion: None,
+    };
 
     manager
         .cache_descriptor(make_descriptor(fallback_context))
@@ -286,10 +283,9 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         authority_id: peer,
         device_id: None,
         context_id: peer_authority_context,
-        transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
-            "127.0.0.1:6557",
-        )
-        .expect("tcp hint")],
+        transport_hints: vec![
+            aura_rendezvous::facts::TransportHint::tcp_direct("127.0.0.1:6557").expect("tcp hint"),
+        ],
         handshake_psk_commitment: [0u8; 32],
         public_key: [0u8; 32],
         valid_from: 0,
@@ -306,10 +302,9 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         authority_id: peer,
         device_id: None,
         context_id: other_cached_context,
-        transport_hints: vec![aura_rendezvous::facts::TransportHint::tcp_direct(
-            "127.0.0.1:6558",
-        )
-        .expect("tcp hint")],
+        transport_hints: vec![
+            aura_rendezvous::facts::TransportHint::tcp_direct("127.0.0.1:6558").expect("tcp hint"),
+        ],
         handshake_psk_commitment: [7u8; 32],
         public_key: peer_public_key,
         valid_from: 0,
@@ -335,7 +330,10 @@ async fn seed_authority_route_descriptor_repairs_placeholder_from_other_cached_c
         .expect("authority route descriptor should be present");
     assert!(!descriptor_has_placeholder_crypto(&repaired_descriptor));
     non_placeholder_descriptor.context_id = peer_authority_context;
-    assert_eq!(repaired_descriptor.public_key, non_placeholder_descriptor.public_key);
+    assert_eq!(
+        repaired_descriptor.public_key,
+        non_placeholder_descriptor.public_key
+    );
     assert_eq!(
         repaired_descriptor.handshake_psk_commitment,
         non_placeholder_descriptor.handshake_psk_commitment
@@ -692,28 +690,53 @@ fn channel_name_lookup_requires_matching_creation_fact() {
     let channel = ChannelId::from_bytes(hash(b"created-name-lookup"));
     let actor = AuthorityId::new_from_entropy([203u8; 32]);
     let update = ChatFact::channel_updated_ms(
-        context, channel, Some("renamed".to_string()), None,
-        None, None, 30, actor,
+        context,
+        channel,
+        Some("renamed".to_string()),
+        None,
+        None,
+        None,
+        30,
+        actor,
     );
     assert!(resolve_created_channel_ids_by_name([update.clone()], "renamed").is_empty());
 
     let creation = ChatFact::channel_created_ms(
-        context, channel, "original".to_string(), None, false, 10, actor,
+        context,
+        channel,
+        "original".to_string(),
+        None,
+        false,
+        10,
+        actor,
     );
     assert_eq!(
         resolve_created_channel_ids_by_name([update, creation], "renamed"),
         vec![channel]
     );
     let wrong_context_update = ChatFact::channel_updated_ms(
-        other_context, channel, Some("wrong context".to_string()), None,
-        None, None, 40, actor,
+        other_context,
+        channel,
+        Some("wrong context".to_string()),
+        None,
+        None,
+        None,
+        40,
+        actor,
     );
     let creation = ChatFact::channel_created_ms(
-        context, channel, "original".to_string(), None, false, 10, actor,
+        context,
+        channel,
+        "original".to_string(),
+        None,
+        false,
+        10,
+        actor,
     );
-    assert!(resolve_created_channel_ids_by_name(
-        [wrong_context_update, creation], "wrong context",
-    ).is_empty());
+    assert!(
+        resolve_created_channel_ids_by_name([wrong_context_update, creation], "wrong context",)
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -956,6 +979,11 @@ async fn try_list_devices_requires_readable_tree_state() {
         .try_list_devices()
         .await
         .expect_err("missing tree readability should be explicit");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+    );
+    assert!(native_identity_has_source::<aura_core::effects::StorageError>(&error));
     let message = error.to_string();
     assert!(
         message.contains("Failed to read current device list")
@@ -997,6 +1025,11 @@ async fn try_list_authorities_requires_readable_storage_listing() {
         .try_list_authorities()
         .await
         .expect_err("missing authority storage listing should be explicit");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+    );
+    assert!(native_identity_has_source::<aura_core::effects::StorageError>(&error));
     let message = error.to_string();
     assert!(
         message.contains("Failed to list stored authorities")
@@ -1038,6 +1071,11 @@ async fn try_list_authorities_requires_readable_account_config() {
         .try_list_authorities()
         .await
         .expect_err("account config read failure should be explicit");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+    );
+    assert!(native_identity_has_source::<aura_core::effects::StorageError>(&error));
     let message = error.to_string();
     assert!(
         message.contains("Failed to read account.json")
@@ -1045,6 +1083,26 @@ async fn try_list_authorities_requires_readable_account_config() {
         "authority-list failure should surface the account config read error: {message}"
     );
 
+    for failure in [
+        bridge
+            .has_account_config()
+            .await
+            .expect_err("required bootstrap read rejects IO fault"),
+        bridge
+            .initialize_account("new nickname")
+            .await
+            .expect_err("initialization rejects IO fault"),
+    ] {
+        assert_eq!(
+            failure.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+        );
+        assert!(native_identity_has_source::<aura_core::effects::StorageError>(&failure));
+    }
+    assert!(
+        storage_root.join("account.json.dat").is_dir(),
+        "bootstrap must not replace failed config read"
+    );
     let _ = fs::remove_dir_all(storage_root);
 }
 
@@ -1085,6 +1143,11 @@ async fn try_list_authorities_rejects_corrupt_authority_records() {
         .try_list_authorities()
         .await
         .expect_err("corrupt authority record should be explicit");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Serialization
+    );
+    assert!(native_identity_has_source::<serde_json::Error>(&error));
     let message = error.to_string();
     assert!(
         message.contains("Failed to read authority record")
@@ -1128,6 +1191,11 @@ async fn try_get_settings_requires_readable_account_config() {
         .try_get_settings()
         .await
         .expect_err("account config read failure should be explicit");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+    );
+    assert!(native_identity_has_source::<aura_core::effects::StorageError>(&error));
     let message = error.to_string();
     assert!(
         message.contains("Failed to read account.json")
@@ -1590,6 +1658,333 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
 /// finalizes the enrollment itself once the new device accepts. Cross-machine,
 /// the invitee reported success while the initiator failed to sign the commit.
 #[test]
+fn enrollment_receipt_store_failure_keeps_acceptance_invisible() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, _invitee, _invitation, start, _accept, verified) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "receipt-store-fault",
+            )
+            .await;
+        crate::handlers::invitation::enrollment_trust::fail_next_receipt_store_for_test(
+            issuer.runtime().effects().as_ref(),
+            start.ceremony_id.clone(),
+        )
+        .await;
+        let error = issuer
+            .runtime()
+            .ceremony_runner()
+            .record_verified_enrollment_response(verified.clone())
+            .await
+            .expect_err("required receipt write must fail");
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "fault source must survive recorder"
+        );
+        let state = issuer
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .unwrap();
+        assert!(state.accepted_participants.is_empty());
+        assert!(state.terminal_outcome.is_none());
+        assert!(issuer
+            .runtime()
+            .ceremony_tracker()
+            .require_verified_enrollment_response(&start.ceremony_id)
+            .await
+            .is_err());
+        issuer
+            .runtime()
+            .ceremony_runner()
+            .record_verified_enrollment_response(verified)
+            .await
+            .unwrap();
+        assert_eq!(
+            issuer
+                .runtime()
+                .ceremony_tracker()
+                .get(&start.ceremony_id)
+                .await
+                .unwrap()
+                .accepted_participants
+                .len(),
+            1
+        );
+    });
+}
+
+#[test]
+fn enrollment_pending_registration_and_signing_generation_resume_on_runtime_restart() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, invitee, invitation, start, _accept, _old_witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "runtime-restart",
+            )
+            .await;
+        let authority = issuer.authority_id();
+        let config = issuer.runtime().effects().config().clone();
+        let context = EffectContext::new(
+            authority,
+            issuer.context().default_context_id(),
+            ExecutionMode::Testing,
+        );
+        let before = issuer
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .unwrap();
+        let original_budget = issuer
+            .runtime()
+            .ceremony_runner()
+            .enrollment_window_budget(&start.ceremony_id)
+            .await
+            .unwrap();
+        assert!(before.accepted_participants.is_empty());
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        drop(issuer);
+        let restarted = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&context)
+                .await
+                .expect("reopen actual persisted runtime"),
+        );
+        let bridge = AgentRuntimeBridge::new(restarted.clone());
+        bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("restore active signing then pending ownership");
+        let after = restarted
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .unwrap();
+        let restored_budget = restarted
+            .runtime()
+            .ceremony_runner()
+            .enrollment_window_budget(&start.ceremony_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            restored_budget.started_at_ms(),
+            original_budget.started_at_ms()
+        );
+        assert_eq!(
+            restored_budget.deadline_at_ms(),
+            original_budget.deadline_at_ms()
+        );
+        assert_eq!(after.started_at, before.started_at);
+        assert_eq!(after.prestate_hash, before.prestate_hash);
+        assert_eq!(after.enrollment_device_id, before.enrollment_device_id);
+        assert!(
+            after.accepted_participants.is_empty(),
+            "restart does not manufacture acceptance"
+        );
+        let verified = crate::handlers::invitation::enrollment_trust::verify_actual_invitee_acceptance_for_test(
+            restarted.runtime().effects().as_ref(), invitee.runtime().effects().as_ref(), &invitation,
+            authority, &start.ceremony_id, start.device_id, start.pending_epoch.value(),
+        ).await.unwrap();
+        restarted
+            .runtime()
+            .ceremony_runner()
+            .record_verified_enrollment_response(verified)
+            .await
+            .unwrap();
+        let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+            authority,
+            restarted.runtime().effects(),
+            restarted.runtime().ceremony_tracker().clone(),
+            restarted.runtime().ceremony_runner().clone(),
+            restarted.runtime().threshold_signing(),
+            restarted.runtime().reconfiguration().clone(),
+        );
+        service
+            .finalize_sole_device_enrollment(&start.ceremony_id)
+            .await
+            .expect("activate recovered exact generation");
+        let tree = restarted
+            .runtime()
+            .effects()
+            .get_current_state()
+            .await
+            .unwrap();
+        assert_eq!(
+            tree.leaves
+                .values()
+                .filter(|leaf| leaf.device_id == start.device_id)
+                .count(),
+            1
+        );
+        assert_eq!(
+            restarted
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .unwrap(),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed)
+        );
+        service
+            .finalize_sole_device_enrollment(&start.ceremony_id)
+            .await
+            .unwrap();
+        let tree = restarted
+            .runtime()
+            .effects()
+            .get_current_state()
+            .await
+            .unwrap();
+        assert_eq!(
+            tree.leaves
+                .values()
+                .filter(|leaf| leaf.device_id == start.device_id)
+                .count(),
+            1
+        );
+    });
+}
+
+#[test]
+fn enrollment_prepared_tree_operation_reconciles_before_and_after_tree_apply() {
+    run_async_test_on_large_stack(async move {
+        for after_tree in [false, true] {
+            let label = if after_tree {
+                "activation-after-tree"
+            } else {
+                "activation-before-tree"
+            };
+            let (issuer, _invitee, _invitation, start, _accept, witness) =
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(label)
+                    .await;
+            issuer
+                .runtime()
+                .tasks()
+                .shutdown_with_timeout(std::time::Duration::from_secs(2))
+                .await
+                .unwrap();
+            issuer
+                .runtime()
+                .ceremony_runner()
+                .record_verified_enrollment_response(witness)
+                .await
+                .unwrap();
+            crate::handlers::device_epoch_rotation::fail_activation_for_test(
+                issuer.runtime().effects().as_ref(),
+                start.ceremony_id.clone(),
+                after_tree,
+            )
+            .await;
+            let authority = issuer.authority_id();
+            let config = issuer.runtime().effects().config().clone();
+            let context = EffectContext::new(
+                authority,
+                issuer.context().default_context_id(),
+                ExecutionMode::Testing,
+            );
+            let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+                authority,
+                issuer.runtime().effects(),
+                issuer.runtime().ceremony_tracker().clone(),
+                issuer.runtime().ceremony_runner().clone(),
+                issuer.runtime().threshold_signing(),
+                issuer.runtime().reconfiguration().clone(),
+            );
+            service
+                .finalize_sole_device_enrollment(&start.ceremony_id)
+                .await
+                .expect_err("stop at exact preparation boundary");
+            let tree = issuer
+                .runtime()
+                .effects()
+                .get_current_state()
+                .await
+                .unwrap();
+            assert_eq!(
+                tree.leaves
+                    .values()
+                    .any(|leaf| leaf.device_id == start.device_id),
+                after_tree
+            );
+            assert_eq!(
+                issuer
+                    .runtime()
+                    .ceremony_runner()
+                    .terminal_outcome(&start.ceremony_id)
+                    .await
+                    .unwrap(),
+                None
+            );
+            assert!(
+                issuer
+                    .runtime()
+                    .ceremony_runner()
+                    .abort(&start.ceremony_id, None)
+                    .await
+                    .is_err(),
+                "cancellation cannot replace a durably prepared activation owner"
+            );
+            drop(service);
+            drop(issuer);
+            let restarted = Arc::new(
+                AgentBuilder::new()
+                    .with_authority(authority)
+                    .with_config(config)
+                    .build_testing_async(&context)
+                    .await
+                    .unwrap(),
+            );
+            AgentRuntimeBridge::new(restarted.clone())
+                .bootstrap_signing_keys()
+                .await
+                .unwrap();
+            let resumed = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
+                authority,
+                restarted.runtime().effects(),
+                restarted.runtime().ceremony_tracker().clone(),
+                restarted.runtime().ceremony_runner().clone(),
+                restarted.runtime().threshold_signing(),
+                restarted.runtime().reconfiguration().clone(),
+            );
+            resumed
+                .finalize_sole_device_enrollment(&start.ceremony_id)
+                .await
+                .expect("reconcile exact retained operation");
+            let tree = restarted
+                .runtime()
+                .effects()
+                .get_current_state()
+                .await
+                .unwrap();
+            assert_eq!(
+                tree.leaves
+                    .values()
+                    .filter(|leaf| leaf.device_id == start.device_id)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                restarted
+                    .runtime()
+                    .ceremony_runner()
+                    .terminal_outcome(&start.ceremony_id)
+                    .await
+                    .unwrap(),
+                Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed)
+            );
+        }
+    });
+}
+
+#[test]
 fn sole_device_enrollment_commits_after_new_device_accepts() {
     run_async_test_on_large_stack(async move {
         let authority = AuthorityId::new_from_entropy([73u8; 32]);
@@ -1618,23 +2013,126 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             .await
             .expect("bootstrap local identity keys");
 
-        let baseline = agent.runtime().effects().export_tree_ops().await.expect("baseline");
+        let baseline = agent
+            .runtime()
+            .effects()
+            .export_tree_ops()
+            .await
+            .expect("baseline");
+
+        let invitee_authority = AuthorityId::new_from_entropy([75u8; 32]);
+        let invitee_context = EffectContext::new(
+            invitee_authority,
+            ContextId::new_from_entropy([76u8; 32]),
+            ExecutionMode::Testing,
+        );
+        let invitee_config = AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy([77u8; 32]),
+            storage: crate::core::config::StorageConfig {
+                base_path: unique_test_path("sole-device-enrollment-invitee"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let invitee = Arc::new(
+            AgentBuilder::new()
+                .with_authority(invitee_authority)
+                .with_config(invitee_config)
+                .build_testing_async(&invitee_context)
+                .await
+                .expect("build actual invitee runtime"),
+        );
+        let invitee_bridge = AgentRuntimeBridge::new(invitee.clone());
+        invitee_bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("invitee signing ready");
+        let setup_code = invitee_bridge
+            .export_device_enrollment_setup_request()
+            .await
+            .expect("export actual invitee setup");
+        let initiator_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(agent.clone())),
+            )
+            .expect("initiator app"),
+        ));
+        let setup =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                &initiator_app,
+                setup_code,
+            )
+            .await
+            .expect("verify explicitly transferred invitee setup");
 
         let start = bridge
-            .initiate_device_enrollment_ceremony(
-                "Tablet".to_string(),
-                AuthorityId::new_from_entropy([75u8; 32]),
-            )
+            .initiate_device_enrollment_ceremony("Tablet".to_string(), setup)
             .await
             .expect("start device enrollment");
+        assert_eq!(start.device_id, invitee.context().device_id());
         let runner = agent.runtime().ceremony_runner().clone();
-        runner
-            .record_local_response(
-                &start.ceremony_id,
-                aura_core::threshold::ParticipantIdentity::device(start.device_id),
+        let decoded =
+            aura_invitation::shareable::ShareableInvitation::from_code(&start.enrollment_code)
+                .expect("actual issued enrollment code");
+        let invitation = agent
+            .invitations()
+            .expect("issuer invitation service")
+            .get(&decoded.invitation_id)
+            .await
+            .expect("actual issued invitation");
+        let transfer = start
+            .manifest_transfer
+            .as_ref()
+            .expect("actual issuer manifest transfer");
+        let invitee_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(invitee.clone())),
+            )
+            .expect("actual invitee app"),
+        ));
+        let manifest_pin =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
+                &invitee_app,
+                transfer.manifest_code.clone(),
+                transfer.initiator_verifier_code.clone(),
             )
             .await
-            .expect("record new device acceptance");
+            .expect("independent actual manifest and verifier transfer");
+        invitee_bridge
+            .import_enrollment_invitation(&start.enrollment_code, manifest_pin)
+            .await
+            .expect("actual invitee admission before canonical acceptance");
+        let verified = crate::handlers::invitation::enrollment_trust::verify_actual_invitee_acceptance_for_test(
+            agent.runtime().effects().as_ref(), invitee.runtime().effects().as_ref(),
+            &invitation, authority, &start.ceremony_id, start.device_id,
+            start.pending_epoch.value(),
+        ).await.expect("verify canonical provisional acceptance under retained setup key");
+        let duplicate = crate::handlers::invitation::enrollment_trust::verify_actual_invitee_acceptance_for_test(
+            agent.runtime().effects().as_ref(), invitee.runtime().effects().as_ref(),
+            &invitation, authority, &start.ceremony_id, start.device_id,
+            start.pending_epoch.value(),
+        ).await.expect("independently signed duplicate canonical decision");
+        runner
+            .record_verified_enrollment_response(verified)
+            .await
+            .expect("record actual verified device acceptance");
+        runner
+            .record_verified_enrollment_response(duplicate)
+            .await
+            .expect("duplicate proof is idempotent");
+        assert_eq!(
+            agent
+                .runtime()
+                .ceremony_tracker()
+                .get(&start.ceremony_id)
+                .await
+                .unwrap()
+                .accepted_participants
+                .len(),
+            1
+        );
 
         let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
             authority,
@@ -1663,23 +2161,38 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
         let tree = aura_protocol::effects::TreeEffects::get_current_state(effects.as_ref())
             .await
             .expect("tree state");
-        assert!(tree.leaves.values().any(|leaf| leaf.device_id == start.device_id));
+        assert!(tree
+            .leaves
+            .values()
+            .any(|leaf| leaf.device_id == start.device_id));
         let devices = super::identity::list_devices(&bridge)
             .await
             .expect("list devices");
-        assert_eq!(devices.len(), 2, "initiator should list itself and the new device");
+        assert_eq!(
+            devices.len(),
+            2,
+            "initiator should list itself and the new device"
+        );
 
         // The joining device holds the pre-enrollment baseline; replicating the
         // initiator's verified ops gives it its own leaf (work/8.md task 32).
-        let joiner = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &crate::core::AgentConfig {
-                device_id: start.device_id,
-                ..crate::core::AgentConfig::default()
-            },
-            authority,
-            crate::SharedTransport::new(),
-        );
-        joiner.replace_tree_ops(&baseline).await.expect("adopt baseline");
+        let joiner =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &crate::core::AgentConfig {
+                    device_id: start.device_id,
+                    storage: crate::core::config::StorageConfig {
+                        base_path: unique_test_path("device-enrollment-joiner"),
+                        ..Default::default()
+                    },
+                    ..crate::core::AgentConfig::default()
+                },
+                authority,
+                crate::SharedTransport::new(),
+            );
+        joiner
+            .replace_tree_ops(&baseline)
+            .await
+            .expect("adopt baseline");
         let all_ops = effects.export_tree_ops().await.expect("initiator ops");
         // A tree frame cannot supply its own trust anchor. The fixture's
         // secure-store copy stands in for an independently authenticated
@@ -1722,9 +2235,12 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             joiner.import_verified_tree_ops(&forged).await.is_err(),
             "forged extending operation must fail with a trusted parent verifier"
         );
-        assert_eq!(joiner.export_tree_ops().await.expect("after forgery"), baseline);
-        let resulting_state = aura_journal::commitment_tree::reduce(&all_ops)
-            .expect("initiator tree should reduce");
+        assert_eq!(
+            joiner.export_tree_ops().await.expect("after forgery"),
+            baseline
+        );
+        let resulting_state =
+            aura_journal::commitment_tree::reduce(&all_ops).expect("initiator tree should reduce");
         let mut forged_tail = all_ops.last().expect("enrollment extension").clone();
         forged_tail.op.parent_epoch = resulting_state.epoch;
         forged_tail.op.parent_commitment = resulting_state.root_commitment;
@@ -1736,29 +2252,368 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             baseline,
             "a bad later operation must not partially persist a valid prefix"
         );
-        assert!(joiner.import_verified_tree_ops(&all_ops).await.expect("import") > 0);
+        assert!(
+            joiner
+                .import_verified_tree_ops(&all_ops)
+                .await
+                .expect("import")
+                > 0
+        );
         let joiner_tree = aura_protocol::effects::TreeEffects::get_current_state(joiner.as_ref())
             .await
             .expect("joiner tree");
-        assert!(joiner_tree.leaves.values().any(|leaf| leaf.device_id == start.device_id));
+        assert!(joiner_tree
+            .leaves
+            .values()
+            .any(|leaf| leaf.device_id == start.device_id));
 
         // A provisional op a joining device made for itself does not extend the
         // account tree and is not applied by the initiator.
-        let provisional = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &crate::core::AgentConfig {
-                device_id: aura_core::DeviceId::new_from_entropy([0x7E; 32]),
-                ..crate::core::AgentConfig::default()
-            },
-            authority,
-            crate::SharedTransport::new(),
-        );
+        let provisional =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &crate::core::AgentConfig {
+                    device_id: aura_core::DeviceId::new_from_entropy([0x7E; 32]),
+                    storage: crate::core::config::StorageConfig {
+                        base_path: unique_test_path("device-enrollment-provisional"),
+                        ..Default::default()
+                    },
+                    ..crate::core::AgentConfig::default()
+                },
+                authority,
+                crate::SharedTransport::new(),
+            );
         crate::runtime::services::ThresholdSigningService::new(provisional.clone())
             .bootstrap_authority(&authority)
             .await
             .expect("provisional bootstrap");
         let before = effects.export_tree_ops().await.expect("before");
-        let provisional_ops = provisional.export_tree_ops().await.expect("provisional ops");
-        assert!(effects.import_verified_tree_ops(&provisional_ops).await.is_err());
+        let provisional_ops = provisional
+            .export_tree_ops()
+            .await
+            .expect("provisional ops");
+        assert!(effects
+            .import_verified_tree_ops(&provisional_ops)
+            .await
+            .is_err());
         assert_eq!(effects.export_tree_ops().await.expect("after"), before);
     });
+}
+
+#[test]
+fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, invitee, _invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "retirement-reissue",
+            )
+            .await;
+        let authority = issuer.authority_id();
+        let config = issuer.runtime().effects().config().clone();
+        let context = EffectContext::new(
+            authority,
+            issuer.context().default_context_id(),
+            ExecutionMode::Testing,
+        );
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        issuer
+            .runtime()
+            .effects()
+            .fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
+        let bridge = AgentRuntimeBridge::new(issuer.clone());
+        let error = bridge
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect_err("required secure deletion must fail");
+        assert!(std::error::Error::source(&error).is_some());
+        let original = issuer
+            .runtime()
+            .ceremony_runner()
+            .terminal_outcome(&start.ceremony_id)
+            .await
+            .unwrap();
+        assert!(matches!(
+            original,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(_))
+        ));
+        let profile = crate::runtime::effects::enrollment_generation_profile_location(
+            &authority,
+            start.pending_epoch.value(),
+        );
+        assert!(
+            issuer
+                .runtime()
+                .effects()
+                .secure_exists(&profile)
+                .await
+                .unwrap(),
+            "interrupted cleanup retains activation fence"
+        );
+        drop(bridge);
+        drop(issuer);
+        let restarted = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&context)
+                .await
+                .expect("reopen failed generation"),
+        );
+        let bridge = AgentRuntimeBridge::new(restarted.clone());
+        bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("retry original failed cleanup under owned bootstrap");
+        assert_eq!(
+            restarted
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .unwrap(),
+            original
+        );
+        assert!(!restarted
+            .runtime()
+            .effects()
+            .secure_exists(&profile)
+            .await
+            .unwrap());
+        let setup_code = AgentRuntimeBridge::new(invitee.clone())
+            .export_device_enrollment_setup_request()
+            .await
+            .unwrap();
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(restarted.clone())),
+            )
+            .unwrap(),
+        ));
+        let setup =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                &app, setup_code,
+            )
+            .await
+            .unwrap();
+        let replacement = bridge
+            .initiate_device_enrollment_ceremony("reissued".to_string(), setup)
+            .await
+            .expect("fresh owned generation after strict retirement");
+        assert_ne!(replacement.ceremony_id, start.ceremony_id);
+        assert_eq!(replacement.pending_epoch, start.pending_epoch);
+        assert_eq!(
+            restarted
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .unwrap(),
+            original
+        );
+    });
+}
+
+#[test]
+fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_restart() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, invitee, _invitation, first, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "orphan-retirement",
+            )
+            .await;
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        let authority = issuer.authority_id();
+        let config = issuer.runtime().effects().config().clone();
+        let context = EffectContext::new(
+            authority,
+            issuer.context().default_context_id(),
+            ExecutionMode::Testing,
+        );
+        AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&first.ceremony_id)
+            .await
+            .unwrap();
+        let setup_code = AgentRuntimeBridge::new(invitee.clone())
+            .export_device_enrollment_setup_request()
+            .await
+            .unwrap();
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+            )
+            .unwrap(),
+        ));
+        let setup =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                &app, setup_code,
+            )
+            .await
+            .unwrap();
+        let service = issuer.invitations().unwrap();
+        let reserved = service
+            .reserve_device_enrollment_invitation()
+            .await
+            .unwrap();
+        let ceremony = aura_core::CeremonyId::new(format!("unissued:{}", reserved.invitation_id()));
+        let effects = issuer.runtime().effects();
+        let plan = effects
+            .prepare_authenticated_enrollment_rotation(&setup)
+            .await
+            .expect("actual authenticated current roster");
+        let (epoch, _packages, _public, allocation) = effects
+            .prepare_pinned_enrollment_rotation(&setup, &reserved, &ceremony, plan)
+            .await
+            .unwrap();
+        drop(allocation); // Crash before invitation fact commit or registration.
+        effects.fail_next_enrollment_retirement_for_test(epoch);
+        let error = effects
+            .retire_unissued_enrollment_allocation()
+            .await
+            .expect_err("release fault retains original orphan decision");
+        assert!(std::error::Error::source(&error).is_some());
+        let decision = aura_core::effects::SecureStorageLocation::new(
+            "device_enrollment_orphan_retirement_v1",
+            ceremony.to_string(),
+        );
+        let original = effects
+            .secure_retrieve(
+                &decision,
+                &[aura_core::effects::SecureStorageCapability::Read],
+            )
+            .await
+            .unwrap();
+        let profile =
+            crate::runtime::effects::enrollment_generation_profile_location(&authority, epoch);
+        assert!(effects.secure_exists(&profile).await.unwrap());
+        drop(effects);
+        drop(service);
+        drop(app);
+        drop(issuer);
+        let restarted = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&context)
+                .await
+                .expect("reopen actual orphan allocation"),
+        );
+        AgentRuntimeBridge::new(restarted.clone())
+            .bootstrap_signing_keys()
+            .await
+            .expect("finish original orphan retirement");
+        assert!(!restarted
+            .runtime()
+            .effects()
+            .secure_exists(&profile)
+            .await
+            .unwrap());
+        assert_eq!(
+            restarted
+                .runtime()
+                .effects()
+                .secure_retrieve(
+                    &decision,
+                    &[aura_core::effects::SecureStorageCapability::Read]
+                )
+                .await
+                .unwrap(),
+            original
+        );
+        assert!(!restarted
+            .runtime()
+            .ceremony_tracker()
+            .list_device_enrollment_ceremonies()
+            .await
+            .unwrap()
+            .contains(&ceremony));
+    });
+}
+
+fn native_identity_has_source<E: std::error::Error + 'static>(
+    error: &(dyn std::error::Error + 'static),
+) -> bool {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if error.is::<E>() {
+            return true;
+        }
+        current = error.source();
+    }
+    false
+}
+
+#[tokio::test]
+async fn required_moderation_rejects_corrupt_committed_ban_with_native_codec_source() {
+    use aura_journal::DomainFact as _;
+    let authority = AuthorityId::new_from_entropy([235; 32]);
+    let context = ContextId::new_from_entropy([236; 32]);
+    let channel = ChannelId::from_bytes([237; 32]);
+    let root = tempfile::tempdir().expect("actual isolated storage profile");
+    let config = AgentConfig {
+        storage: crate::core::config::StorageConfig {
+            base_path: root.path().to_path_buf(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let build_context = EffectContext::new(authority, context, ExecutionMode::Testing);
+    let agent = Arc::new(
+        Box::pin(
+            AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&build_context),
+        )
+        .await
+        .expect("actual runtime"),
+    );
+    let bridge = AgentRuntimeBridge::new(agent);
+    let mut envelope = aura_social::HomeBanFact {
+        context_id: context,
+        channel_id: Some(channel),
+        banned_authority: authority,
+        actor_authority: authority,
+        reason: "actual committed corrupt test payload".into(),
+        banned_at: aura_core::PhysicalTime {
+            ts_ms: 1,
+            uncertainty: None,
+        },
+        expires_at: None,
+    }
+    .to_envelope();
+    envelope.encoding = aura_core::types::facts::FactEncoding::Json;
+    envelope.payload = b"not-json".to_vec();
+    bridge
+        .agent
+        .runtime()
+        .effects()
+        .commit_relational_facts(vec![RelationalFact::Generic {
+            context_id: context,
+            envelope,
+        }])
+        .await
+        .expect("persist actual journal wrapper with corrupt domain payload");
+    let error = bridge
+        .moderation_status(context, channel, authority, 2)
+        .await
+        .expect_err("corrupt ban cannot authorize absence");
+    assert_eq!(
+        error.kind(),
+        aura_app::runtime_bridge::RuntimeBridgeErrorKind::Serialization
+    );
+    assert!(native_identity_has_source::<serde_json::Error>(&error));
+    assert!(native_identity_has_source::<
+        aura_social::RequiredModerationQueryError,
+    >(&error));
 }

@@ -13,6 +13,7 @@ pub struct DeviceEnrollmentModalProps {
     pub visible: bool,
     pub nickname_suggestion: String,
     pub enrollment_code: String,
+    pub manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     pub accepted_count: u16,
     pub total_count: u16,
     pub threshold: u16,
@@ -57,11 +58,11 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
             status: status,
             status_text: status_text,
             progress_text: progress_text,
-            instruction: String::new(),
+            instruction:props.manifest_transfer.as_ref().map(|transfer|format!("Signed manifest: {}\nInitiator verifier (transfer separately): {}\nPress t to copy manifest; v to copy verifier",transfer.manifest_code,transfer.initiator_verifier_code)).unwrap_or_else(||"Authenticated manifest transfer unavailable".to_string()),
             code: props.enrollment_code.clone(),
             error_message: props.error_message.clone(),
             copied: props.copied,
-            show_mobile_hint: props.is_demo_mode,
+            show_mobile_hint:false,
         )
     }
 }

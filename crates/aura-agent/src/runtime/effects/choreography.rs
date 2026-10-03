@@ -2,7 +2,7 @@ use super::{AuraEffectSystem, CHOREO_FLOW_COST_PER_KB, DEFAULT_CHOREO_FLOW_COST}
 use async_trait::async_trait;
 use aura_chat::capabilities::ChatCapability;
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt};
-use aura_core::effects::{PhysicalTimeEffects, TransportEffects, WakeCondition};
+use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ContextId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
@@ -16,6 +16,15 @@ use std::collections::HashMap;
 use crate::runtime::subsystems::choreography::RuntimeChoreographySessionId;
 use crate::runtime::subsystems::choreography::SessionStartError;
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
+
+/// Clock failure remains primary after required session-resource retirement.
+#[derive(Debug, thiserror::Error)]
+#[error("required session end clock failed: {source}; cleanup failure: {cleanup:?}")]
+pub(crate) struct SessionEndTimeFailure {
+    #[source]
+    source: aura_core::effects::TimeError,
+    cleanup: Option<crate::runtime::subsystems::choreography::SessionEndError>,
+}
 
 fn current_session_snapshot(
     effects: &AuraEffectSystem,
@@ -239,13 +248,28 @@ impl ChoreographicEffects for AuraEffectSystem {
         // Wait on the session-local inbox notifier instead of polling the global inbox.
         // Default timeout remains 5 seconds to allow async guardians time to respond.
         let timeout_ms = session.timeout_ms.unwrap_or(5000);
-        let timeout_handle = self
-            .time_handler
-            .set_timeout(timeout_ms)
-            .await
-            .map_err(|error| ChoreographyError::InternalError {
-                message: format!("failed to issue receive timeout witness: {error}"),
-            })?;
+        let started_at = self.time_handler.physical_time().await.map_err(|source| {
+            ChoreographyError::RequiredTime {
+                operation: "receive_timeout_issue",
+                source: Box::new(source),
+            }
+        })?;
+        // The receive future owns this fixed deadline. Dropping it cannot leave
+        // a registered timer behind, and notifications cannot renew its window.
+        let timeout_budget = if timeout_ms == 0 {
+            None
+        } else {
+            Some(
+                aura_core::TimeoutBudget::from_start_and_timeout(
+                    &started_at,
+                    std::time::Duration::from_millis(timeout_ms),
+                )
+                .map_err(|source| ChoreographyError::RequiredTime {
+                    operation: "receive_timeout_issue",
+                    source: Box::new(source),
+                })?,
+            )
+        };
 
         let source_authority = role.authority_id;
         tracing::debug!(
@@ -272,7 +296,6 @@ impl ChoreographicEffects for AuraEffectSystem {
             }
 
             let Some(session_inbox_notify) = session_inbox_notify.clone() else {
-                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::InternalError {
                     message: format!(
                         "missing choreography inbox notifier for active session {session_id}"
@@ -289,12 +312,16 @@ impl ChoreographicEffects for AuraEffectSystem {
                         std::future::pending::<()>().await;
                     }
                 } => {}
-                timeout_result = self.time_handler.yield_until(WakeCondition::TimeoutExpired {
-                    timeout_id: timeout_handle,
-                }) => {
+                timeout_result = async {
+                    match timeout_budget.as_ref() {
+                        Some(budget) => self.time_handler.wait_owned_timeout(budget).await,
+                        None => Ok(()),
+                    }
+                } => {
                     if let Err(error) = timeout_result {
-                        return Err(ChoreographyError::InternalError {
-                            message: format!("receive timeout witness failed: {error}"),
+                        return Err(ChoreographyError::RequiredTime {
+                            operation: "receive_timeout_wait",
+                            source: Box::new(error),
                         });
                     }
                     let mut state = self.choreography_state.write();
@@ -308,7 +335,6 @@ impl ChoreographicEffects for AuraEffectSystem {
             }
 
             if !self.choreography_state.read().is_active() {
-                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::SessionNotStarted);
             }
             if self
@@ -317,7 +343,6 @@ impl ChoreographicEffects for AuraEffectSystem {
                 .current_session_id()
                 .is_some_and(|active| active != session_id)
             {
-                let _ = self.time_handler.cancel_timeout(timeout_handle).await;
                 return Err(ChoreographyError::InternalError {
                     message: format!(
                         "choreography session binding changed while waiting for receive: {session_id}"
@@ -325,8 +350,6 @@ impl ChoreographicEffects for AuraEffectSystem {
                 });
             }
         };
-
-        let _ = self.time_handler.cancel_timeout(timeout_handle).await;
 
         {
             let mut state = self.choreography_state.write();
@@ -430,11 +453,14 @@ impl ChoreographicEffects for AuraEffectSystem {
             self.authority_id,
             roles.iter().map(|r| r.device_id).collect::<Vec<_>>()
         );
-        let started_at_ms = self
-            .physical_time()
-            .await
-            .map(|time| time.ts_ms)
-            .unwrap_or_default();
+        let started_at_ms =
+            self.physical_time()
+                .await
+                .map(|time| time.ts_ms)
+                .map_err(|source| ChoreographyError::RequiredTime {
+                    operation: "session_start",
+                    source: Box::new(source),
+                })?;
 
         let mut state = self.choreography_state.write();
         state
@@ -458,19 +484,36 @@ impl ChoreographicEffects for AuraEffectSystem {
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
-        let ended_at_ms = self
-            .physical_time()
-            .await
-            .map(|time| time.ts_ms)
-            .unwrap_or_default();
-
-        let mut state = self.choreography_state.write();
-        let ended_session_id = state
-            .end_session(ended_at_ms)
-            .map_err(|_| ChoreographyError::SessionNotStarted)?;
-        drop(state);
-        let _released_fragments = self.release_vm_fragments_for_session(ended_session_id);
-        Ok(())
+        let clock = self.physical_time().await;
+        let ended = {
+            let mut state = self.choreography_state.write();
+            state.end_session_observed(clock.as_ref().ok().map(|time| time.ts_ms))
+        };
+        match &ended {
+            Ok(session_id)
+            | Err(
+                crate::runtime::subsystems::choreography::SessionEndError::MissingBoundSession(
+                    session_id,
+                ),
+            ) => {
+                self.release_vm_fragments_for_session(*session_id);
+            }
+            Err(
+                crate::runtime::subsystems::choreography::SessionEndError::MissingCurrentBinding,
+            ) => {}
+        }
+        match clock {
+            Ok(_) => ended
+                .map(|_| ())
+                .map_err(|_| ChoreographyError::SessionNotStarted),
+            Err(source) => Err(ChoreographyError::RequiredTime {
+                operation: "session_end",
+                source: Box::new(SessionEndTimeFailure {
+                    source,
+                    cleanup: ended.err(),
+                }),
+            }),
+        }
     }
 
     async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
@@ -511,6 +554,135 @@ mod tests {
     use tokio::sync::Barrier;
     use uuid::Uuid;
 
+    struct SessionFaultClock(std::sync::atomic::AtomicBool);
+
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for SessionFaultClock {
+        async fn physical_time(
+            &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                Err(aura_core::effects::TimeError::OperationFailed {
+                    reason: "required session clock fault".into(),
+                })
+            } else {
+                Ok(aura_core::time::PhysicalTime {
+                    ts_ms: 100,
+                    uncertainty: None,
+                })
+            }
+        }
+
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn required_session_clock_failure_preserves_source_and_retires_binding() {
+        use std::error::Error;
+        use std::sync::atomic::Ordering;
+        let authority = AuthorityId::new_from_entropy([0x78; 32]);
+        let clock = Arc::new(SessionFaultClock(std::sync::atomic::AtomicBool::new(true)));
+        let effects = AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+            &AgentConfig::default(),
+            authority,
+            0x789,
+        )
+        .expect("actual runtime effects")
+        .with_physical_time_provider(clock.clone());
+        let role = authority_device_role(authority, 0);
+        let session = Uuid::from_u128(0x789);
+        let error = effects
+            .start_session(session, vec![role])
+            .await
+            .expect_err("required read fails");
+        assert!(matches!(
+            &error,
+            ChoreographyError::RequiredTime {
+                operation: "session_start",
+                ..
+            }
+        ));
+        assert!(error
+            .source()
+            .expect("native source")
+            .downcast_ref::<aura_core::effects::TimeError>()
+            .is_some());
+        assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+        assert!(effects
+            .choreography_state
+            .read()
+            .current_session_id()
+            .is_none());
+        clock.0.store(false, Ordering::SeqCst);
+        effects
+            .start_session(session, vec![role])
+            .await
+            .expect("actual session admitted");
+        clock.0.store(true, Ordering::SeqCst);
+        let receive = effects
+            .receive_from_role_bytes(role)
+            .await
+            .expect_err("required timeout issuance fails");
+        assert!(matches!(
+            &receive,
+            ChoreographyError::RequiredTime {
+                operation: "receive_timeout_issue",
+                ..
+            }
+        ));
+        assert!(receive
+            .source()
+            .expect("original clock error")
+            .downcast_ref::<aura_core::effects::TimeError>()
+            .is_some());
+        assert_eq!(effects.choreography_state.read().active_session_count(), 1);
+        let error = effects
+            .end_session()
+            .await
+            .expect_err("clock fault stays primary");
+        let failure = error
+            .source()
+            .expect("retirement source")
+            .downcast_ref::<SessionEndTimeFailure>()
+            .expect("typed dual failure");
+        assert!(failure.cleanup.is_none());
+        assert!(matches!(
+            failure.source,
+            aura_core::effects::TimeError::OperationFailed { .. }
+        ));
+        assert_eq!(effects.choreography_state.read().active_session_count(), 0);
+        assert!(effects
+            .choreography_state
+            .read()
+            .current_session_id()
+            .is_none());
+        let repeated = effects
+            .end_session()
+            .await
+            .expect_err("both failures retained");
+        let failure = repeated
+            .source()
+            .expect("native source")
+            .downcast_ref::<SessionEndTimeFailure>()
+            .expect("typed dual failure");
+        assert_eq!(
+            failure.cleanup,
+            Some(crate::runtime::subsystems::choreography::SessionEndError::MissingCurrentBinding)
+        );
+        assert!(matches!(
+            failure.source,
+            aura_core::effects::TimeError::OperationFailed { .. }
+        ));
+        clock.0.store(false, Ordering::SeqCst);
+        effects
+            .start_session(session, vec![role])
+            .await
+            .expect("retired binding permits readmission");
+        effects.end_session().await.expect("normal retirement");
+    }
+
     async fn assert_settles_within<T, E: std::fmt::Debug>(
         future: impl std::future::Future<Output = Result<T, E>>,
         timeout: Duration,
@@ -550,6 +722,51 @@ mod tests {
             authority_id,
             RoleIndex::new(role_index.into()).expect("role index"),
         )
+    }
+
+    #[tokio::test]
+    async fn dropped_receive_keeps_no_registered_timer_and_zero_timeout_stays_immediate() {
+        use futures::FutureExt;
+        let authority = AuthorityId::new_from_entropy([0x79; 32]);
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let effects = AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+            &AgentConfig::default(),
+            authority,
+            0x790,
+        )
+        .expect("actual effects")
+        .with_physical_time_provider(clock);
+        let role = authority_device_role(authority, 0);
+        effects
+            .start_session(Uuid::from_u128(0x790), vec![role])
+            .await
+            .expect("actual session");
+        let mut receive = Box::pin(effects.receive_from_role_bytes(role));
+        assert!(receive.as_mut().now_or_never().is_none());
+        assert_eq!(
+            effects.time_handler.get_statistics().await.active_timeouts,
+            0
+        );
+        drop(receive);
+        assert_eq!(
+            effects.time_handler.get_statistics().await.active_timeouts,
+            0
+        );
+        effects.set_timeout(0).await;
+        let error = effects
+            .receive_from_role_bytes(role)
+            .await
+            .expect_err("zero wait expires immediately");
+        assert!(matches!(error, ChoreographyError::Transport { source }
+            if matches!(source.downcast_ref::<aura_core::effects::TransportError>(), Some(aura_core::effects::TransportError::NoMessage))));
+        assert_eq!(
+            effects.time_handler.get_statistics().await.active_timeouts,
+            0
+        );
+        effects
+            .end_session()
+            .await
+            .expect("actual session retirement");
     }
 
     #[test]
@@ -923,7 +1140,11 @@ mod tests {
         let delayed_effects = Arc::clone(&effects);
         let mut delayed_tasks = tokio::task::JoinSet::new();
         delayed_tasks.spawn(async move {
-            delayed_effects.time_handler.sleep_ms(10).await;
+            delayed_effects
+                .time_handler
+                .sleep_ms(10)
+                .await
+                .expect("required delayed test sleep");
             let mut metadata = HashMap::new();
             metadata.insert(
                 "content-type".to_string(),
@@ -1267,7 +1488,11 @@ mod tests {
         let delayed_effects = Arc::clone(&effects);
         let mut delayed_tasks = tokio::task::JoinSet::new();
         delayed_tasks.spawn(async move {
-            delayed_effects.time_handler.sleep_ms(10).await;
+            delayed_effects
+                .time_handler
+                .sleep_ms(10)
+                .await
+                .expect("required delayed test sleep");
             delayed_effects
                 .choreography_state
                 .write()

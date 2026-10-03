@@ -527,7 +527,7 @@ pub struct SettingsNicknameModalViewProps {
 pub struct AddDeviceModalViewProps {
     pub visible: bool,
     pub name: String,
-    pub invitee_authority_id: String,
+    pub setup_code: String,
     pub invitee_focused: bool,
     pub error: String,
 }
@@ -536,6 +536,9 @@ pub struct AddDeviceModalViewProps {
 pub struct DeviceImportModalViewProps {
     pub visible: bool,
     pub code: String,
+    pub manifest_code: String,
+    pub initiator_verifier_code: String,
+    pub focused_input: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -544,6 +547,7 @@ pub struct DeviceEnrollmentModalViewProps {
     pub ceremony_id: String,
     pub nickname_suggestion: String,
     pub code: String,
+    pub manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     pub accepted_count: u16,
     pub total_count: u16,
     pub threshold: u16,
@@ -624,8 +628,8 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         Some(QueuedModal::SettingsAddDevice(s)) => AddDeviceModalViewProps {
             visible: true,
             name: s.name.clone(),
-            invitee_authority_id: s.invitee_authority_id.clone(),
-            invitee_focused: s.focused_field == AddDeviceField::InviteeAuthority,
+            setup_code: s.setup_code.clone(),
+            invitee_focused: s.focused_field == AddDeviceField::SetupCode,
             error: s.error.clone().unwrap_or_default(),
         },
         _ => AddDeviceModalViewProps::default(),
@@ -780,12 +784,28 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             device_import: DeviceImportModalViewProps {
                 visible: device_import_visible,
                 code: device_import_code,
+                manifest_code: match state.modal_queue.current() {
+                    Some(QueuedModal::SettingsDeviceImport(s)) => s.manifest_code.clone(),
+                    _ => String::new(),
+                },
+                initiator_verifier_code: match state.modal_queue.current() {
+                    Some(QueuedModal::SettingsDeviceImport(s)) => s.initiator_verifier_code.clone(),
+                    _ => String::new(),
+                },
+                focused_input: match state.modal_queue.current() {
+                    Some(QueuedModal::SettingsDeviceImport(s)) => s.focused_input,
+                    _ => 0,
+                },
             },
             device_enrollment: DeviceEnrollmentModalViewProps {
                 visible: enrollment_visible,
                 ceremony_id: enrollment_ceremony_id,
                 nickname_suggestion: enrollment_nickname_suggestion,
                 code: enrollment_code,
+                manifest_transfer: match state.modal_queue.current() {
+                    Some(QueuedModal::SettingsDeviceEnrollment(s)) => s.manifest_transfer.clone(),
+                    _ => None,
+                },
                 accepted_count: enrollment_accepted,
                 total_count: enrollment_total,
                 threshold: enrollment_threshold,

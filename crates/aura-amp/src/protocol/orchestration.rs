@@ -766,6 +766,7 @@ mod tests {
         bootstrap_id: aura_core::Hash32,
     ) -> ChannelEpochState {
         ChannelEpochState {
+            canonical_checkpoint: None,
             chan_epoch: 1,
             pending_bump: None,
             bootstrap: Some(ChannelBootstrap {

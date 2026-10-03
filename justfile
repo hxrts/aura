@@ -566,8 +566,12 @@ ci-lan-deep:
     cargo test -p hxrts-aura-agent --test lan_integration -q -- --ignored
 
 # Test suite (excludes patchbay tests and contract_suite PTY/SSH tests which run in ci-harness-contract)
-ci-test:
+ci-test: ci-amp-lifecycle-trace
     cargo test --workspace -- --skip patchbay --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
+
+# Required deterministic AMP lifecycle artifact; replay runs in ci-test.
+ci-amp-lifecycle-trace:
+    QUINT_TRACE_MAIN=harness_amp_channel QUINT_TRACE_MAX_STEPS=24 scripts/verify/quint-trace.sh check verification/quint/harness/amp_channel.qnt verification/quint/traces/amp_channel.itf.json
 
 # Protocol evolution compatibility gate (async_subtype)
 ci-protocol-compat:

@@ -329,15 +329,26 @@ async fn test_device_enrollment_export_includes_sender_hint() -> TestResult {
     let _guard = lock_lan_test().await;
     let lan_port = next_lan_port();
     let agent = create_lan_agent(0x51, lan_port).await?;
+    let invitee = create_lan_agent(0x61, next_lan_port()).await?;
+    let invitee_bridge = invitee.clone().as_runtime_bridge();
+    invitee_bridge.bootstrap_signing_keys().await?;
+    let setup_code = invitee_bridge
+        .export_device_enrollment_setup_request()
+        .await?;
+    let initiator_app = create_runtime_app(agent.clone()).await?;
+    let setup = aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+        &initiator_app,
+        setup_code,
+    )
+    .await?;
 
+    let expected_device = setup.statement().device;
     let start = agent
         .clone()
         .as_runtime_bridge()
-        .initiate_device_enrollment_ceremony(
-            "WebApp".to_string(),
-            AuthorityId::new_from_entropy([0x61; 32]),
-        )
+        .initiate_device_enrollment_ceremony("WebApp".to_string(), setup)
         .await?;
+    assert_eq!(start.device_id, expected_device);
 
     let sender_hint = aura_agent::handlers::invitation::ShareableInvitation::sender_addr_from_code(
         &start.enrollment_code,

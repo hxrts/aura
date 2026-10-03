@@ -400,7 +400,7 @@ fn invite_command() -> impl Parser<Commands> {
 
     let import = {
         let code = long("code")
-            .help("Shareable invite code (format: aura:v1:<base64>)")
+            .help("Shareable invite code (format: aura:v<version>:<base64>)")
             .argument::<String>("CODE");
         construct!(InvitationAction::Import { code })
             .to_options()

@@ -64,6 +64,43 @@ pub struct TextModalState {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct EnrollmentImportModalState {
+    pub value: String,
+    pub manifest_code: String,
+    pub initiator_verifier_code: String,
+    pub focus_index: usize,
+}
+impl EnrollmentImportModalState {
+    pub fn field_id(&self) -> aura_app::ui::contract::FieldId {
+        use aura_app::ui::contract::FieldId;
+        match self.focus_index {
+            0 => FieldId::DeviceImportCode,
+            1 => FieldId::DeviceImportManifest,
+            _ => FieldId::DeviceImportInitiatorVerifier,
+        }
+    }
+    pub fn input(&self) -> &str {
+        match self.focus_index {
+            0 => &self.value,
+            1 => &self.manifest_code,
+            _ => &self.initiator_verifier_code,
+        }
+    }
+    pub fn input_mut(&mut self) -> &mut String {
+        match self.focus_index {
+            0 => &mut self.value,
+            1 => &mut self.manifest_code,
+            _ => &mut self.initiator_verifier_code,
+        }
+    }
+    pub fn can_submit(&self) -> bool {
+        !self.value.trim().is_empty()
+            && !self.manifest_code.trim().is_empty()
+            && !self.initiator_verifier_code.trim().is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CreateInvitationModalState {
     pub nickname: String,
@@ -117,6 +154,7 @@ pub struct AddDeviceModalState {
     pub step: AddDeviceWizardStep,
     pub device_name: String,
     pub enrollment_code: String,
+    pub manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     pub code_copied: bool,
     pub ceremony_id: Option<CeremonyId>,
     pub accepted_count: u16,
@@ -126,6 +164,8 @@ pub struct AddDeviceModalState {
     pub has_failed: bool,
     pub error_message: Option<String>,
     pub name_input: String,
+    pub setup_code_input: String,
+    pub active_field: FieldId,
 }
 
 impl Default for AddDeviceModalState {
@@ -134,6 +174,7 @@ impl Default for AddDeviceModalState {
             step: AddDeviceWizardStep::Name,
             device_name: String::new(),
             enrollment_code: String::new(),
+            manifest_transfer: None,
             code_copied: false,
             ceremony_id: None,
             accepted_count: 0,
@@ -143,6 +184,8 @@ impl Default for AddDeviceModalState {
             has_failed: false,
             error_message: None,
             name_input: String::new(),
+            setup_code_input: String::new(),
+            active_field: FieldId::DeviceName,
         }
     }
 }
@@ -271,7 +314,7 @@ pub enum ActiveModal {
     GuardianSetup(ThresholdWizardModalState),
     RequestRecovery,
     AddDevice(AddDeviceModalState),
-    ImportDeviceEnrollmentCode(TextModalState),
+    ImportDeviceEnrollmentCode(EnrollmentImportModalState),
     SelectDeviceToRemove(SelectDeviceModalState),
     ConfirmRemoveDevice(SelectDeviceModalState),
     MfaSetup(ThresholdWizardModalState),

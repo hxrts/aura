@@ -216,7 +216,7 @@ async fn invite_user_to_channel_with_context_owned(
             &runtime,
             "invite_user_to_channel",
             "resolve_target_authority",
-            Some(deadline),
+            Some(deadline.clone()),
             resolve_target_authority_for_invite(app_core, target_user_id),
         )
         .await?;
@@ -225,7 +225,7 @@ async fn invite_user_to_channel_with_context_owned(
             &runtime,
             "invite_user_to_channel",
             "resolve_channel_id",
-            Some(deadline),
+            Some(deadline.clone()),
             resolve_chat_channel_id_from_state_or_input(app_core, channel_name_or_id),
         )
         .await?;
@@ -242,7 +242,7 @@ async fn invite_user_to_channel_with_context_owned(
             Some(channel_name_hint),
             owner,
             None,
-            Some(deadline),
+            Some(deadline.clone()),
             stage_tracker.clone(),
             message,
             ttl_ms,
@@ -251,16 +251,18 @@ async fn invite_user_to_channel_with_context_owned(
     })
     .await
     .map_err(|error| match error {
-        TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+        TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. }) => {
             let stage = stage_tracker
                 .as_ref()
                 .and_then(|tracker| tracker.try_lock().map(|guard| *guard))
                 .unwrap_or("operation");
-            AuraError::from(crate::workflows::error::WorkflowError::TimedOut {
-                operation: "invite_user_to_channel",
-                stage,
-                timeout_ms: deadline.timeout_ms(),
-            })
+            AuraError::Internal {
+                message: format!(
+                    "invite_user_to_channel timed out in stage {stage} after {}ms",
+                    deadline.timeout_ms()
+                ),
+                source: Some(Arc::new(source)),
+            }
         }
         TimeoutRunError::Timeout(timeout_error) => timeout_error.into(),
         TimeoutRunError::Operation(operation_error) => operation_error,
@@ -357,7 +359,7 @@ pub(super) async fn invite_authority_to_channel_with_context(
                 &runtime,
                 "invite_authority_to_channel",
                 "require_authoritative_context",
-                deadline,
+                deadline.clone(),
                 require_authoritative_channel_ref(
                     app_core,
                     &runtime,
@@ -383,7 +385,7 @@ pub(super) async fn invite_authority_to_channel_with_context(
         channel_name_hint,
         None,
         owner,
-        deadline,
+        deadline.clone(),
         stage_tracker.clone(),
         message,
         ttl_ms,

@@ -18,6 +18,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiOperationTransferScope {
     StartDeviceEnrollment,
+    ImportDeviceEnrollment,
     SendChatMessage,
     JoinChannel,
     CreateInvitation,

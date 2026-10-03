@@ -465,3 +465,7 @@ Verification code is in `aura-core/src/tree/verification.rs`. Type definitions a
 - [Cryptographic Architecture](100_crypto.md) for FROST and signing modes
 - [Effects and Handlers Guide](802_effects_guide.md) for practical implementation patterns
 - [Privacy and Information Flow](003_information_flow_contract.md) for privacy guarantees
+
+### Enrollment roster decision custody
+
+Device enrollment key generation is authorized by a held authenticated current-tree decision and the independently granted invitee setup. The physical issuer is a current Device member, the new device is not yet a member, and active signing epoch/configuration agree with the verified tree. The complete ordered signing roster and prestate are derived within generation-before-tree custody and retained through original issuer registration. Raw identifiers, participant vectors, observed tree state, and missing-current-device repair do not authorize rotation. A historical allocation can authorize negative secret retirement without conferring current live enrollment authority.

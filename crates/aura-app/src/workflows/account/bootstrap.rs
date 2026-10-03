@@ -4,8 +4,6 @@ use crate::ui_contract::{
     SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
 };
 use crate::views::PendingAccountBootstrap;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::workflows::runtime::{execute_with_runtime_retry_budget, workflow_retry_policy};
 use crate::workflows::{
     runtime::{
         execute_with_runtime_timeout_budget, require_runtime, timeout_runtime_call,
@@ -16,8 +14,6 @@ use crate::workflows::{
 };
 use crate::AppCore;
 use async_lock::RwLock;
-#[cfg(not(target_arch = "wasm32"))]
-use aura_core::RetryRunError;
 use aura_core::{AuraError, OperationContext, TimeoutBudgetError, TimeoutRunError, TraceContext};
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,19 +37,19 @@ where
         .map_err(AuraError::from)?;
     match execute_with_runtime_timeout_budget(&runtime, &budget, operation).await {
         Ok(value) => Ok(value),
-        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+        Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout(
                 "finalize_runtime_account_bootstrap",
                 stage,
                 budget.timeout_ms(),
             );
-            Err(AuraError::from(
-                crate::workflows::error::WorkflowError::TimedOut {
-                    operation: "finalize_runtime_account_bootstrap",
-                    stage,
-                    timeout_ms: budget.timeout_ms(),
-                },
-            ))
+            Err(AuraError::Internal {
+                message: format!(
+                    "finalize_runtime_account_bootstrap timed out in stage {stage} after {}ms",
+                    budget.timeout_ms()
+                ),
+                source: Some(std::sync::Arc::new(source)),
+            })
         }
         Err(TimeoutRunError::Timeout(error)) => Err(AuraError::from(error)),
         Err(TimeoutRunError::Operation(error)) => Err(error),
@@ -94,7 +90,12 @@ pub async fn has_runtime_account_config(
     )
     .await
     .map_err(|e| AuraError::from(super::super::error::runtime_call("check account config", e)))?
-    .map_err(|e| AuraError::from(super::super::error::runtime_call("check account config", e)))
+    .map_err(|e| {
+        AuraError::from(super::super::error::native_runtime_call(
+            "check account config",
+            e,
+        ))
+    })
 }
 
 /// Returns true when runtime bootstrap has completed (account config exists).
@@ -118,19 +119,57 @@ pub async fn initialize_runtime_account(
     initialize_runtime_account_owned(app_core, nickname_suggestion, &owner, None).await
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Account bootstrap failed: {cause}; terminal publication failed: {publication}")]
+struct AccountBootstrapPublicationFailure {
+    #[source]
+    cause: AuraError,
+    publication: AuraError,
+}
+
+fn account_bootstrap_failure(error: &AuraError) -> SemanticOperationError {
+    let code=crate::workflows::runtime_error_classification::native_runtime_failure_code(error).unwrap_or_else(|| {
+        use std::error::Error;
+        let mut source=Some(error as &(dyn Error+'static));
+        while let Some(cause)=source {
+            if let Some(budget)=cause.downcast_ref::<TimeoutBudgetError>() {return crate::workflows::runtime_error_classification::timeout_budget_failure_code(budget);}
+            source=cause.source();
+        }
+        match error {
+            AuraError::Invalid { .. } => SemanticFailureCode::InvalidArgument,
+            AuraError::NotFound { .. } => SemanticFailureCode::NotFound,
+            AuraError::PermissionDenied { .. } => SemanticFailureCode::PermissionDenied,
+            AuraError::Crypto { .. } => SemanticFailureCode::CryptoFailure,
+            AuraError::Serialization { .. } => SemanticFailureCode::SerializationFailure,
+            AuraError::Storage { .. } => SemanticFailureCode::StorageFailure,
+            AuraError::Network { .. } => SemanticFailureCode::Unavailable,
+            AuraError::Internal { .. } | AuraError::Terminal(_) => SemanticFailureCode::InternalError,
+        }
+    });
+    SemanticOperationError::new(SemanticFailureDomain::Command, code).with_detail(error.to_string())
+}
+
 async fn fail_initialize_runtime_account<T>(
     owner: &SemanticWorkflowOwner,
-    detail: impl Into<String>,
+    cause: AuraError,
 ) -> Result<T, AuraError> {
-    let error = SemanticOperationError::new(
-        SemanticFailureDomain::Internal,
-        SemanticFailureCode::InternalError,
-    )
-    .with_detail(detail.into());
-    owner.publish_failure(error.clone()).await?;
-    Err(AuraError::agent(error.detail.unwrap_or_else(|| {
-        "initialize runtime account failed".to_string()
-    })))
+    if let Err(publication) = owner
+        .publish_failure(account_bootstrap_failure(&cause))
+        .await
+    {
+        let error = AccountBootstrapPublicationFailure { cause, publication };
+        let outer =
+            match crate::workflows::runtime_error_classification::native_runtime_error_kind(&error)
+            {
+                Some(kind) => kind.wrap_source(error.to_string(), error),
+                None => AuraError::Internal {
+                    message: error.to_string(),
+                    source: Some(Arc::new(error)),
+                },
+            };
+        return Err(outer);
+    }
+    Err(cause)
 }
 
 #[aura_macros::semantic_owner(
@@ -169,19 +208,21 @@ async fn initialize_runtime_account_owned(
     .map_err(|e| AuraError::from(super::super::error::runtime_call("initialize account", e)))
     .and_then(|result| {
         result.map_err(|e| {
-            AuraError::from(super::super::error::runtime_call("initialize account", e))
+            AuraError::from(super::super::error::native_runtime_call(
+                "initialize account",
+                e,
+            ))
         })
-    })
-    .map_err(|error| AuraError::agent(error.to_string()));
+    });
     if let Err(error) = init_result {
-        return fail_initialize_runtime_account(owner, error.to_string()).await;
+        return fail_initialize_runtime_account(owner, error).await;
     }
 
     if let Err(error) =
         finalize_runtime_account_bootstrap_inner(app_core, pending_bootstrap.nickname_suggestion)
             .await
     {
-        return fail_initialize_runtime_account(owner, error.to_string()).await;
+        return fail_initialize_runtime_account(owner, error).await;
     }
 
     owner
@@ -242,7 +283,7 @@ async fn ensure_note_to_self_on_login(app_core: &Arc<RwLock<AppCore>>) {
         let authority_id = runtime.authority_id();
         let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
             .await
-            .map_err(|e| AuraError::agent(e.to_string()))?;
+            .map_err(AuraError::from)?;
         super::super::messaging::ensure_runtime_note_to_self_channel(
             app_core,
             &runtime,
@@ -268,8 +309,11 @@ async fn finalize_runtime_account_bootstrap_inner(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
 ) -> Result<(), AuraError> {
-    let _nickname_suggestion = validate_nickname_suggestion(&nickname_suggestion)
-        .map_err(|error| AuraError::invalid(error.to_string()))?;
+    let _nickname_suggestion =
+        validate_nickname_suggestion(&nickname_suggestion).map_err(|error| AuraError::Invalid {
+            message: error.to_string(),
+            source: Some(Arc::new(error)),
+        })?;
     let _authority_id = {
         let core = app_core.read().await;
         core.runtime()
@@ -278,71 +322,29 @@ async fn finalize_runtime_account_bootstrap_inner(
     }
     .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        const SIGNING_KEY_ATTEMPTS: usize = 40;
-        const BOOTSTRAP_RETRY_MS: u64 = 250;
-        let retry_policy = workflow_retry_policy(
-            SIGNING_KEY_ATTEMPTS as u32,
-            Duration::from_millis(BOOTSTRAP_RETRY_MS),
-            Duration::from_millis(BOOTSTRAP_RETRY_MS),
-        )?;
-        execute_with_runtime_retry_budget(
-            &require_runtime(app_core).await?,
-            &retry_policy,
-            |_attempt| async {
-                let runtime = {
-                    let core = app_core.read().await;
-                    core.runtime().cloned()
-                };
-                if let Some(runtime) = runtime {
-                    if timeout_runtime_call(
-                        &runtime,
-                        "finalize_runtime_account_bootstrap",
-                        "bootstrap_signing_keys",
-                        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-                        || runtime.bootstrap_signing_keys(),
-                    )
-                    .await
-                    .ok()
-                    .and_then(Result::ok)
-                    .is_some()
-                    {
-                        return Ok(());
-                    }
-                }
-                Err(AuraError::from(
-                    crate::workflows::error::WorkflowError::Precondition(
-                        "runtime signing keys not yet bootstrapped",
-                    ),
-                ))
-            },
-        )
-        .await
-        .map_err(|error| match error {
-            RetryRunError::Timeout(timeout_error) => AuraError::from(timeout_error),
-            RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-        })?;
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        if let Some(runtime) = {
-            let core = app_core.read().await;
-            core.runtime().cloned()
-        } {
-            timeout_runtime_call(
-                &runtime,
-                "finalize_runtime_account_bootstrap",
-                "bootstrap_signing_keys",
-                ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
-                || runtime.bootstrap_signing_keys(),
-            )
-            .await
-            .map_err(|e| AuraError::agent(e.to_string()))?
-            .map_err(|e| AuraError::agent(e.to_string()))?;
-        }
-    }
+    // Initialization is an owned required operation on both native and browser.
+    // A storage/codec/clock failure is not evidence of transient signing readiness.
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
+        &runtime,
+        "finalize_runtime_account_bootstrap",
+        "bootstrap_signing_keys",
+        ACCOUNT_RUNTIME_OPERATION_TIMEOUT,
+        || runtime.bootstrap_signing_keys(),
+    )
+    .await
+    .map_err(|error| {
+        AuraError::from(crate::workflows::error::runtime_call(
+            "bootstrap signing budget",
+            error,
+        ))
+    })?
+    .map_err(|error| {
+        AuraError::from(crate::workflows::error::native_runtime_call(
+            "bootstrap signing keys",
+            error,
+        ))
+    })?;
 
     #[cfg(feature = "signals")]
     run_account_bootstrap_stage(
@@ -353,7 +355,7 @@ async fn finalize_runtime_account_bootstrap_inner(
             let runtime = require_runtime(app_core).await?;
             let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
                 .await
-                .map_err(|e| AuraError::agent(e.to_string()))?;
+                .map_err(AuraError::from)?;
             super::super::messaging::ensure_runtime_note_to_self_channel(
                 app_core,
                 &runtime,
@@ -381,4 +383,41 @@ async fn finalize_runtime_account_bootstrap_inner(
     )
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod native_bootstrap_failure_tests {
+    use super::*;
+    #[test]
+    fn account_failure_uses_native_evidence_and_keeps_original_codec_source() {
+        use crate::{
+            runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind},
+            IntentError,
+        };
+        use std::error::Error;
+        let original = serde_json::from_slice::<serde_json::Value>(b"not-json").unwrap_err();
+        let cause = AuraError::from(crate::workflows::error::native_runtime_call(
+            "initialize account",
+            RuntimeBridgeError::with_source(
+                IntentError::internal_error("network timeout"),
+                original,
+            )
+            .with_kind(RuntimeBridgeErrorKind::Serialization),
+        ));
+        let semantic = account_bootstrap_failure(&cause);
+        assert_eq!(semantic.domain, SemanticFailureDomain::Command);
+        assert_eq!(semantic.code, SemanticFailureCode::SerializationFailure);
+        let failure = AccountBootstrapPublicationFailure {
+            cause,
+            publication: AuraError::storage("publication failed"),
+        };
+        let mut source = failure.source();
+        let mut found = false;
+        while let Some(error) = source {
+            found |= error.is::<serde_json::Error>();
+            source = error.source();
+        }
+        assert!(found);
+        assert!(matches!(failure.publication, AuraError::Storage { .. }));
+    }
 }

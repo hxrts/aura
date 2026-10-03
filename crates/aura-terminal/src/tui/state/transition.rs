@@ -664,7 +664,7 @@ mod tests {
         match state.modal_queue.current() {
             Some(QueuedModal::SettingsAddDevice(modal)) => {
                 let error = modal.error.as_deref().unwrap_or_default();
-                assert!(error.contains("authority ID"), "{error}");
+                assert!(error.contains("setup code"), "{error}");
             }
             other => panic!("add device modal should stay open, got {other:?}"),
         }
@@ -674,7 +674,7 @@ mod tests {
         match state.modal_queue.current() {
             Some(QueuedModal::SettingsAddDevice(modal)) => {
                 assert!(modal.error.is_none());
-                assert_eq!(modal.invitee_authority_id, "x");
+                assert_eq!(modal.setup_code, "x");
             }
             other => panic!("add device modal should stay open, got {other:?}"),
         }

@@ -19,16 +19,72 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Cursor;
 
-/// Unified error type for serialization operations
-#[derive(Debug, thiserror::Error)]
+/// Unified error type for serialization operations.
+///
+/// Codec failures require their actual source; a diagnostic cannot replace it.
+/// ```compile_fail
+/// use aura_core::util::serialization::SerializationError;
+/// let _ = SerializationError::DagCbor("lost codec cause".to_owned());
+/// ```
+#[derive(Debug)]
 pub enum SerializationError {
-    /// DAG-CBOR encoding/decoding error
-    #[error("DAG-CBOR error: {0}")]
-    DagCbor(String),
-
-    /// Invalid data format
-    #[error("Invalid format: {0}")]
+    /// DAG-CBOR encoding/decoding error with its original process-local cause.
+    DagCbor {
+        /// Stable display diagnostic, retained for presentation compatibility.
+        message: String,
+        /// Original codec failure; never reconstructed from diagnostic text.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    /// Pure validation failure without a lower-level codec cause.
     InvalidFormat(String),
+    /// Value serialization failure retaining the original codec cause.
+    InvalidFormatWithSource {
+        /// Stable display diagnostic.
+        message: String,
+        /// Original value serialization failure.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+impl SerializationError {
+    fn dag_cbor(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::DagCbor {
+            message: source.to_string(),
+            source: Box::new(source),
+        }
+    }
+
+    fn dag_cbor_context(
+        context: &str,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::DagCbor {
+            message: format!("{context}: {source}"),
+            source: Box::new(source),
+        }
+    }
+}
+
+impl std::fmt::Display for SerializationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DagCbor { message, .. } => write!(f, "DAG-CBOR error: {message}"),
+            Self::InvalidFormat(message) | Self::InvalidFormatWithSource { message, .. } => {
+                write!(f, "Invalid format: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SerializationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::DagCbor { source, .. } | Self::InvalidFormatWithSource { source, .. } => {
+                Some(source.as_ref())
+            }
+            Self::InvalidFormat(_) => None,
+        }
+    }
 }
 
 /// Standard Result type for serialization operations
@@ -84,8 +140,7 @@ fn canonicalize_map(entries: Vec<(CborValue, CborValue)>) -> Result<CborValue> {
 
 fn parse_cbor_value(bytes: &[u8]) -> Result<CborValue> {
     let mut cursor = Cursor::new(bytes);
-    let value: CborValue =
-        cbor_from_reader(&mut cursor).map_err(|e| SerializationError::DagCbor(e.to_string()))?;
+    let value: CborValue = cbor_from_reader(&mut cursor).map_err(SerializationError::dag_cbor)?;
     let consumed = cursor.position() as usize;
     if consumed != bytes.len() {
         return Err(SerializationError::InvalidFormat(
@@ -97,14 +152,15 @@ fn parse_cbor_value(bytes: &[u8]) -> Result<CborValue> {
 
 /// Serialize any serde-compatible type to DAG-CBOR bytes
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    let value = CborValue::serialized(value).map_err(|e| {
-        SerializationError::InvalidFormat(format!("Failed to serialize to DAG-CBOR value: {e}"))
-    })?;
+    let value =
+        CborValue::serialized(value).map_err(|e| SerializationError::InvalidFormatWithSource {
+            message: format!("Failed to serialize to DAG-CBOR value: {e}"),
+            source: Box::new(e),
+        })?;
     let value = canonicalize_value(value)?;
     let mut bytes = Vec::new();
-    cbor_into_writer(&value, &mut bytes).map_err(|e| {
-        SerializationError::DagCbor(format!("Failed to encode DAG-CBOR bytes: {e}"))
-    })?;
+    cbor_into_writer(&value, &mut bytes)
+        .map_err(|e| SerializationError::dag_cbor_context("Failed to encode DAG-CBOR bytes", e))?;
     Ok(bytes)
 }
 
@@ -118,9 +174,7 @@ pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
 pub fn from_slice_trusted<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
     let value = parse_cbor_value(bytes)?;
     let value = canonicalize_value(value)?;
-    value
-        .deserialized()
-        .map_err(|e| SerializationError::DagCbor(e.to_string()))
+    value.deserialized().map_err(SerializationError::dag_cbor)
 }
 
 /// Deserialize strict wire/transcript DAG-CBOR bytes to any serde-compatible
@@ -134,16 +188,14 @@ pub fn from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T> {
     let value = canonicalize_value(value)?;
     let mut canonical_bytes = Vec::new();
     cbor_into_writer(&value, &mut canonical_bytes).map_err(|e| {
-        SerializationError::DagCbor(format!("Failed to encode canonical DAG-CBOR bytes: {e}"))
+        SerializationError::dag_cbor_context("Failed to encode canonical DAG-CBOR bytes", e)
     })?;
     if canonical_bytes != bytes {
         return Err(SerializationError::InvalidFormat(
             "Non-canonical DAG-CBOR wire encoding".to_string(),
         ));
     }
-    value
-        .deserialized()
-        .map_err(|e| SerializationError::DagCbor(e.to_string()))
+    value.deserialized().map_err(SerializationError::dag_cbor)
 }
 
 /// Serialize to DAG-CBOR and return the canonical hash
@@ -233,6 +285,67 @@ mod tests {
         id: u64,
         name: String,
         tags: Vec<String>,
+    }
+
+    #[test]
+    fn codec_failures_expose_original_concrete_source() {
+        use std::error::Error;
+        let truncated = from_slice::<u64>(&[0x18]).expect_err("truncated integer must fail");
+        assert!(truncated
+            .source()
+            .expect("decoder source")
+            .is::<ciborium::de::Error<std::io::Error>>());
+        let wrong_type = from_slice::<u64>(&to_vec(&"text").expect("canonical text"))
+            .expect_err("wrong target type");
+        assert!(wrong_type
+            .source()
+            .expect("value decoder source")
+            .is::<ciborium::value::Error>());
+        let wrapped = crate::AuraError::Serialization {
+            message: "required decode".to_owned(),
+            source: Some(std::sync::Arc::new(truncated)),
+        };
+        assert!(wrapped
+            .source()
+            .expect("serialization wrapper")
+            .source()
+            .expect("original codec")
+            .is::<ciborium::de::Error<std::io::Error>>());
+        assert!(from_slice::<u64>(&[0x01, 0x02])
+            .expect_err("trailing bytes")
+            .source()
+            .is_none());
+    }
+
+    #[test]
+    fn value_encoding_failure_retains_source_and_display() {
+        use std::error::Error;
+        struct Reject;
+        impl Serialize for Reject {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("deliberate serializer rejection"))
+            }
+        }
+        let error = to_vec(&Reject).expect_err("actual serializer failure");
+        assert!(error
+            .source()
+            .expect("value encoder source")
+            .is::<ciborium::value::Error>());
+        assert!(error
+            .to_string()
+            .starts_with("Invalid format: Failed to serialize to DAG-CBOR value: "));
+        let original = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "writer fault");
+        let writer = SerializationError::dag_cbor_context(
+            "Failed to encode DAG-CBOR bytes",
+            ciborium::ser::Error::Io(original),
+        );
+        assert!(writer
+            .source()
+            .expect("writer source")
+            .is::<ciborium::ser::Error<std::io::Error>>());
     }
 
     #[test]

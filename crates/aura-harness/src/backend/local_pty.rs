@@ -117,6 +117,8 @@ fn require_channel_binding_submission(
     operation_name: &str,
 ) -> Result<SubmittedAction<ChannelBinding>> {
     match receipt {
+        HarnessUiCommandReceipt::Accepted { value: Some(SemanticCommandValue::DeviceEnrollmentSetup { .. }) }
+        | HarnessUiCommandReceipt::AcceptedWithOperation { value: Some(SemanticCommandValue::DeviceEnrollmentSetup { .. }), .. } => anyhow::bail!("{operation_name} returned an unexpected setup code payload"),
         HarnessUiCommandReceipt::AcceptedWithOperation {
             operation,
             value:
@@ -205,6 +207,8 @@ fn require_contact_invitation_submission(
     operation_name: &str,
 ) -> Result<(UiOperationHandle, Option<ContactInvitationCode>)> {
     match receipt {
+        HarnessUiCommandReceipt::Accepted { value: Some(SemanticCommandValue::DeviceEnrollmentSetup { .. }) }
+        | HarnessUiCommandReceipt::AcceptedWithOperation { value: Some(SemanticCommandValue::DeviceEnrollmentSetup { .. }), .. } => anyhow::bail!("{operation_name} returned an unexpected setup code payload"),
         HarnessUiCommandReceipt::AcceptedWithOperation {
             operation,
             value: Some(SemanticCommandValue::ContactInvitationCode { code }),
@@ -1722,22 +1726,27 @@ impl LocalPtyBackend {
     fn submit_start_device_enrollment(
         &mut self,
         device_name: &str,
-        invitee_authority_id: &str,
+        setup_code: &str,
     ) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
             self.send_harness_command(&HarnessUiCommand::StartDeviceEnrollment {
                 device_name: device_name.to_string(),
-                invitee_authority_id: invitee_authority_id.to_string(),
+                setup_code: setup_code.to_string(),
             })?,
             "start_device_enrollment",
         )?;
         Ok(SubmittedAction::with_ui_operation((), handle))
     }
 
-    fn submit_import_device_enrollment_code(&mut self, code: &str) -> Result<SubmittedAction<()>> {
+    fn submit_import_device_enrollment_code(
+        &mut self,
+        code: &str,
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
+    ) -> Result<SubmittedAction<()>> {
         let handle = require_ui_operation_handle(
             self.send_harness_command(&HarnessUiCommand::ImportDeviceEnrollmentCode {
                 code: code.to_string(),
+                manifest_transfer,
             })?,
             "import_device_enrollment_code",
         )?;
@@ -1813,21 +1822,41 @@ impl SharedSemanticBackend for LocalPtyBackend {
                     value: SemanticCommandValue::None,
                 })
             }
+            IntentAction::ExportDeviceEnrollmentSetup => {
+                match self
+                    .send_harness_command_receipt(&HarnessUiCommand::ExportDeviceEnrollmentSetup)?
+                {
+                    HarnessUiCommandReceipt::Accepted {
+                        value: Some(SemanticCommandValue::DeviceEnrollmentSetup { setup_code }),
+                    } => Ok(SemanticCommandResponse::accepted(
+                        SemanticCommandValue::DeviceEnrollmentSetup { setup_code },
+                    )),
+                    HarnessUiCommandReceipt::Rejected { reason } => {
+                        anyhow::bail!("setup export rejected: {reason}")
+                    }
+                    _ => anyhow::bail!(
+                        "setup export did not return its declared immediate setup-code value"
+                    ),
+                }
+            }
             IntentAction::StartDeviceEnrollment {
                 device_name,
-                invitee_authority_id,
+                setup_code,
                 ..
             } => {
-                let submitted =
-                    self.submit_start_device_enrollment(&device_name, &invitee_authority_id)?;
+                let submitted = self.submit_start_device_enrollment(&device_name, &setup_code)?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,
                     value: SemanticCommandValue::None,
                 })
             }
-            IntentAction::ImportDeviceEnrollmentCode { code } => {
-                let submitted = self.submit_import_device_enrollment_code(&code)?;
+            IntentAction::ImportDeviceEnrollmentCode {
+                code,
+                manifest_transfer,
+            } => {
+                let submitted =
+                    self.submit_import_device_enrollment_code(&code, manifest_transfer)?;
                 Ok(SemanticCommandResponse {
                     submission: submitted.submission,
                     handle: submitted.handle,

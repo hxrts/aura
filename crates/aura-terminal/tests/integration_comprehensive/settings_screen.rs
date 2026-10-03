@@ -86,7 +86,8 @@ fn test_settings_authority_mfa_hotkey() {
 #[test]
 fn test_settings_device_management() {
     let mut tui = TestTui::new();
-    let invitee_authority_id = AuthorityId::new_from_entropy([7u8; 32]);
+    // Input routing only; runtime proof verification is covered by enrollment tests.
+    let setup_code = "explicitly transferred setup code";
     tui.go_to_screen(Screen::Settings);
 
     tui.send_char('j');
@@ -98,7 +99,7 @@ fn test_settings_device_management() {
     tui.assert_has_modal();
     tui.type_text("My Phone");
     tui.send_tab();
-    tui.type_text(&invitee_authority_id.to_string());
+    tui.type_text(setup_code);
 
     tui.clear_commands();
     tui.send_enter();
@@ -108,8 +109,8 @@ fn test_settings_device_management() {
             d,
             DispatchCommand::AddDevice {
                 name,
-                invitee_authority_id: actual_invitee_authority_id,
-            } if name == "My Phone" && *actual_invitee_authority_id == invitee_authority_id
+                setup_code: actual_setup_code,
+            } if name == "My Phone" && actual_setup_code == setup_code
         )
     });
 }

@@ -26,7 +26,9 @@ pub async fn execute_planned(
             PlannedCommand::General(p) => validate_preconditions(p, &snapshot),
         };
         if let Err(error) = check {
-            return Err(AuraError::invalid(format!("precondition failed: {error}")));
+            return Err(
+                super::execution_model::CommandExecutionFailure::Precondition(error).into(),
+            );
         }
     }
 
@@ -52,7 +54,5 @@ pub async fn execute_planned(
     _app_core: &Arc<RwLock<AppCore>>,
     _plan: PlannedCommand,
 ) -> Result<CommandExecutionResult, AuraError> {
-    Err(AuraError::agent(
-        "strong command execution requires the `signals` feature",
-    ))
+    Err(super::execution_model::CommandExecutionFailure::FeatureUnavailable.into())
 }

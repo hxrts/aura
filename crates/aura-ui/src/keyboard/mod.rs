@@ -786,12 +786,22 @@ mod tests {
             modal_state(&model),
             Some(ModalState::AddDeviceStep1)
         ));
+        assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::Name);
         assert_eq!(
-            add_device_state(&model).step,
-            AddDeviceWizardStep::ShareCode
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Paste the new device's setup code")
         );
-        assert_eq!(model.modal_hint, "Add Device — Step 2 of 3");
-        assert!(!add_device_state(&model).enrollment_code.is_empty());
+        apply_named_key(&mut model, "tab", 1, &clipboard);
+        apply_text_keys(&mut model, "transferred-request", &clipboard);
+        assert_eq!(add_device_state(&model).name_input, "Laptop");
+        assert_eq!(
+            add_device_state(&model).setup_code_input,
+            "transferred-request"
+        );
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+        assert_eq!(add_device_state(&model).step, AddDeviceWizardStep::Name);
+        assert_eq!(model.modal_hint, "Add Device — Step 1 of 3");
+        assert!(add_device_state(&model).enrollment_code.is_empty());
     }
 
     #[test]
@@ -813,14 +823,20 @@ mod tests {
     }
 
     #[test]
-    fn settings_add_device_wizard_can_copy_generated_code() {
+    fn settings_add_device_wizard_can_copy_observed_code() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();
         model.set_screen(ScreenId::Settings);
         model.settings_section = SettingsSection::Devices;
 
-        apply_text_keys(&mut model, "aPhone\n", &clipboard);
-        apply_named_key(&mut model, "enter", 1, &clipboard);
+        apply_text_keys(&mut model, "a", &clipboard);
+        // Rendering/clipboard fixture only: the workflow supplies the observed
+        // code and step after issuance; keyboard input cannot create them.
+        let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() else {
+            panic!("add-device modal should be active");
+        };
+        state.step = AddDeviceWizardStep::ShareCode;
+        state.enrollment_code = "observed-enrollment-code".to_string();
         apply_text_keys(&mut model, "c", &clipboard);
 
         assert_eq!(clipboard.read(), add_device_state(&model).enrollment_code);

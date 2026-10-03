@@ -42,6 +42,7 @@ verification/lean/.lean_build/
 verification/lean/build/
 verification/lean/Generated/
 verification/quint/traces/*.json
+!verification/quint/traces/amp_channel.itf.json
 _apalache-out/
 artifacts/
 

@@ -55,8 +55,10 @@ pub struct ITFMeta {
     /// Execution status
     pub status: String,
     /// Human-readable description
+    #[serde(default)]
     pub description: String,
     /// Timestamp of generation
+    #[serde(default)]
     pub timestamp: u64,
 }
 

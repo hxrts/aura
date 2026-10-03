@@ -737,13 +737,8 @@ fn execute_semantic_step(
                     .as_ref()
                     .map(|binding| binding.context_id.clone()),
             };
-            let response = submit_shared_intent(
-                &metadata_step,
-                tool_api,
-                context,
-                &instance_id,
-                open_intent,
-            )?;
+            let response =
+                submit_shared_intent(&metadata_step, tool_api, context, &instance_id, open_intent)?;
             record_submission_handle(
                 context,
                 &instance_id,
@@ -802,12 +797,10 @@ fn execute_semantic_step(
                 context.vars.insert(name.clone(), value);
                 Ok(())
             }
-            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
-                name,
-            } => {
+            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentSetup { name } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let authority_id = tool_api.prepare_device_enrollment_invitee_authority(&instance_id)?;
-                context.vars.insert(name.clone(), authority_id);
+                let setup_code = tool_api.prepare_device_enrollment_setup(&instance_id)?;
+                context.vars.insert(name.clone(), setup_code);
                 Ok(())
             }
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { name } => {
@@ -818,11 +811,7 @@ fn execute_semantic_step(
             }
             aura_app::scenario_contract::VariableAction::CaptureSelection { name, list } => {
                 let instance_id = resolve_required_semantic_instance(step)?;
-                let snapshot = fetch_ui_snapshot_in_lane(
-                    tool_api,
-                    semantic_lane,
-                    &instance_id,
-                )?;
+                let snapshot = fetch_ui_snapshot_in_lane(tool_api, semantic_lane, &instance_id)?;
                 let selection = snapshot
                     .selections
                     .iter()
@@ -1036,34 +1025,17 @@ fn execute_semantic_step(
                                 context.vars.insert(var.clone(), code);
                             }
                             RuntimeEventKind::DeviceEnrollmentCodeReady => {
-                                let code = matched_snapshot
-                                    .runtime_events
-                                    .iter()
-                                    .rev()
-                                    .find_map(|event| match &event.fact {
-                                        RuntimeFact::DeviceEnrollmentCodeReady {
-                                            code: Some(code),
-                                            ..
-                                        } => Some(code.clone()),
-                                        _ => None,
-                                    })
-                                    .or_else(|| {
-                                        read_clipboard_value(
-                                            tool_api,
-                                            &instance_id,
-                                            &step.id,
-                                            1_000,
-                                        )
-                                        .ok()
-                                    })
-                                    .ok_or_else(|| {
-                                        anyhow!(
-                                            "step {} runtime event {:?} matched without an exported code on instance {}",
-                                            step.id,
-                                            kind,
-                                            instance_id
-                                        )
-                                    })?;
+                                let (code,transfer)=matched_snapshot.runtime_events.iter().rev().find_map(|event|match &event.fact {
+                                    RuntimeFact::DeviceEnrollmentCodeReady {code:Some(code),manifest_transfer:Some(transfer),..}=>Some((code.clone(),transfer.clone())),
+                                    _=>None,
+                                }).ok_or_else(||anyhow!("step {} matched enrollment readiness without actual manifest/verifier transfer on instance {}",step.id,instance_id))?;
+                                context
+                                    .vars
+                                    .insert(format!("{var}_manifest"), transfer.manifest_code);
+                                context.vars.insert(
+                                    format!("{var}_initiator_verifier"),
+                                    transfer.initiator_verifier_code,
+                                );
                                 context.vars.insert(var.clone(), code);
                             }
                             _ => {}
@@ -1171,6 +1143,27 @@ fn execute_semantic_intent(
     let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
 
     match &intent {
+        IntentAction::ExportDeviceEnrollmentSetup => {
+            let response = submit_shared_intent(
+                &metadata_step,
+                tool_api,
+                context,
+                &instance_id,
+                intent.clone(),
+            )?;
+            match response.value {
+                SemanticCommandValue::DeviceEnrollmentSetup { setup_code }
+                    if !setup_code.is_empty() =>
+                {
+                    Ok(())
+                }
+                _ => bail!(
+                    "step {} export did not return an actual setup code",
+                    step.id
+                ),
+            }
+        }
+
         IntentAction::CreateAccount { .. } | IntentAction::CreateHome { .. } => {
             let operation = match &intent {
                 IntentAction::CreateAccount { .. } => "create_account",
@@ -1233,7 +1226,7 @@ fn execute_semantic_intent(
         IntentAction::StartDeviceEnrollment {
             device_name: _,
             code_name: _,
-            invitee_authority_id: _,
+            setup_code: _,
         } => {
             let response = submit_shared_intent(
                 &metadata_step,
@@ -1670,6 +1663,7 @@ fn resolve_intent_templates(
     context: &ScenarioContext,
 ) -> Result<IntentAction> {
     Ok(match intent {
+        IntentAction::ExportDeviceEnrollmentSetup => IntentAction::ExportDeviceEnrollmentSetup,
         IntentAction::OpenScreen {
             screen,
             channel_id,
@@ -1697,17 +1691,32 @@ fn resolve_intent_templates(
         IntentAction::StartDeviceEnrollment {
             device_name,
             code_name,
-            invitee_authority_id,
+            setup_code,
         } => IntentAction::StartDeviceEnrollment {
             device_name: resolve_template(device_name, context)?,
             code_name: code_name.clone(),
-            invitee_authority_id: resolve_template(invitee_authority_id, context)?,
+            setup_code: resolve_template(setup_code, context)?,
         },
-        IntentAction::ImportDeviceEnrollmentCode { code } => {
-            IntentAction::ImportDeviceEnrollmentCode {
-                code: resolve_template(code, context)?,
-            }
-        }
+        IntentAction::ImportDeviceEnrollmentCode {
+            code,
+            manifest_transfer,
+        } => IntentAction::ImportDeviceEnrollmentCode {
+            code: resolve_template(code, context)?,
+            manifest_transfer: manifest_transfer
+                .as_ref()
+                .map(|transfer| {
+                    Ok::<_, anyhow::Error>(
+                        aura_app::ui::contract::EnrollmentManifestTransferInput {
+                            manifest_code: resolve_template(&transfer.manifest_code, context)?,
+                            initiator_verifier_code: resolve_template(
+                                &transfer.initiator_verifier_code,
+                                context,
+                            )?,
+                        },
+                    )
+                })
+                .transpose()?,
+        },
         IntentAction::OpenSettingsSection(section) => IntentAction::OpenSettingsSection(*section),
         IntentAction::RemoveSelectedDevice { device_id } => IntentAction::RemoveSelectedDevice {
             device_id: device_id
@@ -2043,6 +2052,7 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
             }
         },
         SemanticAction::Intent(intent) => match intent {
+            IntentAction::ExportDeviceEnrollmentSetup => "export_device_enrollment_setup",
             IntentAction::OpenScreen { .. } => "open_screen",
             IntentAction::CreateAccount { .. } => "create_account",
             IntentAction::CreateHome { .. } => "create_home",
@@ -2065,9 +2075,9 @@ fn semantic_action_label(action: &SemanticAction) -> &'static str {
         },
         SemanticAction::Variables(variable) => match variable {
             aura_app::scenario_contract::VariableAction::Set { .. } => "set_var",
-            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
+            aura_app::scenario_contract::VariableAction::PrepareDeviceEnrollmentSetup {
                 ..
-            } => "prepare_device_enrollment_invitee_authority",
+            } => "prepare_device_enrollment_setup",
             aura_app::scenario_contract::VariableAction::CaptureCurrentAuthorityId { .. } => {
                 "capture_current_authority_id"
             }
@@ -2894,21 +2904,6 @@ fn wait_for_operation_handle_state(
     )
 }
 
-fn read_clipboard_value(
-    tool_api: &mut ToolApi,
-    instance_id: &str,
-    step_id: &str,
-    timeout_ms: u64,
-) -> Result<String> {
-    read_clipboard_value_in_lane(
-        tool_api,
-        ExecutionLane::FrontendConformance,
-        instance_id,
-        step_id,
-        timeout_ms,
-    )
-}
-
 fn wait_for_diagnostic_screen_contains_in_lane(
     tool_api: &mut ToolApi,
     lane: ExecutionLane,
@@ -3407,6 +3402,9 @@ fn require_semantic_unit_submission(
 ) -> Result<Option<UiOperationHandle>> {
     match response.value {
         SemanticCommandValue::None => Ok(response.handle.ui_operation),
+        SemanticCommandValue::DeviceEnrollmentSetup { .. } => {
+            bail!("step {} unexpected device setup payload", step.id)
+        }
         SemanticCommandValue::ContactInvitationCode { .. } => bail!(
             "step {} issue stage failed for {}: unexpected contact invitation code payload",
             step.id,
@@ -3467,6 +3465,7 @@ fn require_channel_binding_submission(
             operation,
             channel_id
         ),
+        SemanticCommandValue::DeviceEnrollmentSetup { .. } => bail!("step {} unexpected device setup payload", step.id),
         SemanticCommandValue::ContactInvitationCode { .. } => bail!(
             "step {} issue stage failed for {}: unexpected contact invitation code payload",
             step.id,
@@ -3496,6 +3495,7 @@ fn require_contact_invitation_submission(
     response: SemanticCommandResponse,
 ) -> Result<(Option<String>, Option<UiOperationHandle>)> {
     match response.value {
+        SemanticCommandValue::DeviceEnrollmentSetup { .. } => bail!("step {} unexpected device setup payload", step.id),
         SemanticCommandValue::ContactInvitationCode { code } => {
             Ok((Some(code), response.handle.ui_operation))
         }

@@ -68,7 +68,50 @@ pub struct VmBridgeTransferMetadataSnapshot {
     pub transfer_descriptors: Vec<String>,
 }
 
-/// Synchronous session-local bridge operations used by the Telltale host boundary.
+/// Failure to obtain or advance exclusive custody of queued VM sends.
+#[derive(Debug, thiserror::Error)]
+pub enum VmBridgeSendError {
+    /// Another flush owns the queue.
+    #[error("VM send queue already has a delivery owner")]
+    AlreadyOwned,
+    /// A dropped or failed delivery may have reached the peer.
+    #[error("VM send delivery outcome is unknown; replay requires reconciliation")]
+    DeliveryUnknown,
+    /// A delivery must start before it can be acknowledged or declared unsent.
+    #[error("invalid VM send delivery transition")]
+    InvalidTransition,
+    /// This provider cannot safely retain delivery custody.
+    #[error("VM bridge provider does not support owned delivery")]
+    Unsupported,
+}
+
+/// Exclusive move-owned custody. Drop during delivery retains an unknown outcome.///
+/// ```compile_fail
+/// use aura_core::effects::VmBridgeSendLease;
+/// fn duplicate(lease: Box<dyn VmBridgeSendLease>) {
+///     let second_owner = lease.clone();
+/// }
+/// ```
+
+pub trait VmBridgeSendLease: Send {
+    /// Observe the oldest queued frame without removing it.
+    fn pending(&self) -> Option<&VmBridgePendingSend>;
+    /// Mark the frame as in flight immediately before the transport await.
+    fn begin_delivery(&mut self) -> Result<(), VmBridgeSendError>;
+    /// Remove only the acknowledged front frame and advance to the next.
+    fn acknowledge(&mut self) -> Result<(), VmBridgeSendError>;
+    /// Retain the front frame after a transport proves it was not sent.
+    fn definitely_unsent(&mut self) -> Result<(), VmBridgeSendError>;
+}
+
+/// Synchronous session-local bridge operations used by the Telltale host boundary.///
+/// ```compile_fail
+/// use aura_core::effects::VmBridgeEffects;
+/// fn steal_frames(bridge: &dyn VmBridgeEffects) {
+///     bridge.drain_pending_sends();
+/// }
+/// ```
+
 pub trait VmBridgeEffects: Send + Sync {
     /// Queue one outbound payload for the next VM send callback.
     fn enqueue_outbound_payload(&self, payload: Vec<u8>);
@@ -91,8 +134,13 @@ pub trait VmBridgeEffects: Send + Sync {
     /// Record one pending send emitted by the synchronous VM boundary.
     fn record_pending_send(&self, send: VmBridgePendingSend);
 
-    /// Drain all pending sends accumulated for async host delivery.
-    fn drain_pending_sends(&self) -> Vec<VmBridgePendingSend>;
+    /// Observe queued frames without allocating mutation or delivery ownership.
+    fn pending_send_snapshot(&self) -> Vec<VmBridgePendingSend>;
+
+    /// Obtain exclusive cancellation-safe delivery custody.
+    fn lease_pending_sends(&self) -> Result<Box<dyn VmBridgeSendLease + '_>, VmBridgeSendError> {
+        Err(VmBridgeSendError::Unsupported)
+    }
 
     /// Record the currently blocked receive edge for this fragment.
     fn set_blocked_edge(&self, edge: Option<VmBridgeBlockedEdge>);

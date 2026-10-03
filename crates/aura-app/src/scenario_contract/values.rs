@@ -44,6 +44,7 @@ pub struct SharedActionId(pub String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentKind {
+    ExportDeviceEnrollmentSetup,
     OpenScreen,
     CreateAccount,
     CreateHome,
@@ -66,7 +67,8 @@ pub enum IntentKind {
 }
 
 impl IntentKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
+        Self::ExportDeviceEnrollmentSetup,
         Self::OpenScreen,
         Self::CreateAccount,
         Self::CreateHome,

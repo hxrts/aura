@@ -19,9 +19,6 @@ DEFAULT_TRACE="$ROOT/verification/quint/traces/harness_flows.itf.json"
 SEED="${QUINT_TRACE_SEED:-424242}"
 MAX_STEPS="${QUINT_TRACE_MAX_STEPS:-50}"
 MAIN="${QUINT_TRACE_MAIN:-}"
-if [[ -z "$MAIN" && "$(basename "$DEFAULT_SPEC")" == "flows.qnt" ]]; then
-    MAIN="fullInvitationChatScenario"
-fi
 
 generate_trace() {
     local spec="$1"
@@ -99,6 +96,9 @@ check_trace() {
 CMD="${1:-generate}"
 SPEC_INPUT="${2:-$DEFAULT_SPEC}"
 PATH_INPUT="${3:-$DEFAULT_TRACE}"
+if [[ -z "$MAIN" && "$(basename "$SPEC_INPUT")" == "flows.qnt" ]]; then
+    MAIN="fullInvitationChatScenario"
+fi
 
 case "$CMD" in
     generate|gen)

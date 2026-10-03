@@ -688,6 +688,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 while let Some(submission) = rx.recv().await {
                     let submission_id = submission.submission_id.clone();
+                    if matches!(submission.command, aura_app::ui::contract::HarnessUiCommand::ExportDeviceEnrollmentSetup) {
+                        let result = aura_app::ui::workflows::ceremonies::export_device_enrollment_setup_code(
+                            app_ctx_for_commands.app_core.raw(),
+                        ).await;
+                        let reply_result = match result {
+                            Ok(setup_code) => accept_harness_command_submission(
+                                submission_id,
+                                None,
+                                Some(aura_app::scenario_contract::SemanticCommandValue::DeviceEnrollmentSetup { setup_code }),
+                            ).await,
+                            Err(error) => reject_harness_command_submission(submission_id, error.to_string()).await,
+                        };
+                        if let Err(error) = reply_result {
+                            tracing::warn!(error = %error, "failed to deliver setup export command receipt");
+                        }
+                        continue;
+                    }
                     let app_snapshot_for_command = match authoritative_app_snapshot_with_retry(
                         &app_ctx_for_commands,
                         "authoritative snapshot unavailable",

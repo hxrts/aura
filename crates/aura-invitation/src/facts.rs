@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-aura_core::define_fact_type_id!(str invitation, "invitation", 1);
+aura_core::define_fact_type_id!(str invitation, "invitation", 2);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CeremonyRelationshipId(String);
@@ -124,6 +124,7 @@ pub struct InvitationFactKey {
 #[domain_fact(
     type_id = INVITATION_FACT_TYPE_ID,
     schema_version = INVITATION_FACT_SCHEMA_VERSION,
+    min_supported_schema_version = 1,
     context_fn = "context_id_for_fact"
 )]
 #[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data
@@ -284,7 +285,83 @@ pub enum InvitationFact {
     },
 }
 
+/// Structural failure decoding a required persisted invitation fact.
+#[derive(Debug, thiserror::Error)]
+pub enum InvitationFactDecodeError {
+    /// Envelope type, supported schema or payload bound failed.
+    #[error("invitation fact envelope failed: {0}")]
+    Envelope(#[from] aura_core::types::facts::FactError),
+    /// Canonical DAG-CBOR payload could not be decoded.
+    #[error("invitation DAG-CBOR payload failed: {0}")]
+    DagCbor(#[source] aura_core::util::serialization::SerializationError),
+    /// Declared JSON payload could not be decoded.
+    #[error("invitation JSON payload failed: {0}")]
+    Json(#[source] serde_json::Error),
+    /// A known payload context disagrees with its journal wrapper.
+    #[error("invitation fact context mismatch: wrapper {outer}, payload {payload}")]
+    ContextMismatch {
+        /// Context of the committed relational wrapper.
+        outer: ContextId,
+        /// Context explicitly retained in the invitation payload.
+        payload: ContextId,
+    },
+}
+
 impl InvitationFact {
+    /// Decode a required fact without converting corruption into absence.
+    /// Schemas 1 and 2 remain replayable; decoding never manufactures trust.
+    /// Only the explicitly declared encoding is attempted.
+    ///
+    /// # Errors
+    /// Returns envelope validation or the original declared-codec failure.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, InvitationFactDecodeError> {
+        use aura_core::types::facts::{
+            FactEncoding, FactError, FactSchemaCompatibility, MAX_FACT_PAYLOAD_BYTES,
+        };
+        if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
+            return Err(FactError::TypeMismatch {
+                expected: INVITATION_FACT_TYPE_ID.to_owned(),
+                actual: envelope.type_id.to_string(),
+            }
+            .into());
+        }
+        FactSchemaCompatibility::range(1, INVITATION_FACT_SCHEMA_VERSION)
+            .ensure_supported(envelope.schema_version)?;
+        if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
+            return Err(FactError::PayloadTooLarge {
+                size: envelope.payload.len() as u64,
+                max: MAX_FACT_PAYLOAD_BYTES as u64,
+            }
+            .into());
+        }
+        match envelope.encoding {
+            FactEncoding::DagCbor => aura_core::util::serialization::from_slice(&envelope.payload)
+                .map_err(InvitationFactDecodeError::DagCbor),
+            FactEncoding::Json => {
+                serde_json::from_slice(&envelope.payload).map_err(InvitationFactDecodeError::Json)
+            }
+        }
+    }
+    /// Decode required journal evidence and check its explicit payload context.
+    /// Schema-1 contextless lifecycle facts stay contextless during replay.
+    ///
+    /// # Errors
+    /// Returns decoding failures or an explicit wrapper/payload context mismatch.
+    pub fn try_from_envelope_in_context(
+        envelope: &aura_core::types::facts::FactEnvelope,
+        outer: ContextId,
+    ) -> Result<Self, InvitationFactDecodeError> {
+        let fact = Self::try_from_envelope(envelope)?;
+        if let Some(payload) = fact.context_id_opt() {
+            if payload != outer {
+                return Err(InvitationFactDecodeError::ContextMismatch { outer, payload });
+            }
+        }
+        Ok(fact)
+    }
+
     fn exact_time(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
             ts_ms,
@@ -631,6 +708,78 @@ impl FactReducer for InvitationFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn required_invitation_decoder_preserves_legacy_encoding_schema_and_sources() {
+        use aura_core::types::facts::{FactEncoding, FactError, MAX_FACT_PAYLOAD_BYTES};
+        use std::error::Error;
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            InvitationId::new("required-codec"),
+            test_authority_id(1),
+            test_authority_id(2),
+            InvitationType::Contact { nickname: None },
+            100,
+            None,
+            None,
+        );
+        for version in [1, 2] {
+            let mut envelope = fact.to_envelope();
+            envelope.schema_version = version;
+            assert_eq!(InvitationFact::try_from_envelope(&envelope).unwrap(), fact);
+            envelope.encoding = FactEncoding::Json;
+            envelope.payload = serde_json::to_vec(&fact).unwrap();
+            assert_eq!(
+                InvitationFact::try_from_envelope_in_context(&envelope, test_context_id()).unwrap(),
+                fact
+            );
+        }
+        let mut future = fact.to_envelope();
+        future.schema_version = 3;
+        assert!(matches!(
+            InvitationFact::try_from_envelope(&future),
+            Err(InvitationFactDecodeError::Envelope(
+                FactError::VersionMismatch { actual: 3, .. }
+            ))
+        ));
+        let mut malformed = fact.to_envelope();
+        malformed.payload = vec![0xff];
+        let error = InvitationFact::try_from_envelope(&malformed).unwrap_err();
+        assert!(matches!(error, InvitationFactDecodeError::DagCbor(_)));
+        assert!(error
+            .source()
+            .and_then(|source| source
+                .downcast_ref::<aura_core::util::serialization::SerializationError>())
+            .is_some());
+        let mut mislabeled = fact.to_envelope();
+        mislabeled.encoding = FactEncoding::Json;
+        let error = InvitationFact::try_from_envelope(&mislabeled).unwrap_err();
+        assert!(matches!(error, InvitationFactDecodeError::Json(_)));
+        assert!(error
+            .source()
+            .and_then(|source| source.downcast_ref::<serde_json::Error>())
+            .is_some());
+        let mut mislabeled_json = fact.to_envelope();
+        mislabeled_json.payload = serde_json::to_vec(&fact).unwrap();
+        assert!(matches!(
+            InvitationFact::try_from_envelope(&mislabeled_json),
+            Err(InvitationFactDecodeError::DagCbor(_))
+        ));
+        let mut large = fact.to_envelope();
+        large.payload = vec![0; MAX_FACT_PAYLOAD_BYTES + 1];
+        assert!(matches!(
+            InvitationFact::try_from_envelope(&large),
+            Err(InvitationFactDecodeError::Envelope(
+                FactError::PayloadTooLarge { .. }
+            ))
+        ));
+        let other = ContextId::new_from_entropy([97; 32]);
+        assert!(
+            matches!(InvitationFact::try_from_envelope_in_context(&fact.to_envelope(),other),
+            Err(InvitationFactDecodeError::ContextMismatch {outer,payload}) if outer==other && payload==test_context_id())
+        );
+        // Observation keeps its established optional compatibility contract.
+        assert!(InvitationFact::from_envelope(&future).is_none());
+    }
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -662,6 +811,147 @@ mod tests {
         assert_eq!(restored.unwrap(), fact);
     }
 
+    #[test]
+    fn legacy_enrollment_fact_decodes_without_minting_setup_binding() {
+        // These are the prechange schema shapes, independently encoded without
+        // the new InvitationType field. Production v1 facts use canonical
+        // DAG-CBOR maps (DomainFact::to_envelope), not positional bincode.
+        #[derive(serde::Serialize)]
+        enum OldInvitationTypeV1 {
+            DeviceEnrollment {
+                subject_authority: AuthorityId,
+                invitee_authority: Option<AuthorityId>,
+                initiator_device_id: aura_core::DeviceId,
+                device_id: aura_core::DeviceId,
+                nickname_suggestion: Option<String>,
+                ceremony_id: aura_core::CeremonyId,
+                pending_epoch: u64,
+                key_package: Vec<u8>,
+                threshold_config: Vec<u8>,
+                public_key_package: Vec<u8>,
+                baseline_tree_ops: Vec<Vec<u8>>,
+            },
+        }
+        #[derive(serde::Serialize)]
+        enum OldInvitationFactV1 {
+            Sent {
+                context_id: ContextId,
+                invitation_id: InvitationId,
+                sender_id: AuthorityId,
+                receiver_id: AuthorityId,
+                invitation_type: OldInvitationTypeV1,
+                sent_at: PhysicalTime,
+                expires_at: Option<PhysicalTime>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                receiver_nickname: Option<String>,
+                message: Option<String>,
+            },
+        }
+        let enrollment = InvitationType::DeviceEnrollment {
+            setup_binding: None,
+            subject_authority: test_authority_id(1),
+            invitee_authority: Some(test_authority_id(2)),
+            initiator_device_id: aura_core::DeviceId::new_from_entropy([3; 32]),
+            device_id: aura_core::DeviceId::new_from_entropy([4; 32]),
+            nickname_suggestion: None,
+            ceremony_id: aura_core::CeremonyId::new("legacy enrollment"),
+            pending_epoch: 1,
+            key_package: vec![5],
+            threshold_config: vec![6],
+            public_key_package: vec![7],
+            baseline_tree_ops: vec![],
+        };
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            InvitationId::new("legacy"),
+            test_authority_id(1),
+            test_authority_id(2),
+            enrollment.clone(),
+            100,
+            Some(200),
+            None,
+        );
+        let mut old = fact.to_envelope();
+        old.schema_version = 1;
+        let historical = OldInvitationFactV1::Sent {
+            context_id: test_context_id(),
+            invitation_id: InvitationId::new("legacy"),
+            sender_id: test_authority_id(1),
+            receiver_id: test_authority_id(2),
+            invitation_type: OldInvitationTypeV1::DeviceEnrollment {
+                subject_authority: test_authority_id(1),
+                invitee_authority: Some(test_authority_id(2)),
+                initiator_device_id: aura_core::DeviceId::new_from_entropy([3; 32]),
+                device_id: aura_core::DeviceId::new_from_entropy([4; 32]),
+                nickname_suggestion: None,
+                ceremony_id: aura_core::CeremonyId::new("legacy enrollment"),
+                pending_epoch: 1,
+                key_package: vec![5],
+                threshold_config: vec![6],
+                public_key_package: vec![7],
+                baseline_tree_ops: vec![],
+            },
+            sent_at: PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            },
+            expires_at: Some(PhysicalTime {
+                ts_ms: 200,
+                uncertainty: None,
+            }),
+            receiver_nickname: None,
+            message: None,
+        };
+        old.payload = aura_core::util::serialization::to_vec(&historical).unwrap();
+        assert_eq!(
+            InvitationFact::from_bytes(&old.payload),
+            Some(fact.clone()),
+            "actual old shape encoded with production binary codec decodes without setup trust"
+        );
+        // None is omitted, retaining the old canonical map shape.
+        let shape: serde_json::Value = serde_json::to_value(&enrollment).unwrap();
+        assert!(shape["DeviceEnrollment"].get("setup_binding").is_none());
+        let decoded = InvitationFact::from_envelope(&old).expect("legacy fact remains replayable");
+        assert_eq!(InvitationFact::try_from_envelope(&old).unwrap(), decoded);
+        assert_eq!(decoded, fact);
+        let shareable = crate::shareable::ShareableInvitation {
+            version: 1,
+            invitation_id: InvitationId::new("legacy"),
+            sender_id: test_authority_id(1),
+            context_id: Some(test_context_id()),
+            invitation_type: enrollment,
+            expires_at: Some(200),
+            message: None,
+        };
+        assert_eq!(
+            shareable.require_enrollment_setup_binding(),
+            Err(crate::shareable::ShareableInvitationError::MissingEnrollmentSetupBinding)
+        );
+        assert_eq!(decoded.to_envelope().schema_version, 2);
+        let mut future = old;
+        future.schema_version = 3;
+        assert!(InvitationFact::from_envelope(&future).is_none());
+    }
+
+    #[test]
+    fn legacy_non_enrollment_fact_replays_and_new_writer_emits_schema_two() {
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            InvitationId::new("old guardian"),
+            test_authority_id(1),
+            test_authority_id(2),
+            InvitationType::Guardian {
+                subject_authority: test_authority_id(1),
+            },
+            100,
+            None,
+            None,
+        );
+        let mut old = fact.to_envelope();
+        old.schema_version = 1;
+        assert_eq!(InvitationFact::from_envelope(&old), Some(fact.clone()));
+        assert_eq!(fact.to_envelope().schema_version, 2);
+    }
     #[test]
     fn test_invitation_fact_to_generic() {
         let fact = InvitationFact::accepted_ms(

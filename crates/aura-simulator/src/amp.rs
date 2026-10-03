@@ -69,6 +69,19 @@ where
             ChannelId::from_bytes(hash(&bytes))
         };
 
+        match get_channel_state(&self.effects, params.context, channel).await {
+            Ok(_) => {
+                return Err(AmpChannelError::AlreadyExists {
+                    context: params.context,
+                    channel,
+                })
+            }
+            Err(error)
+                if aura_protocol::amp::ChannelStateUnavailable::find(&error).is_some_and(
+                    |absence| absence.context() == params.context && absence.channel() == channel,
+                ) => {}
+            Err(error) => return Err(AmpChannelError::Effect(error)),
+        }
         let window = params.skip_window.unwrap_or(DEFAULT_WINDOW);
         let checkpoint = ChannelCheckpoint {
             context: params.context,
@@ -163,8 +176,12 @@ where
             status: MembershipStatus::Joined,
         };
 
-        let payload = serde_json::to_vec(&membership_data)
-            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
+        let payload = serde_json::to_vec(&membership_data).map_err(|error| {
+            AmpChannelError::Effect(aura_core::AuraError::Serialization {
+                message: format!("Serialization error: {error}"),
+                source: Some(std::sync::Arc::new(error)),
+            })
+        })?;
 
         let envelope = aura_core::types::facts::FactEnvelope {
             type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
@@ -203,8 +220,12 @@ where
             status: MembershipStatus::Left,
         };
 
-        let payload = serde_json::to_vec(&membership_data)
-            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
+        let payload = serde_json::to_vec(&membership_data).map_err(|error| {
+            AmpChannelError::Effect(aura_core::AuraError::Serialization {
+                message: format!("Serialization error: {error}"),
+                source: Some(std::sync::Arc::new(error)),
+            })
+        })?;
 
         let envelope = aura_core::types::facts::FactEnvelope {
             type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
@@ -256,16 +277,8 @@ where
     }
 }
 
-fn map_err(e: aura_core::AuraError) -> AmpChannelError {
-    match e {
-        aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
-        aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
-        aura_core::AuraError::Storage { message, .. } => AmpChannelError::Storage(message),
-        aura_core::AuraError::Crypto { message, .. } => AmpChannelError::Crypto(message),
-        aura_core::AuraError::Invalid { message, .. } => AmpChannelError::InvalidState(message),
-        aura_core::AuraError::Internal { message, .. } => AmpChannelError::Internal(message),
-        other => AmpChannelError::Internal(other.to_string()),
-    }
+fn map_err(error: aura_core::AuraError) -> AmpChannelError {
+    AmpChannelError::Effect(error)
 }
 
 /// Derive a deterministic keystream from header + sender and XOR-mask the payload.

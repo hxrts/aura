@@ -55,6 +55,7 @@ pub(super) fn convert_invitation_type_to_bridge(
             public_key_package: _,
             baseline_tree_ops: _,
             invitee_authority: _,
+            setup_binding: _,
         } => InvitationBridgeType::DeviceEnrollment {
             subject_authority: *subject_authority,
             initiator_device_id: *initiator_device_id,

@@ -9,7 +9,7 @@ use aura_core::{AuthorityId, OwnedShutdownToken, OwnedTaskSpawner};
 pub(crate) fn running_offline_runtime(authority: AuthorityId) -> Arc<OfflineRuntimeBridge> {
     let mut runtime = OfflineRuntimeBridge::new(authority);
     runtime.use_test_task_spawner(OwnedTaskSpawner::new(
-        Arc::new(aura_effects::reactive::TestTaskSpawner),
+        Arc::new(aura_effects::reactive::CountingTestTaskSpawner::default()),
         OwnedShutdownToken::detached(),
     ));
     Arc::new(runtime)

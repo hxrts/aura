@@ -556,6 +556,9 @@ pub struct AmpTransitionReduction {
 /// Derived AMP channel epoch state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelEpochState {
+    /// Actual checkpoint selected by this reduction, absent for staged-only facts.
+    /// This is observed journal data, not a capability or commit-provenance token.
+    pub canonical_checkpoint: Option<ChannelCheckpoint>,
     /// Canonical channel epoch
     pub chan_epoch: u64,
     /// Pending bump if one exists (e→e+1)
@@ -872,6 +875,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                 channel_epochs.insert(
                     channel,
                     ChannelEpochState {
+                        canonical_checkpoint: checkpoint,
                         chan_epoch,
                         pending_bump,
                         bootstrap,

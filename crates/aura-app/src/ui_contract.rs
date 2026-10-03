@@ -43,8 +43,9 @@ pub use ids::{
     list_item_selector, nav_control_id_for_screen, screen_item_id,
     semantic_settings_section_item_id, semantic_settings_section_surface_id,
     settings_section_item_id, AcceptedPendingChannelBinding, AuthenticatedHarnessUiCommand,
-    ChannelBindingWitness, ControlId, FieldId, FrontendSpecificSettingsSectionId, HarnessUiCommand,
-    HarnessUiCommandReceipt, HarnessUiOperationHandle, ListId, ModalId, ParityUiIdentity, ScreenId,
+    ChannelBindingWitness, ControlId, EnrollmentManifestTransferInput, FieldId,
+    FrontendSpecificSettingsSectionId, HarnessUiCommand, HarnessUiCommandReceipt,
+    HarnessUiOperationHandle, ListId, ModalId, ParityUiIdentity, ScreenId,
     SettingsSectionSurfaceId, SharedSettingsSectionId, FRONTEND_SPECIFIC_SETTINGS_SECTIONS,
     HARNESS_AUTH_TOKEN_MIN_LEN, HARNESS_COMMAND_MAX_FRAME_BYTES, PARITY_CRITICAL_SETTINGS_SECTIONS,
 };

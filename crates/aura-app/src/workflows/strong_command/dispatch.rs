@@ -40,7 +40,7 @@ pub(super) async fn execute_membership(
                         messaging::authoritative_channel_ref(channel.channel_id().0, context_id)
                     })?;
                 messaging::join_channel(app_core, authoritative_channel).await?;
-                Ok(())
+                Ok::<(), AuraError>(())
             }
             super::ChannelResolveOutcome::WillCreate { .. } => {
                 messaging::join_channel_by_name(app_core, channel_name).await?;
@@ -52,7 +52,12 @@ pub(super) async fn execute_membership(
             messaging::leave_channel(app_core, channel_id.0).await?;
             Ok(())
         }
-        _ => Err(AuraError::invalid("invalid membership command")),
+        _ => Err(
+            super::execution_model::CommandExecutionFailure::InvalidPlan {
+                family: super::execution_model::InvalidCommandPlanFamily::Membership,
+            }
+            .into(),
+        ),
     }?;
     Ok(Some("membership updated".to_string()))
 }
@@ -109,7 +114,12 @@ pub(super) async fn execute_moderation(
                 .await?;
             Ok(Some("invitation sent".to_string()))
         }
-        _ => Err(AuraError::invalid("invalid moderation command")),
+        _ => Err(
+            super::execution_model::CommandExecutionFailure::InvalidPlan {
+                family: super::execution_model::InvalidCommandPlanFamily::Moderation,
+            }
+            .into(),
+        ),
     }
 }
 
@@ -140,7 +150,12 @@ pub(super) async fn execute_moderator(
                 .await
                 .map(|_| Some("channel mode updated".to_string()))
         }
-        _ => Err(AuraError::invalid("invalid moderator command")),
+        _ => Err(
+            super::execution_model::CommandExecutionFailure::InvalidPlan {
+                family: super::execution_model::InvalidCommandPlanFamily::Moderator,
+            }
+            .into(),
+        ),
     }
 }
 
@@ -266,9 +281,12 @@ pub(super) async fn execute_general(
         | ResolvedCommand::Invite { .. }
         | ResolvedCommand::Op { .. }
         | ResolvedCommand::Deop { .. }
-        | ResolvedCommand::Mode { .. } => {
-            Err(AuraError::invalid("command requires specialized plan"))
-        }
+        | ResolvedCommand::Mode { .. } => Err(
+            super::execution_model::CommandExecutionFailure::InvalidPlan {
+                family: super::execution_model::InvalidCommandPlanFamily::Specialized,
+            }
+            .into(),
+        ),
     }
 }
 

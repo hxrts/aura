@@ -309,14 +309,14 @@ impl
         // Create effect context for building
         let effect_context = EffectContext::new(authority_id, context_id, self.execution_mode);
 
+        let physical_time_provider = self.time.0;
+
         // Build the runtime system
-        // Note: The typestate pattern ensures all required effects were provided,
-        // but currently EffectSystemBuilder creates handlers based on execution mode.
-        // The provided handlers validate the API contract at compile time.
+        // The supplied physical-time provider reaches the actual effect owner.
+        // Other custom provider wiring still requires independent integration.
         let _ = (
             self.crypto,
             self.storage,
-            self.time,
             self.random,
             self.console,
             self.transports,
@@ -326,18 +326,21 @@ impl
             ExecutionMode::Testing => EffectSystemBuilder::testing()
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
                 .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Production => EffectSystemBuilder::production()
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
                 .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
                 .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
@@ -348,6 +351,7 @@ impl
 
     /// Build the agent synchronously (for testing).
     pub fn build_sync(self) -> AgentResult<AuraAgent> {
+        let physical_time_provider = self.time.0;
         let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
             preset: "custom",
             identity: "authority_id",
@@ -358,6 +362,7 @@ impl
             ExecutionMode::Testing => EffectSystemBuilder::testing()
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_physical_time_provider(physical_time_provider.clone())
                 .build_sync()
                 .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
             ExecutionMode::Production => {
@@ -369,6 +374,7 @@ impl
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_physical_time_provider(physical_time_provider.clone())
                 .build_sync()
                 .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
         };

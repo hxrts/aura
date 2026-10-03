@@ -30,6 +30,8 @@ pub enum BuildError {
 
     /// Runtime construction failed
     RuntimeConstruction(String),
+    /// Native construction source remains process-local and typed.
+    RuntimeConstructionSource(Box<dyn std::error::Error + Send + Sync>),
 
     /// Authority context error
     AuthorityError(String),
@@ -53,6 +55,9 @@ impl fmt::Display for BuildError {
             Self::EffectInit { effect, message } => {
                 write!(f, "failed to initialize {} effect: {}", effect, message)
             }
+            Self::RuntimeConstructionSource(source) => {
+                write!(f, "runtime construction failed: {source}")
+            }
             Self::RuntimeConstruction(msg) => {
                 write!(f, "runtime construction failed: {}", msg)
             }
@@ -63,10 +68,24 @@ impl fmt::Display for BuildError {
     }
 }
 
-impl std::error::Error for BuildError {}
+impl std::error::Error for BuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RuntimeConstructionSource(source) => Some(source.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 impl From<BuildError> for crate::AgentError {
     fn from(e: BuildError) -> Self {
-        crate::AgentError::config(e.to_string())
+        if matches!(&e, BuildError::RuntimeConstructionSource(_)) {
+            crate::AgentError::from(aura_core::AuraError::Internal {
+                message: "runtime construction failed".into(),
+                source: Some(std::sync::Arc::new(e)),
+            })
+        } else {
+            crate::AgentError::config(e.to_string())
+        }
     }
 }

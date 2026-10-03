@@ -27,6 +27,11 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 ## Invariants
 
+- Device enrollment issuance accepts an explicit user-transferred setup code.
+  Frontends forward it to the app-owned verification and issuance workflow;
+  raw authority IDs, demo autofill and discovery metadata cannot replace the
+  setup verifier pin or infer that the new device accepted enrollment.
+
 - Terminal interfaces must remain a presentation layer over aura-app.
 - Parity-critical IDs, focus semantics, and action metadata must come from `aura-app::ui_contract`, not frontend-local derivation.
 - Harness mode may add instrumentation or render-stability hooks but must not bypass normal execution semantics for parity-critical flows.
@@ -166,3 +171,11 @@ cargo test -p aura-terminal
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [Testing Guide](../../docs/804_testing_guide.md)
 - [Project Structure](../../docs/999_project_structure.md)
+
+## Enrollment trust transfer boundary
+
+Device enrollment import uses the shared three-field contract and transfers submission ownership to the app before awaiting pin/import/acceptance. The shell does not derive an initiator verifier from the received payload or adopt its authority/device identifiers before acceptance. Issuer output preserves actual signed manifest and independent verifier transfer material. Browser account persistence requires an app-issued completed result; legacy pending-code-only replay fails closed.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+Sync command service ownership requires source-preserving timer, shutdown-signal and runtime supervision outcomes. Every daemon run exit awaits service stop. Failed execution remains primary when stop also fails, with a separately retained typed cleanup cause. A failed timer or backward physical clock cannot publish a tick or successful shutdown. Native terminal diagnostics retain concrete sources; cloned source-bearing errors compare retained source identity rather than matching message text.

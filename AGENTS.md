@@ -136,6 +136,10 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   `#[semantic_owner]` function when the attribute names that exact public
   wrapper; both the changed-files ratchet and Rust-native ownership lint
   verify this declared relationship
+  Signature changes must retain the attribute on the actual Rust declaration;
+  unchanged diff context is accepted through syntax inspection. An attribute
+  on another function or an identically named unannotated boundary does not
+  authorize the change.
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the
   sanctioned terminal/browser submission boundaries; callback factories and
@@ -385,3 +389,11 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 - For shared user-flow or harness policy work, run `just ci-user-flow-policy`
 - Use `.claude/skills/` for project-specific knowledge
 - Batch operations and parallel tool calls when possible
+
+### Durable enrollment window discipline
+
+Production enrollment uses the runtime-private sealed `EnrollmentWindowCapability` for execution, children, retries, and required observation acknowledgment. Do not introduce raw/no-op timeout executors, aliases, fresh duration reconstruction, or weaker budget parameters on that path. The Rust-native `async-session-ownership` lane requires sealed window inputs on attempt functions and methods regardless of parameter name; explicit test-only fixtures must use a positive test predicate. Required maintenance uses fallible owned interval outcomes and preserves concrete sources through service supervision. Run ownership and annotation gates when changing these APIs.
+
+## Trusted enrollment verifier governance
+
+The trusted-key boundary gate uses lexical Rust AST scope and exact key origin for enrollment verifier owners. Canonical sealed admission/retained references must supply their own expected key; comments, nearby resolver names, raw remote fields and aliases cannot substitute for that origin. Manifest signature integrity is distinct from runtime admission and requires an independent verifier argument. Test exclusion must be an actual cfg(test) scope, including all/any semantics, and must not hide subsequent production code. Update AST negative fixtures for ownership changes and run `just _policy-check check security-boundary-policy` before broader CI.

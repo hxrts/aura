@@ -262,6 +262,7 @@ pub enum CanonicalTraceEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 
 pub enum IntentAction {
+    ExportDeviceEnrollmentSetup,
     OpenScreen {
         screen: ScreenId,
         #[serde(default)]
@@ -281,10 +282,12 @@ pub enum IntentAction {
     StartDeviceEnrollment {
         device_name: String,
         code_name: String,
-        invitee_authority_id: String,
+        setup_code: String,
     },
     ImportDeviceEnrollmentCode {
         code: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest_transfer: Option<crate::ui_contract::EnrollmentManifestTransferInput>,
     },
     OpenSettingsSection(SettingsSection),
     RemoveSelectedDevice {
@@ -491,6 +494,7 @@ impl IntentAction {
     #[must_use]
     pub fn kind(&self) -> IntentKind {
         match self {
+            Self::ExportDeviceEnrollmentSetup => IntentKind::ExportDeviceEnrollmentSetup,
             Self::OpenScreen { .. } => IntentKind::OpenScreen,
             Self::CreateAccount { .. } => IntentKind::CreateAccount,
             Self::CreateHome { .. } => IntentKind::CreateHome,
@@ -516,6 +520,23 @@ impl IntentAction {
     #[must_use]
     pub fn contract(&self) -> SharedActionContract {
         match self {
+            Self::ExportDeviceEnrollmentSetup => SharedActionContract {
+                intent: IntentKind::ExportDeviceEnrollmentSetup,
+                submission: SubmissionContract::Immediate {
+                    value: SubmissionValueContract::DeviceEnrollmentSetup,
+                },
+                preconditions: vec![ActionPrecondition::Readiness(UiReadiness::Ready)],
+                barriers: SharedActionBarrierMetadata {
+                    before_issue: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
+                    before_next_intent: vec![],
+                },
+                post_operation_convergence: None,
+                focus_semantics: FocusSemantics::None,
+                selection_semantics: SelectionSemantics::PreservesCurrent,
+                transitions: vec![],
+                terminal_success: vec![],
+                terminal_failure_codes: vec!["device_enrollment_setup_export_failed".to_string()],
+            },
             Self::OpenScreen { screen, .. } => SharedActionContract {
                 intent: IntentKind::OpenScreen,
                 submission: SubmissionContract::Immediate {
@@ -712,12 +733,13 @@ impl IntentAction {
             },
             Self::ImportDeviceEnrollmentCode { .. } => SharedActionContract {
                 intent: IntentKind::ImportDeviceEnrollmentCode,
-                submission: SubmissionContract::Immediate {
+                submission: SubmissionContract::OperationHandle {
+                    operation_id: OperationId::device_enrollment(),
                     value: SubmissionValueContract::None,
                 },
-                preconditions: vec![ActionPrecondition::Screen(ScreenId::Onboarding)],
+                preconditions: vec![ActionPrecondition::Readiness(UiReadiness::Ready)],
                 barriers: SharedActionBarrierMetadata {
-                    before_issue: vec![BarrierDeclaration::Screen(ScreenId::Onboarding)],
+                    before_issue: vec![BarrierDeclaration::Readiness(UiReadiness::Ready)],
                     before_next_intent: vec![
                         BarrierDeclaration::Screen(ScreenId::Neighborhood),
                         BarrierDeclaration::Readiness(UiReadiness::Ready),
@@ -1314,7 +1336,7 @@ pub enum VariableAction {
         name: String,
         value: String,
     },
-    PrepareDeviceEnrollmentInviteeAuthority {
+    PrepareDeviceEnrollmentSetup {
         name: String,
     },
     CaptureCurrentAuthorityId {

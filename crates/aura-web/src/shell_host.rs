@@ -29,14 +29,12 @@ use crate::task_owner::shared_web_task_owner;
 use crate::web_clipboard::WebClipboardAdapter;
 use crate::{
     active_storage_prefix, bootstrap_broker_auth_token, bootstrap_broker_invitation_token,
-    bootstrap_broker_url, clear_pending_device_enrollment_code, clear_storage_key,
-    dual_demo_web_enabled, harness_instance_id, harness_mode_enabled,
-    load_pending_account_bootstrap, load_pending_device_enrollment_code,
+    bootstrap_broker_url, clear_storage_key, dual_demo_web_enabled, harness_instance_id,
+    harness_mode_enabled, load_pending_account_bootstrap, load_pending_device_enrollment_code,
     load_selected_runtime_identity, logged_optional, pending_account_bootstrap_key,
     pending_device_enrollment_code_key, persist_pending_device_enrollment_code,
     persist_selected_runtime_identity, selected_runtime_identity_key,
     submit_runtime_bootstrap_handoff,
-    workflows::{self, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest, RebootstrapPolicy},
 };
 use aura_agent::BootstrapBrokerConfig;
 
@@ -465,44 +463,32 @@ async fn hydrate_existing_runtime_account_projection(
 
 async fn reconcile_pending_device_enrollment_import(
     app_core: &Arc<RwLock<AppCore>>,
-    runtime_authority_id: AuthorityId,
-    runtime_device_id: aura_core::types::identifiers::DeviceId,
+    _runtime_authority_id: AuthorityId,
+    _runtime_device_id: aura_core::types::identifiers::DeviceId,
     pending_code: &str,
-    pending_code_storage_key: &str,
+    _pending_code_storage_key: &str,
 ) -> Result<Option<String>, WebUiError> {
-    let storage_prefix = active_storage_prefix();
-    let result = workflows::accept_device_enrollment_import(
-        app_core,
-        DeviceEnrollmentImportRequest {
-            code: pending_code,
-            current_runtime_identity: CurrentRuntimeIdentity {
-                authority_id: runtime_authority_id,
-                selected_runtime_identity: Some(BootstrapRuntimeIdentity::new(
-                    runtime_authority_id,
-                    runtime_device_id,
-                )),
-            },
-            storage_prefix: &storage_prefix,
-            rebootstrap_policy: RebootstrapPolicy::RejectIfRequired,
-            operation: WebUiOperation::BootstrapController,
-        },
-    )
-    .await?;
-    if result.rebootstrap_required {
-        let staged_runtime_identity = result.staged_runtime_identity;
-        return Err(WebUiError::operation(
+    let outcome =
+        aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
+            app_core,
+            pending_code.to_string(),
+            None,
+            None,
+        )
+        .await;
+    match outcome.result {
+        Err(error) => Err(WebUiError::operation(
             WebUiOperation::BootstrapController,
-            "WEB_PENDING_DEVICE_ENROLLMENT_RUNTIME_IDENTITY_MISMATCH",
-            format!(
-                "pending device enrollment code expected authority {subject_authority} device {device_id}, but bootstrap runtime is authority {} device {}",
-                runtime_authority_id, runtime_device_id,
-                subject_authority = staged_runtime_identity.authority_id,
-                device_id = staged_runtime_identity.device_id,
-            ),
-        ));
+            "WEB_PENDING_DEVICE_ENROLLMENT_PIN_REQUIRED",
+            error.to_string(),
+        )
+        .with_source(error)),
+        Ok(_) => Err(WebUiError::operation(
+            WebUiOperation::BootstrapController,
+            "WEB_PENDING_DEVICE_ENROLLMENT_OWNER_CONTRACT",
+            "An unpinned legacy pending code cannot authorize enrollment",
+        )),
     }
-    clear_pending_device_enrollment_code(pending_code_storage_key)?;
-    Ok(Some(result.bootstrap_name))
 }
 
 fn install_harness_instrumentation(controller: Arc<UiController>, generation_id: u64) {
@@ -561,6 +547,17 @@ async fn bootstrap_generation(generation_id: u64) -> Result<BootstrapState, WebU
     let mut pending_device_enrollment_code = logged_optional(load_pending_device_enrollment_code(
         &pending_code_storage_key,
     ));
+    if pending_device_enrollment_code
+        .as_ref()
+        .is_some_and(|code| !code.is_empty())
+    {
+        return Err(WebUiError::input(
+            WebUiOperation::BootstrapController,
+            "WEB_PENDING_DEVICE_ENROLLMENT_PIN_REQUIRED",
+            "Legacy pending enrollment requires independently transferred manifest and verifier",
+        )
+        .with_source(aura_app::ui::workflows::ceremonies::EnrollmentManifestError::MissingPin));
+    }
     web_sys::console::log_1(
         &format!(
             "[web-bootstrap] generation={generation_id};storage_prefix={storage_prefix};selected_runtime_identity={:?};pending_account_bootstrap={:?};pending_device_enrollment_code_present={}",
@@ -1099,20 +1096,17 @@ mod tests {
     }
 
     #[test]
-    fn shell_host_clears_pending_device_enrollment_code_after_import() {
+    fn shell_host_rejects_legacy_pending_code_before_runtime_construction() {
         let source = include_str!("shell_host.rs");
-        let reconcile_start = source
-            .find("async fn reconcile_pending_device_enrollment_import(")
-            .unwrap_or_else(|| panic!("missing reconcile_pending_device_enrollment_import"));
-        let reconcile_end = source[reconcile_start..]
-            .find("fn install_harness_instrumentation")
-            .map(|offset| reconcile_start + offset)
-            .unwrap_or_else(|| panic!("missing install_harness_instrumentation"));
-        let reconcile_block = &source[reconcile_start..reconcile_end];
+        let start = source
+            .find("async fn bootstrap_generation(generation_id: u64)")
+            .unwrap();
+        let code = &source[start..];
+        let pin_failure = code.find("EnrollmentManifestError::MissingPin").unwrap();
+        let runtime_build = code.find("AgentBuilder::web()").unwrap();
         assert!(
-            reconcile_block
-                .contains("clear_pending_device_enrollment_code(pending_code_storage_key)?;"),
-            "successful device enrollment import must clear the one-shot browser enrollment code"
+            pin_failure < runtime_build,
+            "legacy unpinned identity cannot construct a runtime first"
         );
     }
 

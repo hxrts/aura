@@ -1,12 +1,13 @@
 use aura_app::errors::ErrorCategory;
 use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) struct WebUiError {
     operation: WebUiOperation,
     category: ErrorCategory,
     code: &'static str,
     message: String,
+    source: Option<std::sync::Arc<dyn std::error::Error + Send + Sync>>,
 }
 
 impl WebUiError {
@@ -21,6 +22,7 @@ impl WebUiError {
             category,
             code,
             message: message.into(),
+            source: None,
         }
     }
 
@@ -54,9 +56,17 @@ impl WebUiError {
             category: self.category,
             code: self.code,
             message: self.message.clone(),
+            source: self.source.clone(),
         }
     }
 
+    pub(crate) fn with_source(
+        mut self,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        self.source = Some(std::sync::Arc::new(source));
+        self
+    }
     pub(crate) fn user_message(&self) -> String {
         format!(
             "[{}] {}: {}. Hint: {}",
@@ -74,7 +84,22 @@ impl std::fmt::Display for WebUiError {
     }
 }
 
-impl std::error::Error for WebUiError {}
+impl PartialEq for WebUiError {
+    fn eq(&self, other: &Self) -> bool {
+        self.operation == other.operation
+            && self.category == other.category
+            && self.code == other.code
+            && self.message == other.message
+    }
+}
+impl Eq for WebUiError {}
+impl std::error::Error for WebUiError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|e| e as &(dyn std::error::Error + 'static))
+    }
+}
 
 pub(crate) fn log_web_error(level: &str, error: &WebUiError) {
     let rendered = error.user_message();

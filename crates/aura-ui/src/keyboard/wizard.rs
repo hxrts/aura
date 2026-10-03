@@ -130,7 +130,11 @@ pub(super) fn handle_add_device_modal_char(
 ) {
     match model.active_modal.as_mut() {
         Some(ActiveModal::AddDevice(state)) if matches!(state.step, AddDeviceWizardStep::Name) => {
-            state.push_draft_name_char(ch);
+            if state.active_field == aura_app::ui::contract::FieldId::DeviceSetupCode {
+                state.setup_code_input.push(ch);
+            } else {
+                state.push_draft_name_char(ch);
+            }
         }
         Some(ActiveModal::AddDevice(state))
             if matches!(

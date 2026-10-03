@@ -31,12 +31,14 @@ pub use aura_core::effects::ExecutionMode;
 pub struct EffectSystemBuilder {
     config: Option<AgentConfig>,
     authority_id: Option<AuthorityId>,
+    physical_time_provider: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>>,
     execution_mode: ExecutionMode,
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
     social_config: Option<super::services::SocialManagerConfig>,
     receipt_config: Option<ReceiptManagerConfig>,
     shared_transport: Option<SharedTransport>,
+    selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
 }
 
 impl EffectSystemBuilder {
@@ -45,13 +47,30 @@ impl EffectSystemBuilder {
         Self {
             config: None,
             authority_id: None,
+            physical_time_provider: None,
             execution_mode: ExecutionMode::Production,
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
             receipt_config: None,
             shared_transport: None,
+            selected_profile_owner: None,
         }
+    }
+
+    /// Transfer the actual provider lease acquired before reading bootstrap state.
+    /// Every adapter retains this same resource until the last owner is dropped.
+    ///
+    /// ```compile_fail
+    /// use aura_agent::runtime::EffectSystemBuilder;
+    /// EffectSystemBuilder::production().with_profile_owner(std::sync::Arc::new(()));
+    /// ```
+    pub fn with_profile_owner(
+        mut self,
+        owner: Arc<aura_effects::profile_storage::OwnedProfileLease>,
+    ) -> Self {
+        self.selected_profile_owner = Some(owner);
+        self
     }
 
     /// Create a testing builder
@@ -59,12 +78,14 @@ impl EffectSystemBuilder {
         Self {
             config: None,
             authority_id: None,
+            physical_time_provider: None,
             execution_mode: ExecutionMode::Testing,
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
+            selected_profile_owner: None,
         }
     }
 
@@ -73,12 +94,14 @@ impl EffectSystemBuilder {
         Self {
             config: None,
             authority_id: None,
+            physical_time_provider: None,
             execution_mode: ExecutionMode::Simulation { seed },
             sync_config: None,
             rendezvous_config: None,
             social_config: None,
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
+            selected_profile_owner: None,
         }
     }
 
@@ -88,7 +111,17 @@ impl EffectSystemBuilder {
         self
     }
 
+    /// Bind every runtime physical-time owner to the same injected provider.
+    pub fn with_physical_time_provider(
+        mut self,
+        provider: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Self {
+        self.physical_time_provider = Some(provider);
+        self
+    }
+
     /// Set configuration
+
     pub fn with_config(mut self, config: AgentConfig) -> Self {
         self.config = Some(config);
         self
@@ -150,6 +183,15 @@ impl EffectSystemBuilder {
         self,
         _ctx: &EffectContext,
     ) -> Result<RuntimeSystem, crate::builder::error::BuildError> {
+        if !self.execution_mode.is_production() && self.selected_profile_owner.is_some() {
+            return Err(
+                crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
+                    aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                        "production profile lease supplied to a nonproduction runtime".into(),
+                    ),
+                )),
+            );
+        }
         let config = self.config.unwrap_or_default();
         let authority_id =
             self.authority_id
@@ -166,12 +208,34 @@ impl EffectSystemBuilder {
         // Create effect system components based on execution mode
         let (effect_executor, effect_system) = match self.execution_mode {
             ExecutionMode::Production => {
-                let executor = EffectExecutor::production(authority_id, registry.clone());
-                let system =
-                    super::AuraEffectSystem::production_for_authority(config.clone(), authority_id)
-                        .map_err(|e| {
-                            crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                let owner = match self.selected_profile_owner {
+                    Some(owner) => owner,
+                    None => {
+                        let profile =
+                            aura_effects::profile_storage::FilesystemProfileStorageHandler::new(
+                                config.storage.base_path.clone(),
+                            );
+                        #[cfg(target_arch = "wasm32")]
+                        let owner = profile.acquire_owned_browser().await;
+                        #[cfg(not(target_arch = "wasm32"))]
+                        let owner = profile.acquire_owned_native();
+                        let owner = owner.map(Arc::new).map_err(|e| {
+                            crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
+                                e,
+                            ))
                         })?;
+                        owner
+                    }
+                };
+                let executor = EffectExecutor::production(authority_id, registry.clone());
+                let system = super::AuraEffectSystem::production_for_authority_shared_profile(
+                    config.clone(),
+                    authority_id,
+                    owner,
+                )
+                .map_err(|e| {
+                    crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
+                })?;
                 (executor, system)
             }
             ExecutionMode::Testing => {
@@ -179,10 +243,18 @@ impl EffectSystemBuilder {
                 // Runtime builder intentionally uses explicit execution-mode constructors.
                 // Test-only callsites must use simulation_for_test* helpers instead.
                 #[allow(clippy::disallowed_methods)]
-                let system = super::AuraEffectSystem::testing_for_authority(&config, authority_id)
-                    .map_err(|e| {
-                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
-                    })?;
+                let system = if let Some(shared) = self.shared_transport {
+                    super::AuraEffectSystem::testing_with_shared_transport(
+                        &config,
+                        authority_id,
+                        shared,
+                    )
+                } else {
+                    super::AuraEffectSystem::testing_for_authority(&config, authority_id)
+                }
+                .map_err(|e| {
+                    crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
+                })?;
                 (executor, system)
             }
             ExecutionMode::Simulation { seed } => {
@@ -209,7 +281,14 @@ impl EffectSystemBuilder {
             }
         };
 
+        // Configure the actual effect owner before any service retains its clock.
+        let effect_system = match self.physical_time_provider {
+            Some(provider) => effect_system.with_physical_time_provider(provider),
+            None => effect_system,
+        };
+
         // Create service managers
+
         let context_manager = ContextManager::new(&config);
         let authority_manager = AuthorityManager::new();
         let flow_budget_manager = FlowBudgetManager::new(&config);

@@ -30,6 +30,11 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
 ## Invariants
 
 - Shared core remains platform agnostic; shell crates own platform interop.
+- Add-device submission requires the actual new device's user-transferred setup
+  code. The shared modal renders separate name/setup fields with shared field IDs
+  and forwards the code to the app-owned verification and issuance workflow.
+  Keyboard state cannot fabricate an invitee authority or enrollment code;
+  only runtime issuance advances the modal to code sharing.
 - Snapshot output remains deterministic for equivalent state and key streams.
 - Keyboard routing is centralized and side-effect order is deterministic.
 - Shared state is keyed by semantic ids and typed operation/runtime-event snapshots rather than frontend-local row indexes or renderer-only state.
@@ -156,3 +161,9 @@ just ci-observed-layer-boundaries
 ## References
 
 - [Testing Guide](../../docs/804_testing_guide.md)
+
+## Enrollment trust transfer boundary
+
+Device enrollment import uses the shared three-field contract and transfers submission ownership to the app before awaiting pin/import/acceptance. The shell does not derive an initiator verifier from the received payload or adopt its authority/device identifiers before acceptance. Issuer output preserves actual signed manifest and independent verifier transfer material. Browser account persistence requires an app-issued completed result; legacy pending-code-only replay fails closed.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).

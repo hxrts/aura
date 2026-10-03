@@ -869,9 +869,13 @@ impl<'a> InvitationContactHandler<'a> {
                     .to_generic();
 
                     effects
+                        .insert_relational_fact(membership.clone())
+                        .await
+                        .map_err(AgentError::from)?;
+                    effects
                         .commit_relational_facts(vec![membership])
                         .await
-                        .map_err(|e| AgentError::effects(e.to_string()))?;
+                        .map_err(AgentError::from)?;
                     effects.await_next_view_update().await;
 
                     let now_ms =

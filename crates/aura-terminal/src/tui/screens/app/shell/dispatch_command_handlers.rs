@@ -640,19 +640,26 @@ pub(super) fn handle_dispatch_command_match(
             );
             (cb.app.on_create_account)(name, operation);
         }
-        DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code } => {
+        DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+            code,
+            manifest_transfer,
+        } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
             );
-            (cb.app.on_import_device_enrollment_during_onboarding)(code, operation);
+            (cb.app.on_import_device_enrollment_during_onboarding)(
+                code,
+                manifest_transfer,
+                operation,
+            );
         }
         DispatchCommand::AddGuardian { contact_id } => {
             let Some(update_tx) = update_tx_for_events else {
@@ -1561,10 +1568,7 @@ pub(super) fn handle_dispatch_command_match(
             );
             (cb.settings.on_update_mfa)(policy, operation);
         }
-        DispatchCommand::AddDevice {
-            name,
-            invitee_authority_id,
-        } => {
+        DispatchCommand::AddDevice { name, setup_code } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
@@ -1576,7 +1580,7 @@ pub(super) fn handle_dispatch_command_match(
                 OperationId::device_enrollment(),
                 SemanticOperationKind::StartDeviceEnrollment,
             );
-            (cb.settings.on_add_device)(name, invitee_authority_id, operation);
+            (cb.settings.on_add_device)(name, setup_code, operation);
         }
         DispatchCommand::RemoveDevice { device_id } => {
             let Some(update_tx) = update_tx_for_events else {
@@ -1592,19 +1596,22 @@ pub(super) fn handle_dispatch_command_match(
             );
             (cb.settings.on_remove_device)(device_id, operation);
         }
-        DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
+        DispatchCommand::ImportDeviceEnrollmentOnMobile {
+            code,
+            manifest_transfer,
+        } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
                 OperationId::device_enrollment(),
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
             );
-            (cb.settings.on_import_device_enrollment_on_mobile)(code, operation);
+            (cb.settings.on_import_device_enrollment_on_mobile)(code, manifest_transfer, operation);
         }
         DispatchCommand::OpenAuthorityPicker => {
             // Build list of authorities from app-global state

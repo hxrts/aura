@@ -26,6 +26,17 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 ## Invariants
 
+- `ExportDeviceEnrollmentSetup` runs through the page-owned semantic queue and
+  the bounded app workflow. Its immediate `DeviceEnrollmentSetup` value carries
+  the exact runtime-issued code; export has no enrollment ceremony handle and
+  never stages identity or fabricates device identifiers. Missing runtime or
+  signing context rejects the command.
+
+- Device enrollment issuance accepts an explicit user-transferred setup code.
+  Frontends forward it to the app-owned verification and issuance workflow;
+  raw authority IDs, demo autofill and discovery metadata cannot replace the
+  setup verifier pin or infer that the new device accepted enrollment.
+
 - Browser-only APIs stay in this crate.
 - Shared UI behavior remains in `aura-ui`.
 - Browser shell DOM-id resolution reuses the shared typed helper surface from
@@ -316,3 +327,9 @@ cargo check -p aura-web
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [Testing Guide](../../docs/804_testing_guide.md)
 - [Project Structure](../../docs/999_project_structure.md)
+
+## Enrollment trust transfer boundary
+
+Device enrollment import uses the shared three-field contract and transfers submission ownership to the app before awaiting pin/import/acceptance. The shell does not derive an initiator verifier from the received payload or adopt its authority/device identifiers before acceptance. Issuer output preserves actual signed manifest and independent verifier transfer material. Browser account persistence requires an app-issued completed result; legacy pending-code-only replay fails closed.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).

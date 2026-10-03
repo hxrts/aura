@@ -30,7 +30,10 @@ struct AccessScope {
     peers: Vec<AuthorityId>,
 }
 
-fn map_runtime_error(operation: &'static str, error: impl std::fmt::Display) -> AuraError {
+fn map_runtime_error(
+    operation: &'static str,
+    error: impl std::error::Error + Send + Sync + 'static,
+) -> AuraError {
     super::error::runtime_call(operation, error).into()
 }
 

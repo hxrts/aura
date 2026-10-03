@@ -2,6 +2,7 @@
 
 use super::state::AppCore;
 use crate::core::IntentError;
+use crate::runtime_bridge::RuntimeBridgeError;
 use crate::workflows::system::hooks::{HookGroup, HookInstallError};
 use async_lock::RwLock;
 use std::sync::Arc;
@@ -10,13 +11,26 @@ pub(super) enum HookInstallState {
     Stopped,
     Installing,
     Ready(HookGroup),
+    Failed(Arc<crate::workflows::system::hooks::HookExecutionError>),
 }
 
 impl AppCore {
+    /// Original required background refresh failure for this attachment.
+    /// The error remains observable without enabling tracing instrumentation.
+    pub async fn refresh_hook_failure(
+        &self,
+    ) -> Option<Arc<crate::workflows::system::hooks::HookExecutionError>> {
+        match &self.hook_install_state {
+            HookInstallState::Ready(group) => group.failure().await,
+            HookInstallState::Failed(source) => Some(source.clone()),
+            HookInstallState::Stopped | HookInstallState::Installing => None,
+        }
+    }
+
     /// Initialize signals and attach one complete runtime-backed hook group.
     pub async fn init_signals_with_hooks(
         app_core: &Arc<RwLock<AppCore>>,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), RuntimeBridgeError> {
         let gate = {
             let core = app_core.read().await;
             Arc::clone(&core.hook_install_gate)
@@ -39,20 +53,39 @@ impl AppCore {
         let mut core = app_core.write().await;
         match installed {
             Ok(group) => {
-                core.hook_install_state = HookInstallState::Ready(group);
-                Ok(())
+                match group
+                    .publish_ready(|group| core.hook_install_state = HookInstallState::Ready(group))
+                    .await
+                {
+                    Ok(()) => Ok(()),
+                    Err(source) => {
+                        core.hook_install_state = HookInstallState::Failed(source.clone());
+                        Err(RuntimeBridgeError::with_source(
+                            IntentError::service_error(
+                                "required refresh attachment failed before readiness",
+                            ),
+                            source.as_ref().clone(),
+                        ))
+                    }
+                }
             }
             Err(error) => {
-                core.hook_install_state = HookInstallState::Stopped;
-                Err(match error {
+                core.hook_install_state = match &error {
+                    HookInstallError::RequiredFailed { source } => {
+                        HookInstallState::Failed(source.clone())
+                    }
+                    _ => HookInstallState::Stopped,
+                };
+                let diagnostic = match &error {
                     HookInstallError::Reactive { signal_id, source } => {
-                        IntentError::reactive_failure(signal_id, source)
+                        IntentError::reactive_failure(signal_id.clone(), source.clone())
                     }
                     HookInstallError::RuntimeUnavailable => {
                         IntentError::no_agent("refresh hooks require an attached runtime")
                     }
-                    other => IntentError::service_error(other.to_string()),
-                })
+                    _ => IntentError::service_error("refresh hook installation failed"),
+                };
+                Err(RuntimeBridgeError::with_source(diagnostic, error))
             }
         }
     }
@@ -235,35 +268,91 @@ mod tests {
             .unwrap();
 
         let error = AppCore::init_signals_with_hooks(&app).await.unwrap_err();
-        assert!(matches!(
-            error,
-            IntentError::ReactiveFailure {
-                kind: crate::core::error::ReactiveFailureKind::TypeMismatch,
-                signal_id,
-                ..
-            } if signal_id == CONTACTS_SIGNAL.id().to_string()
-        ));
+        assert_eq!(
+            error.kind(),
+            crate::runtime_bridge::RuntimeBridgeErrorKind::Reactive
+        );
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut reactive = None;
+        while let Some(source) = cause {
+            if let Some(source) =
+                source.downcast_ref::<aura_core::effects::reactive::ReactiveError>()
+            {
+                reactive = Some(source);
+                break;
+            }
+            cause = source.source();
+        }
+        assert!(matches!(reactive,
+            Some(aura_core::effects::reactive::ReactiveError::TypeMismatch {id,..})
+                if id==&CONTACTS_SIGNAL.id().to_string()));
         assert!(matches!(
             app.read().await.hook_install_state,
             HookInstallState::Stopped
         ));
     }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod actual_enrollment_interval_health_tests {
+    use super::*;
+    use crate::workflows::system::hooks::HookFailureStage;
+    use aura_core::AuraError;
+    use std::error::Error;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("actual enrollment interval provider unavailable")]
+    struct EnrollmentIntervalFault;
 
     #[tokio::test]
-    async fn task_dropping_spawner_cannot_report_hook_readiness() {
-        let runtime = Arc::new(OfflineRuntimeBridge::new(AuthorityId::new_from_entropy(
-            [62; 32],
-        )));
+    async fn complete_install_retains_required_enrollment_interval_fault() {
+        let runtime = crate::testing::running_offline_runtime(
+            aura_core::AuthorityId::new_from_entropy([174; 32]),
+        );
         runtime.set_pending_invitations(Vec::new());
-        let app = Arc::new(RwLock::new(
-            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
-        ));
-
-        let error = AppCore::init_signals_with_hooks(&app).await.unwrap_err();
-        assert!(matches!(error, IntentError::ServiceError { .. }));
-        assert!(matches!(
-            app.read().await.hook_install_state,
-            HookInstallState::Stopped
-        ));
+        runtime
+            .fail_next_background_refresh(RuntimeBridgeError::with_source(
+                IntentError::service_error("enrollment interval provider failed"),
+                AuraError::Storage {
+                    message: "interval checkpoint read failed".into(),
+                    source: Some(Arc::new(EnrollmentIntervalFault)),
+                },
+            ))
+            .await;
+        let app =
+            crate::testing::test_app_core_with_runtime(crate::core::AppConfig::default(), runtime);
+        // Failure may precede readiness publication or occur immediately afterward.
+        // Both timings must retain the same owned fault and inactive health.
+        let installation = AppCore::init_signals_with_hooks(&app).await;
+        let failure = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if let Some(failure) = app.read().await.refresh_hook_failure().await {
+                    break failure;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("actual enrollment interval failure must remain observable");
+        assert_eq!(failure.name(), "device_enrollment_completion_hook");
+        assert_eq!(failure.stage(), HookFailureStage::Interval);
+        let mut source: &(dyn Error + 'static) = failure.as_ref();
+        while !source.is::<EnrollmentIntervalFault>() {
+            source = source
+                .source()
+                .expect("original interval provider must remain in source chain");
+        }
+        let core = app.read().await;
+        assert!(
+            !matches!(&core.hook_install_state, HookInstallState::Ready(group) if group.is_active())
+        );
+        if let Err(error) = installation {
+            assert!(
+                error.source().is_some(),
+                "failed installation retains required cause"
+            );
+        }
+        drop(core);
+        AppCore::detach_runtime(&app).await;
     }
 }

@@ -13,10 +13,17 @@ pub const MAX_AMP_CIPHERTEXT_BYTES: usize = 65_536;
 pub const MAX_AMP_PLAINTEXT_BYTES: usize = 65_536;
 
 /// AMP channel error
-#[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, Serialize, Deserialize, Clone)]
 pub enum AmpChannelError {
     #[error("channel not found")]
     NotFound,
+    #[error("channel already exists")]
+    AlreadyExists {
+        context: ContextId,
+        channel: ChannelId,
+    },
+    #[error("{0}")]
+    Effect(#[source] crate::AuraError),
     #[error("context not found")]
     ContextNotFound,
     #[error("invalid state: {0}")]
@@ -36,6 +43,8 @@ impl crate::ProtocolErrorCode for AmpChannelError {
         match self {
             AmpChannelError::NotFound => "not_found",
             AmpChannelError::ContextNotFound => "not_found",
+            AmpChannelError::AlreadyExists { .. } => "already_exists",
+            AmpChannelError::Effect(error) => crate::ProtocolErrorCode::code(error),
             AmpChannelError::InvalidState(_) => "invalid_state",
             AmpChannelError::Unauthorized => "unauthorized",
             AmpChannelError::Storage(_) => "storage",

@@ -23,6 +23,29 @@ No runtime, frontend, or harness path should keep a parallel terminal publicatio
 
 The same visibility rule applies to runtime-owned mutation helpers. Raw VM admission helpers, fragment ownership registry mutation, and the mutable reconfiguration controller stay inside `aura-agent` runtime internals. Shared consumers go through sanctioned ingress, session-owner, or manager surfaces.
 
+Enrollment setup export belongs to the signing runtime owner. Device identity,
+key epoch, mode, policy and package are one coherent snapshot; frontend or
+harness identity staging cannot substitute for this snapshot. The runtime
+verifies and retains the signed request before returning its code. Export
+failures preserve typed time, readiness, admission, proof and storage causes
+across the app's runtime bridge. Signing recovery preserves prior verifier
+identity and fails closed on incomplete persisted material, as specified in
+[Cryptography](100_crypto.md).
+
+Signing-material preparation, activation, recovery and rollback have one
+serialized lifecycle owner. Activation validates the prospective context and
+local membership before persisting the active epoch and exposing the context.
+An active or historical epoch cannot be rolled back as a failed pending
+rotation. Existing pending material cannot be silently replaced by a second
+preparation for the same epoch.
+
+Bootstrap publishes its signing context only after genesis completion. Its
+pending/complete record is independent of the active key epoch, so persisted
+keys cannot turn a failed tree commit into readiness on retry. A cached tree
+operation without its persisted operation and index entry is insufficient
+completion evidence. Legacy migration requires an existing authenticated
+creation witness; restoration cannot silently recreate a missing lineage.
+
 ## Adaptive Privacy Runtime Ownership
 
 Adaptive privacy policy is runtime-owned local state, not shared truth.
@@ -131,20 +154,61 @@ Long-lived runtimes periodically prune caches and stale in-memory state through
 owned service actors and supervised task groups. Domain crates expose cleanup
 APIs but do not self-schedule. The agent runtime owns the scheduling model.
 
+Required periodic work terminates with typed success, failure, or cancellation.
+A timer or callback failure remains a failed task with its concrete source and
+must be observable through owning service health and drain. An invalid interval
+policy fails before invoking domain work. Intentional callback completion is
+distinct from a failed callback. Supervisor clock failures are distinct from
+observed drain deadline expiry.
+
+Task-group supervision covers descendants even after callers drop their group
+handles. Shutdown closes admission across the owned subtree before waiting;
+late submissions cannot schedule work. Forced abort requests cancellation but
+does not establish drain. Task registrations remain active until the owned
+future and its resources have actually dropped. Descendant failures propagate
+to ancestor health and retain their original cause. Group depth, live groups
+and active tasks have explicit admission bounds; dead group entries are pruned.
+
 See [System Internals Guide](807_system_internals_guide.md) for service lifecycle implementation.
 
 ### Runtime Timeout Policy
+
+A choreography receive owns its local deadline for the lifetime of that receive
+future. Inbox notifications cannot renew it, and dropping the future leaves no
+registered timer resource. Required clock and sleep observations determine
+expiry through the shared typed timeout budget. A zero configured receive timeout
+remains immediate when no matching message is already queued.
+
+Choreography session admission requires a successful physical clock read before
+installing session state or task bindings. A failed read is a typed required-time
+failure with its original source; zero is not substitute clock evidence.
+Session retirement removes owned session resources even if its required clock
+read fails. The clock failure remains primary, and any retirement failure is
+retained as a separate typed cause. Duration metrics are updated only when the
+required observation exists. Receive-timeout issuance and waiting preserve
+native time-effect causes through the choreography error boundary.
 
 Runtime timeout behavior must preserve Aura's time-system contract:
 
 - physical time drives local waiting, retry, and backoff policy
 - logical, order, and provenanced time remain semantic ordering tools
 - runtime owners publish typed timeout failure when local waiting is exhausted
+- required clock and backoff failures retain their actual cause and remain
+  distinct from deadline expiry; an unavailable clock cannot fabricate an
+  observed deadline or authorize timeout retry
+- pending invitation lookup errors remain required failures even when observed
+  pending or accepted history exists; history recovery requires a typed
+  readiness exhaustion outcome, and clock or policy failures cannot select it
+- runtime-to-app deadline errors retain the typed deadline cause through the
+  standard error source chain; semantic observers classify deadlines from that
+  cause rather than matching display text
 - harness and simulation may scale timeout policy, but they should not invent a different semantic model
 
 In practice this means:
 
 - long-lived owners should consume a remaining timeout budget across nested stages instead of resetting fresh wall-clock literals at each call site
+- enrollment retries and child VM attempts remain bounded by the ceremony's
+  original deadline; restoration does not grant a new acceptance window
 - retry loops should use shared backoff policy rather than duplicated sleeps
 - timeout policy belongs to owner/coordinator code, not UI observation layers
 - reducing timeout duration in tests or harness mode is acceptable. Changing what timeout means is not.
@@ -527,3 +591,157 @@ This flow shows the push-based reactive model. Facts from any source flow throug
 ### Runtime Access
 
 When AppCore has a runtime, it provides access to runtime-backed operations through the `RuntimeBridge` trait. The runtime bridge exposes async capabilities while keeping `aura-app` decoupled from any specific runtime implementation. Frontends import app-facing types from `aura-app` and runtime types from `aura-agent` directly.
+
+### Enrollment restart and activation ownership
+
+Enrollment recovery follows active signing-context restoration. Service startup alone does not establish signing readiness. An active enrollment retains its canonical invitation, original start time and deadline, participant inventory, prestate, setup binding, and exact pending signing-generation identity. Restoring those records does not establish acceptance. Original signed responses must be reverified against their retained setup verifier before an acceptance capability can be restored.
+
+Activation owns one ceremony decision lease from its eligibility check through terminal settlement. Required durable preparation identifies the exact signed tree operation. Once irreversible preparation is retained, cancellation and timeout may not replace its owner; restart reconciles that exact operation and generation without adding a duplicate leaf. First terminal decisions are durably retained before becoming visible, and historical result observation grants no activation capability.
+
+An enrollment allocation owns its reserved invitation identity before pending keys become visible. Completing registration establishes a process-local capability for launching the canonical initiator. Failed or unissued generation retirement retains the original decision, rejects already prepared activation, and releases the generation only after required key deletion succeeds. A historical retirement receipt permits observation of the original decision and never deletion of a later generation that reused its epoch.
+
+Enrollment acceptance binds the original setup and the independently admitted signed trust manifest. Recovery selects the expected manifest and confirmation verifier from issuer-owned retention, revalidates the actual signed response at its original admission time, and does not deserialize an acceptance capability. Local serialization is not a guarantee of exclusive profile ownership between concurrent processes.
+
+### Durable enrollment time windows
+
+Enrollment execution retains the original allocated local deadline and acknowledged clock history across retries and restart. A child allowance cannot replace its parent's durable window. Required clock observations and sticky failures are durably acknowledged before protocol progression or terminal result publication. Missing retained observation state is a required recovery failure. A reimport preserves its original admitted window. Historical completed evidence retains its immutable acknowledged window and cannot grant fresh protocol or signing authority.
+
+Owned ceremony maintenance terminates with a typed failure when required clock, storage, or timer effects fail. Health projections may describe that outcome, while the runtime retains its original error source.
+
+### Native identity query failures
+
+Required native identity and settings queries retain structural runtime failures and original IO/codec causes. Missing optional account configuration remains explicit absence; corruption cannot be interpreted as absence. Device inventory is derived from canonical device leaves, including a current device only when it is present there. Presentation contact counts and uninitialized threshold summaries do not prove runtime readiness.
+
+### Native failure projection
+
+Native runtime error category survives workflow context wrapping. Required settings queries and mutations accept structural native errors at their workflow failure boundary; source-free diagnostic errors do not satisfy that contract. Foreign notification payloads preserve a stable native code at their terminal projection boundary. Crypto and serialization failures remain distinct from Internal; semantic failures classify them as failed commands rather than fabricated timeout or invalid argument evidence.
+
+### Native semantic failure codes
+
+Native runtime crypto, serialization, storage, journal, and reactive failures have distinct semantic codes. Category-preserving workflow wrappers retain concrete error sources; foreign/shared operation snapshots retain the stable category code and operation domain. Generic crypto failure does not imply an authorization decision.
+
+### Shared window contracts and admission phases
+
+Physical execution and receipt-generation allowance use domain-separated checked half-open interval arithmetic. Physical owners retain a fixed positive-millisecond deadline; flow owners retain authorized generation progression and current/previous epoch policy. Serialized interval bounds are arithmetic evidence only. They do not admit protocol execution or confer signing authority.
+
+Enrollment allocation retains the original window before execution becomes live. An interrupted allocation can retain its missing initial clock only while neither immutable live-boundary evidence nor canonical registration evidence exists, and only from the exact secure original allocation. The immutable live-boundary marker precedes registry insertion. Once that boundary is retained, missing clock history is a required failure; recovery cannot reconstruct a duration or start from current time. A historical record can acquire missing live-boundary evidence only when its original secure allocation and clock both validate.
+
+Checkpoint acknowledgment preserves exact allocation identity and the same shared clock and exhaustion owner. The durable maximum observation and sticky failures cannot regress. The registry retains allocation continuity through the required checkpoint write. Terminal decisions may advance for the same allocation; they do not authorize a renewed window, and historical completed evidence does not grant fresh execution.
+
+### Native account bootstrap failures
+
+Account bootstrap never treats a failed configuration read as absent configuration. Required signing initialization propagates original native faults under its bounded operation window. Failure publication projects the native semantic category and returns the original error, preserving both failures if terminal publication itself fails. Account configuration and authority-record persistence remain separate writes and are not claimed as one transaction.
+
+### Selected-profile physical resource binding
+
+An exclusively owned native filesystem profile binds its lifetime ownership to actual lock and directory resources. Every attached writer and clone retains that physical directory binding; changing process working directory or replacing a pathname cannot reauthorize a different directory. A filesystem secure provider admits its wrapping key only under the selected owner's physical directory and retains the original provider key. Invalid persisted key material fails closed without replacement.
+
+Reads and mutations reject descendant directory aliases. Durable acknowledgment concerns the actual held data and directory resources. An interrupted or failed acknowledgment can leave an uncertain publication outcome and requires validation of the canonical record. These single-record guarantees do not imply atomicity across selected-profile metadata, enrollment handoff, admission receipts, and signing activation. That multi-record transition requires its own durable recovery owner.
+
+Required timeout checkpoints preserve storage and codec causes in `TimeoutBudgetError::CheckpointFailure`. This failure does not represent clock unavailability or elapsed time. Native and semantic classification follows its retained cause; unclassified checkpoint faults remain internal. Serialized diagnostics omit native error sources and grant no checkpoint authority.
+
+### Required one-shot runtime work
+
+Required owned tasks retain their concrete execution failure in supervisor health and drain. Terminal lifecycle settlement does not erase that failure. If terminal publication also fails, both causes remain available, with the original execution cause preserved in the standard error chain and the secondary publication cause retained as typed evidence.
+
+Sync command service ownership requires source-preserving timer, shutdown-signal and runtime supervision outcomes. Every daemon run exit awaits service stop. Failed execution remains primary when stop also fails, with a separately retained typed cleanup cause. A failed timer or backward physical clock cannot publish a tick or successful shutdown. Native terminal diagnostics retain concrete sources; cloned source-bearing errors compare retained source identity rather than matching message text.
+
+### VM host send ownership
+
+The runtime owns one exclusive pending-send lease per VM bridge flush. It marks
+a frame in flight immediately before the transport await, acknowledges only a
+successful send, and retains failed or unattempted frames in their original
+order. New callbacks enqueue behind retained frames. Cancellation or an
+ambiguous failure leaves an unknown delivery outcome and prevents automatic
+replay on that bridge. Configuration failure before delivery leaves frames
+pending. Native session-not-started and destination-unreachable failures occur
+before delivery and retain replay eligibility; retry still requires the
+protocol owner's original admitted time window and exact request contract.
+
+### Enrollment failure receipt ownership
+
+An invitee publishes a failed enrollment readout only after verifying the
+issuer's pinned signed terminal control and acknowledging the original owned
+window checkpoint. The immutable failure receipt binds the exact manifest,
+invitation, ceremony, physical device, signed reason, and frozen acknowledged
+clock snapshot. Failure and confirmation receipts occupy distinct namespaces;
+contradictory receipts are rejected. Repeated reads revalidate the original
+admission and signed evidence without allocating another duration or issuing
+activation authority.
+
+An issuer records rejection only from a verified refusal capability and under
+the same terminal decision gate as commitment and cancellation. The first
+persisted terminal decision is immutable. Closing the VM is required on both
+success and failure; a secondary close failure remains available structurally
+alongside the original execution error.
+
+### Parallel window observations
+
+Parallel children of a physical timeout owner share observation ordering as well
+as the original high-water mark and expiry state. Each required physical read,
+its high-water update, and its durable acknowledgment form one owned sequence.
+A later query cannot overtake an earlier incomplete query and fabricate rollback
+from scheduling. Cancellation releases observation ownership; genuine backward
+clock movement remains a sticky failure and the original deadline is unchanged.
+
+### Required refresh failure ownership
+
+Runtime-backed app refresh attachments retain their first source-bearing failure independently of instrumentation. Signal receipt, required refresh, and interval-provider failures have distinct typed stages, cancel the attachment, and fail runtime supervision. A failed attachment is not active readiness. Intentional attachment cancellation completes successfully. Reattachment cannot erase the enclosing runtime generation's retained supervision failure.
+
+### Bounded attempt teardown
+
+Selecting a bounded-attempt timeout cancels the borrowed operation, while its
+owner retains the runtime resources needed for required teardown. The owner
+closes the actual VM before returning or retrying. Closing does not renew the
+operation window or authorize additional business work. A failed close remains
+a typed terminal task failure alongside the original execution cause.
+
+### Signed enrollment failure diagnostics
+
+Native enrollment failures retain the verified terminal reason independently of
+flat foreign diagnostics and preserve the original typed standard error source.
+Rejected, cancelled, timed-out, choreography-failed, runtime-failed, and
+superseded outcomes have distinct semantic projections. A remote signed failure
+reason does not claim the original remote provider exception or grant retry,
+activation, membership, or adoption authority. Diagnostic text cannot reconstruct
+a reason or an authenticated terminal capability.
+
+### Live pending enrollment registration custody
+
+An initial pending enrollment registration belongs to the still-held physical signing-generation reservation. Its bindings and participant policy must match that allocation, and it cannot inject accepted participants or a prior terminal decision. The registration must continue the immutable original allocation's start, deadline and budget observation history. Recovery uses independently revalidated original durable evidence rather than manufacturing a live reservation from stored identifiers.
+
+### Persistent enrollment allocation authorization
+
+A held physical signing-generation reservation authorizes initial persistent enrollment allocation. Plain ceremony identifiers, policies or snapshots cannot substitute for that owner even when a reservation for the same generation exists. Generic guardian registration and nonpersistent state-model registration remain distinct from persistent enrollment admission. Verified recovery restores original evidence through its recovery owner and cannot reset the allocated lifetime through fresh generic registration.
+
+Enrollment sender cancellation reads its required persisted sender record and
+the exact retained issued manifest. Guard preparation precedes the terminal
+CAS; local `InvitationCancelled` publication follows the actual durable
+`Failed(Cancelled)` first decision. A different first terminal decision cannot
+be changed, and a failed cancellation cannot publish a canceled invitation.
+The resulting negative capability is bound to that invitation and ceremony;
+it grants neither device membership nor profile activation. Cancellation
+preserves the original deadline and acknowledged clock observations, including
+sticky expiry and rollback. Required record, codec, guard, budget, and clock
+failures retain their native cause and cannot be interpreted as absence.
+
+### Pre-live enrollment clock continuity
+
+Recovery of a device enrollment allocation uses protected original allocation and signing-generation evidence under the same runtime generation owner. A ceremony identifier selects that original; caller state cannot replace its start, deadline, or observation history. Live admission must checkpoint eligibility against the original clock before publication and reject terminated or expired allocations. Clock and generation profiles are owned mutable records with atomic initial publication. First terminal and retirement decisions remain lifetime-protected immutable evidence; a competing decision cannot be overwritten during recovery.
+
+Cancellation preparation consumes required sender-record custody and borrows
+retained issued control; observed invitation values cannot substitute. Both
+retain the exact native runtime owner. Guard-issued preparation and the
+tracker-issued negative terminal token must agree with the publication runtime,
+including when authority and physical device identifiers are equal. A different
+runtime cannot sign through borrowed control or publish its cancellation.
+The required regular sender-record decoder rejects records larger than 1 MiB
+before decoding; oversized and malformed data remain distinct typed failures.
+
+Required sender enrollment custody combines the bounded regular record with its
+separately retained secure original payload. Secure reads, decoding and exact
+immutable metadata comparison must succeed before custody is minted; a redacted
+record alone cannot substitute. Only regular lifecycle status overlays the
+retained original. The regular decoder is bounded to 1 MiB and the retained
+secret decoder to 4 MiB. Cancellation status publication redacts the hydrated
+payload again and preserves the secure original bytes.

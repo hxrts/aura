@@ -61,9 +61,18 @@ pub enum ModalId {
     EditChannelInfo,
 }
 
+/// Raw explicit user-transfer inputs; these strings are not trust evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnrollmentManifestTransferInput {
+    pub manifest_code: String,
+    pub initiator_verifier_code: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HarnessUiCommand {
+    ExportDeviceEnrollmentSetup,
     Ping,
     RefreshAccount,
     NavigateScreen {
@@ -94,10 +103,12 @@ pub enum HarnessUiCommand {
     },
     StartDeviceEnrollment {
         device_name: String,
-        invitee_authority_id: String,
+        setup_code: String,
     },
     ImportDeviceEnrollmentCode {
         code: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest_transfer: Option<EnrollmentManifestTransferInput>,
     },
     RemoveSelectedDevice {
         #[serde(default)]
@@ -278,7 +289,10 @@ pub enum FieldId {
     ThresholdInput,
     Nickname,
     DeviceName,
+    DeviceSetupCode,
     DeviceImportCode,
+    DeviceImportManifest,
+    DeviceImportInitiatorVerifier,
     CapabilityFull,
     CapabilityPartial,
     CapabilityLimited,
@@ -290,6 +304,10 @@ impl FieldId {
         match self {
             Self::AccountName => Some("aura-account-name-input"),
             Self::DeviceImportCode => Some("aura-account-import-code-input"),
+            Self::DeviceImportManifest => Some("aura-device-import-manifest-input"),
+            Self::DeviceImportInitiatorVerifier => {
+                Some("aura-device-import-initiator-verifier-input")
+            }
             Self::InvitationCode => Some("aura-field-invitation-code"),
             Self::InvitationReceiver => Some("aura-field-invitation-receiver"),
             Self::InvitationType => Some("aura-field-invitation-type"),
@@ -303,6 +321,7 @@ impl FieldId {
             Self::ThresholdInput => Some("aura-field-threshold-input"),
             Self::Nickname => Some("aura-field-nickname"),
             Self::DeviceName => Some("aura-field-device-name"),
+            Self::DeviceSetupCode => Some("aura-field-device-setup-code"),
             Self::CapabilityFull => Some("aura-field-capability-full"),
             Self::CapabilityPartial => Some("aura-field-capability-partial"),
             Self::CapabilityLimited => Some("aura-field-capability-limited"),

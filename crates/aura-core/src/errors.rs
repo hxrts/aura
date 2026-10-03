@@ -9,99 +9,120 @@ use std::sync::Arc;
 type AuraErrorSource = Arc<dyn std::error::Error + Send + Sync>;
 
 /// Unified error type for all Aura operations
-#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuraError {
     /// Invalid input or configuration
-    #[error("Invalid: {message}")]
     Invalid {
         /// Error message describing the invalid input
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Resource not found
-    #[error("Not found: {message}")]
     NotFound {
         /// Error message describing what was not found
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Permission denied
-    #[error("Permission denied: {message}")]
     PermissionDenied {
         /// Error message describing the permission issue
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Cryptographic operation failed
-    #[error("Crypto error: {message}")]
     Crypto {
         /// Error message describing the cryptographic failure
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Network or transport error
-    #[error("Network error: {message}")]
     Network {
         /// Error message describing the network issue
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Serialization/deserialization error
-    #[error("Serialization error: {message}")]
     Serialization {
         /// Error message describing the serialization failure
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Storage operation failed
-    #[error("Storage error: {message}")]
     Storage {
         /// Error message describing the storage failure
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Internal system error
-    #[error("Internal error: {message}")]
     Internal {
         /// Error message describing the internal error
         message: String,
         /// Underlying source error when available.
-        #[source]
         #[serde(skip_serializing, skip_deserializing, default)]
         source: Option<AuraErrorSource>,
     },
 
     /// Terminal operation error
-    #[error("Terminal error: {0}")]
     Terminal(String),
+}
+
+// Implement source traversal explicitly: deriving Error for an Arc-backed source
+// exposes the Arc as the immediate error rather than the concrete cause.
+impl std::fmt::Display for AuraError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (prefix, message) = match self {
+            Self::Invalid { message, .. } => ("Invalid", message),
+            Self::NotFound { message, .. } => ("Not found", message),
+            Self::PermissionDenied { message, .. } => ("Permission denied", message),
+            Self::Crypto { message, .. } => ("Crypto error", message),
+            Self::Network { message, .. } => ("Network error", message),
+            Self::Serialization { message, .. } => ("Serialization error", message),
+            Self::Storage { message, .. } => ("Storage error", message),
+            Self::Internal { message, .. } => ("Internal error", message),
+            Self::Terminal(message) => ("Terminal error", message),
+        };
+        write!(formatter, "{prefix}: {message}")
+    }
+}
+
+impl std::error::Error for AuraError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        let source = match self {
+            Self::Invalid { source, .. }
+            | Self::NotFound { source, .. }
+            | Self::PermissionDenied { source, .. }
+            | Self::Crypto { source, .. }
+            | Self::Network { source, .. }
+            | Self::Serialization { source, .. }
+            | Self::Storage { source, .. }
+            | Self::Internal { source, .. } => source,
+            Self::Terminal(_) => return None,
+        };
+        source
+            .as_deref()
+            .map(|error| error as &(dyn std::error::Error + 'static))
+    }
 }
 
 /// Shared error code mapping for protocol-level errors.
@@ -204,6 +225,14 @@ impl AuraError {
         Self::Crypto {
             message: message.into(),
             source: None,
+        }
+    }
+
+    /// Create a crypto error while preserving its typed source.
+    pub fn crypto_with_source(message: impl Into<String>, source: AuraErrorSource) -> Self {
+        Self::Crypto {
+            message: message.into(),
+            source: Some(source),
         }
     }
 
@@ -415,6 +444,117 @@ impl From<crate::util::serialization::SerializationError> for AuraError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("concrete cause")]
+    struct ConcreteCause;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("outer cause")]
+    struct OuterCause {
+        #[source]
+        inner: ConcreteCause,
+    }
+
+    #[test]
+    fn every_source_variant_exposes_concrete_cause_after_clone() {
+        let source: AuraErrorSource = Arc::new(ConcreteCause);
+        let errors = [
+            AuraError::invalid_with_source("detail", source.clone()),
+            AuraError::not_found_with_source("detail", source.clone()),
+            AuraError::permission_denied_with_source("detail", source.clone()),
+            AuraError::crypto_with_source("detail", source.clone()),
+            AuraError::network_with_source("detail", source.clone()),
+            AuraError::serialization_with_source("detail", source.clone()),
+            AuraError::storage_with_source("detail", source.clone()),
+            AuraError::internal_with_source("detail", source),
+        ];
+        let expected = [
+            "Invalid: detail",
+            "Not found: detail",
+            "Permission denied: detail",
+            "Crypto error: detail",
+            "Network error: detail",
+            "Serialization error: detail",
+            "Storage error: detail",
+            "Internal error: detail",
+        ];
+        for (error, display) in errors.into_iter().zip(expected) {
+            assert_eq!(error.to_string(), display);
+            for candidate in [error.clone(), error] {
+                let cause = std::error::Error::source(&candidate).expect("concrete source");
+                assert!(cause.downcast_ref::<ConcreteCause>().is_some());
+                assert!(cause.source().is_none());
+            }
+        }
+        let terminal = AuraError::Terminal("detail".to_owned());
+        assert_eq!(terminal.to_string(), "Terminal error: detail");
+        assert!(std::error::Error::source(&terminal).is_none());
+        assert!(std::error::Error::source(&AuraError::crypto("detail")).is_none());
+    }
+
+    #[test]
+    fn io_source_preserves_concrete_kind_after_clone() {
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::ConnectionReset,
+        ] {
+            let error = AuraError::from(std::io::Error::new(kind, "original io"));
+            let cloned = error.clone();
+            let cause = std::error::Error::source(&cloned)
+                .expect("io source")
+                .downcast_ref::<std::io::Error>()
+                .expect("original concrete io error");
+            assert_eq!(cause.kind(), kind);
+            assert_eq!(cause.to_string(), "original io");
+        }
+    }
+
+    #[test]
+    fn standard_source_traversal_preserves_nested_cause() {
+        let error = AuraError::crypto_with_source(
+            "detail",
+            Arc::new(OuterCause {
+                inner: ConcreteCause,
+            }),
+        );
+        let first = std::error::Error::source(&error).expect("outer source");
+        assert!(first.downcast_ref::<OuterCause>().is_some());
+        let second = first.source().expect("inner source");
+        assert!(second.downcast_ref::<ConcreteCause>().is_some());
+        assert!(second.source().is_none());
+    }
+
+    #[test]
+    fn serde_preserves_error_shape_and_omits_process_local_source() {
+        let error = AuraError::crypto_with_source("detail", Arc::new(ConcreteCause));
+        let json = serde_json::to_value(&error).expect("serialize error");
+        assert_eq!(json, serde_json::json!({"Crypto": {"message": "detail"}}));
+        let decoded: AuraError = serde_json::from_value(json).expect("deserialize error");
+        assert_eq!(decoded.to_string(), error.to_string());
+        assert_eq!(decoded.code(), error.code());
+        assert!(std::error::Error::source(&decoded).is_none());
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn serialization_source_downcasts_to_original_parse_error() {
+        let parse_error =
+            serde_json::from_str::<serde_json::Value>("{not json").expect_err("invalid json");
+        let expected_line = parse_error.line();
+        let expected_column = parse_error.column();
+        let error = AuraError::from(parse_error);
+        let cloned = error.clone();
+        assert_eq!(cloned.to_string(), error.to_string());
+        let cause = std::error::Error::source(&cloned)
+            .expect("serialization source")
+            .downcast_ref::<serde_json::Error>()
+            .expect("original concrete json error");
+        assert!(cause.is_syntax());
+        assert_eq!(cause.line(), expected_line);
+        assert_eq!(cause.column(), expected_column);
+    }
 
     #[test]
     fn test_error_creation() {

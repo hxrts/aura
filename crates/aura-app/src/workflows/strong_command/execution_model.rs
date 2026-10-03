@@ -151,6 +151,11 @@ pub enum CommandTerminalReasonCode {
     Banned,
     Unavailable,
     OperationTimedOut,
+    CryptoFailure,
+    SerializationFailure,
+    StorageFailure,
+    JournalFailure,
+    ReactiveFailure,
     Internal,
 }
 
@@ -169,6 +174,11 @@ impl CommandTerminalReasonCode {
             Self::Banned => "banned",
             Self::Unavailable => "unavailable",
             Self::OperationTimedOut => "operation_timed_out",
+            Self::CryptoFailure => "crypto_failure",
+            Self::SerializationFailure => "serialization_failure",
+            Self::StorageFailure => "storage_failure",
+            Self::JournalFailure => "journal_failure",
+            Self::ReactiveFailure => "reactive_failure",
             Self::Internal => "internal",
         }
     }
@@ -306,5 +316,44 @@ const fn consistency_witness_label(witness: ConsistencyWitness) -> &'static str 
         ConsistencyWitness::Accepted => "accepted",
         ConsistencyWitness::Replicated => "replicated",
         ConsistencyWitness::Enforced => "enforced",
+    }
+}
+
+/// Typed internal plan category, independent of display wording.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidCommandPlanFamily {
+    Membership,
+    Moderation,
+    Moderator,
+    Specialized,
+}
+
+/// Required command execution faults retain their originating domain evidence.
+#[derive(Debug, thiserror::Error)]
+pub enum CommandExecutionFailure {
+    #[error("Command precondition failed: {0}")]
+    Precondition(#[source] super::resolve::CommandResolverError),
+    #[error("Missing channel scope for /{command}")]
+    MissingChannelScope { command: &'static str },
+    #[error("Invalid command plan for {family:?}")]
+    InvalidPlan { family: InvalidCommandPlanFamily },
+    #[error("Strong command execution requires the signals feature")]
+    FeatureUnavailable,
+}
+
+impl From<CommandExecutionFailure> for aura_core::AuraError {
+    fn from(error: CommandExecutionFailure) -> Self {
+        let message = error.to_string();
+        if matches!(error, CommandExecutionFailure::FeatureUnavailable) {
+            Self::Internal {
+                message,
+                source: Some(std::sync::Arc::new(error)),
+            }
+        } else {
+            Self::Invalid {
+                message,
+                source: Some(std::sync::Arc::new(error)),
+            }
+        }
     }
 }

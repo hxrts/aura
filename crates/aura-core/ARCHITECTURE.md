@@ -1,5 +1,7 @@
 # Aura Core (Layer 1)
 
+AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
+
 ## Purpose
 
 Single source of truth for domain types and effect trait definitions. Provides foundational algebraic types with zero dependencies on other Aura crates.
@@ -32,6 +34,15 @@ Single source of truth for domain types and effect trait definitions. Provides f
 ## Invariants
 
 - Zero internal dependencies (foundation constraint).
+- `AuraError` preserves each concrete process-local cause as its immediate
+  standard `Error::source`, including after cloning. Source traversal exposes
+  the original error rather than its shared storage wrapper. Serialized errors
+  retain their category and message but omit process-local source objects.
+- `crypto::tree_signing::validate_retained_threshold_key_package` checks a native
+  FROST package against the exact signer index, authenticated threshold policy,
+  complete public participant inventory, group key and derived verifying share.
+  It validates one local share without a quorum. Native public packages do not
+  encode the threshold; conversion defaults cannot establish policy evidence.
 - Effect trait definitions only (no implementations).
 - `ReactiveEffects::ensure_registered` requires atomic per-signal check-and-insert without resetting live values; registration under an existing ID with a different type is an error. Subscription to an unregistered signal fails explicitly.
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
@@ -161,3 +172,56 @@ cargo test -p aura-core --lib              # inline unit tests only
 - [Effect System](../../docs/103_effect_system.md) — effect trait design and handler rules
 - [Ownership Model](../../docs/122_ownership_model.md) — ownership taxonomy, reactive contract
 - [Testing Guide](../../docs/804_testing_guide.md) — ownership testing requirements
+
+## Native timeout failure provenance
+
+Required clock and sleep failures retain their original causes through `TimeoutBudgetError`, `TimeoutRunError`, and `RetryRunError`. A failed clock read cannot create deadline evidence. Serialized clock errors omit native sources. Source-bearing timeout errors no longer implement equality; policy uses exhaustive variants and stable codes. Converting deadline or attempt exhaustion to `AuraError` uses a source-bearing internal wrapper rather than the former source-less terminal string; the typed cause defines the outcome.
+
+### Profile lifetime ownership and immutable secure publication
+
+`ProfileStorageEffects` defines nonblocking storage-profile ownership through a non-Clone adapter resource lease. Ownership errors retain native sources; unsupported backends fail explicitly. The lease is infrastructure ownership and does not establish enrollment trust. `SecureStorageEffects::secure_store_immutable` distinguishes Created from AlreadyExists, never treating existence as equality or authorization. Created requires complete encrypted publication and durable acknowledgement; post-publication failures may leave a complete record requiring owned recovery. Default implementations report typed unsupported atomicity.
+
+The public profile effect trait is an infrastructure adapter interface, not an unforgeable trust witness. Production runtime construction accepts only the selected audited adapter's concrete private lease type. Browser errors explicitly convert foreign JS objects into typed operation/name/message diagnostics; those values never authorize domain outcomes. Deadline exhaustion and historical plaintext profile ambiguity are distinct typed failures.
+
+### Required deadline observations
+
+Timeout budgets retain their original deadline and share a latched physical-clock high-water observation across clones and child budgets. Rollback after progress is a typed required-clock failure, even when the new observation remains above the start. Timer exhaustion and rollback survive validated serialization; legacy records lacking observation state fail closed. Nonblocking observation contention is a separate ownership fault. Snapshot and expiration updates acquire the same short-lived guards atomically and never hold guards across await.
+
+### Required observation acknowledgment
+
+The checkpointed timeout executor waits for the owner acknowledgment after each observation, including rollback and timer exhaustion, before polling the operation or returning its result. Cancellation before acknowledgment cannot continue the operation. Historical snapshot validation checks frozen bounds and sticky failure state without treating recorded time as a fresh clock observation; that pure check grants no authority.
+
+### Native identity query failures
+
+Device leaf metadata decoding preserves the canonical codec source inside `AuraError::Serialization`; an empty legacy metadata value remains explicit absence, while malformed nonempty metadata is a required-read failure.
+
+## Shared window arithmetic
+
+`types::window` owns sealed physical-millisecond and receipt-generation coordinates with validated half-open intervals. This pure contract proves bounds and domain separation, not admission or checkpoint provenance. Physical timeout ownership keeps its fixed deadline, sticky observations and required durable acknowledgment; flow allowance ownership keeps epoch progression and previous-window receipt policy. No common interval method renews a budget.
+
+Required timeout checkpoints preserve storage and codec causes in `TimeoutBudgetError::CheckpointFailure`. This failure does not represent clock unavailability or elapsed time. Native and semantic classification follows its retained cause; unclassified checkpoint faults remain internal. Serialized diagnostics omit native error sources and grant no checkpoint authority.
+
+### Canonical codec failure provenance
+
+Required canonical serialization retains the original concrete ciborium failure through the standard error source chain. Display diagnostics keep their existing prefixes; pure canonical-format validation failures have no invented codec source. Canonical bytes and strict decoding rules are unchanged. Native semantic classification remains SerializationFailure, including when a codec cause is carried through storage or checkpoint context. Serialized presentation diagnostics do not establish native failure provenance.
+
+### VM send custody contract
+
+`VmBridgeEffects` exposes an observational pending-send snapshot and exclusive
+`VmBridgeSendLease` acquisition. The move-owned lease acknowledges only an
+in-flight frame; unknown delivery, concurrent ownership and invalid transitions
+are distinct typed failures. No destructive queue-drain escape is exposed.
+
+### Asynchronous timeout observation ordering
+
+Timeout clock owners share a nonblocking observation lease across clones and
+children. Required physical reads, high-water updates, and checkpoint
+acknowledgments execute in that owner order. Pure snapshot guards remain short
+and do not cross awaits. The async lease is released before the owned operation
+or timer is awaited and on cancellation; it never renews a deadline or grants
+admission authority. Deterministic interleaved-read tests distinguish genuine
+rollback from delayed earlier queries.
+
+### Required task outcome contract
+
+`TaskSpawner` and `OwnedTaskSpawner` distinguish unit background work from required cancellable work returning `Result<(), AuraError>`. Required admission returns a native error immediately when the adapter cannot supervise it or the runtime owner has closed admission. Unsupported adapters cannot acknowledge successful required admission. The owned facade rejects unit futures for required work; its compile-fail guard enforces that distinction.

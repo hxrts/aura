@@ -55,6 +55,15 @@ pub struct DeviceEnrollmentStart {
     pub pending_epoch: Epoch,
     /// Device id being enrolled.
     pub device_id: DeviceId,
+    /// Separate confirmation transfer; absence is explicit unsupported runtime.
+    pub manifest_transfer: Option<EnrollmentManifestTransferCodes>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnrollmentManifestTransferCodes {
+    pub manifest_code: String,
+    /// The user transfers this separately from the enrollment payload.
+    pub initiator_verifier_code: String,
 }
 
 /// Status of a key-rotation / membership-change ceremony.

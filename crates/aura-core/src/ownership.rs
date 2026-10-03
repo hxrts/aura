@@ -485,7 +485,7 @@ impl TraceContext {
 }
 
 /// Typed timeout budget surface for operation ownership contexts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum OperationTimeoutBudget {
     Configured(TimeoutBudget),
     DeferredLocalPolicy,
@@ -583,6 +583,41 @@ impl OwnedTaskSpawner {
             .cloned()
             .unwrap_or_else(|| Arc::new(NeverCancel));
         self.inner.spawn_cancellable(fut, token);
+    }
+
+    /// Spawn required work without lowering its typed outcome to unit.
+    /// ```compile_fail
+    /// use aura_core::OwnedTaskSpawner;
+    /// fn discard_failure(spawner: &OwnedTaskSpawner) {
+    ///     let _ = spawner.spawn_fallible_cancellable("required", Box::pin(async {}));
+    /// }
+    /// ```
+    pub fn spawn_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, Result<(), crate::AuraError>>,
+    ) -> Result<(), crate::AuraError> {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner.spawn_fallible_cancellable(name, fut, token)
+    }
+
+    /// Spawn thread-local required work under the same failure contract.
+    pub fn spawn_local_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: LocalBoxFuture<'static, Result<(), crate::AuraError>>,
+    ) -> Result<(), crate::AuraError> {
+        let token = self
+            .shutdown
+            .raw()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(NeverCancel));
+        self.inner
+            .spawn_local_fallible_cancellable(name, fut, token)
     }
 
     pub fn spawn_local(&self, fut: LocalBoxFuture<'static, ()>) {

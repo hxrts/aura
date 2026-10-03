@@ -112,10 +112,13 @@ async fn test_device_management() {
         .ctx
         .dispatch(EffectCommand::AddDevice {
             nickname_suggestion: "TestPhone".to_string(),
-            invitee_authority_id: aura_core::AuthorityId::new_from_entropy([19u8; 32]),
+            setup_code: String::new(),
         })
         .await;
-    assert!(add_result.is_ok());
+    assert!(
+        add_result.is_err(),
+        "mock runtime cannot mint verified setup trust"
+    );
 
     let remove_result = env
         .ctx

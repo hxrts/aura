@@ -162,11 +162,17 @@ pub struct ClipboardPayload {
     pub text: String,
 }
 
+/// Exact setup code exported by the selected invitee runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceEnrollmentSetupPayload {
+    pub setup_code: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorityIdSource {
     Backend,
-    PreparedInviteeAuthority,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +212,7 @@ pub enum ToolPayload {
     ContactInvitationCreated(ContactInvitationCreatedPayload),
     TailLog(TailLogPayload),
     Clipboard(ClipboardPayload),
+    DeviceEnrollmentSetup(DeviceEnrollmentSetupPayload),
     AuthorityId(AuthorityIdPayload),
     DiagnosticChannels(DiagnosticChannelListPayload),
     DiagnosticSelection(DiagnosticSelectionPayload),
@@ -285,7 +292,7 @@ pub enum ToolRequest {
     ReadClipboard {
         instance_id: String,
     },
-    PrepareDeviceEnrollmentInviteeAuthority {
+    PrepareDeviceEnrollmentSetup {
         instance_id: String,
     },
     GetAuthorityId {
@@ -389,12 +396,9 @@ impl ToolApi {
             .submit_semantic_command_via_ui(instance_id, request)
     }
 
-    pub fn prepare_device_enrollment_invitee_authority(
-        &mut self,
-        instance_id: &str,
-    ) -> anyhow::Result<String> {
+    pub fn prepare_device_enrollment_setup(&mut self, instance_id: &str) -> anyhow::Result<String> {
         self.coordinator
-            .prepare_device_enrollment_invitee_authority(instance_id)
+            .prepare_device_enrollment_setup(instance_id)
     }
 
     pub fn current_authority_id(&mut self, instance_id: &str) -> anyhow::Result<String> {
@@ -591,14 +595,11 @@ impl ToolApi {
                 .coordinator
                 .read_clipboard(&instance_id)
                 .map(|text| ToolPayload::Clipboard(ClipboardPayload { text })),
-            ToolRequest::PrepareDeviceEnrollmentInviteeAuthority { instance_id } => self
+            ToolRequest::PrepareDeviceEnrollmentSetup { instance_id } => self
                 .coordinator
-                .prepare_device_enrollment_invitee_authority(&instance_id)
-                .map(|authority_id| {
-                    ToolPayload::AuthorityId(AuthorityIdPayload {
-                        authority_id,
-                        source: AuthorityIdSource::PreparedInviteeAuthority,
-                    })
+                .prepare_device_enrollment_setup(&instance_id)
+                .map(|setup_code| {
+                    ToolPayload::DeviceEnrollmentSetup(DeviceEnrollmentSetupPayload { setup_code })
                 }),
             ToolRequest::GetAuthorityId { instance_id } => self
                 .coordinator

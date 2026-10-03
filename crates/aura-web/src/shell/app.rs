@@ -1,7 +1,6 @@
 use async_lock::Mutex;
 use aura_app::frontend_primitives::FrontendUiOperation as WebUiOperation;
 use aura_app::ui::contract::{ControlId, FieldId, ScreenId, UiReadiness};
-use aura_app::ui::workflows::runtime as runtime_workflows;
 use aura_app::ui_contract::RuntimeFact;
 use aura_app::DUAL_FRONTEND_DEMO_WEB_TABLET_NAME;
 use aura_app::{BootstrapCandidateInfo, BootstrapCandidateOrigin};
@@ -16,16 +15,12 @@ use crate::error::{log_web_error, WebUiError};
 use crate::harness_bridge;
 use crate::shell_host::{BootstrapState, WebShellHost};
 use crate::task_owner::shared_web_task_owner;
-use crate::workflows::{
-    self, AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
-    RebootstrapPolicy,
-};
+use crate::workflows::{self, AccountCreationStageMode};
 
 use super::bootstrap::submit_runtime_bootstrap_handoff;
 use super::storage::{
     active_storage_prefix, clear_demo_tablet_enrollment_code, demo_tablet_enrollment_code_key,
-    dual_demo_web_enabled, load_selected_runtime_identity, logged_optional,
-    persist_demo_tablet_enrollment_code, selected_runtime_identity_key,
+    dual_demo_web_enabled, persist_demo_tablet_enrollment_code,
 };
 use crate::browser_promises::browser_sleep_ms;
 
@@ -154,6 +149,8 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
     let mut account_error = use_signal(|| Option::<WebUiError>::None);
     let creating_account = use_signal(|| false);
     let mut import_code = use_signal(String::new);
+    let mut import_manifest = use_signal(String::new);
+    let mut import_initiator_verifier = use_signal(String::new);
     let mut import_error = use_signal(|| Option::<WebUiError>::None);
     let importing_code = use_signal(|| false);
     let mut auto_import_started = use_signal(|| false);
@@ -273,185 +270,51 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
 
     let run_import: Arc<dyn Fn(String)> = Arc::new({
         let controller = controller.clone();
-        let demo_tablet_storage_key = demo_tablet_storage_key.clone();
         let import_error = import_error.clone();
         let importing_code = importing_code.clone();
+        let import_manifest = import_manifest.clone();
+        let import_initiator_verifier = import_initiator_verifier.clone();
         move |code: String| {
-            let mut import_error = import_error.clone();
-            let mut importing_code = importing_code.clone();
             if importing_code() {
                 return;
             }
-
-            let storage_prefix = active_storage_prefix();
+            let mut importing_code = importing_code.clone();
+            let mut import_error = import_error.clone();
             importing_code.set(true);
             import_error.set(None);
-
+            let manifest_transfer = Some(aura_app::ui::contract::EnrollmentManifestTransferInput {
+                manifest_code: import_manifest(),
+                initiator_verifier_code: import_initiator_verifier(),
+            });
+            let (handle, transfer) = aura_ui::semantic_lifecycle::begin_exact_handoff_operation(
+                controller.clone(),
+                aura_app::ui::contract::OperationId::device_enrollment(),
+                aura_app::ui::contract::SemanticOperationKind::ImportDeviceEnrollmentCode,
+                aura_ui::semantic_lifecycle::UiOperationTransferScope::ImportDeviceEnrollment,
+            );
+            let instance = Some(handle.instance_id.clone());
             let controller = controller.clone();
-            let scheduled_controller = controller.clone();
-            let demo_tablet_storage_key = demo_tablet_storage_key.clone();
-            if let Err(error) = harness_bridge::schedule_browser_task_next_tick(move || {
-                shared_web_task_owner().spawn_local(async move {
-                    let app_core = scheduled_controller.app_core().clone();
-                    let result: Result<_, WebUiError> = async {
-                        let current_authority = runtime_workflows::require_runtime(&app_core)
-                            .await
-                            .map_err(|error| {
-                                WebUiError::operation(
-                                    WebUiOperation::ImportDeviceEnrollmentCode,
-                                    "WEB_RUNTIME_REQUIRED_FAILED",
-                                    error.to_string(),
-                                )
-                            })?
-                            .authority_id();
-                        let current_runtime_identity = CurrentRuntimeIdentity {
-                            authority_id: current_authority,
-                            selected_runtime_identity: logged_optional(
-                                load_selected_runtime_identity(&selected_runtime_identity_key(
-                                    &storage_prefix,
-                                )),
-                            ),
-                        };
-                        let result = workflows::accept_device_enrollment_import(
-                            &app_core,
-                            DeviceEnrollmentImportRequest {
-                                code: &code,
-                                current_runtime_identity: current_runtime_identity.clone(),
-                                storage_prefix: &storage_prefix,
-                                rebootstrap_policy: RebootstrapPolicy::StageIfRequired,
-                                operation: WebUiOperation::ImportDeviceEnrollmentCode,
-                            },
-                        )
-                        .await?;
-                        if result.rebootstrap_required {
-                            let staged_runtime_identity = result.staged_runtime_identity.clone();
-                            let selected_runtime_identity =
-                                current_runtime_identity.selected_runtime_identity;
-                            let device_id = staged_runtime_identity.device_id;
-                            let subject_authority = staged_runtime_identity.authority_id;
-                            web_sys::console::log_1(
-                                &format!(
-                                    "[web-import-device] staging_rebootstrap current_authority={};subject_authority={};selected_runtime_identity={:?};invited_device={}",
-                                    current_authority,
-                                    subject_authority,
-                                    selected_runtime_identity,
-                                    device_id
-                                )
-                                .into(),
-                            );
-                            web_sys::console::log_1(
-                                &format!(
-                                    "[web-import-device] staged_rebootstrap subject_authority={};device_id={}",
-                                    subject_authority, device_id
-                                )
-                                .into(),
-                            );
-                            submit_runtime_bootstrap_handoff(
-                                harness_bridge::BootstrapHandoff::RuntimeIdentityStaged {
-                                    authority_id: subject_authority,
-                                    device_id,
-                                    source: harness_bridge::RuntimeIdentityStageSource::ImportDeviceEnrollment,
-                                },
-                            )
-                            .await
-                            .map_err(|error| {
-                                error.with_operation(WebUiOperation::ImportDeviceEnrollmentCode)
-                            })?;
-                            return Ok(result);
-                        }
-                        web_sys::console::log_1(
-                            &format!(
-                                "[web-import-device] accepting_on_bound_runtime authority={};selected_runtime_identity={:?};invited_device={}",
-                                current_authority,
-                                current_runtime_identity.selected_runtime_identity,
-                                result.staged_runtime_identity.device_id
-                            )
-                            .into(),
-                        );
-                        web_sys::console::log_1(
-                            &format!(
-                                "[web-import-device] initializing_runtime_account nickname={}",
-                                result.bootstrap_name
-                            )
-                            .into(),
-                        );
-                        Ok(result)
-                    }
-                    .await;
-
-                    // Guard signal writes — component may have unmounted during async work.
-                    match result {
-                        Ok(result) => {
-                            if result.accepted {
-                                if dual_demo_web_enabled() {
-                                    let _ =
-                                        clear_demo_tablet_enrollment_code(&demo_tablet_storage_key);
-                                }
-                                web_sys::console::log_1(&"[web-import-device] finalizing_ui".into());
-                                scheduled_controller.info_toast("Device enrollment complete");
-                                scheduled_controller.finalize_account_setup(ScreenId::Neighborhood);
-                                harness_bridge::publish_semantic_controller_snapshot(
-                                    scheduled_controller.clone(),
-                                );
-                                web_sys::console::log_1(&"[web-import-device] finalized_ui".into());
-                            } else {
-                                scheduled_controller
-                                    .info_toast("Switching runtime to finish import");
-                            }
-                            write_signal_with_retry(
-                                importing_code,
-                                false,
-                                WebUiOperation::ImportDeviceEnrollmentCode,
-                                "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                                "clear importing_code after device enrollment import",
-                            );
-                        }
-                        Err(error) => {
-                            let message = error.user_message();
-                            scheduled_controller.set_account_setup_state(
-                                false,
-                                "",
-                                Some(message.clone()),
-                            );
-                            write_signal_with_retry(
-                                import_error,
-                                Some(error),
-                                WebUiOperation::ImportDeviceEnrollmentCode,
-                                "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                                "publish device enrollment import error",
-                            );
-                            write_signal_with_retry(
-                                importing_code,
-                                false,
-                                WebUiOperation::ImportDeviceEnrollmentCode,
-                                "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                                "clear importing_code after device enrollment import error",
-                            );
+            shared_web_task_owner().spawn_local(async move {
+                let app=controller.app_core().clone();
+                let result=transfer.run_workflow(controller.clone(),"import_device_enrollment",
+                    aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
+                        &app,code,manifest_transfer,instance)).await;
+                match result {
+                    Ok(completed)=>{
+                        match workflows::persist_completed_enrollment_identity(&app,&completed,&active_storage_prefix()).await {
+                            Ok(())=>controller.finalize_account_setup(ScreenId::Neighborhood),
+                            Err(error)=>{controller.runtime_error_toast(error.user_message());import_error.set(Some(error));}
                         }
                     }
-                });
-            }) {
-                let error = WebUiError::operation(
-                    WebUiOperation::ImportDeviceEnrollmentCode,
-                    "WEB_DEVICE_ENROLLMENT_SCHEDULE_FAILED",
-                    format!("{error:?}"),
-                );
-                controller.set_account_setup_state(false, "", Some(error.user_message()));
-                write_signal_with_retry(
-                    import_error,
-                    Some(error),
-                    WebUiOperation::ImportDeviceEnrollmentCode,
-                    "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                    "publish device enrollment scheduling error",
-                );
-                write_signal_with_retry(
-                    importing_code,
-                    false,
-                    WebUiOperation::ImportDeviceEnrollmentCode,
-                    "WEB_DEVICE_ENROLLMENT_SIGNAL_WRITE_FAILED",
-                    "clear importing_code after device enrollment scheduling error",
-                );
-            }
+                    Err(error)=>{
+                        let error=WebUiError::operation(WebUiOperation::ImportDeviceEnrollmentCode,
+                            "WEB_DEVICE_ENROLLMENT_IMPORT_FAILED",error.to_string()).with_source(error);
+                        controller.set_account_setup_state(false,"",Some(error.user_message()));
+                        import_error.set(Some(error));
+                    }
+                }
+                importing_code.set(false);
+            });
         }
     });
 
@@ -722,6 +585,28 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 },
                             }
                         }
+                        label {
+                            class:"block space-y-2",
+                            span {"Signed enrollment manifest"}
+                            input {
+                                id:FieldId::DeviceImportManifest.required_dom_id("FieldId::DeviceImportManifest"),
+                                class:"w-full rounded-md border bg-background px-3 py-2 text-sm",
+                                value:"{import_manifest()}",placeholder:"Paste signed manifest code...",
+                                disabled:importing_code(),
+                                oninput:move |event|{import_manifest.set(event.value());import_error.set(None);},
+                            }
+                        }
+                        label {
+                            class:"block space-y-2",
+                            span {"Initiator verifier (separate transfer)"}
+                            input {
+                                id:FieldId::DeviceImportInitiatorVerifier.required_dom_id("FieldId::DeviceImportInitiatorVerifier"),
+                                class:"w-full rounded-md border bg-background px-3 py-2 text-sm",
+                                value:"{import_initiator_verifier()}",placeholder:"Paste separately transferred verifier...",
+                                disabled:importing_code(),
+                                oninput:move |event|{import_initiator_verifier.set(event.value());import_error.set(None);},
+                            }
+                        }
                         if let Some(error) = import_error() {
                             p { class: "text-sm text-destructive", "{error.user_message()}" }
                         }
@@ -730,7 +615,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                                 id: ControlId::OnboardingImportDeviceButton
                                     .required_dom_id("ControlId::OnboardingImportDeviceButton"),
                                 class: "inline-flex h-10 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50",
-                                disabled: importing_code() || import_code().trim().is_empty(),
+                                disabled: importing_code() || import_code().trim().is_empty() || import_manifest().trim().is_empty() || import_initiator_verifier().trim().is_empty(),
                                 onclick: submit_import,
                                 if importing_code() {
                                     "Joining Account..."

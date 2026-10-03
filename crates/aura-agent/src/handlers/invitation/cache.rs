@@ -84,7 +84,7 @@ impl<'a> InvitationCacheHandler<'a> {
         )
     }
 
-    fn secret_payload_location(
+    pub(super) fn secret_payload_location(
         authority_id: AuthorityId,
         invitation_id: &InvitationId,
         kind: &'static str,
@@ -100,7 +100,7 @@ impl<'a> InvitationCacheHandler<'a> {
         matches!(invitation_type, InvitationType::DeviceEnrollment { .. })
     }
 
-    fn redact_device_enrollment_payload(invitation: &Invitation) -> Invitation {
+    pub(super) fn redact_device_enrollment_payload(invitation: &Invitation) -> Invitation {
         let mut redacted = invitation.clone();
         if let InvitationType::DeviceEnrollment {
             key_package,

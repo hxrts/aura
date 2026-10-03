@@ -115,7 +115,8 @@ use channel_refs::ensure_channel_visible_after_join;
 pub(in crate::workflows) use channel_refs::{
     apply_authoritative_membership_projection, authoritative_join_member_count_if_joined,
     authoritative_recipient_peers_for_channel, context_id_for_channel,
-    runtime_channel_state_exists, wait_for_runtime_channel_state,
+    runtime_amp_duplicate_is_reconciled, runtime_channel_state_exists,
+    wait_for_runtime_channel_state,
 };
 pub use channel_refs::{
     authoritative_channel_ref, current_home_channel_id, current_home_channel_ref,
@@ -182,33 +183,31 @@ async fn timeout_workflow_stage_with_deadline<T>(
     deadline: Option<TimeoutBudget>,
     future: impl Future<Output = Result<T, AuraError>>,
 ) -> Result<T, AuraError> {
-    let requested = deadline
-        .map(|deadline| {
-            Duration::from_millis(deadline.timeout_ms())
-                .min(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS))
-        })
-        .unwrap_or(Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS));
-    let budget = match workflow_timeout_budget(runtime, requested).await {
-        Ok(budget) => budget,
-        Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-            warn_workflow_timeout(operation, stage, 0);
-            return Err(AuraError::from(super::error::WorkflowError::TimedOut {
-                operation,
-                stage,
-                timeout_ms: 0,
-            }));
+    let requested = Duration::from_millis(INVITE_USER_STAGE_TIMEOUT_MS);
+    let budget = match deadline.as_ref() {
+        Some(parent) => {
+            let now = runtime
+                .current_time_ms()
+                .await
+                .map_err(TimeoutBudgetError::time_source_failure)?;
+            parent.child_budget(
+                &aura_core::time::PhysicalTime::exact(now),
+                crate::workflows::runtime::scaled_workflow_duration(requested)?,
+            )?
         }
-        Err(error) => return Err(error.into()),
+        None => workflow_timeout_budget(runtime, requested).await?,
     };
     match execute_with_runtime_timeout_budget(runtime, &budget, || future).await {
         Ok(value) => Ok(value),
-        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+        Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout(operation, stage, budget.timeout_ms());
-            Err(AuraError::from(super::error::WorkflowError::TimedOut {
-                operation,
-                stage,
-                timeout_ms: budget.timeout_ms(),
-            }))
+            Err(AuraError::Internal {
+                message: format!(
+                    "{operation} timed out in stage {stage} after {}ms",
+                    budget.timeout_ms()
+                ),
+                source: Some(Arc::new(source)),
+            })
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
@@ -233,8 +232,13 @@ async fn messaging_backend(app_core: &Arc<RwLock<AppCore>>) -> MessagingBackend 
     }
 }
 
-pub(crate) fn is_amp_channel_state_unavailable(error: &impl std::fmt::Display) -> bool {
-    classify_amp_channel_error(error) == AmpChannelErrorClass::ChannelStateUnavailable
+pub(crate) fn is_amp_channel_state_unavailable(
+    error: &(impl std::error::Error + 'static),
+    context: ContextId,
+    channel: ChannelId,
+) -> bool {
+    classify_amp_channel_error(error, context, channel)
+        == AmpChannelErrorClass::ChannelStateUnavailable
 }
 
 /// Create a deterministic ChannelId from a DM channel descriptor string
@@ -394,7 +398,7 @@ fn join_error_is_not_found(error: &AuraError) -> bool {
         || lowered.contains("no such channel")
 }
 
-fn intent_error_is_not_found(error: &IntentError) -> bool {
+fn intent_error_is_not_found(error: &(impl std::error::Error + 'static)) -> bool {
     validation::intent_error_is_not_found(error)
 }
 

@@ -6,6 +6,7 @@ use super::types::{
 };
 #[cfg(test)]
 use super::types::{OfflineAcceptInvitationResult, OfflineProcessCeremonyResult};
+use super::RuntimeBridgeError;
 use super::{
     AuthenticationStatus, AuthoritativeModerationStatus, BootstrapCandidateInfo,
     BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome, CeremonyStatus,
@@ -35,7 +36,35 @@ use aura_journal::DomainFact;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+#[cfg(test)]
+type OfflineChannelStateAnswers = Arc<
+    Mutex<
+        HashMap<
+            (ContextId, ChannelId),
+            std::collections::VecDeque<Result<bool, RuntimeBridgeError>>,
+        >,
+    >,
+>;
+
+#[cfg(test)]
+type OfflineAmpCreateResults =
+    Arc<Mutex<std::collections::VecDeque<Result<ChannelId, super::RuntimeBridgeError>>>>;
+#[cfg(test)]
+type OfflineAmpJoinResults =
+    Arc<Mutex<std::collections::VecDeque<Result<(), super::RuntimeBridgeError>>>>;
+
+#[cfg(test)]
+type OfflineClockAnswers = Arc<Mutex<std::collections::VecDeque<Result<u64, RuntimeBridgeError>>>>;
+#[cfg(test)]
+type OfflineSleepAnswers = Arc<Mutex<std::collections::VecDeque<Result<(), RuntimeBridgeError>>>>;
+
 pub struct OfflineRuntimeBridge {
+    #[cfg(test)]
+    clock_answers: OfflineClockAnswers,
+    #[cfg(test)]
+    sleep_answers: OfflineSleepAnswers,
+    #[cfg(test)]
+    background_refresh_failure: Arc<Mutex<Option<RuntimeBridgeError>>>,
     authority_id: AuthorityId,
     reactive: ReactiveHandler,
     task_spawner: OwnedTaskSpawner,
@@ -44,6 +73,16 @@ pub struct OfflineRuntimeBridge {
     canonical_channel_creations: Arc<Mutex<HashMap<(ContextId, ChannelId), ChatFact>>>,
     materialized_channel_name_matches: MaterializedChannelNameMatches,
     amp_channel_states: AmpChannelStates,
+    #[cfg(test)]
+    amp_channel_state_answers: OfflineChannelStateAnswers,
+    #[cfg(test)]
+    amp_join_calls: Arc<Mutex<usize>>,
+    #[cfg(test)]
+    amp_create_calls: Arc<Mutex<usize>>,
+    #[cfg(test)]
+    amp_create_results: OfflineAmpCreateResults,
+    #[cfg(test)]
+    amp_join_results: OfflineAmpJoinResults,
     amp_channel_participants: AmpChannelParticipants,
     moderation_statuses: ModerationStatuses,
     #[cfg(test)]
@@ -58,13 +97,106 @@ pub struct OfflineRuntimeBridge {
 
 impl OfflineRuntimeBridge {
     #[cfg(test)]
+    pub(crate) fn queue_clock_answers(&self, answers: Vec<Result<u64, RuntimeBridgeError>>) {
+        *self
+            .clock_answers
+            .try_lock()
+            .expect("clock fixture not concurrently borrowed") = answers.into();
+    }
+    #[cfg(test)]
+    pub(crate) fn queue_sleep_answers(&self, answers: Vec<Result<(), RuntimeBridgeError>>) {
+        *self
+            .sleep_answers
+            .try_lock()
+            .expect("sleep fixture not concurrently borrowed") = answers.into();
+    }
+
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn queue_amp_create_results(
+        &self,
+        results: Vec<Result<ChannelId, super::RuntimeBridgeError>>,
+    ) {
+        self.amp_create_results
+            .try_lock()
+            .expect("creation fixture is idle")
+            .extend(results);
+    }
+
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn queue_amp_join_results(
+        &self,
+        results: Vec<Result<(), super::RuntimeBridgeError>>,
+    ) {
+        self.amp_join_results
+            .try_lock()
+            .expect("join fixture is idle")
+            .extend(results);
+    }
+
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn amp_create_call_count(&self) -> usize {
+        *self
+            .amp_create_calls
+            .try_lock()
+            .expect("creation fixture is idle")
+    }
+
+    /// Queue exact query outcomes to exercise a later required read failing
+    /// after an earlier read completed. Unqueued reads keep normal bridge behavior.
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn queue_amp_channel_state_answers(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+        answers: Vec<Result<bool, RuntimeBridgeError>>,
+    ) {
+        self.amp_channel_state_answers
+            .try_lock()
+            .expect("channel state answer fixture is not concurrently borrowed")
+            .insert((context, channel), answers.into());
+    }
+
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn remaining_amp_channel_state_answers(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> usize {
+        self.amp_channel_state_answers
+            .try_lock()
+            .expect("channel state answer fixture is not concurrently borrowed")
+            .get(&(context, channel))
+            .map_or(0, std::collections::VecDeque::len)
+    }
+
+    #[cfg(all(test, feature = "signals"))]
+    pub(crate) fn amp_join_call_count(&self) -> usize {
+        *self
+            .amp_join_calls
+            .try_lock()
+            .expect("join call fixture is not concurrently borrowed")
+    }
+
+    #[cfg(test)]
     pub(crate) fn use_test_task_spawner(&mut self, spawner: OwnedTaskSpawner) {
         self.task_spawner = spawner;
     }
 
+    #[cfg(test)]
+    pub(crate) async fn fail_next_background_refresh(&self, source: RuntimeBridgeError) {
+        *self.background_refresh_failure.lock().await = Some(source);
+    }
+
     /// Create a new offline runtime bridge
+
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {
+            #[cfg(test)]
+            clock_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            sleep_answers: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            background_refresh_failure: Arc::new(Mutex::new(None)),
             authority_id,
             reactive: ReactiveHandler::new(),
             task_spawner: OwnedTaskSpawner::new(
@@ -76,6 +208,16 @@ impl OfflineRuntimeBridge {
             canonical_channel_creations: Arc::new(Mutex::new(HashMap::new())),
             materialized_channel_name_matches: Arc::new(Mutex::new(HashMap::new())),
             amp_channel_states: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            amp_channel_state_answers: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(test)]
+            amp_join_calls: Arc::new(Mutex::new(0)),
+            #[cfg(test)]
+            amp_create_calls: Arc::new(Mutex::new(0)),
+            #[cfg(test)]
+            amp_create_results: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            #[cfg(test)]
+            amp_join_results: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             amp_channel_participants: Arc::new(Mutex::new(HashMap::new())),
             moderation_statuses: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
@@ -245,7 +387,7 @@ impl OfflineRuntimeBridge {
     /// Configure the result returned by `accept_invitation`.
     pub fn set_accept_invitation_result(
         &self,
-        result: Result<InvitationMutationOutcome, IntentError>,
+        result: Result<InvitationMutationOutcome, super::RuntimeBridgeError>,
     ) {
         let mut guard = self
             .accept_invitation_result
@@ -344,8 +486,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn amp_create_channel(
         &self,
         _params: ChannelCreateParams,
-    ) -> Result<ChannelId, IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    ) -> Result<ChannelId, crate::runtime_bridge::RuntimeBridgeError> {
+        #[cfg(test)]
+        {
+            *self.amp_create_calls.lock().await += 1;
+            if let Some(result) = self.amp_create_results.lock().await.pop_front() {
+                return result;
+            }
+        }
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
     async fn amp_create_channel_bootstrap(
@@ -353,26 +502,35 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
         _recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, IntentError> {
-        Err(IntentError::no_agent(
-            "AMP bootstrap not available in offline mode",
-        ))
+    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError> {
+        Err(IntentError::no_agent("AMP bootstrap not available in offline mode").into())
     }
 
     async fn amp_channel_state_exists(
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<bool, IntentError> {
+    ) -> Result<bool, RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(answer) = self
+            .amp_channel_state_answers
+            .lock()
+            .await
+            .get_mut(&(context, channel))
+            .and_then(std::collections::VecDeque::pop_front)
+        {
+            return answer;
+        }
         self.amp_channel_states
             .lock()
             .await
             .get(&(context, channel))
             .copied()
             .ok_or_else(|| {
-                IntentError::no_agent(format!(
+                let error = IntentError::no_agent(format!(
                     "authoritative AMP state unavailable in offline mode for channel {channel} in context {context}"
-                ))
+                ));
+                RuntimeBridgeError::with_source(error.clone(), error)
             })
     }
 
@@ -380,7 +538,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Vec<AuthorityId>, IntentError> {
+    ) -> Result<Vec<AuthorityId>, RuntimeBridgeError> {
         self.amp_channel_participants
             .lock()
             .await
@@ -389,7 +547,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
             .ok_or_else(|| {
                 IntentError::no_agent(format!(
                     "authoritative AMP participants unavailable in offline mode for channel {channel} in context {context}"
-                ))
+                )).into()
             })
     }
 
@@ -397,7 +555,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Option<crate::ui_contract::AmpChannelTransitionSnapshot>, IntentError> {
+    ) -> Result<Option<crate::ui_contract::AmpChannelTransitionSnapshot>, RuntimeBridgeError> {
         let _ = (context, channel);
         Ok(None)
     }
@@ -408,7 +566,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         channel_id: ChannelId,
         authority_id: AuthorityId,
         _current_time_ms: u64,
-    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+    ) -> Result<AuthoritativeModerationStatus, RuntimeBridgeError> {
         self.moderation_statuses
             .lock()
             .await
@@ -418,13 +576,13 @@ impl RuntimeBridge for OfflineRuntimeBridge {
                 IntentError::no_agent(format!(
                     "authoritative moderation status unavailable in offline mode for channel {channel_id} in context {context_id}"
                 ))
-            })
+            }).map_err(RuntimeBridgeError::from)
     }
 
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
-    ) -> Result<Option<ContextId>, IntentError> {
+    ) -> Result<Option<ContextId>, RuntimeBridgeError> {
         self.amp_channel_contexts
             .lock()
             .await
@@ -435,6 +593,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
                 IntentError::no_agent(format!(
                     "authoritative AMP context unavailable in offline mode for channel {channel}"
                 ))
+                .into()
             })
     }
 
@@ -463,7 +622,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<ChannelId>, IntentError> {
+    ) -> Result<Vec<ChannelId>, RuntimeBridgeError> {
         self.materialized_channel_name_matches
             .lock()
             .await
@@ -472,27 +631,43 @@ impl RuntimeBridge for OfflineRuntimeBridge {
             .ok_or_else(|| {
                 IntentError::no_agent(format!(
                     "materialized channel-name lookup unavailable in offline mode for channel {channel_name}"
-                ))
+                )).into()
             })
     }
 
     async fn amp_repair_local_channel_membership(
         &self,
         _params: ChannelJoinParams,
-    ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
-    async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    async fn amp_close_channel(
+        &self,
+        _params: ChannelCloseParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
-    async fn amp_join_channel(&self, _params: ChannelJoinParams) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    async fn amp_join_channel(
+        &self,
+        _params: ChannelJoinParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        #[cfg(test)]
+        {
+            *self.amp_join_calls.lock().await += 1;
+            if let Some(result) = self.amp_join_results.lock().await.pop_front() {
+                return result;
+            }
+        }
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
-    async fn amp_leave_channel(&self, _params: ChannelLeaveParams) -> Result<(), IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    async fn amp_leave_channel(
+        &self,
+        _params: ChannelLeaveParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
     async fn bump_channel_epoch(
@@ -520,8 +695,8 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn amp_send_message(
         &self,
         _params: ChannelSendParams,
-    ) -> Result<AmpCiphertext, IntentError> {
-        Err(IntentError::no_agent("AMP not available in offline mode"))
+    ) -> Result<AmpCiphertext, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("AMP not available in offline mode").into())
     }
 
     async fn moderation_kick(
@@ -706,10 +881,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
-        Err(IntentError::no_agent(
-            "Key bootstrapping not available in offline mode",
-        ))
+    async fn bootstrap_signing_keys(
+        &self,
+    ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Key bootstrapping not available in offline mode").into())
     }
 
     async fn get_threshold_config(&self) -> Option<ThresholdConfig> {
@@ -784,11 +959,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         _nickname_suggestion: String,
-        _invitee_authority_id: AuthorityId,
-    ) -> Result<DeviceEnrollmentStart, IntentError> {
-        Err(IntentError::no_agent(
-            "Device enrollment not available in offline mode",
-        ))
+        _setup: crate::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<DeviceEnrollmentStart, aura_invitation::enrollment_setup::EnrollmentIssuanceError>
+    {
+        Err(aura_invitation::enrollment_setup::EnrollmentIssuanceError::Unavailable)
     }
 
     async fn initiate_device_removal_ceremony(
@@ -803,27 +977,28 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn get_ceremony_status(
         &self,
         _ceremony_id: &CeremonyId,
-    ) -> Result<CeremonyStatus, IntentError> {
-        Err(IntentError::no_agent(
-            "Guardian ceremony not available in offline mode",
-        ))
+    ) -> Result<CeremonyStatus, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Guardian ceremony not available in offline mode").into())
     }
 
     #[cfg(test)]
     async fn get_ceremony_terminal_outcome(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<Option<super::CeremonyTerminalOutcome>, IntentError> {
+    ) -> Result<Option<super::CeremonyTerminalOutcome>, crate::runtime_bridge::RuntimeBridgeError>
+    {
         self.enrollment_outcomes
             .lock()
             .await
             .get(ceremony_id)
             .copied()
-            .ok_or_else(|| IntentError::no_agent("enrollment ceremony is unknown"))
+            .ok_or_else(|| IntentError::no_agent("enrollment ceremony is unknown").into())
     }
 
     #[cfg(test)]
-    async fn list_device_enrollment_ceremonies(&self) -> Result<Vec<CeremonyId>, IntentError> {
+    async fn list_device_enrollment_ceremonies(
+        &self,
+    ) -> Result<Vec<CeremonyId>, crate::runtime_bridge::RuntimeBridgeError> {
         Ok(self
             .enrollment_outcomes
             .lock()
@@ -836,19 +1011,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn get_key_rotation_ceremony_status(
         &self,
         _ceremony_id: &CeremonyId,
-    ) -> Result<KeyRotationCeremonyStatus, IntentError> {
-        Err(IntentError::no_agent(
-            "Key rotation ceremonies not available in offline mode",
-        ))
+    ) -> Result<KeyRotationCeremonyStatus, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Key rotation ceremonies not available in offline mode").into())
     }
 
     async fn cancel_key_rotation_ceremony(
         &self,
         _ceremony_id: &CeremonyId,
-    ) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Key rotation ceremonies not available in offline mode",
-        ))
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        Err(IntentError::no_agent("Key rotation ceremonies not available in offline mode").into())
     }
 
     async fn export_invitation(&self, _invitation_id: &str) -> Result<String, IntentError> {
@@ -900,14 +1071,12 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn accept_invitation(
         &self,
         _invitation_id: &str,
-    ) -> Result<InvitationMutationOutcome, IntentError> {
+    ) -> Result<InvitationMutationOutcome, super::RuntimeBridgeError> {
         #[cfg(test)]
         if let Some(result) = self.accept_invitation_result.lock().await.clone() {
             return result;
         }
-        Err(IntentError::no_agent(
-            "Invitation acceptance not available in offline mode",
-        ))
+        Err(IntentError::no_agent("Invitation acceptance not available in offline mode").into())
     }
 
     async fn decline_invitation(
@@ -955,44 +1124,35 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
-        Err(IntentError::no_agent(
-            "Settings not available in offline mode",
-        ))
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, RuntimeBridgeError> {
+        Err(IntentError::no_agent("Settings not available in offline mode").into())
     }
 
-    async fn has_account_config(&self) -> Result<bool, IntentError> {
+    async fn has_account_config(&self) -> Result<bool, RuntimeBridgeError> {
         Ok(false)
     }
 
-    async fn initialize_account(&self, _nickname_suggestion: &str) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Account initialization not available in offline mode",
-        ))
+    async fn initialize_account(
+        &self,
+        _nickname_suggestion: &str,
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Account initialization not available in offline mode").into())
     }
 
-    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
-        Err(IntentError::no_agent(
-            "Devices not available in offline mode",
-        ))
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, RuntimeBridgeError> {
+        Err(IntentError::no_agent("Devices not available in offline mode").into())
     }
 
-    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
-        Err(IntentError::no_agent(
-            "Authorities not available in offline mode",
-        ))
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, RuntimeBridgeError> {
+        Err(IntentError::no_agent("Authorities not available in offline mode").into())
     }
 
-    async fn set_nickname_suggestion(&self, _name: &str) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Settings update not available in offline mode",
-        ))
+    async fn set_nickname_suggestion(&self, _name: &str) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Settings update not available in offline mode").into())
     }
 
-    async fn set_mfa_policy(&self, _policy: &str) -> Result<(), IntentError> {
-        Err(IntentError::no_agent(
-            "Settings update not available in offline mode",
-        ))
+    async fn set_mfa_policy(&self, _policy: &str) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Settings update not available in offline mode").into())
     }
 
     async fn respond_to_guardian_ceremony(
@@ -1006,42 +1166,54 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, RuntimeBridgeError> {
         Ok(AuthenticationStatus::Unauthenticated)
     }
 
-    async fn current_time_ms(&self) -> Result<u64, IntentError> {
-        // Offline bridge uses best-effort physical time for UI surfaces.
-        cfg_if::cfg_if! {
-            if #[cfg(all(target_arch = "wasm32", feature = "wasm"))] {
-                Ok(js_sys::Date::now() as u64)
-            } else {
-                let now = std::time::UNIX_EPOCH.elapsed().map_err(|err| {
-                    IntentError::internal_error(format!("System clock error: {err}"))
-                })?;
-                Ok(now.as_millis() as u64)
-            }
+    async fn current_time_ms(&self) -> Result<u64, super::RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(answer) = self.clock_answers.lock().await.pop_front() {
+            return answer;
         }
+        use aura_core::effects::PhysicalTimeEffects;
+        aura_effects::time::PhysicalTimeHandler::new()
+            .physical_time()
+            .await
+            .map(|time| time.ts_ms)
+            .map_err(|error| {
+                RuntimeBridgeError::with_source(
+                    IntentError::service_error("offline local clock failed"),
+                    error,
+                )
+            })
     }
 
     async fn is_peer_online(&self, _peer: AuthorityId) -> bool {
         false
     }
 
-    async fn sleep_ms(&self, ms: u64) {
-        // Offline bridge yields without actual sleep since there's no runtime
-        // event loop to advance.  The duration is intentionally ignored —
-        // retry/backoff loops in offline mode execute at yield-speed so they
-        // terminate quickly rather than blocking.
-        //
-        // WARNING: This means exponential backoff timing is meaningless in
-        // offline mode.  Code that depends on real elapsed time for
-        // correctness must not run against OfflineRuntimeBridge.
-        let _ = ms;
-        crate::workflows::runtime::cooperative_yield().await;
+    async fn sleep_ms(&self, ms: u64) -> Result<(), RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(answer) = self.sleep_answers.lock().await.pop_front() {
+            return answer;
+        }
+        use aura_core::effects::PhysicalTimeEffects;
+        aura_effects::time::PhysicalTimeHandler::new()
+            .sleep_ms(ms)
+            .await
+            .map_err(|error| {
+                RuntimeBridgeError::with_source(
+                    IntentError::service_error("offline local timer failed"),
+                    error,
+                )
+            })
     }
 
-    async fn wait_for_background_refresh(&self, _ms: u64) {
-        futures::future::pending::<()>().await;
+    async fn wait_for_background_refresh(&self, _ms: u64) -> Result<(), RuntimeBridgeError> {
+        #[cfg(test)]
+        if let Some(source) = self.background_refresh_failure.lock().await.take() {
+            return Err(source);
+        }
+        futures::future::pending::<Result<(), RuntimeBridgeError>>().await
     }
 }

@@ -22,6 +22,75 @@ pub use actions::{
 #[cfg(test)]
 pub(crate) use scope::{current_moderation_scope, resolve_scope};
 
+/// Actual authoritative moderation decision, not a diagnostic text category.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ModerationDenial {
+    /// The required membership query did not include this authority.
+    #[error("Authority {authority} is not a member of channel {channel} in context {context}")]
+    NotMember {
+        /// Authoritative context queried by the workflow.
+        context: aura_core::ContextId,
+        /// Canonical channel in that context.
+        channel: aura_core::ChannelId,
+        /// Authority whose membership was queried.
+        authority: aura_core::AuthorityId,
+    },
+    #[error("Authority {authority} is muted in channel {channel} in context {context}")]
+    /// The required moderation query reported an active mute.
+    Muted {
+        /// Authoritative context queried by the workflow.
+        context: aura_core::ContextId,
+        /// Canonical channel in that context.
+        channel: aura_core::ChannelId,
+        /// Authority whose mute status was queried.
+        authority: aura_core::AuthorityId,
+    },
+    #[error("Authority {authority} is banned from channel {channel} in context {context}")]
+    /// The required moderation query reported an active ban.
+    Banned {
+        /// Authoritative context queried by the workflow.
+        context: aura_core::ContextId,
+        /// Canonical channel in that context.
+        channel: aura_core::ChannelId,
+        /// Authority whose ban status was queried.
+        authority: aura_core::AuthorityId,
+    },
+}
+
+impl ModerationDenial {
+    pub(crate) fn semantic_code(&self) -> crate::ui_contract::SemanticFailureCode {
+        use crate::ui_contract::SemanticFailureCode as C;
+        match self {
+            Self::NotMember { .. } => C::NotMember,
+            Self::Muted { .. } => C::Muted,
+            Self::Banned { .. } => C::Banned,
+        }
+    }
+}
+
+impl From<ModerationDenial> for aura_core::AuraError {
+    fn from(cause: ModerationDenial) -> Self {
+        Self::PermissionDenied {
+            message: cause.to_string(),
+            source: Some(std::sync::Arc::new(cause)),
+        }
+    }
+}
+
+/// Find actual denial evidence retained through workflow/native error context.
+pub(crate) fn denial_from_error<'a>(
+    error: &'a (impl std::error::Error + 'static),
+) -> Option<&'a ModerationDenial> {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = source {
+        if let Some(denial) = cause.downcast_ref::<ModerationDenial>() {
+            return Some(denial);
+        }
+        source = cause.source();
+    }
+    None
+}
+
 #[cfg(test)]
 #[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {

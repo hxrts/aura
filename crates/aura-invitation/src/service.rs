@@ -136,6 +136,9 @@ pub enum InvitationType {
     /// This is primarily intended for out-of-band transfer (QR/copy-paste) and
     /// carries the key-share material required for the new device to install.
     DeviceEnrollment {
+        /// Legacy decode may lack this field; it never authorizes a response.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        setup_binding: Option<crate::enrollment_setup::DeviceEnrollmentSetupBinding>,
         /// Account authority being modified
         subject_authority: AuthorityId,
         /// Authority the new device was invited as. The new device may re-import

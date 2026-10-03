@@ -10,7 +10,6 @@ use crate::tui::navigation::navigate_list;
 
 use super::super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::super::modal_queue::{ContactSelectModalState, QueuedModal};
-use super::super::super::toast::{QueuedToast, ToastLevel};
 use super::super::super::views::{
     validate_nickname_suggestion, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
     DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, ImportInvitationModalState,
@@ -79,8 +78,8 @@ pub(super) fn handle_settings_nickname_suggestion_key_queue(
 
 /// Handle settings add device modal keys (queue-based)
 ///
-/// Supports two-step exchange: Tab switches between Name and InviteeAuthority fields.
-/// If invitee_authority_id is provided, uses DeviceEnrollment choreography.
+/// Supports two-step exchange: Tab switches between Name and SetupCode fields.
+/// A user-transferred setup code is required before issuing an enrollment invitation.
 pub(super) fn handle_settings_add_device_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
@@ -92,12 +91,12 @@ pub(super) fn handle_settings_add_device_key_queue(
             state.modal_queue.dismiss();
         }
         KeyCode::Tab => {
-            // Switch between Name and InviteeAuthority fields
+            // Switch between Name and SetupCode fields
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
                     s.focused_field = match s.focused_field {
-                        AddDeviceField::Name => AddDeviceField::InviteeAuthority,
-                        AddDeviceField::InviteeAuthority => AddDeviceField::Name,
+                        AddDeviceField::Name => AddDeviceField::SetupCode,
+                        AddDeviceField::SetupCode => AddDeviceField::Name,
                     };
                 }
             });
@@ -112,17 +111,10 @@ pub(super) fn handle_settings_add_device_key_queue(
                 return;
             }
             if modal_state.can_submit() {
-                let invitee_authority_id = match parse_authority_id(
-                    state,
-                    modal_state.invitee_authority(),
-                    "device enrollment invitee",
-                ) {
-                    Some(id) => id,
-                    None => return,
-                };
+                let setup_code = modal_state.setup_code().to_owned();
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,
-                    invitee_authority_id,
+                    setup_code,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -133,7 +125,7 @@ pub(super) fn handle_settings_add_device_key_queue(
                     s.error = None;
                     match s.focused_field {
                         AddDeviceField::Name => s.name.push(c),
-                        AddDeviceField::InviteeAuthority => s.invitee_authority_id.push(c),
+                        AddDeviceField::SetupCode => s.setup_code.push(c),
                     }
                 }
             });
@@ -146,8 +138,8 @@ pub(super) fn handle_settings_add_device_key_queue(
                         AddDeviceField::Name => {
                             s.name.pop();
                         }
-                        AddDeviceField::InviteeAuthority => {
-                            s.invitee_authority_id.pop();
+                        AddDeviceField::SetupCode => {
+                            s.setup_code.pop();
                         }
                     }
                 }
@@ -295,66 +287,32 @@ pub(super) fn handle_device_import_key_queue(
     key: KeyEvent,
     modal_state: ImportInvitationModalState,
 ) {
-    // Demo shortcut: Ctrl+M fills the Mobile device enrollment code.
-    let is_ctrl_m =
-        key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'));
-    let is_enter_autofill = key.code == KeyCode::Enter
-        && modal_state.code.is_empty()
-        && !state.settings.demo_mobile_device_id.is_empty();
-
-    if is_ctrl_m || is_enter_autofill {
-        state.toast_queue.dismiss();
-        let code = state.settings.last_device_enrollment_code.clone();
-        if !code.is_empty() {
-            state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
-                    s.code = code.clone();
-                }
-            });
-        } else {
-            state.settings.pending_mobile_enrollment_autofill = true;
-            if state.settings.demo_mobile_authority_id.is_empty() {
-                state.next_toast_id += 1;
-                state.toast_queue.enqueue(QueuedToast::new(
-                    state.next_toast_id,
-                    "Mobile enrollment requires a configured invitee authority ID",
-                    ToastLevel::Error,
-                ));
-                return;
-            }
-            commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
-                name: "Mobile".to_string(),
-                invitee_authority_id: state
-                    .settings
-                    .demo_mobile_authority_id
-                    .parse()
-                    .unwrap_or_else(|error| {
-                        panic!("demo mobile authority id should already be validated: {error}")
-                    }),
-            }));
-            state.next_toast_id += 1;
-            state.toast_queue.enqueue(QueuedToast::new(
-                state.next_toast_id,
-                "Generating Mobile enrollment code…",
-                ToastLevel::Info,
-            ));
-        }
-        return;
-    }
-
     match key.code {
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
         KeyCode::Enter => {
-            if modal_state.can_submit() {
+            if modal_state.can_submit_enrollment() {
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::ImportDeviceEnrollmentOnMobile {
                         code: modal_state.code,
+                        manifest_transfer: Some(
+                            aura_app::ui::contract::EnrollmentManifestTransferInput {
+                                manifest_code: modal_state.manifest_code,
+                                initiator_verifier_code: modal_state.initiator_verifier_code,
+                            },
+                        ),
                     },
                 ));
                 state.modal_queue.dismiss();
             }
+        }
+        KeyCode::Tab => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceImport(s) = modal {
+                    s.focused_input = (s.focused_input + 1) % 3;
+                }
+            });
         }
         KeyCode::Char(_) => {
             let Some(c) = modal_text_char_from_key(&key.code) else {
@@ -362,14 +320,14 @@ pub(super) fn handle_device_import_key_queue(
             };
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
-                    s.code.push(c);
+                    s.enrollment_input_mut().push(c);
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsDeviceImport(ref mut s) = modal {
-                    s.code.pop();
+                    s.enrollment_input_mut().pop();
                 }
             });
         }
@@ -411,19 +369,19 @@ pub(super) fn handle_device_enrollment_key_queue(
                 state.toast_success("Copied to clipboard");
             }
         }
-        KeyCode::Char('m' | 'M')
-            if key.modifiers.ctrl() || !state.settings.demo_mobile_device_id.is_empty() =>
-        {
-            // Demo mode: allow plain m/M as harness-friendly fallback in addition to Ctrl+M.
-            let is_demo = !state.settings.demo_mobile_device_id.is_empty();
-            let is_pending = !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed;
-            if is_demo && is_pending && !modal_state.enrollment_code.is_empty() {
-                commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::ImportDeviceEnrollmentOnMobile {
-                        code: modal_state.enrollment_code.clone(),
-                    },
-                ));
-                state.toast_info("Sending code to Mobile agent...");
+        KeyCode::Char('t' | 'v') => {
+            if let Some(transfer) = modal_state.manifest_transfer.as_ref() {
+                let code = if key.code == KeyCode::Char('t') {
+                    &transfer.manifest_code
+                } else {
+                    &transfer.initiator_verifier_code
+                };
+                match copy_to_clipboard(code) {
+                    Ok(()) => state.toast_success("Copied actual transfer code"),
+                    Err(error) => state.toast_error(format!("Copy failed: {error}")),
+                }
+            } else {
+                state.toast_error("Authenticated manifest transfer unavailable");
             }
         }
         _ => {}

@@ -141,3 +141,7 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 - [MPST and Choreography](../../docs/110_mpst_and_choreography.md)
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Ownership Model](../../docs/122_ownership_model.md)
+
+### Durable enrollment execution boundary
+
+The `async-session-ownership` lane also enforces sealed durable enrollment windows. AST checks reject raw timeout executor calls or aliases, fresh timeout reconstruction, weaker attempt parameters, and raw budget methods in production device enrollment. Attempt functions and methods require a sealed window input regardless of parameter name. Test-only exclusions require a positive test predicate; `cfg(not(test))` remains checked. Adversarial fixtures cover each bypass, renamed inputs, missing inputs, and the sanctioned window path.

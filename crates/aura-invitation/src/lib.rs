@@ -93,6 +93,10 @@ pub mod view;
 
 /// Descriptors for invitation-based peer connection
 pub mod descriptor;
+pub mod enrollment_admission;
+pub mod enrollment_manifest;
+/// Device-owned enrollment setup codes and sealed possession evidence.
+pub mod enrollment_setup;
 /// Shareable invitation code format and validated import provenance.
 pub mod shareable;
 
@@ -195,18 +199,21 @@ pub struct Relationship {
 }
 
 // Re-export domain fact types
-pub use facts::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
+pub use facts::{
+    InvitationFact, InvitationFactDecodeError, InvitationFactReducer, INVITATION_FACT_TYPE_ID,
+};
 
 // Re-export view delta types
 pub use view::{CeremonyViewStatus, InvitationDelta, InvitationDirection, InvitationViewReducer};
 
 // Re-export protocol types
 pub use protocol::{
-    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest,
-    DeviceEnrollmentState, GuardianAccept, GuardianConfirm, GuardianDecline,
-    GuardianInvitationState, GuardianRequest, InvitationAck, InvitationAckStatus,
-    InvitationExchangeState, InvitationOffer, InvitationResponse, DEVICE_ENROLLMENT_PROTOCOL_ID,
-    EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRefusal,
+    DeviceEnrollmentRequest, DeviceEnrollmentResponse, DeviceEnrollmentState, GuardianAccept,
+    GuardianConfirm, GuardianDecline, GuardianInvitationState, GuardianRequest, InvitationAck,
+    InvitationAckStatus, InvitationExchangeState, InvitationOffer, InvitationResponse,
+    DEVICE_ENROLLMENT_PROTOCOL_ID, EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE,
+    PROTOCOL_VERSION,
 };
 
 // Re-export consensus-based ceremony types

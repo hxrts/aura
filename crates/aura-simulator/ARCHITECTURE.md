@@ -109,6 +109,7 @@ Contract alignment:
 | Fault injection and deterministic environment state | `ActorOwned` | Owning simulator service/task controls mutation; reports/bridges observe. |
 | Differential/parity artifact comparison | `Observed` | Upstream artifacts and comparison contracts are authoritative; local comparison state only. |
 | Quint / external verification bridge inputs | `Observed` | External artifact/schema producers are authoritative; bridge adaptation only. |
+| Deferred non-AMP ingress during a bounded message scan | `MoveOwned` | A local drop guard returns borrowed envelopes on success, failure and cancellation; restoration overflow fails replay. Capacity-reserving runtime leases and multi-channel routing remain required before this proves complete mailbox ownership. |
 
 ### Capability-Gated Points
 
@@ -123,6 +124,19 @@ Contract alignment:
 Deterministic replay and protocol simulation fidelity are the primary concerns. Integration tests verify each simulated protocol produces correct outcomes. Property tests verify consensus and choreography invariants under fault injection. ITF trace replay verifies conformance with Quint formal models.
 
 ### Commands
+
+The AMP lifecycle target requires the checked-in 24-step
+`verification/quint/traces/amp_channel.itf.json` artifact. Missing artifacts
+and missing action handlers fail replay. `just ci-amp-lifecycle-trace`
+verifies deterministic regeneration before the workspace test lane. Replay
+uses owned temporary storage and the default test stack; stack inflation is
+not a substitute for bounded delegated futures.
+
+Channel creation commits the complete chat creation fact through the runtime
+journal after AMP creation and creator join. The closed three-actor fixture
+owns its immutable bootstrap roster at creation. Required checkpoint reads
+and replicated leave operations propagate errors rather than treating them
+as absence or proceeding with only part of the membership update.
 
 ```
 cargo test -p aura-simulator

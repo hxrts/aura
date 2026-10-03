@@ -47,7 +47,7 @@ async fn refresh_settings_signal_from_runtime(
         || runtime.try_get_settings(),
     )
     .await?
-    .map_err(|error| super::error::runtime_call("refresh settings", error))?;
+    .map_err(|error| super::error::native_runtime_call("refresh settings", error))?;
     let devices = timeout_runtime_call(
         &runtime,
         "refresh_settings_from_runtime",
@@ -56,7 +56,7 @@ async fn refresh_settings_signal_from_runtime(
         || runtime.try_list_devices(),
     )
     .await?
-    .map_err(|error| super::error::runtime_call("list devices", error))?;
+    .map_err(|error| super::error::native_runtime_call("list devices", error))?;
     let authorities = timeout_runtime_call(
         &runtime,
         "refresh_settings_from_runtime",
@@ -65,7 +65,7 @@ async fn refresh_settings_signal_from_runtime(
         || runtime.try_list_authorities(),
     )
     .await?
-    .map_err(|error| super::error::runtime_call("list authorities", error))?;
+    .map_err(|error| super::error::native_runtime_call("list authorities", error))?;
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.nickname_suggestion = settings.nickname_suggestion.clone();
     state.mfa_policy = settings.mfa_policy;
@@ -135,7 +135,7 @@ pub async fn update_mfa_policy(
         || runtime.set_mfa_policy(policy),
     )
     .await?
-    .map_err(|e| super::error::runtime_call("update MFA policy", e))?;
+    .map_err(|e| super::error::native_runtime_call("update MFA policy", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -160,7 +160,7 @@ pub async fn update_nickname(
         || runtime.set_nickname_suggestion(&name),
     )
     .await?
-    .map_err(|e| super::error::runtime_call("update nickname", e))?;
+    .map_err(|e| super::error::native_runtime_call("update nickname", e))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -194,7 +194,7 @@ pub async fn set_channel_mode(
                 || runtime.identify_materialized_channel_bindings_by_name(&channel_name),
             )
             .await?
-            .map_err(|e| super::error::runtime_call("resolve channel for mode update", e))?;
+            .map_err(|e| super::error::native_runtime_call("resolve channel for mode update", e))?;
             let binding = match resolved.as_slice() {
                 [] => return Err(AuraError::not_found(channel_name.clone())),
                 [binding] => *binding,
@@ -224,7 +224,7 @@ pub async fn set_channel_mode_resolved(
         || runtime.resolve_amp_channel_context(resolved_channel),
     )
     .await?
-    .map_err(|e| super::error::runtime_call("resolve channel context for mode update", e))?
+    .map_err(|e| super::error::native_runtime_call("resolve channel context for mode update", e))?
     .ok_or_else(|| {
         AuraError::from(WorkflowError::MissingAuthoritativeContext {
             channel: resolved_channel.to_string(),

@@ -7,6 +7,7 @@ pub(super) enum ModalFieldDescriptor {
     CreateChannelThreshold,
     ThresholdWizard,
     AddDeviceName,
+    AddDeviceSetupCode,
     Capability(CapabilityTier),
 }
 
@@ -22,6 +23,7 @@ impl ModalFieldDescriptor {
             }
             Self::CreateChannelThreshold | Self::ThresholdWizard => FieldId::ThresholdInput,
             Self::AddDeviceName => FieldId::DeviceName,
+            Self::AddDeviceSetupCode => FieldId::DeviceSetupCode,
             Self::Capability(CapabilityTier::Full) => FieldId::CapabilityFull,
             Self::Capability(CapabilityTier::Partial) => FieldId::CapabilityPartial,
             Self::Capability(CapabilityTier::Limited) => FieldId::CapabilityLimited,
@@ -132,25 +134,45 @@ impl ThresholdWizardModalState {
 
 impl AddDeviceModalState {
     fn field_descriptor(&self) -> Option<ModalFieldDescriptor> {
-        single_text_field(
-            self.accepts_name_input(),
-            ModalFieldDescriptor::AddDeviceName,
-            self.draft_name().unwrap_or_default(),
-        )
-        .map(|(descriptor, _)| descriptor)
+        self.accepts_name_input()
+            .then_some(match self.active_field {
+                FieldId::DeviceSetupCode => ModalFieldDescriptor::AddDeviceSetupCode,
+                _ => ModalFieldDescriptor::AddDeviceName,
+            })
     }
 
     fn text_value(&self) -> Option<String> {
-        single_text_field(
-            self.accepts_name_input(),
-            ModalFieldDescriptor::AddDeviceName,
-            self.draft_name().unwrap_or_default(),
-        )
-        .map(|(_, value)| value)
+        match self.field_descriptor()? {
+            ModalFieldDescriptor::AddDeviceSetupCode => Some(self.setup_code_input.clone()),
+            ModalFieldDescriptor::AddDeviceName => Some(self.name_input.clone()),
+            _ => None,
+        }
     }
 
     fn set_text_value(&mut self, value: String) {
-        self.set_draft_name(value);
+        match self.field_descriptor() {
+            Some(ModalFieldDescriptor::AddDeviceSetupCode) => self.setup_code_input = value,
+            Some(ModalFieldDescriptor::AddDeviceName) => self.set_draft_name(value),
+            _ => {}
+        }
+    }
+
+    fn set_field_value(&mut self, field_id: FieldId, value: String) {
+        if !self.accepts_name_input()
+            || !matches!(field_id, FieldId::DeviceName | FieldId::DeviceSetupCode)
+        {
+            return;
+        }
+        self.active_field = field_id;
+        self.set_text_value(value);
+    }
+
+    fn set_active_field(&mut self, field_id: FieldId) {
+        if self.accepts_name_input()
+            && matches!(field_id, FieldId::DeviceName | FieldId::DeviceSetupCode)
+        {
+            self.active_field = field_id;
+        }
     }
 }
 
@@ -232,8 +254,8 @@ impl ActiveModal {
             }
             Self::CreateHome(_) => Some(ModalFieldDescriptor::Direct(FieldId::HomeName)),
             Self::EditNickname(_) => Some(ModalFieldDescriptor::Direct(FieldId::Nickname)),
-            Self::ImportDeviceEnrollmentCode(_) => {
-                Some(ModalFieldDescriptor::Direct(FieldId::DeviceImportCode))
+            Self::ImportDeviceEnrollmentCode(state) => {
+                Some(ModalFieldDescriptor::Direct(state.field_id()))
             }
             Self::CreateChannel(state) => state.field_descriptor(),
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.field_descriptor(),
@@ -252,8 +274,8 @@ impl ActiveModal {
             Self::AcceptContactInvitation(state)
             | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
-            | Self::EditNickname(state)
-            | Self::ImportDeviceEnrollmentCode(state) => Some(state.value.clone()),
+            | Self::EditNickname(state) => Some(state.value.clone()),
+            Self::ImportDeviceEnrollmentCode(state) => Some(state.input().to_string()),
             Self::CreateChannel(state) => state.text_value(),
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.text_value(),
             Self::AddDevice(state) => state.text_value(),
@@ -269,8 +291,8 @@ impl ActiveModal {
             Self::AcceptContactInvitation(state)
             | Self::AcceptChannelInvitation(state)
             | Self::CreateHome(state)
-            | Self::EditNickname(state)
-            | Self::ImportDeviceEnrollmentCode(state) => state.value = value,
+            | Self::EditNickname(state) => state.value = value,
+            Self::ImportDeviceEnrollmentCode(state) => *state.input_mut() = value,
             Self::CreateChannel(state) => state.set_text_value(value),
             Self::GuardianSetup(state) | Self::MfaSetup(state) => state.set_text_value(value),
             Self::AddDevice(state) => state.set_text_value(value),
@@ -283,6 +305,20 @@ impl ActiveModal {
     }
 
     pub(super) fn set_field_value(&mut self, field_id: FieldId, value: String) {
+        if let Self::ImportDeviceEnrollmentCode(state) = self {
+            match field_id {
+                FieldId::DeviceImportCode => state.value = value,
+                FieldId::DeviceImportManifest => state.manifest_code = value,
+                FieldId::DeviceImportInitiatorVerifier => state.initiator_verifier_code = value,
+                _ => {}
+            }
+            return;
+        }
+
+        if let Self::AddDevice(state) = self {
+            state.set_field_value(field_id, value);
+            return;
+        }
         if let Self::CreateInvitation(state) = self {
             state.set_field_value(field_id, value);
             return;
@@ -304,6 +340,19 @@ impl ActiveModal {
     }
 
     pub(super) fn set_active_field(&mut self, field_id: FieldId) {
+        if let Self::ImportDeviceEnrollmentCode(state) = self {
+            state.focus_index = match field_id {
+                FieldId::DeviceImportManifest => 1,
+                FieldId::DeviceImportInitiatorVerifier => 2,
+                _ => 0,
+            };
+            return;
+        }
+
+        if let Self::AddDevice(state) = self {
+            state.set_active_field(field_id);
+            return;
+        }
         if let Self::CreateInvitation(state) = self {
             state.set_active_field(field_id);
             return;
@@ -324,6 +373,32 @@ mod tests {
         ActiveModal, AddDeviceModalState, AddDeviceWizardStep, CreateInvitationModalState,
     };
     use aura_app::ui::contract::FieldId;
+
+    #[test]
+    fn add_device_fields_preserve_pasted_setup_and_cannot_edit_after_issuance() {
+        let mut modal = ActiveModal::AddDevice(AddDeviceModalState::default());
+        modal.set_field_value(FieldId::DeviceName, "Laptop".to_owned());
+        modal.set_field_value(FieldId::DeviceSetupCode, "transferred-request".to_owned());
+        assert_eq!(modal.text_value().as_deref(), Some("transferred-request"));
+        assert_eq!(
+            modal.field_descriptor().map(|field| field.field_id()),
+            Some(FieldId::DeviceSetupCode)
+        );
+        modal.set_active_field(FieldId::DeviceName);
+        assert_eq!(modal.text_value().as_deref(), Some("Laptop"));
+        if let ActiveModal::AddDevice(state) = &mut modal {
+            state.step = AddDeviceWizardStep::ShareCode;
+        }
+        modal.set_field_value(FieldId::DeviceSetupCode, "replacement".to_owned());
+        assert!(modal.text_value().is_none());
+        match modal {
+            ActiveModal::AddDevice(state) => {
+                assert_eq!(state.setup_code_input, "transferred-request");
+                assert_eq!(state.name_input, "Laptop");
+            }
+            _ => panic!("expected add-device modal"),
+        }
+    }
 
     #[test]
     fn add_device_name_step_uses_explicit_draft_helpers() {

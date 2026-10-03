@@ -4,6 +4,33 @@ This guide covers how to work with Aura's algebraic effect system. Use it when y
 
 For the full effect system specification, see [Effect System](103_effect_system.md).
 
+AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
+
+## Preserve Concrete Error Causes
+
+Required AMP state, bootstrap and participant reads use the native bridge
+error contract. Return absence only after a successful canonical checkpoint
+read proves exact context/channel absence. Participant augmentation uses the
+required channel invitation reader; the general best-effort invitation listing
+is an observed diagnostic surface and cannot supply authoritative membership.
+
+Retain the native cause when retrying AMP sends. Publish an initial bounded-call
+failure through the existing semantic owner, and classify transport outcomes
+from typed native kinds and timeout-budget variants. Clock unavailability is
+an unavailable dependency; only deadline evidence yields a timeout. Error
+display text must not decide retry policy or terminal failure codes.
+
+Use the existing typed conversions into `AuraError` when wrapping effect
+failures. For cryptographic context, use `AuraError::crypto_with_source` with
+the original error in an `Arc`; avoid reducing the cause to its display text.
+If adding an error wrapper that stores an `Arc<dyn Error + Send + Sync>`, make
+its standard `Error::source` return the wrapped error through `as_deref()`.
+Verify this with a concrete `downcast_ref` assertion after cloning and a nested
+source-chain assertion. Checking only source presence or display text cannot
+detect an extra shared-storage wrapper. The serialization contract in
+[Effect System](103_effect_system.md#typed-error-sources) omits these process-local
+sources; use typed codes for cross-process failures.
+
 ## 1. Code Location
 
 A critical distinction guides where code belongs in the architecture.
@@ -224,3 +251,125 @@ The effect system uses three layers:
 All impure operations (time, randomness, filesystem, network) must flow through effect traits. Direct calls break simulation determinism and WASM compatibility.
 
 Run `just check-arch` to validate effect trait placement and layer boundaries.
+
+### Preserving workflow failure causes
+
+Pass the concrete error into `runtime_call`, `journal_op`, `fact_encoding`,
+or `ceremony_op`. These helpers require `Error + Send + Sync + 'static`;
+passing `to_string()`, a borrowed error, or a display-only value is rejected.
+Use a typed domain precondition variant when no underlying failure exists.
+Do not invent a source to make a diagnostic message satisfy the helper bound.
+
+Workflow conversion retains the `WorkflowError` as the standard error source,
+followed by the context wrapper and original concrete cause. `WorkflowError::Core`
+passes through unchanged. Time failures likewise retain `TimeUnavailable` and
+the original runtime/query/parity cause. Inspect `Error::source()` and downcast
+when selecting typed policy; display text is for diagnostics.
+
+Compatibility: helper callers must pass owned concrete errors. Time failure
+variants now include an owned `source` field; callers matching their kind use
+`{ .. }`, and constructors must retain the actual failure. Existing outer
+workflow categories and diagnostic display prefixes are retained; the journal
+encoding path no longer adds a redundant serialization wrapper. Serialized
+`AuraError` values omit process-local sources, so deserialization cannot recover
+a typed cause for authorization or retry decisions.
+
+For required canonical-state queries, propagate `Err` before issuing a
+mutation or publishing readiness. Only `Ok(false)` means that the canonical
+entity is absent. A failed query cannot justify creating or joining an entity.
+If a failed operation triggers a second canonical read to distinguish an
+already-completed operation from failure, that second read is also required;
+do not replace its error with `false` or a stale projection.
+
+### Native runtime error classification
+
+Keep `RuntimeBridgeError` and its original source on native paths. Use the
+runtime's structural invitation failure reason when deciding whether acceptance
+was already handled or when publishing a contact confirmation failure. A
+non-pending invitation is not necessarily accepted: revoked, expired, and
+declined states must remain failures. Never infer these decisions from display
+text, even when a message is stable or comes from a wrapped error.
+
+When adding a native domain reason, match the concrete runtime cause
+exhaustively at the bridge normalization boundary and test both genuine typed
+causes and diagnostic lookalikes. Workflow context errors retain that native
+cause through `Error::source()`. Converting to the existing foreign
+`IntentError` or `CallbackError` payload is an explicit terminal diagnostic
+operation and cannot feed native retry or authorization policy.
+
+## Preserving timeout causes
+
+For enrollment execution, derive the budget from the original registered
+ceremony window before creating bounded child attempts. Restarting a task or
+retrying transport must not create a fresh acceptance window. A pending
+terminal state is a wait under that budget; it is not deadline evidence.
+
+Use the required trusted-parent metadata reader for cryptographic admission.
+Propagate secure retrieval errors and retain codec sources. Validate participant
+count, uniqueness and signing policy before using the verifier. Query canonical
+package presence through the fallible provider API first. A successful absence
+permits legacy layout lookup; failed presence or byte reads must propagate.
+Present but corrupt canonical bytes cannot be repaired with legacy bytes.
+Observational `Option` readers cannot establish parent trust.
+
+At native required-read adapters, classify concrete error variants before
+building display diagnostics. Preserve the original wrapper and source chain.
+Known storage, codec, authorization and network causes keep their own category;
+generic internal wrappers may expose a more specific typed source. Required
+clock failure, rollback and retry-attempt exhaustion are service failures, not
+observed budget deadlines. Foreign diagnostic text cannot supply that evidence.
+
+Use `TimeoutBudgetError::time_source_failure(error)` when a required clock operation returns an actual error. The detail-only constructor is for diagnostics without an underlying failure. Match typed timeout variants or stable codes; do not compare source-bearing errors for equality or infer deadline expiry from display text. Forward timeout and retry wrappers as errors so their standard source chains remain available. Serialized diagnostics carry no native source evidence.
+
+### Preserve timeout ownership across awaits
+
+Use the existing timeout budget or its child budget for subsequent stages. Clone shares observation and exhaustion; constructing a fresh budget from a prior duration discards the owner contract. Required runtime sleep returns a result: propagate its original source through the owned failure path. Check required time after either awaited branch and after retry backoff. Keep observation guards lexical and release them before awaiting. Cover rollback after progress, cloning, child deadlines, canceled waits, and validated restart with injected clocks. Compile-fail coverage prevents Copy reconstruction; semantic and native classification must exhaustively match timeout-budget variants.
+
+### Persist enrollment windows through their sealed owner
+
+Use `registered_enrollment_window` for an issued generation and the admitted-window constructor for a verified invitee manifest. Pass the resulting `EnrollmentWindow` through nested attempts. Its child, retry, and executor methods checkpoint the original parent observation before continuation. Do not reconstruct a duration or call a raw/no-op executor on that path. A new immutable user-transfer admission allocates its original window; existing admissions require the retained record. Missing legacy state requires fresh setup transfer rather than repair from raw identifiers.
+
+Use fallible owned interval callbacks for required maintenance. Preserve the original error through task supervision, service health consumption, and shutdown. Run `just ci-ownership-policy`, `just ci-annotation-ratchet`, and the checkpoint/rollback source regressions after changing these boundaries.
+
+### Using shared window arithmetic
+
+Use `aura_core::types::window::{WindowInterval, WindowPosition, PhysicalMillis, ReceiptGeneration}` for validated interval arithmetic. Keep owner-specific admission and checkpoint APIs separate: interval deserialization validates bounds but grants no provenance. Construct physical execution through `TimeoutBudget`; its millisecond policy rejects empty or sub-millisecond windows. The flow-window owner should adopt `WindowInterval<ReceiptGeneration>` when its generation-window module integrates, reject unrepresentable endpoints, and keep checked epoch/base progression in its existing authoritative path. Keep physical clock fields out of flow receipts. Adoption of the shared arithmetic primitive is a separate integration step; existing flow-window code has not been migrated by this change. A subtraction-based membership implementation may admit base `u64::MAX` with extent one, whereas the checked primitive rejects its unrepresentable exclusive endpoint. Handle this as typed exhaustion or define a reviewed wider coordinate contract; do not silently clamp it.
+
+### Recovering enrollment window phases
+
+Retain the original immutable allocation, initial clock, canonical registration and immutable live-boundary marker before inserting the live registry entry. Recover an interrupted pre-live clock from the secure original allocation; never rebuild its duration from current time. Treat either canonical registration or the live marker as evidence that a missing clock cannot be repaired. For older records, mint a missing live marker only after both secure allocation and original clock validate. Preserve original clock/exhaustion identity in the execution capability and hold allocation continuity until required checkpoint storage acknowledges.
+
+### Construct native profile writers before accessing secrets
+
+Acquire `FilesystemProfileStorageHandler::acquire_owned_native` once for the selected physical profile. Attach its concrete `Arc<OwnedProfileLease>` to ordinary storage and pass the same owner into `ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner` for an explicitly permitted filesystem provider. This factory opens `secure_store` relative to the retained profile descriptor before reading or immutably admitting the wrapping key. Keep the returned owned provider intact; rebuilding a backend or generating a replacement for an invalid persisted key breaks provider continuity.
+
+Native Unix file operations retain directory descriptors through staging, `renameat` or no-replace `linkat`, `unlinkat`, and directory sync. `NOFOLLOW` rejects descendant symlinks. The production effect constructor selects this factory before wrapping-key access. Unowned convenience constructors remain test/simulation surfaces; they do not grant a lifetime profile ownership guarantee. A profile path may cease naming its original directory, while an already-owned descriptor still names that original inode.
+
+After an interrupted publication, reread and validate the canonical record under the retained owner. A successful local replacement does not atomically update the account profile, pending enrollment handoff, and signing generation together; that requires their transaction/WAL owner.
+
+### Recover encrypted storage without replacing its master key
+
+Retain the original secure master key when reopening an encrypted namespace. If
+it is absent, inventory ordinary records through the retained storage owner
+before first-use key admission. Existing records require the original key;
+return the native storage failure when inventory or key recovery fails. Generate
+an immutable first-use key only for an empty namespace. A concurrent wrapper may
+have published the original key during inventory, so reread that canonical key
+before rejecting an existing namespace. Preserve ciphertext and avoid publishing
+new records on recovery failure. Actual owned-provider regressions cover missing
+and corrupt keys and independent wrappers sharing the admitted key.
+
+### Ordering shared physical observations
+
+Use the shared timeout owner's asynchronous observation lease around a required
+physical read, budget update, and checkpoint acknowledgment. Release the lease
+before awaiting the operation or timer. Runtime remaining/child/ACK paths and
+bounded-execution initial and completion paths must use the same gate. Do not
+nest lease acquisition by calling another observing helper while holding it.
+Test a provider that captures an earlier timestamp then suspends: a cloned child
+must wait before querying, and cancelling the suspended observer must release
+the gate without moving the deadline.
+
+### Held enrollment roster inputs
+
+Obtain `prepare_authenticated_enrollment_rotation` from the actual effect owner and transferred setup before deriving the enrollment ceremony. Use its read-only roster/prestate accessors for packaging, then consume that same plan in `prepare_pinned_enrollment_rotation`. Preserve generation → tree lock order and keep the returned reservation through manifest retention and canonical registration. Do not acquire either gate recursively or rebuild an issuer participant from an absent tree leaf. Original cleanup recovery uses its negative custody path; live recovery additionally checks the fresh authenticated decision and original clock.

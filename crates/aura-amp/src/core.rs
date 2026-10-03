@@ -221,6 +221,7 @@ mod tests {
     ) -> ChannelEpochState {
         let transition_id = Hash32::new([4u8; 32]);
         ChannelEpochState {
+            canonical_checkpoint: None,
             chan_epoch: 3,
             current_gen: 10,
             last_checkpoint_gen: 8,

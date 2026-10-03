@@ -5,6 +5,9 @@ use std::{
     process::Command,
 };
 
+#[path = "trusted_key_scope.rs"]
+mod trusted_key_scope;
+
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 
@@ -387,37 +390,38 @@ pub fn run_ownership_annotation_ratchet(args: &[String]) -> Result<()> {
     .unwrap_or_default();
     let mut violations = Vec::new();
     let mut current_file = String::new();
-    let mut window: Vec<String> = Vec::new();
 
     for line in diff.lines() {
         if let Some(file) = line.strip_prefix("+++ b/") {
             current_file = file.to_string();
-            window.clear();
             continue;
         }
         if line.starts_with("@@") {
-            window.clear();
             continue;
         }
         if let Some(added) = line.strip_prefix('+') {
             if line.starts_with("+++") {
                 continue;
             }
-            window.push(added.to_string());
-            if window.len() > 16 {
-                window.remove(0);
-            }
-            let declared_wrapper = if mode == "semantic-owner"
-                && added.contains("_with_terminal_status(")
-            {
-                let source = read(repo_root.join(&current_file))?;
-                semantic_owner_wrapper_declared_in_source(&source, added)?
+            let declared_wrapper =
+                if mode == "semantic-owner" && added.contains("_with_terminal_status(") {
+                    let source = read(repo_root.join(&current_file))?;
+                    semantic_owner_wrapper_declared_in_source(&source, added)?
+                } else {
+                    false
+                };
+            let attached_declaration = if candidate_requires_attr(mode, &current_file, added) {
+                boundary_annotation_attached_in_source(
+                    &read(repo_root.join(&current_file))?,
+                    added,
+                    required_attr,
+                )?
             } else {
                 false
             };
             if candidate_requires_attr(mode, &current_file, added)
-                && !window.iter().any(|entry| entry.contains(required_attr))
                 && !declared_wrapper
+                && !attached_declaration
             {
                 violations.push(format!(
                     "{current_file}: added boundary appears to require {required_attr} near {added}"
@@ -459,6 +463,74 @@ fn semantic_owner_wrapper_declared_in_source(source: &str, added: &str) -> Resul
         regex::escape(&function)
     ))?;
     Ok(declaration.is_match(source))
+}
+
+// Read attributes from Rust declarations, including unchanged diff context.
+// If a name occurs more than once, every declaration must carry the annotation;
+// a nearby annotated overload must not authorize an unannotated boundary.
+fn boundary_annotation_attached_in_source(
+    source: &str,
+    added: &str,
+    required_attr: &str,
+) -> Result<bool> {
+    use syn::visit::Visit;
+    let function = Regex::new(r"\b(?:fn|struct)\s+([A-Za-z0-9_]+)\s*(?:[<({]|$)")?
+        .captures(added)
+        .and_then(|captures| captures.get(1).map(|name| name.as_str().to_owned()));
+    let Some(function) = function else {
+        return Ok(false);
+    };
+    let annotation = required_attr.trim_start_matches("#[");
+    let expected: Vec<&str> = annotation.split("::").collect();
+    struct Attached<'a> {
+        name: &'a str,
+        expected: &'a [&'a str],
+        found: Vec<bool>,
+    }
+    impl Attached<'_> {
+        fn record(&mut self, name: &syn::Ident, attributes: &[syn::Attribute]) {
+            if name != self.name {
+                return;
+            }
+            self.found.push(attributes.iter().any(|attribute| {
+                let path = attribute.path();
+                path.segments.len() == self.expected.len()
+                    && path
+                        .segments
+                        .iter()
+                        .zip(self.expected)
+                        .all(|(segment, expected)| {
+                            if *expected == "actor_" {
+                                segment.ident == "actor_owned" || segment.ident == "actor_root"
+                            } else {
+                                segment.ident == *expected
+                            }
+                        })
+            }));
+        }
+    }
+    impl<'ast> Visit<'ast> for Attached<'_> {
+        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+            self.record(&item.sig.ident, &item.attrs);
+            syn::visit::visit_item_fn(self, item);
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            self.record(&item.sig.ident, &item.attrs);
+            syn::visit::visit_impl_item_fn(self, item);
+        }
+        fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+            self.record(&item.ident, &item.attrs);
+            syn::visit::visit_item_struct(self, item);
+        }
+    }
+    let file = syn::parse_file(source).context("parse ownership annotation source")?;
+    let mut visitor = Attached {
+        name: &function,
+        expected: &expected,
+        found: Vec::new(),
+    };
+    visitor.visit_file(&file);
+    Ok(!visitor.found.is_empty() && visitor.found.iter().all(|attached| *attached))
 }
 
 pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
@@ -536,7 +608,7 @@ pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
 }
 
 pub fn run_ignored_test_count_ratchet() -> Result<()> {
-    const MAX_IGNORED_TEST_ANNOTATIONS: usize = 47;
+    const MAX_IGNORED_TEST_ANNOTATIONS: usize = 46;
 
     let repo_root = repo_root()?;
     let ignore_hits = rg_lines(&vec![
@@ -1521,7 +1593,9 @@ fn canonical_channel_witness_boundary_violation(rel: &str, contents: &str) -> Op
         return Some("channel creation witness construction must remain private to aura-chat");
     }
     if !canonical_channel_reducer_owner_path(rel) && contents.contains("ChatViewReducer") {
-        return Some("chat view reduction may mint a channel witness only in an owned reducer path");
+        return Some(
+            "chat view reduction may mint a channel witness only in an owned reducer path",
+        );
     }
     None
 }
@@ -1558,15 +1632,17 @@ fn run_canonical_channel_witness_boundary() -> Result<()> {
     ] {
         for file in rust_files_under(repo_root.join("crates").join(crate_name).join("src")) {
             let rel = repo_relative(file.strip_prefix(&repo_root)?);
-            if let Some(reason) =
-                canonical_channel_witness_boundary_violation(&rel, &read(&file)?)
+            if let Some(reason) = canonical_channel_witness_boundary_violation(&rel, &read(&file)?)
             {
                 violations.push(format!("{rel}: {reason}"));
             }
         }
     }
     if !violations.is_empty() {
-        bail!("canonical-channel-witness-boundary:\n{}", violations.join("\n"));
+        bail!(
+            "canonical-channel-witness-boundary:\n{}",
+            violations.join("\n")
+        );
     }
     println!("canonical channel witness boundary: clean");
     Ok(())
@@ -2290,10 +2366,7 @@ pub fn run_authorization_resource_scope_boundary() -> Result<()> {
     let repo_root = repo_root()?;
     let mut violations = Vec::new();
 
-    for rel_root in [
-        "crates/aura-authorization/src",
-        "crates/aura-guards/src",
-    ] {
+    for rel_root in ["crates/aura-authorization/src", "crates/aura-guards/src"] {
         let root = repo_root.join(rel_root);
         if !root.exists() {
             continue;
@@ -2316,8 +2389,7 @@ pub fn run_authorization_resource_scope_boundary() -> Result<()> {
                 {
                     continue;
                 }
-                let context =
-                    lines[idx.saturating_sub(20)..lines.len().min(idx + 21)].join("\n");
+                let context = lines[idx.saturating_sub(20)..lines.len().min(idx + 21)].join("\n");
                 if authorization_scope_policy_allowed(&rel, &context) {
                     continue;
                 }
@@ -2564,10 +2636,13 @@ pub fn run_trusted_key_resolution_boundary() -> Result<()> {
             continue;
         }
         let lines = read_lines(&path)?;
+        let source = read(&path)?;
+        let scopes = trusted_key_scope::analyze(&rel, &source)?;
+        violations.extend(scopes.violations.iter().cloned());
         let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
 
         for (idx, line) in lines.iter().enumerate() {
-            if is_test_path || line_is_test_scoped(&lines, idx) {
+            if is_test_path || scopes.test_lines.contains(&(idx + 1)) {
                 continue;
             }
             let trimmed = line.trim_start();
@@ -2577,7 +2652,8 @@ pub fn run_trusted_key_resolution_boundary() -> Result<()> {
             }
 
             let local_window = lines[idx.saturating_sub(16)..=idx].join("\n");
-            if is_signature_verification_call(line)
+            if !scopes.typed_contract
+                && is_signature_verification_call(line)
                 && !has_trusted_key_resolution_context(&local_window)
             {
                 violations.push(format!(
@@ -2661,11 +2737,10 @@ fn has_trusted_key_resolution_context(window: &str) -> bool {
 fn self_certified_invitation_key_used_as_trusted(line: &str, context: &str) -> bool {
     let uses_proof_key_as_trusted =
         line.contains("trusted_key") && line.contains("proof.public_key");
-    let self_certified_key_drives_verification =
-        line.contains("sender_id_bound_to_public_key")
-            && (context.contains("trusted_key")
-                || context.contains("verify_ed25519_transcript")
-                || context.contains("verify_frost_transcript"));
+    let self_certified_key_drives_verification = line.contains("sender_id_bound_to_public_key")
+        && (context.contains("trusted_key")
+            || context.contains("verify_ed25519_transcript")
+            || context.contains("verify_frost_transcript"));
     let bypasses_resolver = !(context.contains("TrustedKeyResolver")
         || context.contains("TrustedPublicKey")
         || context.contains("key_resolver")
@@ -3333,8 +3408,7 @@ pub fn run_rendezvous_descriptor_validation_boundary() -> Result<()> {
                 {
                     continue;
                 }
-                let context =
-                    lines[idx.saturating_sub(24)..lines.len().min(idx + 25)].join("\n");
+                let context = lines[idx.saturating_sub(24)..lines.len().min(idx + 25)].join("\n");
                 if rendezvous_descriptor_validation_violation(line, &context) {
                     violations.push(format!(
                         "{rel}:{} sync peer materialization must require canonical RendezvousDescriptor production validation",
@@ -3371,9 +3445,8 @@ fn rendezvous_descriptor_validation_violation(line: &str, context: &str) -> bool
 }
 
 fn secret_persistence_violation(line: &str, context: &str) -> bool {
-    let serializes_invitation =
-        line.contains("serde_json::to_vec(invitation)")
-            || line.contains("serde_json::to_vec(&invitation)");
+    let serializes_invitation = line.contains("serde_json::to_vec(invitation)")
+        || line.contains("serde_json::to_vec(&invitation)");
     let ordinary_store = context.contains(".store(&") || context.contains(".store(");
     let invitation_secret_context = context.contains("DeviceEnrollment")
         || context.contains("Invitation")
@@ -8780,7 +8853,56 @@ pub fn run_shared_flow_policy() -> Result<()> {
 
 #[cfg(test)]
 mod ownership_ratchet_tests {
-    use super::semantic_owner_wrapper_declared_in_source;
+    use super::{
+        boundary_annotation_attached_in_source, semantic_owner_wrapper_declared_in_source,
+    };
+
+    #[test]
+    fn signature_changes_require_attached_declarations() {
+        let required = "#[aura_macros::capability_boundary";
+        let free = "pub async fn sleep_ms(";
+        let annotated = r#"
+            #[aura_macros::capability_boundary(category = "capability_gated")]
+            pub async fn sleep_ms(ms: u64) -> Result<(), ()> { Ok(()) }
+        "#;
+        assert!(boundary_annotation_attached_in_source(annotated, free, required).unwrap());
+        let method = format!("impl Runtime {{ {annotated} }}");
+        assert!(boundary_annotation_attached_in_source(&method, free, required).unwrap());
+        let missing = annotated.replace(
+            "#[aura_macros::capability_boundary(category = \"capability_gated\")]",
+            "",
+        );
+        assert!(!boundary_annotation_attached_in_source(&missing, free, required).unwrap());
+        let unrelated = format!("{annotated}\npub async fn current_time_ms() {{}}");
+        assert!(!boundary_annotation_attached_in_source(
+            &unrelated,
+            "pub async fn current_time_ms(",
+            required
+        )
+        .unwrap());
+        let duplicate = format!("{annotated}\nmod other {{ {missing} }}");
+        assert!(!boundary_annotation_attached_in_source(&duplicate, free, required).unwrap());
+        let comment = format!("// #[aura_macros::capability_boundary]\n{missing}");
+        assert!(!boundary_annotation_attached_in_source(&comment, free, required).unwrap());
+        assert!(boundary_annotation_attached_in_source(
+            "#[aura_macros::actor_owned(owner = \"sync\")] struct SyncService {}",
+            "struct SyncService {",
+            "#[aura_macros::actor_",
+        )
+        .unwrap());
+        assert!(!boundary_annotation_attached_in_source(
+            "#[other::actor_owned] struct SyncService {}",
+            "struct SyncService {",
+            "#[aura_macros::actor_",
+        )
+        .unwrap());
+        assert!(!boundary_annotation_attached_in_source(
+            "#[aura_macros::actor_fake] struct SyncService {}",
+            "struct SyncService {",
+            "#[aura_macros::actor_",
+        )
+        .unwrap());
+    }
 
     #[test]
     fn semantic_owner_wrapper_requires_its_exact_declaration() {
@@ -8797,11 +8919,12 @@ mod ownership_ratchet_tests {
         "#;
         assert!(semantic_owner_wrapper_declared_in_source(declared, wrapper).unwrap());
         assert!(!semantic_owner_wrapper_declared_in_source(
-            declared.replace(
-                "wrapper = \"import_invitation_details_with_terminal_status\"",
-                "wrapper = \"another_with_terminal_status\""
-            )
-            .as_str(),
+            declared
+                .replace(
+                    "wrapper = \"import_invitation_details_with_terminal_status\"",
+                    "wrapper = \"another_with_terminal_status\""
+                )
+                .as_str(),
             wrapper
         )
         .unwrap());

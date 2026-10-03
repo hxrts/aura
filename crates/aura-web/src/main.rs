@@ -885,8 +885,8 @@ mod tests {
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", app_path.display()));
 
         assert!(
-            source.contains("workflows::accept_device_enrollment_import("),
-            "device enrollment import should route through the shared aura-web workflow helper"
+            source.contains("import_device_enrollment_with_terminal_status("),
+            "device enrollment import should hand off to the shared app semantic owner"
         );
         assert!(
             source.contains("workflows::stage_account_creation(controller.app_core(), &nickname)"),

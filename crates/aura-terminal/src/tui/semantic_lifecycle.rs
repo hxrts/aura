@@ -24,6 +24,7 @@ static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
     InvitationImport,
+    ImportDeviceEnrollment,
     CreateGuardianInvitation,
     AcceptInvitation,
     InviteActorToChannel,

@@ -203,6 +203,15 @@ those states into `Result<(), E>`.
 
 Every submitted operation must reach a terminal state. Terminal states may not regress. Owner drop must publish failure or cancellation explicitly.
 
+Device enrollment setup verification and code issuance belong to one submission
+owner. Issuance success requires the runtime's actual ceremony result; common
+preparation must not publish a second success. This start proof does not prove
+enrollment completion, which has its own operation instance and authoritative
+ceremony outcome. Invalid possession signatures or bindings yield
+`PermissionDenied`; malformed or out-of-validity setup statements yield
+`InvalidArgument`. Bounded deadlines yield `OperationTimedOut` with the original
+typed cause retained through the standard error source chain.
+
 Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `OperationState::Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
 
 Timeout-triggered returns do not relax this rule. A timeout may fail an
@@ -692,3 +701,11 @@ When adding or modifying a parity-critical path, ask these questions:
 - Is any later parity-critical step relying on hidden best-effort follow-up?
 - What bounded budget owns each required wait and retry?
 If these answers are unclear, the design is not complete enough.
+
+## Window ownership
+
+The common window primitive is `Pure`: sealed physical-millisecond and receipt-generation domains provide checked bounds and half-open membership. Admission, progression, cryptographic provenance and durable acknowledgment belong to their domain owners. Arithmetic serialization cannot mint an admission capability.
+
+A fixed physical execution window is `MoveOwned` at admission and shares one observation/exhaustion owner across clones and children. Its enclosing runtime is `ActorOwned`. An observed ceremony snapshot cannot mint that execution capability or replace its interval. The registered owner admits execution directly from its authoritative registry and retains the sealed allocation capability through subsequent checkpoints.
+
+Initial allocation and live admission are distinct lifecycle phases. Only an internally minted pre-live capability can retain a missing initial checkpoint from the exact original secure allocation, before canonical registration or immutable live-boundary evidence exists. The live boundary is retained before execution can observe the registry entry. After that boundary, missing observation history fails closed. A required checkpoint holds allocation continuity through its write, retains monotone durable history and preserves sticky failures; cancellation or storage failure prevents the required continuation/publication. A terminal outcome for the same allocation does not invalidate historical acknowledgment or renew execution.

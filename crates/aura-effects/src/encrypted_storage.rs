@@ -32,6 +32,11 @@ const MASTER_KEY_NAMESPACE: &str = "aura-encryption";
 const MASTER_KEY_ID: &str = "master-key";
 
 type MasterKeyMaterial = Arc<Zeroizing<[u8; 32]>>;
+#[derive(Debug, thiserror::Error)]
+#[error("encryption master key length is {actual}, expected 32")]
+struct InvalidMasterKeyLength {
+    actual: usize,
+}
 
 /// Configuration for encrypted storage behavior
 #[derive(Debug, Clone)]
@@ -214,54 +219,79 @@ where
         let read_caps = [SecureStorageCapability::Read];
         let write_caps = [SecureStorageCapability::Write];
 
-        let mut key_bytes = if self.secure.secure_exists(&location).await.map_err(|e| {
-            StorageError::ConfigurationError {
-                reason: format!("Failed to check secure storage: {e}"),
-            }
-        })? {
+        let failure =
+            |operation: &str, source: aura_core::AuraError| StorageError::BackendFailure {
+                operation: operation.into(),
+                source,
+            };
+        let key_bytes = if self
+            .secure
+            .secure_exists(&location)
+            .await
+            .map_err(|source| failure("check encryption master key", source))?
+        {
             self.secure
                 .secure_retrieve(&location, &read_caps)
                 .await
-                .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to retrieve master key: {e}"),
-                })?
+                .map_err(|source| failure("read encryption master key", source))?
         } else {
-            let key_bytes = self.crypto.random_bytes(32).await;
-            if key_bytes.len() != 32 {
-                return Err(StorageError::ConfigurationError {
-                    reason: "Failed to generate 32-byte key".to_string(),
-                });
+            let existing_records = self.inner.list_keys(None).await.map_err(|source| {
+                failure(
+                    "inspect records before encryption master key initialization",
+                    aura_core::AuraError::Storage {
+                        message: "inspect original encrypted profile".into(),
+                        source: Some(Arc::new(source)),
+                    },
+                )
+            })?;
+            if !existing_records.is_empty() {
+                // Another first-use wrapper may have published the original key
+                // after our first probe. Read that key; never replace a missing
+                // key when any original record already exists.
+                self.secure
+                    .secure_retrieve(&location, &read_caps)
+                    .await
+                    .map_err(|source| {
+                        failure("restore original key for nonempty profile", source)
+                    })?
+            } else {
+                let candidate = self.crypto.random_bytes(32).await;
+                if candidate.len() != 32 {
+                    return Err(failure(
+                        "generate encryption master key",
+                        aura_core::AuraError::Crypto {
+                            message: "generated encryption master key has invalid length".into(),
+                            source: Some(Arc::new(InvalidMasterKeyLength {
+                                actual: candidate.len(),
+                            })),
+                        },
+                    ));
+                }
+                match self
+                    .secure
+                    .secure_store_immutable(&location, &candidate, &write_caps)
+                    .await
+                    .map_err(|source| failure("immutably admit encryption master key", source))?
+                {
+                    aura_core::effects::secure::ImmutableSecureStoreOutcome::Created => candidate,
+                    aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists => self
+                        .secure
+                        .secure_retrieve(&location, &read_caps)
+                        .await
+                        .map_err(|source| failure("read original encryption master key", source))?,
+                }
             }
-
-            self.secure
-                .secure_store(&location, &key_bytes, &write_caps)
-                .await
-                .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to store master key: {e}"),
-                })?;
-
-            key_bytes
         };
-
         if key_bytes.len() != 32 {
-            // If secure storage contains an invalid key length, treat it as corrupt and
-            // re-generate a fresh master key. This preserves correctness because existing
-            // encrypted data would be unreadable with a malformed key anyway.
-            let delete_caps = [SecureStorageCapability::Delete];
-            let _ = self.secure.secure_delete(&location, &delete_caps).await;
-            let regenerated = self.crypto.random_bytes(32).await;
-            if regenerated.len() != 32 {
-                return Err(StorageError::ConfigurationError {
-                    reason: "Failed to generate 32-byte key".to_string(),
-                });
-            }
-            self.secure
-                .secure_store(&location, &regenerated, &write_caps)
-                .await
-                .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to store master key: {e}"),
-                })?;
-            key_bytes = regenerated;
+            return Err(failure(
+                "validate original encryption master key",
+                aura_core::AuraError::Storage {
+                    message: "persisted encryption master key has invalid length".into(),
+                    source: Some(Arc::new(InvalidMasterKeyLength {
+                        actual: key_bytes.len(),
+                    })),
+                },
+            ));
         }
 
         let mut key = [0u8; 32];
@@ -580,6 +610,161 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn independent_wrappers_retain_one_actual_owned_master_key(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let owner = Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(profile.path().into())
+                .acquire_owned_native()?,
+        );
+        let storage = crate::storage::FilesystemStorageHandler::new(profile.path().into())
+            .retain_profile_owner(owner.clone())?;
+        let secure = Arc::new(
+            crate::secure::ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                owner,
+            )?,
+        );
+        let crypto = Arc::new(crate::crypto::RealCryptoHandler::new());
+        let first = EncryptedStorage::new(
+            storage.clone(),
+            crypto.clone(),
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        let second = EncryptedStorage::new(
+            storage.clone(),
+            crypto.clone(),
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        let (left, right) = tokio::join!(
+            first.store("first", b"left".to_vec()),
+            second.store("second", b"right".to_vec())
+        );
+        left?;
+        right?;
+        drop(first);
+        drop(second);
+        let reopened = EncryptedStorage::new(
+            storage,
+            crypto,
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        assert_eq!(reopened.retrieve("first").await?, Some(b"left".to_vec()));
+        assert_eq!(reopened.retrieve("second").await?, Some(b"right".to_vec()));
+        assert_eq!(
+            secure
+                .secure_retrieve(
+                    &EncryptedStorage::<
+                        crate::storage::FilesystemStorageHandler,
+                        crate::crypto::RealCryptoHandler,
+                        crate::secure::ProductionSecureStorageHandler,
+                    >::master_key_location(&EncryptedStorageConfig::default()),
+                    &[SecureStorageCapability::Read]
+                )
+                .await?
+                .len(),
+            32
+        );
+        Ok(())
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn missing_actual_owned_master_key_preserves_existing_ciphertext(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let owner = Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(profile.path().into())
+                .acquire_owned_native()?,
+        );
+        let storage = crate::storage::FilesystemStorageHandler::new(profile.path().into())
+            .retain_profile_owner(owner.clone())?;
+        let secure = Arc::new(
+            crate::secure::ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                owner,
+            )?,
+        );
+        let crypto = Arc::new(crate::crypto::RealCryptoHandler::new());
+        let original = EncryptedStorage::new(
+            storage.clone(),
+            crypto.clone(),
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        original
+            .store("original", b"retained data".to_vec())
+            .await?;
+        let ciphertext = storage
+            .retrieve("original")
+            .await?
+            .ok_or("missing actual ciphertext")?;
+        drop(original);
+        let key = SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
+        secure
+            .secure_delete(&key, &[SecureStorageCapability::Delete])
+            .await?;
+        let reopened = EncryptedStorage::new(
+            storage.clone(),
+            crypto,
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        let failure = reopened
+            .store("must-not-publish", b"new data".to_vec())
+            .await
+            .expect_err("missing original key cannot reinitialize a populated profile");
+        assert!(matches!(failure, StorageError::BackendFailure { .. }));
+        assert!(std::error::Error::source(&failure).is_some());
+        assert!(!secure.secure_exists(&key).await?);
+        assert_eq!(storage.retrieve("original").await?, Some(ciphertext));
+        assert!(!storage.exists("must-not-publish").await?);
+        assert!(reopened.retrieve("original").await.is_err());
+        assert!(!secure.secure_exists(&key).await?);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn corrupt_actual_owned_master_key_is_never_replaced(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let owner = Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(profile.path().into())
+                .acquire_owned_native()?,
+        );
+        let storage = crate::storage::FilesystemStorageHandler::new(profile.path().into())
+            .retain_profile_owner(owner.clone())?;
+        let secure = Arc::new(
+            crate::secure::ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                owner,
+            )?,
+        );
+        let key = SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
+        secure
+            .secure_store(&key, b"corrupt", &[SecureStorageCapability::Write])
+            .await?;
+        let wrapped = EncryptedStorage::new(
+            storage,
+            Arc::new(crate::crypto::RealCryptoHandler::new()),
+            secure.clone(),
+            EncryptedStorageConfig::default(),
+        );
+        assert!(wrapped
+            .store("must-not-publish", b"data".to_vec())
+            .await
+            .is_err());
+        assert_eq!(
+            secure
+                .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                .await?,
+            b"corrupt"
+        );
+        assert!(!wrapped.inner.exists("must-not-publish").await?);
+        Ok(())
+    }
     use super::*;
     use aura_core::effects::storage::StorageStats;
     use aura_core::effects::{
@@ -916,6 +1101,25 @@ mod tests {
 
     #[async_trait]
     impl SecureStorageEffects for MockSecureStorage {
+        async fn secure_store_immutable(
+            &self,
+            location: &SecureStorageLocation,
+            data: &[u8],
+            _caps: &[SecureStorageCapability],
+        ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, aura_core::AuraError>
+        {
+            use std::collections::hash_map::Entry;
+            match self.data.write().await.entry(location.full_path()) {
+                Entry::Occupied(_) => {
+                    Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists)
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(data.to_vec());
+                    Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::Created)
+                }
+            }
+        }
+
         async fn secure_store(
             &self,
             location: &SecureStorageLocation,

@@ -288,6 +288,17 @@ fn invitation_service_for(
     .unwrap()
 }
 
+#[test]
+fn invitation_acceptance_caller_future_is_bounded() {
+    let authority = create_test_authority(187);
+    let effects = effects_for(&authority);
+    let service = invitation_service_for(authority, effects);
+    let invitation = InvitationId::new("acceptance-future-budget");
+    let future = service.accept(&invitation);
+    let bytes = std::mem::size_of_val(&future);
+    assert!(bytes <= 16 * 1024, "acceptance facade future is {bytes} bytes");
+}
+
 fn unsigned_test_code_for_invitation(invitation: &Invitation) -> String {
     ShareableInvitation {
         version: ShareableInvitation::CURRENT_VERSION,
@@ -490,7 +501,7 @@ impl ContactPair {
 }
 
 #[track_caller]
-fn run_async_test_on_large_stack<F>(future: F)
+pub(crate) fn run_async_test_on_large_stack<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
@@ -943,6 +954,74 @@ async fn invitation_can_be_created() {
     assert!(invitation.expires_at.is_some());
 }
 
+#[tokio::test]
+async fn invitation_reservation_is_side_effect_free_and_rejects_another_issuer() {
+    let issuer = create_test_authority(181);
+    let other = create_test_authority(182);
+    let effects = effects_for(&issuer);
+    let handler = handler_for(issuer.clone());
+    let before = effects.load_committed_facts(issuer.authority_id()).await.unwrap();
+    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
+    let error = handler_for(other).prepare_reserved_invitation_with_context(
+        effects.clone(), reserved, AuthorityId::new_from_entropy([183; 32]),
+        InvitationType::Contact { nickname: None }, None, None, None, None,
+    ).await.expect_err("another issuer cannot consume the reservation");
+    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
+    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
+    let other_device = AuthorityContext::new_with_device(
+        issuer.authority_id(), DeviceId::new_from_entropy([186; 32]),
+    );
+    let other_effects = effects_for(&other_device);
+    let other_before = other_effects.load_committed_facts(issuer.authority_id()).await.unwrap();
+    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    let error = handler.prepare_reserved_invitation_with_context(
+        other_effects.clone(), reserved, AuthorityId::new_from_entropy([183; 32]),
+        InvitationType::Contact { nickname: None }, None, None, None, None,
+    ).await.expect_err("another physical device cannot consume the reservation");
+    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
+    assert_eq!(other_effects.load_committed_facts(issuer.authority_id()).await.unwrap(), other_before);
+}
+
+#[tokio::test]
+async fn invitation_preparation_caller_future_is_bounded() {
+    let issuer = create_test_authority(187);
+    let effects = effects_for(&issuer);
+    let handler = handler_for(issuer);
+    let future = handler.prepare_invitation_with_context(
+        effects, AuthorityId::new_from_entropy([188; 32]),
+        InvitationType::Contact { nickname: None }, None, None, None, None,
+    );
+    let bytes = std::mem::size_of_val(&future);
+    assert!(bytes <= 16 * 1024,
+        "invitation preparation caller future exceeds the 16 KiB stack budget: {bytes}");
+}
+
+#[tokio::test]
+async fn invitation_reservation_preserves_identity_and_rejects_deadline_overflow() {
+    let issuer = create_test_authority(184);
+    let effects = effects_for(&issuer);
+    let handler = handler_for(issuer.clone());
+    let before = effects.load_committed_facts(issuer.authority_id()).await.unwrap();
+    let invalid = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    assert!(invalid.created_at_ms() > 0);
+    let error = handler.prepare_reserved_invitation_with_context(
+        effects.clone(), invalid, AuthorityId::new_from_entropy([185; 32]),
+        InvitationType::Contact { nickname: None }, None, None, None, Some(u64::MAX),
+    ).await.expect_err("overflow must fail before fact preparation");
+    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
+    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
+    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    let identity = reserved.invitation_id().clone();
+    let timestamp = reserved.created_at_ms();
+    let prepared = handler.prepare_reserved_invitation_with_context(
+        effects, reserved, AuthorityId::new_from_entropy([185; 32]),
+        InvitationType::Contact { nickname: None }, None, None, None, None,
+    ).await.expect("same owner consumes reservation");
+    assert_eq!(prepared.invitation.invitation_id, identity);
+    assert_eq!(prepared.invitation.created_at, timestamp);
+}
+
 large_stack_async_test!(invitation_can_be_accepted, {
     let pair = contact_pair(93).await;
     let invitation = pair.create_contact_invitation().await;
@@ -1098,7 +1177,7 @@ large_stack_async_test!(accepting_guardian_invitation_surfaces_choreography_fail
     .expect_err("guardian choreography failure should surface");
     // With no principal online the signed acceptance cannot be delivered;
     // the failure must still surface to the caller.
-    assert!(matches!(&error, AgentError::Timeout(_)), "unexpected error: {error}");
+    assert!(error.is_timeout(), "unexpected error: {error}");
 });
 
 #[tokio::test]
@@ -3383,7 +3462,7 @@ fn shareable_invitation_roundtrip_contact() {
     let code = shareable
         .to_code()
         .expect("shareable invitation should serialize");
-    assert!(code.starts_with("aura:v1:"));
+    assert!(code.starts_with("aura:v2:"));
 
     let decoded = ShareableInvitation::from_code(&code).unwrap();
     assert_eq!(decoded.version, shareable.version);
@@ -3481,6 +3560,8 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
         context_id: Some(context_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority,
+            // Codec fixture only; deliberately no authorization evidence.
+            setup_binding: None,
             invitee_authority: None,
             initiator_device_id,
             device_id,
@@ -3504,6 +3585,7 @@ fn shareable_invitation_roundtrip_device_enrollment_preserves_baseline_tree_ops(
     match decoded.invitation_type {
         InvitationType::DeviceEnrollment {
             invitee_authority: _,
+            setup_binding: _,
             subject_authority: decoded_subject_authority,
             initiator_device_id: decoded_initiator_device_id,
             device_id: decoded_device_id,
@@ -3539,6 +3621,8 @@ fn test_device_enrollment_invitation(invitation_id: &str) -> Invitation {
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
+            // Legacy cache fixture; secure caching cannot mint setup trust.
+            setup_binding: None,
             invitee_authority: None,
             initiator_device_id: DeviceId::new_from_entropy([152u8; 32]),
             device_id: DeviceId::new_from_entropy([153u8; 32]),
@@ -3703,6 +3787,9 @@ fn device_enrollment_test_invitation(
         context_id: default_context_id_for_authority(sender_id),
         invitation_type: InvitationType::DeviceEnrollment {
             subject_authority: sender_id,
+            // Negative/legacy fixture. Positive authentication uses actual
+            // device export and explicit app transfer instead.
+            setup_binding: None,
             invitee_authority: None,
             initiator_device_id: DeviceId::new_from_entropy([153u8; 32]),
             device_id,
@@ -3722,57 +3809,92 @@ fn device_enrollment_test_invitation(
     }
 }
 
-async fn signed_device_enrollment_accept(
-    invitee_effects: &Arc<AuraEffectSystem>,
-    invitation: &Invitation,
-    acceptor_id: AuthorityId,
-    device_id: DeviceId,
-) -> DeviceEnrollmentAccept {
-    bootstrap_test_signing_authority(invitee_effects, acceptor_id).await;
-    let ceremony_id = CeremonyId::new("ceremony:device-enrollment-signed");
-    let transcript = DeviceEnrollmentAcceptanceTranscript {
-        invitation,
-        acceptor_id,
-        subject_authority: invitation.sender_id,
-        ceremony_id: ceremony_id.clone(),
-        device_id,
-    };
-    let signature =
-        sign_invitation_acceptance_transcript(invitee_effects.as_ref(), acceptor_id, &transcript)
+/// Build real runtimes and retain a setup pin before verifying remote evidence.
+pub(crate) async fn actual_pinned_device_enrollment_fixture(label: &str) -> (
+    Arc<crate::AuraAgent>, Arc<crate::AuraAgent>, Invitation,
+    aura_app::runtime_bridge::DeviceEnrollmentStart, DeviceEnrollmentAccept,
+    super::VerifiedEnrollmentResponse,
+) {
+    use aura_app::runtime_bridge::RuntimeBridge;
+    use crate::runtime_bridge::AgentRuntimeBridge;
+    use crate::runtime::EffectSystemBuilder;
+    let transport = crate::SharedTransport::new();
+    let mut agents = Vec::new();
+    for seed in [151u8, 154u8] {
+        let authority = AuthorityId::new_from_entropy([seed; 32]);
+        let config = AgentConfig {
+            device_id: DeviceId::new_from_entropy([seed + 1; 32]),
+            storage: StorageConfig {
+                base_path: tempfile::Builder::new().prefix(&format!("aura-actual-enrollment-{label}-{seed}-")).tempdir().expect("actual enrollment storage root").keep(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let context = aura_core::context::EffectContext::new(authority,
+            ContextId::new_from_entropy([seed + 2; 32]), aura_core::effects::ExecutionMode::Testing);
+        let runtime = EffectSystemBuilder::testing()
+            .with_authority(authority)
+            .with_config(config)
+            .with_shared_transport(transport.clone())
+            .build(&context)
             .await
-            .expect("device enrollment acceptance should sign");
-    DeviceEnrollmentAccept {
-        invitation_id: invitation.invitation_id.clone(),
-        ceremony_id,
-        device_id,
-        acceptor_id,
-        signature,
+            .expect("actual connected runtime");
+        let agent = Arc::new(crate::AuraAgent::new(runtime, authority));
+        AgentRuntimeBridge::new(agent.clone()).bootstrap_signing_keys().await.expect("actual signing bootstrap");
+        agents.push(agent);
     }
+    let initiator = agents[0].clone();
+    let invitee = agents[1].clone();
+    let code = AgentRuntimeBridge::new(invitee.clone()).export_device_enrollment_setup_request().await.unwrap();
+    let app = Arc::new(async_lock::RwLock::new(aura_app::AppCore::with_runtime(
+        aura_app::AppConfig::default(), Arc::new(AgentRuntimeBridge::new(initiator.clone())),
+    ).unwrap()));
+    let pin = aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&app, code).await.unwrap();
+    let start = AgentRuntimeBridge::new(initiator.clone()).initiate_device_enrollment_ceremony("Actual device".to_string(), pin).await.unwrap();
+    let decoded = ShareableInvitation::from_code(&start.enrollment_code).unwrap();
+    let invitation = initiator.invitations().unwrap().get(&decoded.invitation_id).await.unwrap();
+    assert!(!initiator.runtime().effects().export_tree_ops().await.expect("actual committed genesis baseline").is_empty(),
+        "fresh issuer bootstrap must commit baseline before manifest export");
+    let transfer = start.manifest_transfer.as_ref().expect("actual issuer exports manifest transfer");
+    let invitee_app = Arc::new(async_lock::RwLock::new(aura_app::AppCore::with_runtime(
+        aura_app::AppConfig::default(), Arc::new(AgentRuntimeBridge::new(invitee.clone())),
+    ).unwrap()));
+    let selected_manifest = aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
+        &invitee_app, transfer.manifest_code.clone(), transfer.initiator_verifier_code.clone(),
+    ).await.expect("explicit actual initiator transfer verifies");
+    AgentRuntimeBridge::new(invitee.clone()).import_enrollment_invitation(
+        &start.enrollment_code, selected_manifest,
+    ).await.expect("actual transferred manifest admitted before import");
+    let admitted = super::enrollment_manifest_admission::load_admitted_baseline(
+        invitee.runtime().effects().as_ref(), invitee.authority_id(), &invitation,
+    ).await.expect("actual runtime admission witness");
+    let manifest_digest = admitted.manifest_digest();
+    let transcript = DeviceEnrollmentAcceptanceTranscript {
+        invitation: &invitation, acceptor_id: invitee.authority_id(), subject_authority: initiator.authority_id(),
+        ceremony_id: start.ceremony_id.clone(), device_id: start.device_id,
+        manifest_digest,
+    };
+    let accept = DeviceEnrollmentAccept {
+        invitation_id: invitation.invitation_id.clone(), ceremony_id: start.ceremony_id.clone(), device_id: start.device_id,
+        acceptor_id: invitee.authority_id(),
+        manifest_digest: Some(manifest_digest),
+        signature: sign_invitation_acceptance_transcript(invitee.runtime().effects().as_ref(), invitee.authority_id(), &transcript).await.unwrap(),
+    };
+    let verified = super::device_enrollment::verify_device_enrollment_acceptance(
+        initiator.runtime().effects().as_ref(), &invitation, initiator.authority_id(),
+        &start.ceremony_id, start.device_id, &accept,
+    ).await.expect("actual retained setup verifies exact remote proof");
+    (initiator, invitee, invitation, start, accept, verified)
 }
 
-/// Regression (work/8.md task 7): device enrollment is accepted only with a
-/// valid signature from the invited authority over this exact enrollment.
-#[tokio::test]
-async fn device_enrollment_acceptance_requires_signed_transcript_from_invitee() {
-    let initiator = create_test_authority(151);
-    let invitee = create_test_authority(154);
-    let initiator_effects = effects_for(&initiator);
-    let invitee_effects = effects_for(&invitee);
-    let device_id = invitee.device_id();
-    let ceremony_id = CeremonyId::new("ceremony:device-enrollment-signed");
-    let invitation = device_enrollment_test_invitation(
-        "inv-device-enrollment-signed",
-        initiator.authority_id(),
-        invitee.authority_id(),
-        device_id,
-    );
-    let accept = signed_device_enrollment_accept(
-        &invitee_effects,
-        &invitation,
-        invitee.authority_id(),
-        device_id,
-    )
-    .await;
+// Regression: device enrollment is accepted only with a valid signature from
+// the invited authority over this exact enrollment.
+large_stack_async_test!(device_enrollment_acceptance_requires_signed_transcript_from_invitee, {
+    let (initiator, _invitee, invitation, start, accept, _verified) =
+        actual_pinned_device_enrollment_fixture("signature-binding").await;
+    let initiator_effects = initiator.runtime().effects();
+    let device_id = start.device_id;
+    let ceremony_id = start.ceremony_id;
 
     // Valid signed acceptance verifies.
     super::device_enrollment::verify_device_enrollment_acceptance(
@@ -3815,12 +3937,8 @@ async fn device_enrollment_acceptance_requires_signed_transcript_from_invitee() 
     .is_err());
 
     // Replay: the same acceptance presented for a different invitation.
-    let other_invitation = device_enrollment_test_invitation(
-        "inv-device-enrollment-other",
-        initiator.authority_id(),
-        invitee.authority_id(),
-        device_id,
-    );
+    let mut other_invitation = invitation.clone();
+    other_invitation.invitation_id = InvitationId::new("inv-device-enrollment-other");
     let mut replayed = accept.clone();
     replayed.invitation_id = other_invitation.invitation_id.clone();
     assert!(super::device_enrollment::verify_device_enrollment_acceptance(
@@ -3849,7 +3967,7 @@ async fn device_enrollment_acceptance_requires_signed_transcript_from_invitee() 
     )
     .await
     .is_err());
-}
+});
 
 #[test]
 fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
@@ -5114,25 +5232,19 @@ large_stack_async_test!(guardian_choreography_completes_when_guardian_accepts_la
 // still name the authority that was invited, or the initiator rejects the
 // signed acceptance.
 large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
-    let mut invitation = test_device_enrollment_invitation("reimport-after-switch");
-    let invited = invitation.receiver_id;
-    if let InvitationType::DeviceEnrollment {
-        invitee_authority, ..
-    } = &mut invitation.invitation_type
-    {
-        *invitee_authority = Some(invited);
-    }
-    // The importing runtime already runs as the subject authority.
-    let subject_context = AuthorityContext::new(invitation.sender_id);
-    let effects = effects_for(&subject_context);
-    let handler = handler_for(subject_context);
+let (_issuer,invitee,invitation,start,_accept,_witness)=Box::pin(
+    actual_pinned_device_enrollment_fixture("reimport-after-switch"),
+).await;
+let invited=invitation.receiver_id;
+// Recreate the importing handler under the subject context on the same
+// actual device/storage. Original admitted provisional identity remains
+// the authoritative receiver; no raw code can supply replacement trust.
+let handler=handler_for(AuthorityContext::new_with_device(invitation.sender_id,invitee.context().device_id()));
+let imported=handler.import_invitation_code(invitee.runtime().effects().as_ref(),&start.enrollment_code)
+    .await.expect("actual independently admitted code reimports under subject handler context");
+assert_eq!(imported.receiver_id,invited);
+assert_eq!(imported.invitation_type,invitation.invitation_type);
 
-    let imported = handler
-        .import_invitation_code(&effects, &unsigned_test_code_for_invitation(&invitation))
-        .await
-        .expect("device enrollment code should import");
-
-    assert_eq!(imported.receiver_id, invited);
 });
 
 // Regression (work/8.md task 32): listing invitations re-caches persisted
@@ -5467,4 +5579,435 @@ large_stack_async_test!(existing_contact_can_import_a_new_code_signed_by_its_con
         .await
         .expect("a confirmed contact's new code should import");
     assert_eq!(reimported.sender_id, pair.sender_id);
+});
+large_stack_async_test!(
+    enrollment_refusal_is_a_distinct_pinned_signature_not_acceptance,
+    {
+        use super::enrollment_trust::{
+            PinnedEnrollmentResponseVerifierCapability, RetainedEnrollmentVmControl,
+            VerifiedEnrollmentResponseDispositionCapability,
+        };
+        use aura_invitation::protocol::{DeviceEnrollmentRefusal, DeviceEnrollmentResponse};
+        let (issuer, invitee, invitation, start, accept, _) =
+            actual_pinned_device_enrollment_fixture("refusal-signature-domain").await;
+        let issuer_effects = issuer.runtime().effects();
+        let invitee_effects = invitee.runtime().effects();
+        let retained = RetainedEnrollmentVmControl::load(issuer_effects.clone(), &invitation)
+            .await
+            .expect("actual issuer control record");
+        let verifier =
+            PinnedEnrollmentResponseVerifierCapability::acquire(issuer_effects.as_ref(), &retained)
+                .await
+                .expect("actual independent setup pin");
+        let admitted = super::enrollment_manifest_admission::load_admitted_baseline(
+            invitee_effects.as_ref(),
+            invitee.authority_id(),
+            &invitation,
+        )
+        .await
+        .expect("actual manifest admission");
+        let refusal = super::enrollment_vm_admission::sign_refusal_for_request(
+            invitee_effects.as_ref(),
+            &admitted,
+            &super::enrollment_vm_admission::expected_request(&admitted),
+        )
+        .await
+        .expect("physically owned actual setup signer refuses");
+        let mislabeled_accept =
+            DeviceEnrollmentResponse::Refused(DeviceEnrollmentRefusal { binding: accept });
+        assert!(verifier
+            .verify_received_response(issuer_effects.as_ref(), &mislabeled_accept)
+            .await
+            .expect("invalid peer proof is discardable")
+            .is_none());
+        let mislabeled_refusal = DeviceEnrollmentResponse::Accepted(refusal.binding.clone());
+        assert!(verifier
+            .verify_received_response(issuer_effects.as_ref(), &mislabeled_refusal)
+            .await
+            .expect("invalid peer proof is discardable")
+            .is_none());
+        let mut tampered = refusal.clone();
+        tampered.binding.device_id = DeviceId::new_from_entropy([219; 32]);
+        assert!(verifier
+            .verify_received_response(
+                issuer_effects.as_ref(),
+                &DeviceEnrollmentResponse::Refused(tampered)
+            )
+            .await
+            .expect("wrong physical device is discardable")
+            .is_none());
+        assert!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("actual pending owner read")
+                .is_none(),
+            "unverified disposition cannot settle the owner"
+        );
+        let Some(VerifiedEnrollmentResponseDispositionCapability::Refused(proof)) = verifier
+            .verify_received_response(
+                issuer_effects.as_ref(),
+                &DeviceEnrollmentResponse::Refused(refusal.clone()),
+            )
+            .await
+            .expect("actual refusal proof verifies")
+        else {
+            panic!("actual refusal must issue rejection capability")
+        };
+        let outcome = issuer
+            .ceremony_runner()
+            .await
+            .record_verified_enrollment_rejection(proof)
+            .await
+            .expect("real rejection CAS persists");
+        assert_eq!(
+            outcome,
+            aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Rejected
+            )
+        );
+        let Some(VerifiedEnrollmentResponseDispositionCapability::Refused(repeated)) = verifier
+            .verify_received_response(
+                issuer_effects.as_ref(),
+                &DeviceEnrollmentResponse::Refused(refusal),
+            )
+            .await
+            .expect("same authenticated refusal remains verifiable")
+        else {
+            panic!("actual refusal must remain rejection")
+        };
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .record_verified_enrollment_rejection(repeated)
+                .await
+                .expect("same refusal CAS is idempotent"),
+            outcome
+        );
+        assert!(
+            issuer
+                .ceremony_tracker()
+                .await
+                .complete(
+                    &start.ceremony_id,
+                    aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed
+                )
+                .await
+                .is_err(),
+            "rejection must never authorize activation or overwrite the first terminal decision"
+        );
+        let cancel = issuer.invitations().expect("issuer invitation service")
+            .cancel(&invitation.invitation_id).await;
+        assert!(cancel.is_err(), "public cancellation cannot replace actual signed rejection");
+        let stored = issuer.invitations().expect("issuer invitation service")
+            .get(&invitation.invitation_id).await.expect("created invitation remains present");
+        assert_eq!(stored.status, InvitationStatus::Pending,
+            "losing terminal CAS cannot publish InvitationCancelled");
+        assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id)
+            .await.expect("required terminal read"), Some(outcome));
+    }
+);
+
+large_stack_async_test!(
+    two_runtime_signed_refusal_persists_failed_readout_without_adoption,
+    {
+        use aura_app::runtime_bridge::{
+            CeremonyFailureReason, CeremonyTerminalOutcome, RuntimeBridge,
+        };
+        let (issuer, invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("two-runtime-refusal").await;
+        timeout(
+            std::time::Duration::from_secs(20),
+            invitee
+                .invitations()
+                .expect("actual invitee service")
+                .decline(&invitation.invitation_id),
+        )
+        .await
+        .expect("actual two-runtime refusal must terminate")
+        .expect("verified refusal receives signed persisted Failed frame");
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("actual issuer terminal state"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Rejected
+            ))
+        );
+        let invitee_effects = invitee.runtime().effects();
+        let failed = super::enrollment_manifest_admission::load_failed_enrollment_for_ceremony(
+            invitee_effects.as_ref(),
+            invitee.authority_id(),
+            &start.ceremony_id,
+        )
+        .await
+        .expect("required immutable failure receipt read")
+        .expect("real signed failure receipt retained before publication");
+        assert_eq!(failed.evidence().reason(), CeremonyFailureReason::Rejected);
+        assert_eq!(
+            crate::runtime_bridge::AgentRuntimeBridge::new(invitee.clone())
+                .get_ceremony_terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("native failure readout"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Rejected
+            ))
+        );
+        assert!(
+            super::enrollment_manifest_admission::load_confirmed_enrollment(
+                invitee_effects.as_ref(),
+                invitee.authority_id(),
+                &invitation.invitation_id,
+            )
+            .await
+            .is_err(),
+            "a failure receipt is never an activation capability"
+        );
+        let replay = super::enrollment_manifest_admission::load_failed_enrollment_for_ceremony(
+            invitee_effects.as_ref(),
+            invitee.authority_id(),
+            &start.ceremony_id,
+        )
+        .await
+        .expect("same durable failure readout remains authenticated")
+        .expect("original failure receipt remains present");
+        assert_eq!(replay.evidence().reason(), CeremonyFailureReason::Rejected);
+    }
+);
+large_stack_async_test!(
+    timed_enrollment_attempt_keeps_actual_vm_for_required_close,
+    {
+        struct DeadlineTime(std::sync::atomic::AtomicUsize);
+        #[async_trait::async_trait]
+        impl aura_core::effects::PhysicalTimeEffects for DeadlineTime {
+            async fn physical_time(
+                &self,
+            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+                let count = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(aura_core::time::PhysicalTime::exact(if count == 0 {
+                    100
+                } else {
+                    101
+                }))
+            }
+            async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+                Ok(())
+            }
+        }
+        let (_, invitee, invitation, _, _, _) =
+            actual_pinned_device_enrollment_fixture("attempt-slot-close").await;
+        let effects = invitee.runtime().effects();
+        let admitted = super::enrollment_manifest_admission::load_admitted_baseline(
+            effects.as_ref(),
+            invitee.authority_id(),
+            &invitation,
+        )
+        .await
+        .expect("actual independent manifest admission");
+        let binding = admitted.manifest();
+        let initiator = ChoreographicRole::new(
+            binding.initiator_device,
+            binding.subject,
+            RoleIndex::new(0).expect("actual initiator role"),
+        );
+        let invitee_role = ChoreographicRole::new(
+            binding.invitee_device,
+            binding.subject,
+            RoleIndex::new(1).expect("actual invitee role"),
+        );
+        let manifest = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::composition_manifest();
+        let global = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::global_type();
+        let locals = aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts::local_types();
+        let session = crate::runtime::open_owned_manifest_vm_session_admitted(
+            effects.clone(),
+            uuid::Uuid::from_bytes([225; 16]),
+            vec![initiator, invitee_role],
+            &manifest,
+            "Invitee",
+            &global,
+            &locals,
+            crate::runtime::AuraVmSchedulerSignals::default(),
+        )
+        .await
+        .expect("actual admitted runtime VM owner");
+        let owner = session.owner().clone();
+        let mut slot = Some(session);
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &aura_core::time::PhysicalTime::exact(100),
+            std::time::Duration::from_millis(1),
+        )
+        .expect("deterministic diagnostic timeout around the actual owned VM");
+        let time = DeadlineTime(std::sync::atomic::AtomicUsize::new(0));
+        let timed = aura_core::execute_with_timeout_budget(&time, &budget, || async {
+            let session = slot
+                .as_mut()
+                .expect("attempt borrows the caller's actual session slot");
+            let _owned_id = session.vm_session_id();
+            futures::future::pending::<AgentResult<()>>().await
+        })
+        .await;
+        assert!(matches!(
+            timed,
+            Err(aura_core::TimeoutRunError::Timeout(
+                aura_core::TimeoutBudgetError::DeadlineExceeded { .. }
+            ))
+        ));
+        assert!(
+            effects.assert_owned_choreography_session(&owner).is_ok(),
+            "dropping the timed future must leave the actual VM available to cleanup"
+        );
+        super::device_enrollment::finish_enrollment_vm_slot(Ok(()), slot)
+            .await
+            .expect("required actual VM close must complete after timeout");
+        assert!(
+            effects.assert_owned_choreography_session(&owner).is_err(),
+            "actual runtime owner must be retired before another attempt"
+        );
+    }
+);
+
+large_stack_async_test!(actual_issuer_cancellation_wins_before_local_status_and_is_idempotent, {
+    use super::enrollment_trust::RetainedEnrollmentVmControl;
+    use aura_app::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
+    let (issuer, _invitee, invitation, start, _, _) =
+        actual_pinned_device_enrollment_fixture("issuer-cancel-first-decision").await;
+    let effects = issuer.runtime().effects();
+    let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
+        .await.expect("genuine retained signed issuance");
+    let cancellation = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
+        .await.expect("actual original-window terminal CAS");
+    assert_eq!(cancellation.invitation(), &invitation.invitation_id);
+    assert_eq!(cancellation.ceremony(), &start.ceremony_id);
+    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id)
+        .await.expect("required terminal read"),
+        Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Cancelled)));
+    assert_eq!(issuer.invitations().expect("issuer service").get(&invitation.invitation_id)
+        .await.expect("created sender invitation").status, InvitationStatus::Pending,
+        "terminal CAS alone cannot fabricate local publication");
+    let again = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
+        .await.expect("same durable negative decision is idempotent");
+    assert_eq!(again.ceremony(), &start.ceremony_id);
+    assert!(issuer.ceremony_tracker().await.complete(&start.ceremony_id,
+        CeremonyTerminalOutcome::Committed).await.is_err(),
+        "negative terminal capability never authorizes adoption");
+});
+
+large_stack_async_test!(cancellation_tokens_reject_another_runtime_with_identical_ids, {
+    use super::enrollment_trust::{EnrollmentVerifierError, RetainedEnrollmentVmControl};
+    use std::error::Error as _;
+    let (issuer, _invitee, invitation, start, _, _) =
+        actual_pinned_device_enrollment_fixture("cancel-runtime-owner").await;
+    let effects = issuer.runtime().effects();
+    let mut config = effects.config().clone();
+    config.storage.base_path = tempfile::Builder::new().prefix("aura-cancel-other-runtime-")
+        .tempdir().expect("distinct actual runtime storage root").keep();
+    let context = aura_core::context::EffectContext::new(issuer.authority_id(), invitation.context_id,
+        aura_core::effects::ExecutionMode::Testing);
+    let foreign = crate::runtime::EffectSystemBuilder::testing()
+        .with_authority(issuer.authority_id()).with_config(config).build(&context)
+        .await.expect("distinct real runtime with equal authority and device identifiers");
+    let foreign = foreign.effects();
+    assert_eq!(foreign.device_id(), effects.device_id());
+    let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
+        .await.expect("genuine signed control belongs to original runtime");
+    let mismatch = issued.require_runtime_owner(foreign.as_ref())
+        .expect_err("equal identifiers cannot replace exact runtime ownership");
+    assert!(matches!(mismatch.source().and_then(|source| source.downcast_ref::<EnrollmentVerifierError>()),
+        Some(EnrollmentVerifierError::RuntimeOwner)));
+    assert!(super::enrollment_vm_admission::sign_request(foreign.as_ref(), &issued).await.is_err(),
+        "borrowed control cannot authorize another runtime's signer");
+    let handler = handler_for_id(issuer.authority_id());
+    let record = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
+        .await.expect("required original sender record capability");
+    let prepared = handler.prepare_enrollment_cancellation(&issued, record)
+        .await.expect("actual original guard preparation");
+    let cancelled = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
+        .await.expect("actual first negative decision");
+    assert!(handler.publish_verified_enrollment_cancellation(foreign.clone(), prepared, cancelled)
+        .await.is_err(), "wrong runtime cannot publish the matching negative decision");
+    let original = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
+        .await.expect("original sender record still required");
+    assert_eq!(original.invitation().status, InvitationStatus::Pending,
+        "wrong-runtime publication cannot mutate original sender record");
+    assert!(foreign.retrieve(&InvitationCacheHandler::created_invitation_key(
+        issuer.authority_id(), &invitation.invitation_id)).await.expect("foreign required storage read").is_none());
+    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await
+        .expect("original durable terminal owner read"), Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+            aura_app::runtime_bridge::CeremonyFailureReason::Cancelled)));
+});
+
+large_stack_async_test!(required_sender_enrollment_hydration_rejects_missing_corrupt_and_mismatched_secret, {
+    let (issuer, _invitee, invitation, start, _, _) =
+        actual_pinned_device_enrollment_fixture("required-created-secret").await;
+    let effects = issuer.runtime().effects();
+    let handler = handler_for_id(issuer.authority_id());
+    let key = InvitationCacheHandler::created_invitation_key(issuer.authority_id(), &invitation.invitation_id);
+    let location = InvitationCacheHandler::secret_payload_location(issuer.authority_id(), &invitation.invitation_id, "created");
+    let original = effects.secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await.expect("actual separately retained signed enrollment payload");
+    let regular = effects.retrieve(&key).await.expect("required regular storage read")
+        .expect("actual regular sender record");
+    let decoded_regular: Invitation = serde_json::from_slice(&regular).expect("actual regular record decodes");
+    let hydrated = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
+        .await.expect("required secret hydration succeeds");
+    assert!(matches!(&decoded_regular.invitation_type,
+        InvitationType::DeviceEnrollment { key_package, threshold_config, public_key_package, baseline_tree_ops, .. }
+        if key_package.is_empty() && threshold_config.is_empty() && public_key_package.is_empty() && baseline_tree_ops.is_empty()));
+    assert!(matches!(&hydrated.invitation().invitation_type,
+        InvitationType::DeviceEnrollment { key_package, public_key_package, baseline_tree_ops, .. }
+        if !key_package.is_empty() && !public_key_package.is_empty() && !baseline_tree_ops.is_empty()));
+    effects.secure_store(&location, b"{malformed actual retained record", &[SecureStorageCapability::Read, SecureStorageCapability::Write])
+        .await.expect("inject actual secure-record codec fault");
+    let codec = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
+        .await.err().expect("required codec failure cannot become redacted fallback");
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&codec);
+    let mut found = false;
+    while let Some(error) = cause { found |= error.is::<serde_json::Error>(); cause = error.source(); }
+    assert!(found, "actual secure record codec source is preserved");
+    let mut wrong: Invitation = serde_json::from_slice(&original).expect("actual original retained payload");
+    wrong.receiver_id = AuthorityId::new_from_entropy([0x37; 32]);
+    effects.secure_store(&location, &serde_json::to_vec(&wrong).expect("mismatched test record encoding"),
+        &[SecureStorageCapability::Read, SecureStorageCapability::Write]).await.expect("inject actual retained identity fault");
+    assert!(handler.created_invitation_required(effects.clone(), &invitation.invitation_id).await.is_err(),
+        "secure custody alone cannot authorize mismatched invitation metadata");
+    effects.secure_delete(&location, &[SecureStorageCapability::Delete]).await.expect("remove actual required retained payload");
+    assert!(issuer.invitations().expect("actual public service").cancel(&invitation.invitation_id).await.is_err(),
+        "public cancellation cannot fall back when retained payload is absent");
+    assert_eq!(effects.retrieve(&key).await.expect("required regular reread").expect("original record remains"), regular,
+        "failed required hydration cannot publish local cancellation");
+    assert!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await.expect("required terminal read").is_none(),
+        "failed required hydration cannot authorize terminal CAS");
+    effects.secure_store(&location, &original, &[SecureStorageCapability::Read, SecureStorageCapability::Write])
+        .await.expect("restore original real evidence for owned task cleanup");
+});
+
+large_stack_async_test!(public_enrollment_cancel_hydrates_original_then_retains_redaction_and_idempotence, {
+    let (issuer, _invitee, invitation, start, _, _) =
+        actual_pinned_device_enrollment_fixture("public-cancel-required-hydration").await;
+    let effects = issuer.runtime().effects();
+    let location = InvitationCacheHandler::secret_payload_location(issuer.authority_id(), &invitation.invitation_id, "created");
+    let original = effects.secure_retrieve(&location, &[SecureStorageCapability::Read]).await.expect("original secure payload");
+    let service = issuer.invitations().expect("actual public service");
+    assert_eq!(service.cancel(&invitation.invitation_id).await.expect("genuine public owner cancellation").new_status,
+        InvitationStatus::Cancelled);
+    assert_eq!(effects.secure_retrieve(&location, &[SecureStorageCapability::Read]).await.expect("retained secure reread"), original,
+        "status publication must not rewrite original secure cryptographic evidence");
+    let regular = effects.retrieve(&InvitationCacheHandler::created_invitation_key(issuer.authority_id(), &invitation.invitation_id))
+        .await.expect("required regular reread").expect("regular record exists");
+    let decoded: Invitation = serde_json::from_slice(&regular).expect("regular cancellation record");
+    assert_eq!(decoded.status, InvitationStatus::Cancelled);
+    assert!(matches!(decoded.invitation_type,
+        InvitationType::DeviceEnrollment { key_package, threshold_config, public_key_package, baseline_tree_ops, .. }
+        if key_package.is_empty() && threshold_config.is_empty() && public_key_package.is_empty() && baseline_tree_ops.is_empty()),
+        "hydration must never leak secure payload into regular status storage");
+    assert_eq!(service.cancel(&invitation.invitation_id).await.expect("same public terminal owner is idempotent").new_status,
+        InvitationStatus::Cancelled);
+    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await.expect("required terminal read"),
+        Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(aura_app::runtime_bridge::CeremonyFailureReason::Cancelled)));
 });

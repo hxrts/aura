@@ -399,21 +399,24 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
             })
         },
     )
-    .await;
+    .await?;
 
     let created_now = match create_result {
         Ok(_) => true,
-        Err(error) if classify_amp_channel_error(&error) == AmpChannelErrorClass::AlreadyExists => {
-            false
-        }
         Err(error) => {
-            return Err(
-                super::super::error::runtime_call("create note-to-self channel", error).into(),
-            );
+            if runtime_amp_duplicate_is_reconciled(runtime, &error, context_id, channel_id).await? {
+                false
+            } else {
+                return Err(super::super::error::runtime_call(
+                    "create note-to-self channel",
+                    error,
+                )
+                .into());
+            }
         }
     };
 
-    if let Err(error) = timeout_runtime_call(
+    timeout_runtime_call(
         runtime,
         "ensure_runtime_note_to_self_channel",
         "amp_join_channel",
@@ -427,13 +430,8 @@ pub(crate) async fn ensure_runtime_note_to_self_channel(
         },
     )
     .await
-    {
-        if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-            return Err(
-                super::super::error::runtime_call("join note-to-self channel", error).into(),
-            );
-        }
-    }
+    .map_err(|error| super::super::error::runtime_call("join note-to-self channel", error))?
+    .map_err(|error| super::super::error::runtime_call("join note-to-self channel", error))?;
 
     if created_now {
         let chat_fact = ChatFact::channel_created_ms(

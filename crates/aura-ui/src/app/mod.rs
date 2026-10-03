@@ -46,7 +46,6 @@ use aura_app::ui_contract::{
 };
 use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
 use dioxus::dioxus_core::schedule_update;
 use dioxus::events::KeyboardData;
@@ -60,7 +59,6 @@ use screens::{
     nav_button_id, nav_tab_class, nav_tabs, neighborhood_member_selection_key,
     render_screen_content,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 

@@ -17,10 +17,14 @@ pub struct AccountSetupModalProps {
     pub nickname_suggestion: String,
     /// Current device import code input
     pub device_import_code: String,
+    pub device_import_manifest: String,
+    pub device_import_initiator_verifier: String,
     /// Whether the input is focused
     pub name_focused: bool,
     /// Whether the import code input is focused
     pub import_code_focused: bool,
+    pub import_manifest_focused: bool,
+    pub import_initiator_verifier_focused: bool,
     /// Whether account creation is in progress
     pub creating: bool,
     /// Whether to show the spinner (debounced - only after 300ms)
@@ -109,7 +113,14 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     // Show input form (default state, or creating state with inline spinner)
     let can_create = !nickname_suggestion.is_empty() && !creating;
-    let can_import = !device_import_code.trim().is_empty() && !creating;
+    let can_import = !device_import_code.trim().is_empty()
+        && !props.device_import_manifest.trim().is_empty()
+        && !props.device_import_initiator_verifier.trim().is_empty()
+        && !creating;
+
+    let import_focused = props.import_code_focused
+        || props.import_manifest_focused
+        || props.import_initiator_verifier_focused;
 
     // Input field props
     let input_props = LabeledInputProps::new("Create a new account", "Enter your nickname...")
@@ -123,6 +134,16 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     .with_value(device_import_code)
     .with_focused(props.import_code_focused);
 
+    let manifest_props =
+        LabeledInputProps::new("Signed enrollment manifest", "Paste manifest code...")
+            .with_value(props.device_import_manifest.clone())
+            .with_focused(props.import_manifest_focused);
+    let verifier_props = LabeledInputProps::new(
+        "Initiator verifier (separate transfer)",
+        "Paste verifier code...",
+    )
+    .with_value(props.device_import_initiator_verifier.clone())
+    .with_focused(props.import_initiator_verifier_focused);
     element! {
         ModalContent(
             flex_direction: FlexDirection::Column,
@@ -165,6 +186,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                 View(margin_top: Spacing::SM) {
                     #(Some(labeled_input(&import_props).into()))
                 }
+                View(margin_top:Spacing::SM) {#(Some(labeled_input(&manifest_props).into()))}
+                View(margin_top:Spacing::SM) {#(Some(labeled_input(&verifier_props).into()))}
 
                 #(if !bootstrap_candidates.is_empty() {
                     Some(element! {
@@ -224,7 +247,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                         Some(element! {
                             View(flex_direction: FlexDirection::Row) {
                                 Text(
-                                    content: if props.import_code_focused { "Joining Account..." } else { "Creating Account..." },
+                                    content: if import_focused { "Joining Account..." } else { "Creating Account..." },
                                     color: Theme::SECONDARY,
                                 )
                             }
@@ -234,7 +257,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                             View(flex_direction: FlexDirection::Row) {
                                 Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                                 Text(
-                                    content: if props.import_code_focused { " to Join Account" } else { " to Create Account" },
+                                    content: if import_focused { " to Join Account" } else { " to Create Account" },
                                     color: Theme::TEXT_MUTED,
                                 )
                             }
@@ -244,12 +267,12 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                             View(flex_direction: FlexDirection::Row) {
                                 Text(content: "Enter", weight: Weight::Bold, color: Theme::SECONDARY)
                                 Text(
-                                    content: if props.import_code_focused {
+                                    content: if import_focused {
                                         " to Join Account"
                                     } else {
                                         " to Create Account"
                                     },
-                                    color: if props.import_code_focused {
+                                    color: if import_focused {
                                         if can_import { Theme::PRIMARY } else { Theme::TEXT_MUTED }
                                     } else if can_create {
                                         Theme::PRIMARY

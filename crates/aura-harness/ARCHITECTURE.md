@@ -36,6 +36,17 @@ Multi-instance orchestration harness for Aura runtime testing and operator workf
 
 ## Invariants
 
+- Device enrollment issuance accepts an explicit user-transferred setup code.
+  Frontends forward it to the app-owned verification and issuance workflow;
+  raw authority IDs, demo autofill and discovery metadata cannot replace the
+  setup verifier pin or infer that the new device accepted enrollment.
+  `PrepareDeviceEnrollmentSetup` exports the exact signed code through the
+  selected runtime's semantic queue after real account creation. It does not
+  create authority staging files, derive physical device IDs, or mint user
+  trust. Signing readiness is established by successful runtime export;
+  unavailable or unready export fails explicitly. The coordinator rejects
+  onboarding before export, and scenarios own the account-creation prerequisite.
+
 - Config-first execution: invalid run or scenario configs fail before instance startup.
 - Instance isolation: each action is scoped by `instance_id` with unique `data_dir`.
 - Deterministic seeds: identical run config and seed produce identical seed bundles.
@@ -226,3 +237,9 @@ cargo test -p aura-harness
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [Testing Guide](../../docs/804_testing_guide.md)
 - [Project Structure](../../docs/999_project_structure.md)
+
+## Enrollment trust transfer boundary
+
+Device enrollment import carries three explicit actor-supplied values. Enrollment readiness capture reads actual manifest/verifier payloads from the matched runtime event and stores companion variables; it fails when those values are absent. Clipboard fallback, payload-derived initiator pins, and independently invented devices cannot authorize enrollment.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).

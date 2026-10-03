@@ -19,5 +19,6 @@ pub use facts::{
 pub use query::{
     is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,
     query_current_mutes, query_current_mutes_in_live_channels, query_kick_history,
+    try_is_user_banned_and_muted, ModerationQueryBound, RequiredModerationQueryError,
 };
 pub use types::{BanStatus, KickRecord, ModerationScopeKey, MuteStatus};

@@ -54,9 +54,8 @@ impl ContactInvitationDecision {
     }
 }
 
-/// Why a contact invitation acceptance did not establish a link. The messages
-/// are user-facing and stable: `aura-app` classifies them into typed failure
-/// codes (`classify_contact_confirmation_error`).
+/// Why a contact invitation acceptance did not establish a link.
+/// Runtime normalization and app policy use the concrete source, not its display.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ContactConfirmationError {
     Rejected(ContactInvitationDecision),
@@ -88,9 +87,19 @@ impl std::error::Error for ContactConfirmationError {}
 
 impl From<ContactConfirmationError> for AgentError {
     fn from(error: ContactConfirmationError) -> Self {
-        match error {
-            ContactConfirmationError::Rejected(_) => AgentError::invalid(error.to_string()),
-            ContactConfirmationError::Unconfirmed(_) => AgentError::timeout(error.to_string()),
+        let timed_out = match &error {
+            ContactConfirmationError::Rejected(_) => false,
+            ContactConfirmationError::Unconfirmed(_) => true,
+        };
+        let message = error.to_string();
+        let source: Option<Arc<dyn std::error::Error + Send + Sync>> = Some(Arc::new(error));
+        if timed_out {
+            AgentError::TimeoutWithSource {
+                message: message.clone(),
+                source: aura_core::AuraError::Internal { message, source },
+            }
+        } else {
+            AgentError::Aura(aura_core::AuraError::Invalid { message, source })
         }
     }
 }

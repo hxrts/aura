@@ -21,6 +21,9 @@
 //!
 //! This test verifies that device enrollment works correctly in demo mode.
 
+#[path = "../support/enrollment.rs"]
+mod enrollment_support;
+
 use async_lock::RwLock;
 use std::sync::Arc;
 use std::time::Duration;
@@ -130,7 +133,7 @@ async fn setup_demo_env(seed: u64) -> DemoTestEnv {
 ///
 /// This test reproduces the bug that occurs when pressing Ctrl+M in the
 /// device import modal during demo mode. The Ctrl+M handler triggers
-/// `DispatchCommand::AddDevice { name: "Mobile", invitee_authority_id }` which
+/// `DispatchCommand::AddDevice { name: "Mobile", setup_code }` which
 /// calls `start_device_enrollment()`.
 ///
 /// Expected behavior: The device enrollment ceremony should start successfully
@@ -151,16 +154,20 @@ async fn regression_demo_mode_mobile_device_enrollment_should_start() {
     // device import modal when no enrollment code exists yet:
     // 1. The modal handler detects Ctrl+M
     // 2. Since `last_device_enrollment_code` is empty, it dispatches:
-    //    `DispatchCommand::AddDevice { name: "Mobile".to_string(), invitee_authority_id: demo mobile authority }`
-    // 3. This calls `ctx.start_device_enrollment("Mobile", invitee_authority_id)`
+    //    `DispatchCommand::AddDevice { name: "Mobile".to_string(), setup_code: actual runtime-exported setup code }`
+    // 3. This calls `ctx.start_device_enrollment("Mobile", setup_code)`
     //
     // The bug causes this to fail with "Internal error: Failed to start devi..."
+    let (_invitee_9, setup_code_9) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("setup-peer-9"),
+        aura_core::DeviceId::new_from_entropy([9; 32]),
+        2009,
+        env.shared_transport.clone(),
+    )
+    .await;
     let result = env
         .ctx
-        .start_device_enrollment(
-            "Mobile",
-            aura_core::AuthorityId::new_from_entropy([9u8; 32]),
-        )
+        .start_device_enrollment("Mobile", setup_code_9)
         .await;
 
     match result {
@@ -211,12 +218,16 @@ async fn demo_mode_sequential_device_enrollments() {
         .expect("refresh_settings_from_runtime should succeed");
 
     // First enrollment
+    let (_invitee_10, setup_code_10) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("setup-peer-10"),
+        aura_core::DeviceId::new_from_entropy([10; 32]),
+        2010,
+        env.shared_transport.clone(),
+    )
+    .await;
     let result1 = env
         .ctx
-        .start_device_enrollment(
-            "Mobile",
-            aura_core::AuthorityId::new_from_entropy([10u8; 32]),
-        )
+        .start_device_enrollment("Mobile", setup_code_10)
         .await;
     assert!(
         result1.is_ok(),
@@ -228,12 +239,16 @@ async fn demo_mode_sequential_device_enrollments() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Second enrollment (should supersede the first if not completed)
+    let (_invitee_11, setup_code_11) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("setup-peer-11"),
+        aura_core::DeviceId::new_from_entropy([11; 32]),
+        2011,
+        env.shared_transport.clone(),
+    )
+    .await;
     let result2 = env
         .ctx
-        .start_device_enrollment(
-            "Tablet",
-            aura_core::AuthorityId::new_from_entropy([11u8; 32]),
-        )
+        .start_device_enrollment("Tablet", setup_code_11)
         .await;
     assert!(
         result2.is_ok(),
@@ -293,7 +308,7 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
     let agent = AgentBuilder::new()
         .with_config(agent_config)
         .with_authority(authority_id)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport)
+        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
         .await
         .expect("Failed to build simulation agent");
     let agent = Arc::new(agent);
@@ -320,12 +335,14 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
 
     // Don't refresh settings - try enrollment immediately
     // This is a more aggressive test of the initialization sequence
-    let result = ctx
-        .start_device_enrollment(
-            "Mobile",
-            aura_core::AuthorityId::new_from_entropy([12u8; 32]),
-        )
-        .await;
+    let (_invitee_12, setup_code_12) = enrollment_support::provisional_invitee_setup(
+        &test_dir.join("setup-peer-12"),
+        aura_core::DeviceId::new_from_entropy([12; 32]),
+        2012,
+        shared_transport.clone(),
+    )
+    .await;
+    let result = ctx.start_device_enrollment("Mobile", setup_code_12).await;
 
     // Clean up
     let _ = std::fs::remove_dir_all(&test_dir);

@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use super::*;
+use crate::workflows::error::WorkflowError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -82,19 +83,22 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
     .await;
     if let Err(error) = accept_result {
         let error = match error {
-            TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
-                AcceptInvitationError::AcceptFailed {
-                    detail: format!(
-                        "accept_invitation timed out in stage runtime_accept_invitation after {}ms",
-                        accept_budget.timeout_ms()
-                    ),
-                }
-            }
+            TimeoutRunError::Timeout(
+                timeout_error @ TimeoutBudgetError::DeadlineExceeded { .. },
+            ) => AcceptInvitationError::AcceptFailed {
+                detail: format!(
+                    "accept_invitation timed out in stage runtime_accept_invitation after {}ms",
+                    accept_budget.timeout_ms()
+                ),
+                source: Some(accept_failure_source(timeout_error)),
+            },
             TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
                 detail: timeout_error.to_string(),
+                source: Some(accept_failure_source(timeout_error)),
             },
             TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
                 detail: operation_error.to_string(),
+                source: Some(accept_failure_source(operation_error)),
             },
         };
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
@@ -102,6 +106,7 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                 owner,
                 AcceptInvitationError::AcceptFailed {
                     detail: error.to_string(),
+                    source: Some(accept_failure_source(error)),
                 },
             )
             .await;
@@ -157,6 +162,7 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                         detail: format!(
                             "contact invitation readiness refresh failed for {contact_id}: {error}"
                         ),
+                        source: Some(accept_failure_source(error)),
                     },
                 )
                 .await;
@@ -170,7 +176,8 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                         detail: format!(
                             "contact invitation authoritative publish failed for {contact_id}: {error}"
                         ),
-                    },
+                    source: Some(accept_failure_source(error)),
+},
                 )
                 .await;
             }
@@ -187,7 +194,8 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                 detail: format!(
                     "contact invitation {invitation_id} completed without an authoritative contact id"
                 ),
-            },
+            source: None,
+},
         )
         .await;
     } else if owner.kind() == SemanticOperationKind::AcceptGuardianInvitation {
@@ -244,6 +252,7 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                     owner,
                     AcceptInvitationError::AcceptFailed {
                         detail: error.to_string(),
+                        source: Some(accept_failure_source(error)),
                     },
                 )
                 .await;
@@ -258,7 +267,8 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
                             detail: format!(
                                 "channel invitation accept missing membership readiness for {channel_id}: {error}"
                             ),
-                        },
+                        source: Some(accept_failure_source(error)),
+},
                     )
                     .await;
                 }
@@ -365,7 +375,24 @@ async fn await_guardian_invitation_completion(
                     },
                 ));
             }
-            None => runtime.sleep_ms(1_000).await,
+            None => {
+                if let Err(error) = runtime.sleep_ms(1_000).await {
+                    owner
+                        .publish_failure(
+                            SemanticOperationError::new(
+                                SemanticFailureDomain::Ceremony,
+                                SemanticFailureCode::CeremonyRuntimeFailed,
+                            )
+                            .with_detail(error.to_string()),
+                        )
+                        .await?;
+                    return Err(super::super::error::runtime_call(
+                        "guardian confirmation wait",
+                        error,
+                    )
+                    .into());
+                }
+            }
         }
     }
     owner
@@ -570,6 +597,7 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
                 detail:
                     "device enrollment invitations must use accept_device_enrollment_invitation"
                         .to_string(),
+                source: None,
             },
         )
         .await;
@@ -597,26 +625,30 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
     .await;
     if let Err(error) = accept_result {
         let error = match error {
-            TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+            TimeoutRunError::Timeout(timeout_error @ TimeoutBudgetError::DeadlineExceeded { .. }) => {
                 AcceptInvitationError::AcceptFailed {
                     detail: format!(
                         "accept_imported_invitation timed out in stage runtime_accept_invitation after {}ms",
                         accept_budget.timeout_ms()
                     ),
-                }
+                source: Some(accept_failure_source(timeout_error)),
+}
             }
             TimeoutRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
                 detail: timeout_error.to_string(),
-            },
+            source: Some(accept_failure_source(timeout_error)),
+},
             TimeoutRunError::Operation(operation_error) => AcceptInvitationError::AcceptFailed {
                 detail: operation_error.to_string(),
-            },
+            source: Some(accept_failure_source(operation_error)),
+},
         };
         if classify_invitation_accept_error(&error) != InvitationAcceptErrorClass::AlreadyHandled {
             return fail_invitation_accept(
                 owner,
                 AcceptInvitationError::AcceptFailed {
                     detail: error.to_string(),
+                    source: Some(accept_failure_source(error)),
                 },
             )
             .await;
@@ -651,6 +683,7 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
                             "imported contact invitation readiness refresh failed for {}: {error}",
                             invitation.sender_id
                         ),
+                        source: Some(accept_failure_source(error)),
                     },
                 )
                 .await;
@@ -666,7 +699,8 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
                             "imported contact invitation authoritative publish failed for {}: {error}",
                             invitation.sender_id
                         ),
-                    },
+                    source: Some(accept_failure_source(error)),
+},
                 )
                 .await;
             }
@@ -690,7 +724,8 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
                                 "channel invitation {} resolved to invalid canonical channel id {home_id}",
                                 invitation.invitation_id
                             ),
-                        },
+                        source: None,
+},
                     )
                     .await;
                 }
@@ -720,6 +755,7 @@ pub(in crate::workflows) async fn accept_imported_invitation_inner(
                         owner,
                         AcceptInvitationError::AcceptFailed {
                             detail: error.to_string(),
+                            source: Some(accept_failure_source(error)),
                         },
                     )
                     .await;
@@ -1008,12 +1044,44 @@ pub async fn cancel_invitation_by_str_with_terminal_status(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Error)]
 pub(in crate::workflows) enum AcceptInvitationError {
+    #[error("No pending channel invitation found")]
+    PendingInvitationNotFound,
+    #[error("pending invitation is not a channel invitation")]
+    PendingInvitationKindMismatch,
     #[error("Failed to accept invitation: {detail}")]
-    AcceptFailed { detail: String },
+    AcceptFailed {
+        detail: String,
+        #[source]
+        source: Option<AuraError>,
+    },
     #[error("accepted contact invitation for {contact_id} but the contact never converged")]
     ContactLinkDidNotConverge { contact_id: AuthorityId },
+}
+
+fn accept_failure_source(error: impl std::error::Error + Send + Sync + 'static) -> AuraError {
+    AuraError::Internal {
+        message: error.to_string(),
+        source: Some(Arc::new(error)),
+    }
+}
+
+fn invitation_failure_is_timeout(error: &AcceptInvitationError) -> bool {
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = current {
+        if matches!(
+            cause.downcast_ref::<WorkflowError>(),
+            Some(WorkflowError::TimedOut { .. })
+        ) || matches!(
+            cause.downcast_ref::<TimeoutBudgetError>(),
+            Some(TimeoutBudgetError::DeadlineExceeded { .. })
+        ) {
+            return true;
+        }
+        current = cause.source();
+    }
+    false
 }
 
 impl AcceptInvitationError {
@@ -1030,10 +1098,18 @@ impl AcceptInvitationError {
         };
 
         match self {
-            Self::AcceptFailed { detail } => {
+            Self::PendingInvitationNotFound => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::NotFound,
+            ),
+            Self::PendingInvitationKindMismatch => SemanticOperationError::new(
+                SemanticFailureDomain::Invitation,
+                SemanticFailureCode::InvalidState,
+            ),
+            Self::AcceptFailed { detail, .. } => {
                 // An inviter that rejected or never confirmed the acceptance is
                 // a typed outcome, not an internal failure.
-                let code = match classify_contact_confirmation_error(detail) {
+                let code = match classify_contact_confirmation_error(self) {
                     Some(ContactConfirmationErrorClass::Revoked) => {
                         SemanticFailureCode::InvitationRevoked
                     }
@@ -1046,7 +1122,25 @@ impl AcceptInvitationError {
                     Some(ContactConfirmationErrorClass::Unconfirmed) => {
                         SemanticFailureCode::InviterDidNotConfirm
                     }
-                    None => SemanticFailureCode::InternalError,
+                    None => {
+                        use crate::runtime_bridge::InvitationAcceptFailureReason as Reason;
+                        use crate::workflows::runtime_error_classification::invitation_accept_failure_reason;
+                        match invitation_accept_failure_reason(self) {
+                            Some(Reason::AlreadyAccepted | Reason::AlreadySettled) => {
+                                SemanticFailureCode::InvitationAlreadySettled
+                            }
+                            Some(Reason::Revoked) => SemanticFailureCode::InvitationRevoked,
+                            Some(Reason::Expired) => SemanticFailureCode::InvitationExpired,
+                            Some(Reason::Unconfirmed) => SemanticFailureCode::InviterDidNotConfirm,
+                            Some(Reason::NotFound) => SemanticFailureCode::NotFound,
+                            Some(Reason::NotPending) => SemanticFailureCode::InvalidState,
+                            Some(Reason::PermissionDenied) => SemanticFailureCode::PermissionDenied,
+                            None if invitation_failure_is_timeout(self) => {
+                                SemanticFailureCode::OperationTimedOut
+                            }
+                            None => crate::workflows::runtime_error_classification::native_runtime_failure_code(self).unwrap_or(SemanticFailureCode::InternalError),
+                        }
+                    }
                 };
                 SemanticOperationError::new(SemanticFailureDomain::Invitation, code)
                     .with_detail(format!("operation_kind={kind:?}; detail={detail}"))
@@ -1062,7 +1156,10 @@ impl AcceptInvitationError {
 
 impl From<AcceptInvitationError> for AuraError {
     fn from(error: AcceptInvitationError) -> Self {
-        AuraError::agent(error.to_string())
+        AuraError::Internal {
+            message: error.to_string(),
+            source: Some(Arc::new(error)),
+        }
     }
 }
 
@@ -1193,6 +1290,7 @@ pub(in crate::workflows) async fn invitation_accept_timeout_budget(
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
         detail: error.to_string(),
+        source: Some(accept_failure_source(error)),
     })
 }
 
@@ -1260,6 +1358,7 @@ pub(in crate::workflows) async fn reconcile_channel_invitation_acceptance(
         Err(error) => {
             return Err(AcceptInvitationError::AcceptFailed {
                 detail: error.to_string(),
+                source: Some(accept_failure_source(error)),
             });
         }
     };
@@ -1272,7 +1371,7 @@ pub(in crate::workflows) async fn reconcile_channel_invitation_acceptance(
     match reconcile_result {
         Ok(()) => Ok(()),
         Err(error) => {
-            let detail = match error {
+            let detail = match &error {
                 TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. }) => {
                     let stage = stage_tracker
                         .try_lock()
@@ -1286,7 +1385,14 @@ pub(in crate::workflows) async fn reconcile_channel_invitation_acceptance(
                 TimeoutRunError::Timeout(timeout_error) => timeout_error.to_string(),
                 TimeoutRunError::Operation(operation_error) => operation_error.to_string(),
             };
-            Err(AcceptInvitationError::AcceptFailed { detail })
+            let source = match error {
+                TimeoutRunError::Timeout(error) => accept_failure_source(error),
+                TimeoutRunError::Operation(error) => accept_failure_source(error),
+            };
+            Err(AcceptInvitationError::AcceptFailed {
+                detail,
+                source: Some(source),
+            })
         }
     }
 }
@@ -1301,6 +1407,7 @@ pub(in crate::workflows) async fn list_pending_invitations_with_timeout(
     .await
     .map_err(|error| AcceptInvitationError::AcceptFailed {
         detail: error.to_string(),
+        source: Some(accept_failure_source(error)),
     })?;
 
     match execute_with_runtime_timeout_budget(runtime, &budget, || async {
@@ -1309,6 +1416,7 @@ pub(in crate::workflows) async fn list_pending_invitations_with_timeout(
             .await
             .map_err(|error| AcceptInvitationError::AcceptFailed {
                 detail: error.to_string(),
+                source: Some(accept_failure_source(error)),
             })
     })
     .await
@@ -1316,6 +1424,7 @@ pub(in crate::workflows) async fn list_pending_invitations_with_timeout(
         Ok(pending) => Ok(pending),
         Err(TimeoutRunError::Timeout(error)) => Err(AcceptInvitationError::AcceptFailed {
             detail: error.to_string(),
+            source: Some(accept_failure_source(error)),
         }),
         Err(TimeoutRunError::Operation(error)) => Err(error),
     }
@@ -1363,6 +1472,7 @@ pub(in crate::workflows) async fn drive_invitation_accept_convergence(
         .await
         .map_err(|error| AcceptInvitationError::AcceptFailed {
             detail: error.to_string(),
+            source: Some(accept_failure_source(error)),
         })?;
 
         let _ = execute_with_runtime_timeout_budget(runtime, &step_budget, || {
@@ -1546,13 +1656,9 @@ async fn reconcile_accepted_channel_invitation_authoritative(
         .map_err(|error| {
             super::super::error::runtime_call("accept channel invitation join", error)
         })? {
-            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
-                return Err(super::super::error::runtime_call(
-                    "accept channel invitation join",
-                    error,
-                )
-                .into());
-            }
+            return Err(
+                super::super::error::runtime_call("accept channel invitation join", error).into(),
+            );
         }
         runtime_state_ready = crate::workflows::messaging::runtime_channel_state_exists(
             runtime,
@@ -1667,12 +1773,14 @@ pub(in crate::workflows) async fn wait_for_contact_link(
     )
     .map_err(|error| AcceptInvitationError::AcceptFailed {
         detail: error.to_string(),
+        source: Some(accept_failure_source(error)),
     })?;
     execute_with_runtime_retry_budget(runtime, &policy, |_attempt| async {
         let linked = contacts_signal_snapshot(app_core)
             .await
             .map_err(|error| AcceptInvitationError::AcceptFailed {
                 detail: error.to_string(),
+                source: Some(accept_failure_source(error)),
             })?
             .all_contacts()
             .any(|contact| contact.id == contact_id);
@@ -1686,6 +1794,7 @@ pub(in crate::workflows) async fn wait_for_contact_link(
     .map_err(|error| match error {
         RetryRunError::Timeout(timeout_error) => AcceptInvitationError::AcceptFailed {
             detail: timeout_error.to_string(),
+            source: Some(accept_failure_source(timeout_error)),
         },
         RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
     })
@@ -1788,5 +1897,149 @@ mod guardian_operation_tests {
                 SemanticOperationKind::AcceptGuardianInvitation,
             )
         );
+    }
+}
+
+#[cfg(test)]
+mod native_failure_tests {
+    use super::*;
+    use crate::ui_contract::SemanticFailureCode;
+
+    #[test]
+    fn pending_selection_failures_have_explicit_semantic_codes_and_typed_causes() {
+        use std::error::Error;
+        for (failure, expected) in [
+            (
+                AcceptInvitationError::PendingInvitationNotFound,
+                SemanticFailureCode::NotFound,
+            ),
+            (
+                AcceptInvitationError::PendingInvitationKindMismatch,
+                SemanticFailureCode::InvalidState,
+            ),
+        ] {
+            assert_eq!(
+                failure
+                    .semantic_error(SemanticOperationKind::AcceptPendingChannelInvitation)
+                    .code,
+                expected
+            );
+            let returned = AuraError::from(failure);
+            let cause = returned
+                .source()
+                .unwrap()
+                .downcast_ref::<AcceptInvitationError>()
+                .unwrap();
+            assert_eq!(
+                cause
+                    .semantic_error(SemanticOperationKind::AcceptPendingChannelInvitation)
+                    .code,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn acceptance_owner_retains_native_reason_and_original_source() {
+        use crate::runtime_bridge::{InvitationAcceptFailureReason as R, RuntimeBridgeError};
+        use std::error::Error;
+        for (reason, code) in [
+            (
+                R::AlreadyAccepted,
+                SemanticFailureCode::InvitationAlreadySettled,
+            ),
+            (R::Revoked, SemanticFailureCode::InvitationRevoked),
+            (R::Expired, SemanticFailureCode::InvitationExpired),
+            (
+                R::AlreadySettled,
+                SemanticFailureCode::InvitationAlreadySettled,
+            ),
+            (R::Unconfirmed, SemanticFailureCode::InviterDidNotConfirm),
+            (R::NotFound, SemanticFailureCode::NotFound),
+            (R::NotPending, SemanticFailureCode::InvalidState),
+            (R::PermissionDenied, SemanticFailureCode::PermissionDenied),
+        ] {
+            let native = RuntimeBridgeError::with_source(
+                crate::core::IntentError::internal_error("unrelated diagnostic"),
+                std::io::Error::new(std::io::ErrorKind::PermissionDenied, "actual original"),
+            )
+            .with_invitation_accept_reason(reason);
+            let failure = AcceptInvitationError::AcceptFailed {
+                detail: native.to_string(),
+                source: Some(accept_failure_source(native)),
+            };
+            assert_eq!(
+                failure
+                    .semantic_error(SemanticOperationKind::AcceptContactInvitation)
+                    .code,
+                code
+            );
+            let returned = AuraError::from(failure);
+            let original = returned
+                .source()
+                .unwrap()
+                .downcast_ref::<AcceptInvitationError>()
+                .unwrap();
+            let context = original
+                .source()
+                .unwrap()
+                .downcast_ref::<AuraError>()
+                .unwrap();
+            let native = context
+                .source()
+                .unwrap()
+                .downcast_ref::<RuntimeBridgeError>()
+                .unwrap();
+            assert_eq!(native.invitation_accept_reason(), Some(reason));
+            assert_eq!(
+                native
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+        }
+    }
+
+    #[test]
+    fn acceptance_owner_rejects_textual_lookalikes_and_maps_real_deadlines() {
+        let failure = AcceptInvitationError::AcceptFailed {
+            detail: "invitation already accepted; inviter revoked this contact invitation".into(),
+            source: None,
+        };
+        assert_eq!(
+            classify_invitation_accept_error(&failure),
+            InvitationAcceptErrorClass::Other
+        );
+        assert_eq!(
+            failure
+                .semantic_error(SemanticOperationKind::AcceptContactInvitation)
+                .code,
+            SemanticFailureCode::InternalError
+        );
+        for source in [
+            accept_failure_source(WorkflowError::TimedOut {
+                operation: "accept",
+                stage: "runtime",
+                timeout_ms: 30_000,
+            }),
+            accept_failure_source(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 30_000,
+                observed_at_ms: 30_001,
+            }),
+        ] {
+            let timeout = AcceptInvitationError::AcceptFailed {
+                detail: "unrelated diagnostic".into(),
+                source: Some(source),
+            };
+            assert_eq!(
+                timeout
+                    .semantic_error(SemanticOperationKind::AcceptContactInvitation)
+                    .code,
+                SemanticFailureCode::OperationTimedOut
+            );
+        }
     }
 }

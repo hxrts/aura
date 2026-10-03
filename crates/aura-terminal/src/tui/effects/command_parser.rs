@@ -91,8 +91,8 @@ pub enum EffectCommand {
     AddDevice {
         /// Nickname suggestion (what the device wants to be called)
         nickname_suggestion: String,
-        /// Invitee's authority ID for addressed device enrollment.
-        invitee_authority_id: AuthorityId,
+        /// User-transferred setup request exported by the new device.
+        setup_code: String,
     },
     /// Remove a device from the account
     RemoveDevice {

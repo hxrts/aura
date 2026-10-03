@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,10 +20,10 @@ use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{
     execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskHandle, TimeoutBudget,
-    TimeoutRunError,
+    TimeoutBudgetError, TimeoutRunError,
 };
 use aura_effects::time::PhysicalTimeHandler;
-use futures::future::{BoxFuture, LocalBoxFuture};
+use futures::future::{Abortable, BoxFuture, LocalBoxFuture};
 use futures::FutureExt;
 #[cfg(not(target_arch = "wasm32"))]
 use parking_lot::Mutex;
@@ -38,15 +38,62 @@ use wasm_bindgen_futures::spawn_local;
 
 const DEFAULT_TASK_NAME: &str = "task.default";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+fn checked_interval_ms(interval: Duration) -> Result<u64, aura_core::AuraError> {
+    let milliseconds = u64::try_from(interval.as_millis()).map_err(|_| {
+        TimeoutBudgetError::invalid_policy("supervised interval exceeds millisecond range")
+    })?;
+    if milliseconds == 0 {
+        return Err(TimeoutBudgetError::invalid_policy(
+            "supervised interval must be at least one millisecond",
+        )
+        .into());
+    }
+    Ok(milliseconds)
+}
+
+fn required_interval_sleep_error(error: aura_core::effects::TimeError) -> aura_core::AuraError {
+    aura_core::AuraError::Internal {
+        message: "supervised interval sleep failed".into(),
+        source: Some(Arc::new(error)),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskAdmissionKind {
+    Groups,
+    Tasks,
+    Depth,
+}
+
+#[derive(Debug, Clone)]
 pub enum TaskSupervisionError {
+    AdmissionClosed {
+        group: String,
+        task: String,
+    },
+    AdmissionLimit {
+        group: String,
+        kind: TaskAdmissionKind,
+        limit: usize,
+    },
+    TaskFailed {
+        group: String,
+        task: String,
+        source: aura_core::AuraError,
+    },
+    Budget {
+        group: String,
+        source: TimeoutBudgetError,
+    },
     Timeout {
         group: String,
         active_tasks: Vec<String>,
+        source: TimeoutBudgetError,
     },
     ForcedAbort {
         group: String,
         aborted_tasks: Vec<String>,
+        cause: Option<Box<TaskSupervisionError>>,
     },
     Cancelled {
         group: String,
@@ -61,9 +108,27 @@ pub enum TaskSupervisionError {
 impl std::fmt::Display for TaskSupervisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::AdmissionClosed { group, task } => {
+                write!(f, "task admission closed for '{task}' in group '{group}'")
+            }
+            Self::AdmissionLimit { group, kind, limit } => write!(
+                f,
+                "task admission {kind:?} limit {limit} exceeded in '{group}'"
+            ),
+            Self::TaskFailed {
+                group,
+                task,
+                source,
+            } => {
+                write!(f, "task '{task}' in group '{group}' failed: {source}")
+            }
+            Self::Budget { group, source } => {
+                write!(f, "task group '{group}' budget failed: {source}")
+            }
             Self::Timeout {
                 group,
                 active_tasks,
+                ..
             } => write!(
                 f,
                 "task group '{group}' timed out waiting for tasks: {}",
@@ -72,6 +137,7 @@ impl std::fmt::Display for TaskSupervisionError {
             Self::ForcedAbort {
                 group,
                 aborted_tasks,
+                ..
             } => write!(
                 f,
                 "task group '{group}' force-aborted tasks: {}",
@@ -87,29 +153,105 @@ impl std::fmt::Display for TaskSupervisionError {
     }
 }
 
-impl std::error::Error for TaskSupervisionError {}
+impl std::error::Error for TaskSupervisionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Budget { source, .. } | Self::Timeout { source, .. } => Some(source),
+            Self::ForcedAbort { cause, .. } => cause
+                .as_deref()
+                .map(|cause| cause as &(dyn std::error::Error + 'static)),
+            Self::TaskFailed { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum TaskOutcome {
     Completed,
+    Failed(aura_core::AuraError),
     Cancelled,
     Panicked,
 }
 
 #[derive(Debug)]
 struct TaskMetadata {
+    abort: futures::future::AbortHandle,
     task_name: String,
     #[cfg(not(target_arch = "wasm32"))]
     handle: Option<JoinHandle<()>>,
 }
 
+const MAX_SUPERVISED_GROUPS: usize = 1024;
+const MAX_SUPERVISED_TASKS: usize = 4096;
+const MAX_GROUP_DEPTH: usize = 64;
+
+struct TaskTreeState {
+    next_group_id: u64,
+    groups: BTreeMap<u64, std::sync::Weak<TaskGroupShared>>,
+    active_tasks: usize,
+}
+struct TaskTreeShared {
+    state: Mutex<TaskTreeState>,
+}
+
+/// Held inside the spawned future before its first poll. Native abort or local
+/// future drop cannot leave a false active entry, nor publish idle before drop.
+struct TaskCompletionGuard<F> {
+    future: Option<F>,
+    group: TaskGroup,
+    task_id: u64,
+    task_name: String,
+    completed: bool,
+}
+impl<F> TaskCompletionGuard<F> {
+    fn finish(mut self, outcome: TaskOutcome) {
+        let dropped = std::panic::catch_unwind(AssertUnwindSafe(|| drop(self.future.take())));
+        let outcome = if dropped.is_err() {
+            TaskOutcome::Panicked
+        } else {
+            outcome
+        };
+        emit_task_completion(
+            self.group.shared.diagnostics.as_ref(),
+            &self.group.shared.name,
+            &self.task_name,
+            self.task_id,
+            &outcome,
+        );
+        self.group
+            .complete_task(self.task_id, &self.task_name, outcome);
+        self.completed = true;
+    }
+}
+impl<F> Drop for TaskCompletionGuard<F> {
+    fn drop(&mut self) {
+        if !self.completed {
+            let dropped = std::panic::catch_unwind(AssertUnwindSafe(|| drop(self.future.take())));
+            let outcome = if dropped.is_err() {
+                TaskOutcome::Panicked
+            } else {
+                TaskOutcome::Cancelled
+            };
+            self.group
+                .complete_task(self.task_id, &self.task_name, outcome);
+        }
+    }
+}
+
 struct TaskGroupShared {
+    tree: Arc<TaskTreeShared>,
+    group_id: u64,
+    lineage: Vec<u64>,
+    parent: Option<Arc<TaskGroupShared>>,
+    closing: AtomicBool,
     name: String,
     next_task_id: AtomicU64,
     shutdown_tx: watch::Sender<bool>,
     inherited_cancellation: Option<Arc<dyn CancellationToken>>,
     diagnostics: Option<Arc<RuntimeDiagnosticSink>>,
     tasks: Mutex<BTreeMap<u64, TaskMetadata>>,
+    first_failure: Mutex<Option<TaskSupervisionError>>,
     notify: Arc<Notify>,
 }
 
@@ -120,24 +262,49 @@ pub struct TaskGroup {
 
 #[derive(Clone)]
 pub struct TaskSupervisor {
+    _owner: Arc<TaskSupervisorOwner>,
     root: TaskGroup,
 }
 
 impl TaskSupervisor {
-    pub fn new() -> Self {
+    fn with_root(root: TaskGroup) -> Self {
         Self {
-            root: TaskGroup::root("runtime", None),
+            _owner: Arc::new(TaskSupervisorOwner { root: root.clone() }),
+            root,
         }
     }
-
+    pub fn new() -> Self {
+        Self::with_root(TaskGroup::root("runtime", None))
+    }
     pub fn with_diagnostics(diagnostics: Arc<RuntimeDiagnosticSink>) -> Self {
-        Self {
-            root: TaskGroup::root("runtime", Some(diagnostics)),
-        }
+        Self::with_root(TaskGroup::root("runtime", Some(diagnostics)))
+    }
+
+    /// Retained first native failure, including required descendant tasks.
+    pub fn terminal_failure(&self) -> Option<TaskSupervisionError> {
+        self.root.terminal_failure()
     }
 
     pub fn group(&self, name: impl Into<String>) -> TaskGroup {
         self.root.group(name)
+    }
+
+    /// Required one-shot work retains its native failure in health and drain.
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_try_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+    {
+        self.root
+            .spawn_fallible_boxed(name.into(), Box::pin(fut), None)
+    }
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_try_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + 'static,
+    {
+        self.root
+            .spawn_fallible_boxed_local(name.into(), Box::pin(fut), None)
     }
 
     #[must_use = "retain or explicitly discard the owned task handle"]
@@ -194,6 +361,23 @@ impl TaskSupervisor {
     {
         self.root
             .spawn_interval_until_named(name, time_effects, interval, f)
+    }
+
+    /// Required callbacks retain their concrete failure in supervised health and drain.
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_try_interval_until_named<F, Fut>(
+        &self,
+        name: impl Into<String>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        interval: Duration,
+        f: F,
+    ) -> OwnedTaskHandle<u64>
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<bool, aura_core::AuraError>> + Send + 'static,
+    {
+        self.root
+            .spawn_try_interval_until_named(name, time_effects, interval, f)
     }
 
     #[must_use = "retain or explicitly discard the owned task handle"]
@@ -281,16 +465,27 @@ impl Default for TaskSupervisor {
     }
 }
 
-impl Drop for TaskSupervisor {
+/// Last owner drops exactly once through Arc, including simultaneous clone drops.
+struct TaskSupervisorOwner {
+    root: TaskGroup,
+}
+impl Drop for TaskSupervisorOwner {
     fn drop(&mut self) {
-        self.shutdown();
+        self.root.shutdown();
     }
 }
 
 impl TaskGroup {
     fn root(name: impl Into<String>, diagnostics: Option<Arc<RuntimeDiagnosticSink>>) -> Self {
+        let tree = Arc::new(TaskTreeShared {
+            state: Mutex::new(TaskTreeState {
+                next_group_id: 2,
+                groups: BTreeMap::new(),
+                active_tasks: 0,
+            }),
+        });
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        Self {
+        let group = Self {
             shared: Arc::new(TaskGroupShared {
                 name: name.into(),
                 next_task_id: AtomicU64::new(1),
@@ -298,20 +493,71 @@ impl TaskGroup {
                 inherited_cancellation: None,
                 diagnostics,
                 tasks: Mutex::new(BTreeMap::new()),
+                first_failure: Mutex::new(None),
                 notify: Arc::new(Notify::new()),
+                tree: tree.clone(),
+                group_id: 1,
+                lineage: vec![1],
+                parent: None,
+                closing: AtomicBool::new(false),
             }),
-        }
+        };
+        tree.state
+            .lock()
+            .groups
+            .insert(1, Arc::downgrade(&group.shared));
+        group
     }
 
     pub fn name(&self) -> &str {
         &self.shared.name
     }
 
+    /// Retained first typed failure for the owning service's health observation.
+    pub fn terminal_failure(&self) -> Option<TaskSupervisionError> {
+        self.shared.first_failure.lock().clone()
+    }
+
     pub fn group(&self, name: impl Into<String>) -> TaskGroup {
-        let name = name.into();
-        let full_name = format!("{}.{}", self.shared.name, name);
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        TaskGroup {
+        if self.shared.group_id == 0 {
+            return self.clone();
+        }
+        let full_name = format!("{}.{}", self.shared.name, name.into());
+        let mut tree = self.shared.tree.state.lock();
+        tree.groups.retain(|_, group| group.strong_count() != 0);
+        let rejection = if self.shared.closing.load(Ordering::Acquire)
+            || self.cancellation_token().is_cancelled()
+        {
+            Some(TaskSupervisionError::AdmissionClosed {
+                group: self.shared.name.clone(),
+                task: full_name.clone(),
+            })
+        } else if tree.groups.len() >= MAX_SUPERVISED_GROUPS {
+            Some(TaskSupervisionError::AdmissionLimit {
+                group: self.shared.name.clone(),
+                kind: TaskAdmissionKind::Groups,
+                limit: MAX_SUPERVISED_GROUPS,
+            })
+        } else if self.shared.lineage.len() >= MAX_GROUP_DEPTH {
+            Some(TaskSupervisionError::AdmissionLimit {
+                group: self.shared.name.clone(),
+                kind: TaskAdmissionKind::Depth,
+                limit: MAX_GROUP_DEPTH,
+            })
+        } else {
+            None
+        };
+        let group_id = if rejection.is_none() {
+            let id = tree.next_group_id;
+            tree.next_group_id += 1;
+            id
+        } else {
+            0
+        };
+        let mut lineage = self.shared.lineage.clone();
+        lineage.push(group_id);
+        let (shutdown_tx, _shutdown_rx) = watch::channel(rejection.is_some());
+        let child = TaskGroup {
             shared: Arc::new(TaskGroupShared {
                 name: full_name,
                 next_task_id: AtomicU64::new(1),
@@ -319,9 +565,82 @@ impl TaskGroup {
                 inherited_cancellation: Some(self.cancellation_token()),
                 diagnostics: self.shared.diagnostics.clone(),
                 tasks: Mutex::new(BTreeMap::new()),
+                first_failure: Mutex::new(rejection.clone()),
                 notify: Arc::new(Notify::new()),
+                tree: self.shared.tree.clone(),
+                group_id,
+                lineage,
+                parent: Some(self.shared.clone()),
+                closing: AtomicBool::new(rejection.is_some()),
             }),
+        };
+        if rejection.is_none() {
+            tree.groups.insert(group_id, Arc::downgrade(&child.shared));
         }
+        drop(tree);
+        if let Some(error) = rejection {
+            self.propagate_failure(error);
+        }
+        child
+    }
+
+    fn subtree_groups_locked(&self, tree: &mut TaskTreeState) -> Vec<Arc<TaskGroupShared>> {
+        tree.groups.retain(|_, group| group.strong_count() != 0);
+        let mut groups: Vec<_> = tree
+            .groups
+            .values()
+            .filter_map(std::sync::Weak::upgrade)
+            .filter(|group| group.lineage.starts_with(&self.shared.lineage))
+            .collect();
+        if self.shared.group_id == 0 {
+            groups.push(self.shared.clone());
+        }
+        groups
+    }
+
+    fn propagate_failure(&self, failure: TaskSupervisionError) {
+        let mut current = Some(self.shared.clone());
+        while let Some(group) = current {
+            group
+                .first_failure
+                .lock()
+                .get_or_insert_with(|| failure.clone());
+            group.notify.notify_waiters();
+            current = group.parent.clone();
+        }
+    }
+
+    fn notify_ancestors(&self) {
+        let mut current = Some(self.shared.clone());
+        while let Some(group) = current {
+            group.notify.notify_waiters();
+            current = group.parent.clone();
+        }
+    }
+
+    fn rejected_task_handle(&self, task_id: u64) -> OwnedTaskHandle<u64> {
+        let (_sender, shutdown_rx) = watch::channel(true);
+        let token: Arc<dyn CancellationToken> = Arc::new(TaskGroupCancellationToken {
+            shutdown_rx,
+            inherited: None,
+        });
+        OwnedTaskHandle::new(task_id, OwnedShutdownToken::attached(token))
+    }
+
+    /// Required one-shot work retains its native failure in health and drain.
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_try_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+    {
+        self.spawn_fallible_boxed(name.into(), Box::pin(fut), None)
+    }
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_try_named<F>(&self, name: impl Into<String>, fut: F) -> OwnedTaskHandle<u64>
+    where
+        F: Future<Output = Result<(), aura_core::AuraError>> + 'static,
+    {
+        self.spawn_fallible_boxed_local(name.into(), Box::pin(fut), None)
     }
 
     #[must_use = "retain or explicitly discard the owned task handle"]
@@ -397,18 +716,38 @@ impl TaskGroup {
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
-        self.spawn_boxed(
+        self.spawn_try_interval_until_named(name, time_effects, interval, move || {
+            let step = f();
+            async move { Ok(step.await) }
+        })
+    }
+
+    /// `Ok(false)` is intentional completion; `Err` is a retained service failure.
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_try_interval_until_named<F, Fut>(
+        &self,
+        name: impl Into<String>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        interval: Duration,
+        mut f: F,
+    ) -> OwnedTaskHandle<u64>
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<bool, aura_core::AuraError>> + Send + 'static,
+    {
+        self.spawn_fallible_boxed(
             name.into(),
             Box::pin(async move {
+                let interval_ms = checked_interval_ms(interval)?;
                 loop {
-                    if !f().await {
-                        break;
+                    if !f().await? {
+                        return Ok(());
                     }
 
-                    if time_effects.sleep_ms(interval_ms).await.is_err() {
-                        break;
-                    }
+                    time_effects
+                        .sleep_ms(interval_ms)
+                        .await
+                        .map_err(required_interval_sleep_error)?;
                 }
             }),
             None,
@@ -427,18 +766,37 @@ impl TaskGroup {
         F: FnMut() -> Fut + 'static,
         Fut: Future<Output = bool> + 'static,
     {
-        let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
-        self.spawn_boxed_local(
+        self.spawn_local_try_interval_until_named(name, time_effects, interval, move || {
+            let step = f();
+            async move { Ok(step.await) }
+        })
+    }
+
+    #[must_use = "retain or explicitly discard the owned task handle"]
+    pub fn spawn_local_try_interval_until_named<F, Fut>(
+        &self,
+        name: impl Into<String>,
+        time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        interval: Duration,
+        mut f: F,
+    ) -> OwnedTaskHandle<u64>
+    where
+        F: FnMut() -> Fut + 'static,
+        Fut: Future<Output = Result<bool, aura_core::AuraError>> + 'static,
+    {
+        self.spawn_fallible_boxed_local(
             name.into(),
             Box::pin(async move {
+                let interval_ms = checked_interval_ms(interval)?;
                 loop {
-                    if !f().await {
-                        break;
+                    if !f().await? {
+                        return Ok(());
                     }
 
-                    if time_effects.sleep_ms(interval_ms).await.is_err() {
-                        break;
-                    }
+                    time_effects
+                        .sleep_ms(interval_ms)
+                        .await
+                        .map_err(required_interval_sleep_error)?;
                 }
             }),
             None,
@@ -461,95 +819,107 @@ impl TaskGroup {
     }
 
     pub fn request_cancellation(&self) {
-        let _ = self.shared.shutdown_tx.send(true);
-        tracing::debug!(
-            event = "runtime.task_group.cancel_requested",
-            task_group = %self.shared.name,
-            active_tasks = self.active_tasks().len(),
-            "Task group cancellation requested"
-        );
-        self.shared.notify.notify_waiters();
+        let mut tree = self.shared.tree.state.lock();
+        for group in self.subtree_groups_locked(&mut tree) {
+            group.closing.store(true, Ordering::Release);
+            group.shutdown_tx.send_replace(true);
+            group.notify.notify_waiters();
+        }
+        drop(tree);
+        self.notify_ancestors();
     }
 
     pub async fn wait_for_idle(&self, timeout: Duration) -> Result<(), TaskSupervisionError> {
-        let group_name = self.shared.name.clone();
         let time = PhysicalTimeHandler::new();
-        let started_at = time
-            .physical_time()
-            .await
-            .map_err(|_| TaskSupervisionError::Timeout {
-                group: group_name.clone(),
-                active_tasks: self.active_tasks(),
-            })?;
-        let budget = TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|_| {
-            TaskSupervisionError::Timeout {
-                group: group_name.clone(),
-                active_tasks: self.active_tasks(),
-            }
-        })?;
-        let result = execute_with_timeout_budget(&time, &budget, || async {
-            loop {
-                if self.shared.tasks.lock().is_empty() {
-                    return Ok::<(), ()>(());
+        self.wait_for_idle_with_time(timeout, &time).await
+    }
+
+    async fn wait_for_idle_with_time<T: PhysicalTimeEffects>(
+        &self,
+        timeout: Duration,
+        time: &T,
+    ) -> Result<(), TaskSupervisionError> {
+        let group_name = self.shared.name.clone();
+        let started_at =
+            time.physical_time()
+                .await
+                .map_err(|error| TaskSupervisionError::Budget {
+                    group: group_name.clone(),
+                    source: TimeoutBudgetError::time_source_failure(error),
+                })?;
+        let budget =
+            TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|source| {
+                TaskSupervisionError::Budget {
+                    group: group_name.clone(),
+                    source,
                 }
-                self.shared.notify.notified().await;
+            })?;
+        let result = execute_with_timeout_budget(time, &budget, || async {
+            loop {
+                let changed = self.shared.notify.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if self.active_tasks().is_empty() {
+                    return self.terminal_failure().map_or(Ok(()), Err);
+                }
+                changed.await;
             }
         })
         .await;
 
         match result {
             Ok(()) => Ok(()),
-            Err(TimeoutRunError::Timeout(_)) | Err(TimeoutRunError::Operation(_)) => {
+            Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
                 Err(TaskSupervisionError::Timeout {
                     group: group_name,
                     active_tasks: self.active_tasks(),
+                    source,
                 })
             }
+            Err(TimeoutRunError::Timeout(source)) => Err(TaskSupervisionError::Budget {
+                group: group_name,
+                source,
+            }),
+            Err(TimeoutRunError::Operation(error)) => Err(error),
         }
     }
 
+    /// Request descendant abort without publishing false drain completion.
+    /// Registered entries remain until the owned future has actually dropped.
     pub fn force_abort_remaining(&self) -> Result<(), TaskSupervisionError> {
-        let mut tasks = self.shared.tasks.lock();
-        if tasks.is_empty() {
-            return Ok(());
-        }
-
-        let mut aborted_tasks = Vec::with_capacity(tasks.len());
-        #[cfg(not(target_arch = "wasm32"))]
-        for entry in tasks.values() {
-            if let Some(handle) = &entry.handle {
-                handle.abort();
+        self.request_cancellation();
+        let mut tree = self.shared.tree.state.lock();
+        let mut aborted_tasks = Vec::new();
+        for group in self.subtree_groups_locked(&mut tree) {
+            for entry in group.tasks.lock().values() {
+                entry.abort.abort();
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(handle) = &entry.handle {
+                    handle.abort();
+                }
+                aborted_tasks.push(format!("{}::{}", group.name, entry.task_name));
+                emit_task_diagnostic(
+                    group.diagnostics.as_ref(),
+                    RuntimeDiagnosticSeverity::Warn,
+                    "task_supervisor",
+                    format!(
+                        "force-aborted supervised task '{}' in group '{}'",
+                        entry.task_name, group.name
+                    ),
+                );
             }
-            aborted_tasks.push(entry.task_name.clone());
-            emit_task_diagnostic(
-                self.shared.diagnostics.as_ref(),
-                RuntimeDiagnosticSeverity::Warn,
-                "task_supervisor",
-                format!(
-                    "force-aborted supervised task '{}' in group '{}'",
-                    entry.task_name, self.shared.name
-                ),
-            );
-            tracing::warn!(
-                event = "runtime.task.abort_forced",
-                task_group = %self.shared.name,
-                task_name = %entry.task_name,
-                "Force-aborted supervised task"
-            );
         }
-
-        #[cfg(target_arch = "wasm32")]
-        for entry in tasks.values() {
-            aborted_tasks.push(entry.task_name.clone());
+        drop(tree);
+        self.notify_ancestors();
+        if aborted_tasks.is_empty() {
+            Ok(())
+        } else {
+            Err(TaskSupervisionError::ForcedAbort {
+                group: self.shared.name.clone(),
+                aborted_tasks,
+                cause: None,
+            })
         }
-
-        tasks.clear();
-        self.shared.notify.notify_waiters();
-
-        Err(TaskSupervisionError::ForcedAbort {
-            group: self.shared.name.clone(),
-            aborted_tasks,
-        })
     }
 
     pub fn abort_remaining(&self) -> Result<(), TaskSupervisionError> {
@@ -563,7 +933,21 @@ impl TaskGroup {
         self.request_cancellation();
         match self.wait_for_idle(timeout).await {
             Ok(()) => Ok(()),
-            Err(TaskSupervisionError::Timeout { .. }) => self.force_abort_remaining(),
+            Err(timeout @ TaskSupervisionError::Timeout { .. }) => {
+                match self.force_abort_remaining() {
+                    Ok(()) => Err(timeout),
+                    Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        ..
+                    }) => Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        cause: Some(Box::new(timeout)),
+                    }),
+                    Err(abort) => Err(abort),
+                }
+            }
             Err(other) => Err(other),
         }
     }
@@ -585,23 +969,59 @@ impl TaskGroup {
     }
 
     pub fn active_tasks(&self) -> Vec<String> {
-        self.shared
-            .tasks
-            .lock()
-            .values()
-            .map(|task| task.task_name.clone())
-            .collect()
+        let mut tree = self.shared.tree.state.lock();
+        let mut result = Vec::new();
+        for group in self.subtree_groups_locked(&mut tree) {
+            for task in group.tasks.lock().values() {
+                result.push(if group.group_id == self.shared.group_id {
+                    task.task_name.clone()
+                } else {
+                    format!("{}::{}", group.name, task.task_name)
+                });
+            }
+        }
+        result
     }
 
-    fn register_task(&self, task_id: u64, task_name: String) {
+    fn register_task(
+        &self,
+        task_id: u64,
+        task_name: String,
+    ) -> Result<futures::future::AbortRegistration, TaskSupervisionError> {
+        let mut tree = self.shared.tree.state.lock();
+        let rejection = if self.shared.closing.load(Ordering::Acquire)
+            || self.cancellation_token().is_cancelled()
+        {
+            Some(TaskSupervisionError::AdmissionClosed {
+                group: self.shared.name.clone(),
+                task: task_name.clone(),
+            })
+        } else if tree.active_tasks >= MAX_SUPERVISED_TASKS {
+            Some(TaskSupervisionError::AdmissionLimit {
+                group: self.shared.name.clone(),
+                kind: TaskAdmissionKind::Tasks,
+                limit: MAX_SUPERVISED_TASKS,
+            })
+        } else {
+            None
+        };
+        if let Some(error) = rejection {
+            drop(tree);
+            self.propagate_failure(error.clone());
+            return Err(error);
+        }
+        let (abort, registration) = futures::future::AbortHandle::new_pair();
         self.shared.tasks.lock().insert(
             task_id,
             TaskMetadata {
                 task_name,
+                abort,
                 #[cfg(not(target_arch = "wasm32"))]
                 handle: None,
             },
         );
+        tree.active_tasks += 1;
+        Ok(registration)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -612,22 +1032,29 @@ impl TaskGroup {
     }
 
     fn complete_task(&self, task_id: u64, task_name: &str, outcome: TaskOutcome) {
-        let removed = self.shared.tasks.lock().remove(&task_id);
-        if removed.is_none() {
+        let mut tree = self.shared.tree.state.lock();
+        if !self.shared.tasks.lock().contains_key(&task_id) {
             return;
         }
-
-        if matches!(outcome, TaskOutcome::Cancelled | TaskOutcome::Panicked) {
-            tracing::warn!(
-                event = "runtime.task.exit_non_success",
-                task_group = %self.shared.name,
-                task_name = %task_name,
-                outcome = ?outcome,
-                "Supervised task exited abnormally"
-            );
+        let failure = match &outcome {
+            TaskOutcome::Failed(source) => Some(TaskSupervisionError::TaskFailed {
+                group: self.shared.name.clone(),
+                task: task_name.to_owned(),
+                source: source.clone(),
+            }),
+            TaskOutcome::Panicked => Some(TaskSupervisionError::Panicked {
+                group: self.shared.name.clone(),
+                task: task_name.to_owned(),
+            }),
+            TaskOutcome::Completed | TaskOutcome::Cancelled => None,
+        };
+        if let Some(error) = failure {
+            self.propagate_failure(error);
         }
-
-        self.shared.notify.notify_waiters();
+        self.shared.tasks.lock().remove(&task_id);
+        tree.active_tasks -= 1;
+        drop(tree);
+        self.notify_ancestors();
     }
 
     fn spawn_boxed(
@@ -636,14 +1063,46 @@ impl TaskGroup {
         fut: BoxFuture<'static, ()>,
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> OwnedTaskHandle<u64> {
+        self.spawn_fallible_boxed(
+            task_name,
+            Box::pin(async move {
+                fut.await;
+                Ok(())
+            }),
+            external_token,
+        )
+    }
+
+    fn spawn_fallible_boxed(
+        &self,
+        task_name: String,
+        fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+    ) -> OwnedTaskHandle<u64> {
+        self.spawn_checked_fallible_boxed(task_name, fut, external_token)
+            .unwrap_or_else(|(task_id, _source)| self.rejected_task_handle(task_id))
+    }
+
+    fn spawn_checked_fallible_boxed(
+        &self,
+        task_name: String,
+        fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
-        self.register_task(task_id, task_name.clone());
+        let abort_registration = self
+            .register_task(task_id, task_name.clone())
+            .map_err(|source| (task_id, source))?;
+        let mut completion = TaskCompletionGuard {
+            future: Some(fut),
+            group: self.clone(),
+            task_id,
+            task_name: task_name.clone(),
+            completed: false,
+        };
         let group_name = self.shared.name.clone();
         let mut shutdown_rx = self.shared.shutdown_tx.subscribe();
         let inherited = self.shared.inherited_cancellation.clone();
-        let diagnostics = self.shared.diagnostics.clone();
-        let task_name_for_wrapper = task_name.clone();
-        let group = self.clone();
 
         tracing::debug!(
             event = "runtime.task.spawned",
@@ -655,26 +1114,23 @@ impl TaskGroup {
 
         #[cfg(not(target_arch = "wasm32"))]
         let handle = tokio::spawn(async move {
-            let outcome = AssertUnwindSafe(async {
+            let outcome = AssertUnwindSafe(Abortable::new(async {
                 tokio::select! {
+                    biased;
                     _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                     _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
                     _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
-                    _ = fut => TaskOutcome::Completed,
+                    result = completion.future.as_mut().expect("registered task owns its future") => match result {
+                        Ok(()) => TaskOutcome::Completed,
+                        Err(error) => TaskOutcome::Failed(error),
+                    },
                 }
-            })
+            },abort_registration))
             .catch_unwind()
             .await
+            .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
             .unwrap_or(TaskOutcome::Panicked);
-
-            emit_task_completion(
-                diagnostics.as_ref(),
-                &group_name,
-                &task_name_for_wrapper,
-                task_id,
-                &outcome,
-            );
-            group.complete_task(task_id, &task_name_for_wrapper, outcome);
+            completion.finish(outcome);
         });
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -683,33 +1139,30 @@ impl TaskGroup {
         #[cfg(target_arch = "wasm32")]
         {
             spawn_local(async move {
-                let outcome = AssertUnwindSafe(async {
+                let outcome = AssertUnwindSafe(Abortable::new(async {
                     tokio::select! {
+                    biased;
                         _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                         _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
                         _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
-                        _ = fut => TaskOutcome::Completed,
+                        result = completion.future.as_mut().expect("registered task owns its future") => match result {
+                            Ok(()) => TaskOutcome::Completed,
+                            Err(error) => TaskOutcome::Failed(error),
+                        },
                     }
-                })
+                },abort_registration))
                 .catch_unwind()
                 .await
+                .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
                 .unwrap_or(TaskOutcome::Panicked);
-
-                emit_task_completion(
-                    diagnostics.as_ref(),
-                    &group_name,
-                    &task_name_for_wrapper,
-                    task_id,
-                    &outcome,
-                );
-                group.complete_task(task_id, &task_name_for_wrapper, outcome);
+                completion.finish(outcome);
             });
         }
 
-        OwnedTaskHandle::new(
+        Ok(OwnedTaskHandle::new(
             task_id,
             OwnedShutdownToken::attached(self.cancellation_token()),
-        )
+        ))
     }
 
     fn spawn_boxed_local(
@@ -718,37 +1171,65 @@ impl TaskGroup {
         fut: LocalBoxFuture<'static, ()>,
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> OwnedTaskHandle<u64> {
+        self.spawn_fallible_boxed_local(
+            task_name,
+            Box::pin(async move {
+                fut.await;
+                Ok(())
+            }),
+            external_token,
+        )
+    }
+
+    fn spawn_fallible_boxed_local(
+        &self,
+        task_name: String,
+        fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+    ) -> OwnedTaskHandle<u64> {
+        self.spawn_checked_fallible_boxed_local(task_name, fut, external_token)
+            .unwrap_or_else(|(task_id, _source)| self.rejected_task_handle(task_id))
+    }
+
+    fn spawn_checked_fallible_boxed_local(
+        &self,
+        task_name: String,
+        fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        external_token: Option<Arc<dyn CancellationToken>>,
+    ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
-        self.register_task(task_id, task_name.clone());
+        let abort_registration = self
+            .register_task(task_id, task_name.clone())
+            .map_err(|source| (task_id, source))?;
+        let mut completion = TaskCompletionGuard {
+            future: Some(fut),
+            group: self.clone(),
+            task_id,
+            task_name: task_name.clone(),
+            completed: false,
+        };
         let mut shutdown_rx = self.shared.shutdown_tx.subscribe();
         let inherited = self.shared.inherited_cancellation.clone();
-        let group_name = self.shared.name.clone();
-        let diagnostics = self.shared.diagnostics.clone();
-        let task_name_for_wrapper = task_name.clone();
-        let group = self.clone();
 
         #[cfg(not(target_arch = "wasm32"))]
         let handle = tokio::task::spawn_local(async move {
-            let outcome = AssertUnwindSafe(async {
+            let outcome = AssertUnwindSafe(Abortable::new(async {
                 tokio::select! {
+                    biased;
                     _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                     _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
                     _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
-                    _ = fut => TaskOutcome::Completed,
+                    result = completion.future.as_mut().expect("registered task owns its future") => match result {
+                        Ok(()) => TaskOutcome::Completed,
+                        Err(error) => TaskOutcome::Failed(error),
+                    },
                 }
-            })
+            },abort_registration))
             .catch_unwind()
             .await
+            .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
             .unwrap_or(TaskOutcome::Panicked);
-
-            emit_task_completion(
-                diagnostics.as_ref(),
-                &group_name,
-                &task_name_for_wrapper,
-                task_id,
-                &outcome,
-            );
-            group.complete_task(task_id, &task_name_for_wrapper, outcome);
+            completion.finish(outcome);
         });
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -757,33 +1238,30 @@ impl TaskGroup {
         #[cfg(target_arch = "wasm32")]
         {
             spawn_local(async move {
-                let outcome = AssertUnwindSafe(async {
+                let outcome = AssertUnwindSafe(Abortable::new(async {
                     tokio::select! {
+                    biased;
                         _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                         _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
                         _ = external_cancelled(external_token.as_deref()) => TaskOutcome::Cancelled,
-                        _ = fut => TaskOutcome::Completed,
+                        result = completion.future.as_mut().expect("registered task owns its future") => match result {
+                            Ok(()) => TaskOutcome::Completed,
+                            Err(error) => TaskOutcome::Failed(error),
+                        },
                     }
-                })
+                },abort_registration))
                 .catch_unwind()
                 .await
+                .map(|result|result.unwrap_or(TaskOutcome::Cancelled))
                 .unwrap_or(TaskOutcome::Panicked);
-
-                emit_task_completion(
-                    diagnostics.as_ref(),
-                    &group_name,
-                    &task_name_for_wrapper,
-                    task_id,
-                    &outcome,
-                );
-                group.complete_task(task_id, &task_name_for_wrapper, outcome);
+                completion.finish(outcome);
             });
         }
 
-        OwnedTaskHandle::new(
+        Ok(OwnedTaskHandle::new(
             task_id,
             OwnedShutdownToken::attached(self.cancellation_token()),
-        )
+        ))
     }
 }
 
@@ -803,6 +1281,7 @@ impl CancellationToken for TaskGroupCancellationToken {
         match self.inherited.clone() {
             Some(inherited) => {
                 tokio::select! {
+                    biased;
                     _ = shutdown_cancelled(&mut shutdown_rx) => {}
                     _ = inherited.cancelled() => {}
                 }
@@ -824,6 +1303,34 @@ impl CancellationToken for TaskGroupCancellationToken {
 }
 
 impl TaskSpawner for TaskSupervisor {
+    fn spawn_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        self.root
+            .spawn_checked_fallible_boxed(name.to_owned(), fut, Some(token))
+            .map(|_owned_handle| ())
+            .map_err(|(_task_id, source)| aura_core::AuraError::Internal {
+                message: "required task admission rejected".into(),
+                source: Some(Arc::new(source)),
+            })
+    }
+    fn spawn_local_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        self.root
+            .spawn_checked_fallible_boxed_local(name.to_owned(), fut, Some(token))
+            .map(|_owned_handle| ())
+            .map_err(|(_task_id, source)| aura_core::AuraError::Internal {
+                message: "required local task admission rejected".into(),
+                source: Some(Arc::new(source)),
+            })
+    }
     fn spawn(&self, fut: BoxFuture<'static, ()>) {
         let _ = self.spawn_named(DEFAULT_TASK_NAME, fut);
     }
@@ -863,6 +1370,14 @@ fn emit_task_completion(
     outcome: &TaskOutcome,
 ) {
     match outcome {
+        TaskOutcome::Failed(source) => tracing::error!(
+            event = "runtime.task.failed",
+            task_group = %group,
+            task_name = %task_name,
+            task_id,
+            %source,
+            "Supervised task failed"
+        ),
         TaskOutcome::Completed => tracing::debug!(
             event = "runtime.task.completed",
             task_group = %group,
@@ -886,12 +1401,12 @@ fn emit_task_completion(
         ),
     }
 
-    if matches!(outcome, TaskOutcome::Panicked) {
+    if matches!(outcome, TaskOutcome::Panicked | TaskOutcome::Failed(_)) {
         emit_task_diagnostic(
             diagnostics,
             RuntimeDiagnosticSeverity::Error,
             "task_supervisor",
-            format!("supervised task '{task_name}' in group '{group}' panicked"),
+            format!("supervised task '{task_name}' in group '{group}' failed: {outcome:?}"),
         );
     }
 }
@@ -939,6 +1454,178 @@ async fn external_cancelled(token: Option<&dyn CancellationToken>) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn required_callback_failure_stops_before_timer_and_retains_original_cause() {
+        let group = TaskGroup::root("callback-failure", None);
+        let _owner = group.spawn_try_interval_until_named(
+            "required-callback",
+            Arc::new(FailedIntervalClock),
+            Duration::from_millis(1),
+            || async {
+                Err(aura_core::AuraError::from(
+                    aura_core::effects::TimeError::OperationFailed {
+                        reason: "callback clock failed".into(),
+                    },
+                ))
+            },
+        );
+        let error = group
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        let cause = std::error::Error::source(&error)
+            .and_then(std::error::Error::source)
+            .and_then(|cause| cause.downcast_ref::<aura_core::effects::TimeError>());
+        assert!(
+            matches!(cause, Some(aura_core::effects::TimeError::OperationFailed { reason }) if reason == "callback clock failed")
+        );
+        assert!(matches!(
+            group.terminal_failure(),
+            Some(TaskSupervisionError::TaskFailed { .. })
+        ));
+    }
+
+    struct FailedIntervalClock;
+
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl PhysicalTimeEffects for FailedIntervalClock {
+        async fn physical_time(
+            &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            panic!("interval needs only its required timer")
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            Err(aura_core::effects::TimeError::ServiceUnavailable)
+        }
+    }
+
+    #[tokio::test]
+    async fn interval_sleep_failure_is_retained_in_health_and_drain() {
+        use std::error::Error;
+        let group = TaskGroup::root("failed-interval", None);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let _owner = group.spawn_interval_until_named(
+            "required-service",
+            Arc::new(FailedIntervalClock),
+            Duration::from_millis(1),
+            move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                async { true }
+            },
+        );
+        let error = group
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect_err("failed interval cannot drain successfully");
+        assert!(
+            matches!(&error, TaskSupervisionError::TaskFailed { task, .. } if task=="required-service")
+        );
+        assert!(matches!(
+            error
+                .source()
+                .and_then(Error::source)
+                .and_then(|source| source.downcast_ref::<aura_core::effects::TimeError>()),
+            Some(aura_core::effects::TimeError::ServiceUnavailable)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            group.terminal_failure(),
+            Some(TaskSupervisionError::TaskFailed { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn invalid_interval_fails_before_callback_and_local_sleep_failure_is_observable() {
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let invalid = TaskGroup::root("invalid-interval", None);
+                let _owner = invalid.spawn_interval_until_named(
+                    "invalid-policy",
+                    Arc::new(FailedIntervalClock),
+                    Duration::MAX,
+                    || async { panic!("invalid policy must not invoke callback") },
+                );
+                let error = invalid
+                    .wait_for_idle(Duration::from_secs(1))
+                    .await
+                    .expect_err("invalid interval must fail");
+                assert!(matches!(
+                    error,
+                    TaskSupervisionError::TaskFailed {
+                        source: aura_core::AuraError::Invalid { .. },
+                        ..
+                    }
+                ));
+                let group = TaskGroup::root("local-failed-interval", None);
+                let _owner = group.spawn_local_interval_until_named(
+                    "local-required-service",
+                    Arc::new(FailedIntervalClock),
+                    Duration::from_millis(1),
+                    || async { true },
+                );
+                assert!(matches!(
+                    group.wait_for_idle(Duration::from_secs(1)).await,
+                    Err(TaskSupervisionError::TaskFailed { .. })
+                ));
+            })
+            .await;
+    }
+
+    struct UnavailableSupervisorClock;
+
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl PhysicalTimeEffects for UnavailableSupervisorClock {
+        async fn physical_time(
+            &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            Err(aura_core::effects::TimeError::ServiceUnavailable)
+        }
+
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            panic!("failed clock must not start the wait timer")
+        }
+    }
+
+    #[tokio::test]
+    async fn supervisor_clock_and_policy_faults_are_not_timeouts() {
+        use std::error::Error;
+        let group = TaskGroup::root("typed-supervisor-faults", None);
+        let clock = group
+            .wait_for_idle_with_time(Duration::from_secs(1), &UnavailableSupervisorClock)
+            .await
+            .expect_err("required clock failure");
+        assert!(matches!(
+            &clock,
+            TaskSupervisionError::Budget {
+                source: TimeoutBudgetError::TimeSourceUnavailable { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            clock
+                .source()
+                .and_then(Error::source)
+                .and_then(Error::source)
+                .and_then(|cause| cause.downcast_ref::<aura_core::effects::TimeError>()),
+            Some(aura_core::effects::TimeError::ServiceUnavailable)
+        ));
+        let policy = group
+            .wait_for_idle(Duration::MAX)
+            .await
+            .expect_err("unrepresentable duration");
+        assert!(matches!(
+            policy,
+            TaskSupervisionError::Budget {
+                source: TimeoutBudgetError::InvalidPolicy { .. },
+                ..
+            }
+        ));
+    }
+
     use super::*;
     use crate::runtime::{RuntimeDiagnosticKind, RuntimeDiagnosticSeverity};
     use tokio::sync::oneshot;
@@ -993,12 +1680,21 @@ mod tests {
         started_rx.await.expect("task should start");
         let timeout = supervisor.wait_for_idle(Duration::from_millis(10)).await;
         assert!(matches!(timeout, Err(TaskSupervisionError::Timeout { .. })));
+        let cause = std::error::Error::source(timeout.as_ref().unwrap_err())
+            .and_then(|cause| cause.downcast_ref::<TimeoutBudgetError>());
+        assert!(
+            matches!(cause, Some(TimeoutBudgetError::DeadlineExceeded { deadline_at_ms, observed_at_ms }) if observed_at_ms >= deadline_at_ms)
+        );
 
         let abort = supervisor.force_abort_remaining();
         assert!(matches!(
             abort,
             Err(TaskSupervisionError::ForcedAbort { .. })
         ));
+        supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect("aborted futures actually drop before idle");
         assert!(supervisor.active_tasks().is_empty());
     }
 
@@ -1102,5 +1798,428 @@ mod tests {
                 "child cancellation observer must see parent-driven shutdown"
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod descendant_supervision_tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    struct PendingDropProbe {
+        dropped: Arc<AtomicBool>,
+        started: Option<tokio::sync::oneshot::Sender<()>>,
+    }
+    impl Future for PendingDropProbe {
+        type Output = ();
+        fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            if let Some(started) = self.started.take() {
+                let _ = started.send(());
+            }
+            Poll::Pending
+        }
+    }
+    impl Drop for PendingDropProbe {
+        fn drop(&mut self) {
+            self.dropped.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn root_covers_dropped_child_handles_and_abort_waits_for_future_drop() {
+        let supervisor = TaskSupervisor::new();
+        let child = supervisor.group("child");
+        let grandchild = child.group("grandchild");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let _owner = grandchild.spawn_named(
+            "owned",
+            PendingDropProbe {
+                dropped: dropped.clone(),
+                started: Some(started),
+            },
+        );
+        ready.await.unwrap();
+        drop(child);
+        drop(grandchild);
+        assert_eq!(
+            supervisor.active_tasks(),
+            vec!["runtime.child.grandchild::owned".to_owned()]
+        );
+        let timeout = supervisor
+            .wait_for_idle(Duration::from_millis(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(timeout,TaskSupervisionError::Timeout {active_tasks,..} if active_tasks==vec!["runtime.child.grandchild::owned".to_owned()])
+        );
+        assert!(
+            matches!(supervisor.force_abort_remaining(),Err(TaskSupervisionError::ForcedAbort {aborted_tasks,..}) if aborted_tasks==vec!["runtime.child.grandchild::owned".to_owned()])
+        );
+        // An abort request alone does not clear registration or release resources.
+        assert!(!dropped.load(Ordering::Acquire));
+        assert_eq!(supervisor.active_tasks().len(), 1);
+        supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(supervisor.active_tasks().is_empty());
+    }
+
+    #[tokio::test]
+    async fn descendant_failure_reaches_root_and_survives_child_registry_pruning() {
+        use std::error::Error;
+        let supervisor = TaskSupervisor::new();
+        let child = supervisor.group("failed-child");
+        let _owner = child.spawn_try_interval_until_named(
+            "required",
+            Arc::new(PhysicalTimeHandler::new()),
+            Duration::from_millis(1),
+            || async {
+                Err(aura_core::AuraError::Storage {
+                    message: "required IO".into(),
+                    source: Some(Arc::new(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "denied",
+                    ))),
+                })
+            },
+        );
+        drop(child);
+        let error = supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error,TaskSupervisionError::TaskFailed {group,task,..} if group=="runtime.failed-child" && task=="required")
+        );
+        assert!(
+            matches!(error.source().and_then(Error::source).and_then(|e|e.downcast_ref::<std::io::Error>()),Some(e) if e.kind()==std::io::ErrorKind::PermissionDenied)
+        );
+        assert!(supervisor.active_tasks().is_empty());
+        assert!(matches!(
+            supervisor.root.terminal_failure(),
+            Some(TaskSupervisionError::TaskFailed { .. })
+        ));
+        assert_eq!(supervisor.root.shared.tree.state.lock().groups.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancellation_closes_descendant_admission_and_never_polls_rejected_work() {
+        let supervisor = TaskSupervisor::new();
+        let child = supervisor.group("child");
+        supervisor.request_cancellation();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let _owner = child.spawn_named(
+            "late",
+            PendingDropProbe {
+                dropped: dropped.clone(),
+                started: Some(started),
+            },
+        );
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(
+            ready.await.is_err(),
+            "rejected future is dropped without polling"
+        );
+        let late = child.group("late-child");
+        assert!(late.cancellation_token().is_cancelled());
+        assert!(supervisor.active_tasks().is_empty());
+        assert!(matches!(
+            supervisor.wait_for_idle(Duration::from_secs(1)).await,
+            Err(TaskSupervisionError::AdmissionClosed { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn local_descendants_propagate_failure_and_drop_before_root_drain() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let supervisor = TaskSupervisor::new();
+                let child = supervisor.group("local");
+                let marker = std::rc::Rc::new(std::cell::Cell::new(false));
+                let moved = marker.clone();
+                struct LocalDrop(std::rc::Rc<std::cell::Cell<bool>>);
+                impl Drop for LocalDrop {
+                    fn drop(&mut self) {
+                        self.0.set(true);
+                    }
+                }
+                let owned = LocalDrop(moved);
+                let _owner = child.spawn_local_try_interval_until_named(
+                    "required-local",
+                    Arc::new(PhysicalTimeHandler::new()),
+                    Duration::from_millis(1),
+                    move || {
+                        let _keep = &owned;
+                        async { Err(aura_core::AuraError::invalid("local policy failed")) }
+                    },
+                );
+                drop(child);
+                assert!(matches!(
+                    supervisor.wait_for_idle(Duration::from_secs(1)).await,
+                    Err(TaskSupervisionError::TaskFailed { .. })
+                ));
+                assert!(
+                    marker.get(),
+                    "local owned resources must drop before root reports completion"
+                );
+                assert!(supervisor.active_tasks().is_empty());
+            })
+            .await;
+    }
+
+    #[test]
+    fn group_registry_is_bounded_prunes_dead_children_and_rejects_deep_trees() {
+        let supervisor = TaskSupervisor::new();
+        let groups: Vec<_> = (0..MAX_SUPERVISED_GROUPS - 1)
+            .map(|index| supervisor.group(format!("child-{index}")))
+            .collect();
+        let rejected = supervisor.group("overflow");
+        assert!(matches!(
+            rejected.terminal_failure(),
+            Some(TaskSupervisionError::AdmissionLimit { .. })
+        ));
+        assert!(rejected.cancellation_token().is_cancelled());
+        assert_eq!(
+            supervisor.root.shared.tree.state.lock().groups.len(),
+            MAX_SUPERVISED_GROUPS
+        );
+        drop(rejected);
+        drop(groups);
+        assert!(supervisor.active_tasks().is_empty());
+        assert_eq!(supervisor.root.shared.tree.state.lock().groups.len(), 1);
+        let independent = TaskSupervisor::new();
+        let mut deepest = independent.group("child");
+        for _ in 2..MAX_GROUP_DEPTH {
+            deepest = deepest.group("child");
+        }
+        let rejected = deepest.group("too-deep");
+        assert!(matches!(
+            rejected.terminal_failure(),
+            Some(TaskSupervisionError::AdmissionLimit {
+                kind: TaskAdmissionKind::Depth,
+                limit: MAX_GROUP_DEPTH,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn dropping_supervisor_clone_does_not_cancel_the_live_owner() {
+        let supervisor = TaskSupervisor::new();
+        drop(supervisor.clone());
+        assert!(!supervisor.cancellation_token().is_cancelled());
+        let _owner = supervisor.spawn_named("complete", async {});
+        supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod bounded_descendant_task_tests {
+    use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    struct DropCount(Arc<std::sync::atomic::AtomicUsize>);
+    impl Future for DropCount {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            Poll::Pending
+        }
+    }
+    impl Drop for DropCount {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    #[tokio::test]
+    async fn tree_task_limit_counts_descendants_and_rejected_work_is_not_scheduled() {
+        let supervisor = TaskSupervisor::new();
+        let children = [supervisor.group("first"), supervisor.group("second")];
+        let drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        for index in 0..MAX_SUPERVISED_TASKS {
+            let _owner = children[index % 2]
+                .spawn_named(format!("pending-{index}"), DropCount(drops.clone()));
+        }
+        let rejected = children[0].spawn_named("overflow", DropCount(drops.clone()));
+        drop(rejected);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert_eq!(supervisor.active_tasks().len(), MAX_SUPERVISED_TASKS);
+        assert!(matches!(
+            supervisor.root.terminal_failure(),
+            Some(TaskSupervisionError::AdmissionLimit {
+                kind: TaskAdmissionKind::Tasks,
+                limit: MAX_SUPERVISED_TASKS,
+                ..
+            })
+        ));
+        let _abort = supervisor.force_abort_remaining();
+        assert!(matches!(
+            supervisor.wait_for_idle(Duration::from_secs(5)).await,
+            Err(TaskSupervisionError::AdmissionLimit { .. })
+        ));
+        assert_eq!(drops.load(Ordering::SeqCst), MAX_SUPERVISED_TASKS + 1);
+        assert!(supervisor.active_tasks().is_empty());
+    }
+    #[tokio::test]
+    async fn descendant_panic_is_retained_by_root_health() {
+        let supervisor = TaskSupervisor::new();
+        let child = supervisor.group("panicked");
+        let _owner = child.spawn_named("panic", async { panic!("real task panic") });
+        drop(child);
+        assert!(
+            matches!(supervisor.wait_for_idle(Duration::from_secs(1)).await,Err(TaskSupervisionError::Panicked {group,task}) if group=="runtime.panicked" && task=="panic")
+        );
+        assert!(supervisor.active_tasks().is_empty());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod actual_shutdown_admission_race_tests {
+    use super::*;
+    #[tokio::test]
+    async fn real_group_registration_races_shutdown_without_escaping_root_drain() {
+        let supervisor = TaskSupervisor::new();
+        let worker_owner = supervisor.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker_drops = drops.clone();
+        struct Probe(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for Probe {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let worker = std::thread::spawn(move || {
+            let _runtime = runtime.enter();
+            worker_barrier.wait();
+            for index in 0..32 {
+                let child = worker_owner.group(format!("racing-{index}"));
+                let resource = Probe(worker_drops.clone());
+                let _owner = child.spawn_named("pending", async move {
+                    let _resource = resource;
+                    futures::future::pending::<()>().await;
+                });
+            }
+        });
+        barrier.wait();
+        supervisor.request_cancellation();
+        worker.join().unwrap();
+        let result = supervisor.wait_for_idle(Duration::from_secs(1)).await;
+        assert!(matches!(
+            result,
+            Ok(()) | Err(TaskSupervisionError::AdmissionClosed { .. })
+        ));
+        assert_eq!(drops.load(Ordering::SeqCst), 32);
+        assert!(supervisor.active_tasks().is_empty());
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod required_task_admission_tests {
+    use super::*;
+    use std::error::Error;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll};
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("required refresh provider failed")]
+    struct RequiredProviderFault;
+
+    fn provider_fault() -> aura_core::AuraError {
+        aura_core::AuraError::Storage {
+            message: "required refresh read failed".into(),
+            source: Some(Arc::new(RequiredProviderFault)),
+        }
+    }
+
+    async fn assert_required_failure(supervisor: &TaskSupervisor) {
+        let error = supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect_err("required task failure must reach root supervision");
+        let TaskSupervisionError::TaskFailed { source, .. } = error else {
+            panic!("required task must retain its structural failure");
+        };
+        assert!(matches!(&source, aura_core::AuraError::Storage { .. }));
+        assert!(source
+            .source()
+            .expect("original provider source")
+            .is::<RequiredProviderFault>());
+    }
+
+    #[tokio::test]
+    async fn native_required_task_retains_original_provider_failure() {
+        let supervisor = TaskSupervisor::new();
+        TaskSpawner::spawn_fallible_cancellable(
+            &supervisor,
+            "required-refresh",
+            Box::pin(async { Err(provider_fault()) }),
+            supervisor.cancellation_token(),
+        )
+        .expect("admit required task");
+        assert_required_failure(&supervisor).await;
+    }
+
+    #[tokio::test]
+    async fn local_required_task_retains_original_provider_failure() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let supervisor = TaskSupervisor::new();
+                TaskSpawner::spawn_local_fallible_cancellable(
+                    &supervisor,
+                    "required-local-refresh",
+                    Box::pin(async { Err(provider_fault()) }),
+                    supervisor.cancellation_token(),
+                )
+                .expect("admit required local task");
+                assert_required_failure(&supervisor).await;
+            })
+            .await;
+    }
+
+    struct RejectedFuture(Arc<AtomicBool>);
+    impl Future for RejectedFuture {
+        type Output = Result<(), aura_core::AuraError>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            panic!("closed admission must not poll the supplied future")
+        }
+    }
+    impl Drop for RejectedFuture {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn closed_required_admission_returns_source_after_dropping_future() {
+        let supervisor = TaskSupervisor::new();
+        supervisor.request_cancellation();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let error = TaskSpawner::spawn_fallible_cancellable(
+            &supervisor,
+            "rejected-refresh",
+            Box::pin(RejectedFuture(dropped.clone())),
+            supervisor.cancellation_token(),
+        )
+        .expect_err("closed owner must reject required work immediately");
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<TaskSupervisionError>()),
+            Some(TaskSupervisionError::AdmissionClosed { .. })
+        ));
+        assert!(supervisor.active_tasks().is_empty());
     }
 }

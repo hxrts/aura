@@ -141,8 +141,8 @@ pub use domain::journal;
 pub use time::timeout::{
     execute_with_retry_budget, execute_with_timeout_budget, AttemptBudget,
     ExponentialBackoffPolicy, RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError,
-    TimeoutBudgetResult, TimeoutExecutionClass, TimeoutExecutionProfile, TimeoutRunError,
-    TimeoutTimeSemantics,
+    TimeoutBudgetResult, TimeoutClockObservation, TimeoutExecutionClass, TimeoutExecutionProfile,
+    TimeoutRunError, TimeoutTimeSemantics,
 };
 pub use time::TimeDomain;
 

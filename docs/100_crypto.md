@@ -187,7 +187,7 @@ The cryptographic architecture maintains these invariants.
 5. Production randomness comes from OS entropy via `OsRng`
 6. Identity and key bytes decoded from a remote payload are untrusted until checked against an authoritative local key source. A signature by the same key that signed an imported invitation proves continuity of that invitation, not trusted device identity.
 7. A response is constructed from a completed signature over its canonical transcript; production response construction does not create an unsigned placeholder.
-8. Imported authority tree operations require the verifying package and threshold policy of their parent epoch from an authenticated source. A matching parent commitment, a sibling transport session, or a key delivered beside the operation does not authenticate the operation. An enrolling device needs an explicit, ceremony-bound trust bootstrap before it can adopt a baseline tree.
+8. Imported authority tree operations require the verifying package and threshold policy of their parent epoch from an authenticated source. A matching parent commitment, a sibling transport session, or a key delivered beside the operation does not authenticate the operation. An enrolling device needs an explicit, ceremony-bound trust bootstrap before it can adopt a baseline tree. Required parent-policy reads distinguish absent records from storage and decoding failures. Participant inventory is complete and unique, and single-signer policy has exactly one participant and a threshold of one. An unreadable trusted record cannot authorize migration to a substitute verifier.
 9. A transport receipt signed under a key carried in the receipt proves transcript integrity under that key. It does not authenticate the `AuthorityId` in the envelope. Promoting the source to verified authority or device identity requires comparison with an independently trusted key and an authenticated authority/device binding. A nonzero nonce is not replay protection without a checked replay state.
 
 ## 6. Signing Modes
@@ -275,6 +275,59 @@ The `SignableOperation` enum defines what is being signed. Its OTA activation va
 
 The service implementation lives in `aura-agent/src/runtime/services/threshold_signing.rs`. `ThresholdSigningService` manages per-authority signing state and key storage using `SecureStorageEffects` for key material persistence.
 
+Bootstrap preserves an existing signing identity. Recovery loads the persisted
+active epoch, policy, participants and public package instead of regenerating
+epoch-zero keys. Invalid or incomplete persisted material is a recovery failure
+and cannot authorize replacement keys. Decrypting an existing signing share is
+a read-only operation on its wrapping key; a missing key or failed storage read
+must not create new wrapping material. A setup code signed before recovery must
+retain the same verifier afterward.
+
+An enrollment response must verify under the exact provisional signing package,
+epoch, mode and threshold policy selected by explicit user transfer. The
+initiator retains that statement, its canonical digest and ceremony binding
+before starting response owners; proof material supplied by the responder
+cannot choose the expected verifier. Restored records retain the original
+package and validity bounds. Missing legacy verifier state requires a new
+transfer rather than self-certifying a response's key.
+
+The setup validity interval governs admission to issuance. A successfully
+retained ceremony may verify a response after setup expiry within the
+invitation/ceremony's own response deadline; expiry does not substitute another
+key or grant a new issuance. These deadlines are distinct from nonce consumption
+and atomic activation, whose durable receipts remain separate requirements.
+
+Historical setup-response signing is limited to a retained, admitted setup
+request and its exact invitation/ceremony transcript. Possession of an old
+encrypted key does not authorize signing after local revocation, cancellation
+or completion. A response permit requires authenticated initiator-manifest
+provenance, a durable setup admission receipt and current owner-controlled
+lifecycle eligibility. It cannot accept an arbitrary payload, domain or epoch.
+Setup admission must not infer validity from another device's exact wall-clock
+timestamp; each owner's recorded admission evidence governs its validity gate.
+
+For a threshold setup policy, response signing requires the authenticated
+historical participant inventory and its quorum under the same narrow response
+permit. Single-signer fallback cannot satisfy that policy. Retained shares remain
+available while authorized pending requests need them; expiry, cancellation,
+revocation and terminal outcomes govern retirement without removing active keys.
+
+A retained local threshold share must match its authenticated signer identity,
+threshold policy, group verifying key and verifying share. Its signing scalar
+must derive that same verifying share, and the public package must contain the
+exact authenticated participant inventory. Package decoding alone does not
+establish these properties. Native FROST public packages do not encode a
+threshold; a conversion default is not policy evidence. Membership in a prior
+epoch cannot authorize signing after removal from the current participant set.
+
+Initial signing-key readiness is distinct from bootstrap genesis completion.
+A pending genesis record binds the authority, physical device, epoch-zero public
+package digest and initialization phase before key persistence. Completion binds
+the authenticated, durably indexed device-creation operation. A failed genesis
+commit cannot publish a usable signing context. Recovery may resume creation
+only from a matching pending initialization; legacy keys with missing or
+conflicting creation evidence require explicit recovery rather than a new leaf.
+
 Low-level primitives live in `aura-core/src/crypto/tree_signing.rs`. This module defines FROST types and pure coordination logic. It re-exports `frost_ed25519` types for type safety.
 
 The handler in `aura-effects/src/crypto.rs` implements FROST key generation and signing. This is the only location with direct `frost_ed25519` library calls.
@@ -321,3 +374,41 @@ The wrapper and trait abstraction enables algorithm migration and HSM integratio
 - [Effect System](103_effect_system.md) for effect trait patterns
 - [Project Structure](999_project_structure.md) for 8-layer architecture
 - [Effects and Handlers Guide](802_effects_guide.md) for handler implementation guidance
+
+## Independently transferred enrollment manifest
+
+Enrollment baseline admission requires a signed `EnrollmentTrustManifest` and an independently transferred initiator verifier statement. The verifier statement binds the subject authority, physical initiator device, and confirmation key. A key embedded in an invitation or manifest cannot establish this pin. Decoding a transfer statement does not authorize admission; the explicit app transfer owner selects it.
+
+The signed manifest binds the exact setup nonce and digest, reserved invitation and ceremony identifiers, actual provisional invitee authority and physical device, pending epoch, encrypted participant share, public package, canonical provisional threshold policy, and complete ordered baseline digest. Every attested baseline operation requires an exact parent epoch, commitment, signing node, group verifier, ordered participant inventory, threshold, signing mode, and agreement policy from that independently authenticated inventory. Replay checks each signature and reduction before any baseline/key mutation, rejects unused or missing inventory, and requires the exact final commitment. An epoch root key is not proof of an arbitrary node verifier.
+
+Runtime admission rechecks the actual locally retained exported setup request and its signed policy bounds. The immutable secure admission record retains the selected verifier and original local admission time; recovery re-verifies its evidence rather than deserializing a trusted witness. Missing, corrupt, expired, mismatched, or legacy unbound evidence fails closed. Admission is a ceremony-scoped bootstrap permission, not authority adoption, durable peer membership, or permission to use retired signing shares. Acceptance binds the issuer-retained exact manifest digest in addition to the setup and ceremony binding.
+
+#### Committed enrollment confirmation receipts
+
+An invitee activation requires an issuer-pinned signed committed confirmation
+bound to the exact independently admitted enrollment manifest, invitation,
+ceremony, physical device and pending epoch. A cached accepted status, unsigned
+confirmation or received signing package is insufficient. The committed
+confirmation and original admitted budget acknowledgement are retained in an
+immutable authenticated local receipt before activation.
+
+Recovery verifies the original transfer signature, exact baseline and setup
+binding, the actual committed confirmation signature, and the recorded original
+budget state before producing activation evidence. Historical verification is
+scoped to that retained receipt; it grants no historical signing authority and
+cannot extend an admission window. Actual retained share, public package and
+canonical provisional configuration must match the signed manifest. Generic
+rotation activation cannot consume an enrollment import generation, and
+activation cannot roll back a later retained epoch.
+
+### Enrollment verifier origin enforcement
+
+Retained enrollment response verification uses the independently retained setup verifier. Enrollment control verification uses the sealed independently admitted manifest. A remote key field and a trusted-looking local name do not establish either origin. Domain manifest signature verification establishes integrity under the explicitly independent input key and does not establish admission or current membership. Lexical test-only scopes do not relax production verifier contracts.
+
+### Public enrollment configuration digest
+
+The enrollment manifest's pending configuration digest is a `Hash32` content hash of the exact issued configuration encoding. It is public commitment material, not a threshold configuration or secret signing share. Its canonical encoding remains the original 32-byte array representation. Admission and generation validation compare this digest with freshly computed hashes of exact retained bytes; the digest alone confers no authority.
+
+### Enrollment signing roster and authenticated topology
+
+Enrollment keeps the original independently pinned signing quorum separate from the authenticated tree child topology. A signed AddLeaf changes observed child edges before the original signing key attests the RotateEpoch activation fence. Verification retains the exact signed quorum minimum and signer-roster upper bound while deriving topology cardinality solely from authenticated branch and leaf-parent edges. A verification projection does not materialize a canonical branch. A policy already materialized by authenticated tree operations remains an independent minimum; invalid or incompatible canonical policy metadata fails closed and requires an authenticated policy transition rather than a local repair. Missing node-specific verifier inventory cannot be replaced with the epoch root package.

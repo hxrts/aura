@@ -20,8 +20,102 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 
-fn sync_service_context(time_handler: Arc<PhysicalTimeHandler>) -> RuntimeServiceContext {
+fn sync_service_context(
+    time_handler: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+) -> RuntimeServiceContext {
     RuntimeServiceContext::new(Arc::new(TaskSupervisor::new()), time_handler)
+}
+
+/// An execution failure remains primary when stopping also fails.
+#[derive(Debug)]
+pub struct SyncRunCleanupFailure {
+    primary: Arc<dyn std::error::Error + Send + Sync>,
+    cleanup: Arc<dyn std::error::Error + Send + Sync>,
+}
+impl SyncRunCleanupFailure {
+    /// Inspect the independently retained native cleanup failure.
+    #[must_use]
+    pub fn cleanup_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self.cleanup.as_ref()
+    }
+}
+impl std::fmt::Display for SyncRunCleanupFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}; stopping sync also failed: {}",
+            self.primary,
+            self.cleanup_error()
+        )
+    }
+}
+impl std::error::Error for SyncRunCleanupFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.primary.as_ref())
+    }
+}
+
+// One owner awaits stop on every normal/error exit from the run future.
+async fn run_sync_with_cleanup<T, E, S, Run, Stop, Stopped>(
+    run: Run,
+    stop: Stop,
+) -> TerminalResult<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+    S: std::error::Error + Send + Sync + 'static,
+    Run: std::future::Future<Output = Result<T, E>>,
+    Stop: FnOnce() -> Stopped,
+    Stopped: std::future::Future<Output = Result<(), S>>,
+{
+    let result = run.await;
+    let cleanup = stop().await;
+    match (result, cleanup) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(primary), Ok(())) => Err(TerminalError::native_operation(
+            "Sync execution failed",
+            primary,
+        )),
+        (Ok(_), Err(cleanup)) => Err(TerminalError::native_operation(
+            "Failed to stop sync service",
+            cleanup,
+        )),
+        (Err(primary), Err(cleanup)) => {
+            let failure = SyncRunCleanupFailure {
+                primary: Arc::new(primary),
+                cleanup: Arc::new(cleanup),
+            };
+            Err(TerminalError::native_operation(
+                failure.to_string(),
+                failure,
+            ))
+        }
+    }
+}
+
+fn sync_source(error: impl std::error::Error + Send + Sync + 'static) -> aura_core::AuraError {
+    aura_core::AuraError::Internal {
+        message: error.to_string(),
+        source: Some(Arc::new(error)),
+    }
+}
+
+// Sleep failure is an error, never a tick. The same high-water owner spans all ticks.
+async fn required_sync_tick<E: PhysicalTimeEffects + ?Sized>(
+    time: &E,
+    observation: &aura_core::TimeoutClockObservation,
+    started_at_ms: u64,
+    interval_ms: u64,
+) -> Result<u64, aura_core::AuraError> {
+    time.sleep_ms(interval_ms).await.map_err(sync_source)?;
+    let now = time.physical_time().await.map_err(sync_source)?;
+    observation
+        .observe(&now)
+        .map_err(aura_core::AuraError::from)?;
+    let elapsed = now
+        .ts_ms
+        .checked_sub(started_at_ms)
+        .ok_or_else(|| aura_core::AuraError::invalid("sync uptime precedes original start"))?;
+    Ok(elapsed / 1000)
 }
 
 /// Handle sync operations through effects
@@ -62,6 +156,11 @@ async fn handle_daemon_mode(
     max_concurrent: usize,
     peers: Option<&str>,
 ) -> TerminalResult<CliOutput> {
+    if interval_secs == 0 {
+        return Err(TerminalError::Input(
+            "Sync interval must be positive".into(),
+        ));
+    }
     let mut output = CliOutput::new();
 
     output.println("Starting sync daemon...");
@@ -99,55 +198,48 @@ async fn handle_daemon_mode(
     // Start the sync service
     let time_handler = Arc::new(PhysicalTimeHandler::new());
     let service_context = sync_service_context(time_handler.clone());
-    manager
-        .start(&service_context)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
-
-    println!("\nSync daemon started. Press Ctrl+C to stop.\n");
-
-    // Get initial time for uptime tracking
-    let start_time = time_handler.physical_time_now_ms();
-
-    // Run sync loop until interrupted (direct printing for continuous output)
-    let mut tick_count = 0u64;
-    loop {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                println!("\nReceived shutdown signal...");
-                break;
+    let interval_ms =
+        u64::try_from(Duration::from_secs(interval_secs).as_millis()).map_err(|error| {
+            TerminalError::native_operation("Sync interval exceeds physical milliseconds", error)
+        })?;
+    let tick_count = run_sync_with_cleanup(async {
+        manager.start(&service_context).await.map_err(sync_source)?;
+        println!("\nSync daemon started. Press Ctrl+C to stop.\n");
+        let started = time_handler.physical_time().await.map_err(sync_source)?;
+        let observation = aura_core::TimeoutClockObservation::new(&started);
+        let mut tick_count = 0u64;
+        loop {
+            if let Some(failure) = service_context.tasks().terminal_failure() {
+                return Err(sync_source(failure));
             }
-            _ = async {
-                let _ = time_handler.sleep_ms(Duration::from_secs(interval_secs).as_millis() as u64).await;
-            } => {
-                tick_count += 1;
-                let uptime_secs = (time_handler.physical_time_now_ms() - start_time) / 1000;
-
-                // Get health info
-                let health = manager.health().await;
-                println!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
-
-                // Get metrics periodically
-                if tick_count % 5 == 0 {
-                    if let Some(metrics) = manager.metrics().await {
-                        println!(
-                            "  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
-                            metrics.requests_processed,
-                            metrics.errors_encountered,
-                            metrics.avg_latency_ms
-                        );
+            tokio::select! {
+                result = signal::ctrl_c() => {
+                    result.map_err(sync_source)?;
+                    println!("\nReceived shutdown signal...");
+                    break;
+                }
+                result = required_sync_tick(time_handler.as_ref(), &observation, started.ts_ms, interval_ms) => {
+                    let uptime_secs = result?;
+                    if let Some(failure) = service_context.tasks().terminal_failure() {
+                        return Err(sync_source(failure));
+                    }
+                    tick_count += 1;
+                    let health = manager.health().await;
+                    println!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
+                    if tick_count % 5 == 0 {
+                        if let Some(metrics) = manager.metrics().await {
+                            println!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
+                                metrics.requests_processed, metrics.errors_encountered, metrics.avg_latency_ms);
+                        }
                     }
                 }
             }
         }
-    }
-
-    // Stop the service
-    println!("Stopping sync daemon...");
-    manager
-        .stop()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to stop sync service: {e}")))?;
+        Ok::<_, aura_core::AuraError>(tick_count)
+    }, || async {
+        println!("Stopping sync daemon...");
+        manager.stop().await
+    }).await?;
 
     let _ = ctx; // Acknowledge context for future use
 
@@ -184,27 +276,30 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
     // Start the sync service
     let time_handler = Arc::new(PhysicalTimeHandler::new());
     let service_context = sync_service_context(time_handler.clone());
-    manager
-        .start(&service_context)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
+    run_sync_with_cleanup(
+        async {
+            manager.start(&service_context).await.map_err(sync_source)?;
 
-    // Full sync_with_peers needs the full effect system
-    // For now, just add peers and show status
-    for peer in &peers {
-        manager.add_peer(*peer).await;
-    }
+            // Full sync_with_peers needs the full effect system
+            // For now, just add peers and show status
+            for peer in &peers {
+                manager.add_peer(*peer).await;
+            }
 
-    output.kv("Registered peers", manager.peers().await.len().to_string());
+            output.kv("Registered peers", manager.peers().await.len().to_string());
 
-    // In a real implementation, this would call:
-    // manager.sync_with_peers(effects, peers).await?;
+            // In a real implementation, this would call:
+            // manager.sync_with_peers(effects, peers).await?;
 
-    // Show completion
-    let health = manager.health().await;
-    output.kv("Sync service health", format_service_health(&health));
+            // Show completion
+            let health = manager.health().await;
+            output.kv("Sync service health", format_service_health(&health));
 
-    manager.stop().await.ok();
+            Ok::<(), aura_core::AuraError>(())
+        },
+        || manager.stop(),
+    )
+    .await?;
     let _ = ctx; // Acknowledge context for future use
 
     output.println("One-shot sync complete.");
@@ -241,6 +336,165 @@ fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
 
     let _ = ctx; // Acknowledge context
     Ok(output)
+}
+
+#[cfg(test)]
+mod owned_sync_failure_tests {
+    use super::*;
+    use aura_core::effects::TimeError;
+    use aura_core::time::PhysicalTime;
+    use aura_core::TimeoutClockObservation;
+    use std::error::Error;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FailedSleep {
+        reads: Arc<AtomicUsize>,
+    }
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for FailedSleep {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            Ok(PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            })
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), TimeError> {
+            Err(TimeError::ServiceUnavailable)
+        }
+    }
+
+    struct TickTime {
+        now_ms: u64,
+    }
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for TickTime {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            Ok(PhysicalTime {
+                ts_ms: self.now_ms,
+                uncertainty: None,
+            })
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), TimeError> {
+            Ok(())
+        }
+    }
+
+    fn find_cause<'a, T: Error + 'static>(error: &'a (dyn Error + 'static)) -> Option<&'a T> {
+        let mut current = Some(error);
+        while let Some(cause) = current {
+            if let Some(found) = cause.downcast_ref::<T>() {
+                return Some(found);
+            }
+            current = cause.source();
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn required_sleep_failure_stops_before_tick_and_always_runs_cleanup() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let time = FailedSleep {
+            reads: reads.clone(),
+        };
+        let clock = TimeoutClockObservation::new(&PhysicalTime {
+            ts_ms: 100,
+            uncertainty: None,
+        });
+        let stopped = Arc::new(AtomicUsize::new(0));
+        let stop = stopped.clone();
+        let error =
+            run_sync_with_cleanup(required_sync_tick(&time, &clock, 100, 10), || async move {
+                stop.fetch_add(1, Ordering::SeqCst);
+                Ok::<(), aura_agent::ServiceError>(())
+            })
+            .await
+            .expect_err("required sleep failure terminates owned run");
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            0,
+            "no clock read or tick after failed sleep"
+        );
+        assert_eq!(
+            stopped.load(Ordering::SeqCst),
+            1,
+            "cleanup runs exactly once"
+        );
+        assert!(find_cause::<TimeError>(&error).is_some());
+        let clone = error.clone();
+        assert_eq!(clone, error, "clone preserves opaque source identity");
+        assert!(find_cause::<TimeError>(&clone).is_some());
+    }
+
+    #[tokio::test]
+    async fn clock_rollback_after_progress_stops_without_new_tick() {
+        let clock = TimeoutClockObservation::new(&PhysicalTime {
+            ts_ms: 100,
+            uncertainty: None,
+        });
+        assert_eq!(
+            required_sync_tick(&TickTime { now_ms: 200 }, &clock, 100, 10)
+                .await
+                .expect("first valid tick"),
+            0
+        );
+        let stopped = Arc::new(AtomicUsize::new(0));
+        let stop = stopped.clone();
+        let error = run_sync_with_cleanup(
+            required_sync_tick(&TickTime { now_ms: 150 }, &clock, 100, 10),
+            || async move {
+                stop.fetch_add(1, Ordering::SeqCst);
+                Ok::<(), aura_agent::ServiceError>(())
+            },
+        )
+        .await
+        .expect_err("rollback above start still fails");
+        assert!(matches!(
+            find_cause::<aura_core::TimeoutBudgetError>(&error),
+            Some(aura_core::TimeoutBudgetError::ClockRollback {
+                previous_observed_at_ms: 200,
+                observed_at_ms: 150
+            })
+        ));
+        assert_eq!(stopped.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn equal_diagnostics_do_not_equate_independent_native_causes() {
+        let first = TerminalError::native_operation("same", TimeError::ServiceUnavailable);
+        let second = TerminalError::native_operation("same", TimeError::ServiceUnavailable);
+        assert_ne!(first, second);
+        assert_eq!(first, first.clone());
+    }
+
+    #[tokio::test]
+    async fn cleanup_failure_retains_both_actual_native_causes() {
+        let codec = serde_json::from_slice::<u64>(b"invalid").expect_err("actual malformed JSON");
+        let error = run_sync_with_cleanup(async { Err::<(), _>(codec) }, || async {
+            Err::<(), _>(aura_agent::ServiceError::shutdown_failed(
+                "sync",
+                "injected stop failure",
+            ))
+        })
+        .await
+        .expect_err("execution and stop both fail");
+        assert!(find_cause::<serde_json::Error>(&error).is_some());
+        let paired = find_cause::<SyncRunCleanupFailure>(&error).expect("owned paired failure");
+        assert!(paired.cleanup_error().is::<aura_agent::ServiceError>());
+    }
+
+    #[tokio::test]
+    async fn stop_failure_cannot_publish_success() {
+        let error = run_sync_with_cleanup(async { Ok::<_, aura_core::AuraError>(()) }, || async {
+            Err::<(), _>(aura_agent::ServiceError::shutdown_failed(
+                "sync",
+                "injected stop failure",
+            ))
+        })
+        .await
+        .expect_err("cleanup failure rejects successful run");
+        assert!(find_cause::<aura_agent::ServiceError>(&error).is_some());
+    }
 }
 
 /// Add a peer to the sync list

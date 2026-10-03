@@ -1,5 +1,7 @@
 # Aura AMP (Layer 4)
 
+AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
+
 ## Purpose
 
 Orchestrate AMP channel lifecycle and message transport coordination on top of relational journal facts.
@@ -197,3 +199,9 @@ cargo test -p aura-amp
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [System Internals Guide](../../docs/807_system_internals_guide.md)
+
+## Canonical and staged AMP reads
+
+`get_channel_state` requires a reducer-selected checkpoint with the exact requested context and channel. Policies, bootstrap metadata, and epoch transitions alone cannot satisfy creation admission or authoritative readiness. `get_reduced_channel_state` explicitly exposes partial state for observation and staging; callers cannot substitute it at a mutation or readiness boundary. Replay tests cover metadata before and after the actual checkpoint.
+
+Transition diagnostics intentionally use the staged reduced-state reader; authoritative channel context resolution and membership repair require a canonical checkpoint. A missing checkpoint in another context does not hide an actual journal-read failure.

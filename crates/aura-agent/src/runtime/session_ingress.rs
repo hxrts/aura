@@ -76,6 +76,13 @@ pub enum SessionIngressError {
         owner_label: String,
         message: String,
     },
+    #[error("failed to bridge owned runtime session {session_id} for {owner_label}: {source}")]
+    BridgeRound {
+        session_id: RuntimeChoreographySessionId,
+        owner_label: String,
+        #[source]
+        source: super::vm_host_bridge::AuraVmBridgeRoundError,
+    },
     #[error("failed to close owned runtime session {session_id} for {owner_label}: {message}")]
     SessionClose {
         session_id: RuntimeChoreographySessionId,
@@ -101,6 +108,7 @@ impl SessionIngressError {
             Self::InvalidIngressRouting { .. } => "invalid_ingress_routing",
             Self::SessionStart { .. } => "session_start",
             Self::Round { .. } => "round",
+            Self::BridgeRound { .. } => "bridge_round",
             Self::SessionClose { .. } => "session_close",
             Self::OwnerTransfer { .. } => "owner_transfer",
         }
@@ -382,10 +390,10 @@ impl OwnedVmSession {
             peer_roles,
         )
         .await
-        .map_err(|message| SessionIngressError::Round {
+        .map_err(|source| SessionIngressError::BridgeRound {
             session_id: self.owner.session_id,
             owner_label: self.owner.owner_label.clone(),
-            message,
+            source,
         });
         if let Err(error) = &result {
             log_session_ingress_dropped(&self.owner, "advance_round", error, Some(active_role));
@@ -432,10 +440,10 @@ impl OwnedVmSession {
             stop_on_receive_error,
         )
         .await
-        .map_err(|message| SessionIngressError::Round {
+        .map_err(|source| SessionIngressError::BridgeRound {
             session_id: self.owner.session_id,
             owner_label: self.owner.owner_label.clone(),
-            message,
+            source,
         });
         if let Err(error) = &result {
             log_session_ingress_dropped(
@@ -483,13 +491,18 @@ impl OwnedVmSession {
     pub async fn close(mut self) -> Result<(), SessionIngressError> {
         self.effects
             .assert_owned_choreography_session(&self.owner)?;
-        close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|message| {
-            SessionIngressError::SessionClose {
-                session_id: self.owner.session_id,
-                owner_label: self.owner.owner_label.clone(),
-                message,
-            }
-        })?;
+        // The engine reaps terminal sessions during step cleanup. This admitted
+        // owner still owns the runtime binding and fragments after VM completion,
+        // so releasing those must not depend on closing an already-reaped VM.
+        if self.engine.active_sessions().contains(&self.vm_session_id) {
+            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|message| {
+                SessionIngressError::SessionClose {
+                    session_id: self.owner.session_id,
+                    owner_label: self.owner.owner_label.clone(),
+                    message,
+                }
+            })?;
+        }
         self.effects
             .end_owned_choreography_session(&self.owner)
             .await

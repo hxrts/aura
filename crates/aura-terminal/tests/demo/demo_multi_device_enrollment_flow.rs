@@ -17,8 +17,10 @@
 //! 3) Enroll device C via Settings → Add device
 //! 4) Assert device B receives/stores the new-epoch key package and acks the ceremony
 
+#[path = "../support/enrollment.rs"]
+mod enrollment_support;
+
 use async_lock::RwLock;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,7 +45,6 @@ struct TestEnv {
     app_core_a: Arc<RwLock<AppCore>>,
     shared_transport: SharedTransport,
     authority_id: aura_core::AuthorityId,
-    context_id: aura_core::ContextId,
     test_dir: std::path::PathBuf,
 }
 
@@ -106,7 +107,6 @@ async fn setup_test_env() -> TestEnv {
         app_core_a,
         shared_transport,
         authority_id,
-        context_id,
         test_dir,
     }
 }
@@ -148,45 +148,20 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
     // Enroll device B.
+    let device_b_id = DeviceId::new_from_entropy([2; 32]);
+    let (agent_b, setup_code_b) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("device-b"),
+        device_b_id,
+        2025,
+        env.shared_transport.clone(),
+    )
+    .await;
     let start_b = env
         .ctx_a
-        .start_device_enrollment(
-            "Laptop",
-            aura_core::AuthorityId::new_from_entropy([2u8; 32]),
-        )
+        .start_device_enrollment("Laptop", setup_code_b)
         .await
         .expect("start_device_enrollment should succeed");
-
-    let device_b_id = DeviceId::from_str(&start_b.device_id).expect("device_id should parse");
-    let seed_b = 2025u64;
-    let effect_ctx_b = EffectContext::new(
-        env.authority_id,
-        env.context_id,
-        ExecutionMode::Simulation { seed: seed_b },
-    );
-
-    let storage_base_path = env.test_dir.join("device-b");
-    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-b storage dir");
-    let agent_config_b = AgentConfig {
-        device_id: device_b_id,
-        storage: StorageConfig {
-            base_path: storage_base_path,
-            ..StorageConfig::default()
-        },
-        ..AgentConfig::default()
-    };
-
-    let agent_b = AgentBuilder::new()
-        .with_config(agent_config_b)
-        .with_authority(env.authority_id)
-        .build_simulation_async_with_shared_transport(
-            seed_b,
-            &effect_ctx_b,
-            env.shared_transport.clone(),
-        )
-        .await
-        .expect("Failed to build device B agent");
-    let agent_b = Arc::new(agent_b);
+    assert_eq!(start_b.device_id, device_b_id.to_string());
 
     let runtime_b = agent_b.clone().as_runtime_bridge();
     let invitation_b = runtime_b
@@ -216,42 +191,20 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
     wait_for_device(&env.app_core_a, &start_b.device_id).await;
 
     // Enroll device C (now there is an existing non-initiator device B).
+    let device_c_id = DeviceId::new_from_entropy([3; 32]);
+    let (agent_c, setup_code_c) = enrollment_support::provisional_invitee_setup(
+        &env.test_dir.join("device-c"),
+        device_c_id,
+        2026,
+        env.shared_transport.clone(),
+    )
+    .await;
     let start_c = env
         .ctx_a
-        .start_device_enrollment("Phone", aura_core::AuthorityId::new_from_entropy([3u8; 32]))
+        .start_device_enrollment("Phone", setup_code_c)
         .await
         .expect("start_device_enrollment should succeed");
-
-    let device_c_id = DeviceId::from_str(&start_c.device_id).expect("device_id should parse");
-    let seed_c = 2026u64;
-    let effect_ctx_c = EffectContext::new(
-        env.authority_id,
-        env.context_id,
-        ExecutionMode::Simulation { seed: seed_c },
-    );
-
-    let storage_base_path = env.test_dir.join("device-c");
-    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-c storage dir");
-    let agent_config_c = AgentConfig {
-        device_id: device_c_id,
-        storage: StorageConfig {
-            base_path: storage_base_path,
-            ..StorageConfig::default()
-        },
-        ..AgentConfig::default()
-    };
-
-    let agent_c = AgentBuilder::new()
-        .with_config(agent_config_c)
-        .with_authority(env.authority_id)
-        .build_simulation_async_with_shared_transport(
-            seed_c,
-            &effect_ctx_c,
-            env.shared_transport.clone(),
-        )
-        .await
-        .expect("Failed to build device C agent");
-    let agent_c = Arc::new(agent_c);
+    assert_eq!(start_c.device_id, device_c_id.to_string());
 
     let runtime_c = agent_c.as_runtime_bridge();
     let invitation_c = runtime_c

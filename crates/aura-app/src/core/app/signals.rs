@@ -1,19 +1,45 @@
 //! Reactive and callback signal surfaces for `AppCore`.
 #![allow(missing_docs)]
 
-#[cfg(feature = "callbacks")]
-use super::config::SubscriptionId;
 use super::state::{AppCore, APP_RUNTIME_OPERATION_TIMEOUT, APP_RUNTIME_QUERY_TIMEOUT};
+#[cfg(feature = "callbacks")]
+use super::SubscriptionId;
 use crate::core::IntentError;
+use crate::runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind};
 use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
 use aura_core::query::{FactPredicate, Query};
 
+fn signals_runtime_boundary(error: aura_core::AuraError) -> RuntimeBridgeError {
+    use std::error::Error;
+    let mut cause: Option<&(dyn Error + 'static)> = Some(&error);
+    let mut timed_out = false;
+    while let Some(source) = cause {
+        if matches!(
+            source.downcast_ref::<crate::workflows::error::WorkflowError>(),
+            Some(crate::workflows::error::WorkflowError::TimedOut { .. })
+        ) {
+            timed_out = true;
+            break;
+        }
+        cause = source.source();
+    }
+    let native = RuntimeBridgeError::with_source(
+        IntentError::service_error("required signal initialization runtime boundary failed"),
+        error,
+    );
+    if timed_out {
+        native.with_kind(RuntimeBridgeErrorKind::TimedOut)
+    } else {
+        native
+    }
+}
+
 impl AppCore {
     /// Initialize all application signals with default values.
-    pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), IntentError> {
+    pub(super) async fn ensure_signals_registered(&mut self) -> Result<(), RuntimeBridgeError> {
         if let Some(runtime) = self.runtime.as_ref() {
             if crate::workflows::runtime::timeout_runtime_call(
                 runtime,
@@ -23,7 +49,7 @@ impl AppCore {
                 || runtime.get_threshold_config(),
             )
             .await
-            .map_err(|error| IntentError::internal_error(error.to_string()))?
+            .map_err(signals_runtime_boundary)?
             .is_none()
             {
                 let bootstrap = crate::workflows::runtime::timeout_runtime_call(
@@ -34,14 +60,12 @@ impl AppCore {
                     || runtime.bootstrap_signing_keys(),
                 )
                 .await
-                .map_err(|error| IntentError::internal_error(error.to_string()))?;
+                .map_err(signals_runtime_boundary)?;
                 match bootstrap {
                     Ok(_public_key) => {}
-                    Err(IntentError::NoAgent { .. }) => {}
+                    Err(error) if error.kind() == RuntimeBridgeErrorKind::NoAgent => {}
                     Err(error) => {
-                        return Err(IntentError::internal_error(format!(
-                            "Failed to bootstrap signing keys: {error}"
-                        )));
+                        return Err(error);
                     }
                 }
             }
@@ -49,19 +73,30 @@ impl AppCore {
 
         crate::signal_defs::register_app_signals(&self.reactive)
             .await
-            .map_err(|error| IntentError::reactive_failure("app_signals", error))?;
+            .map_err(|error| {
+                RuntimeBridgeError::with_source(
+                    IntentError::reactive_failure("app_signals", error.clone()),
+                    error,
+                )
+            })?;
 
         // The runtime may already have replayed its journal before these
         // signals existed; replay into the now-registered signals.
         if let Some(runtime) = self.runtime.as_ref() {
-            let _ = crate::workflows::runtime::timeout_runtime_call(
+            let replay = crate::workflows::runtime::timeout_runtime_call(
                 runtime,
                 "ensure_signals_registered",
                 "replay_committed_facts",
                 APP_RUNTIME_OPERATION_TIMEOUT,
                 || runtime.replay_committed_facts(),
             )
-            .await;
+            .await
+            .map_err(signals_runtime_boundary)?;
+            if let Err(error) = replay {
+                if !matches!(error, IntentError::NoAgent { .. }) {
+                    return Err(RuntimeBridgeError::with_source(error.clone(), error));
+                }
+            }
         }
 
         Ok(())

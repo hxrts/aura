@@ -593,12 +593,12 @@ mod tests {
     #[test]
     fn harness_command_start_device_enrollment_emits_add_device_followup() {
         let mut state = TuiState::new();
-        let expected_invitee_authority_id = aura_core::AuthorityId::new_from_entropy([0x77; 32]);
+        let expected_setup_code = "explicitly transferred setup code".to_owned();
         let followup = apply_harness_command(
             &mut state,
             HarnessUiCommand::StartDeviceEnrollment {
                 device_name: "Mobile".to_string(),
-                invitee_authority_id: expected_invitee_authority_id.to_string(),
+                setup_code: expected_setup_code.clone(),
             },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
@@ -617,9 +617,9 @@ mod tests {
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name,
-                invitee_authority_id
+                setup_code
             })] if name == "Mobile"
-                && *invitee_authority_id == expected_invitee_authority_id
+                && setup_code == &expected_setup_code
         ));
     }
 
@@ -630,6 +630,7 @@ mod tests {
             &mut state,
             HarnessUiCommand::ImportDeviceEnrollmentCode {
                 code: "device-code".to_string(),
+                manifest_transfer: None,
             },
             TuiSemanticInputs {
                 app_snapshot: &StateSnapshot::default(),
@@ -645,7 +646,7 @@ mod tests {
         assert!(matches!(
             followup.as_slice(),
             [TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
-                code
+                code,..
             })] if code == "device-code"
         ));
     }

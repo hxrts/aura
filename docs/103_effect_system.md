@@ -15,6 +15,21 @@ The runtime contract is intentionally split:
 
 Effect execution that touches session state belongs to the second category, not the first.
 
+## Typed Error Sources
+
+Effect failures converted into `AuraError` retain their original concrete cause
+as the immediate standard `std::error::Error::source`. Cloning the error preserves
+that cause and its nested source chain. Shared storage of a cause does not add a
+wrapper node to the chain. Source objects are process-local: serialization keeps
+the error category and message and intentionally omits the source chain.
+
+Native app/runtime boundaries preserve the same source contract. A
+`RuntimeBridgeError` carries a structural failure category and the actual
+underlying error; diagnostic wording cannot determine an idempotent success,
+retry, authorization result, or protocol confirmation. Foreign callback
+payloads explicitly omit process-local sources. Their diagnostic representation
+does not constitute native failure provenance and cannot reconstruct it.
+
 ## Ownership At Effect Boundaries
 
 Effect traits sit at an ownership boundary and should preserve the repo-wide ownership model rather than hide it.
@@ -286,3 +301,52 @@ let system = TestRuntime::new()
 ```
 
 This snippet creates a test runtime with mock handlers for all effects. It provides deterministic time and network control. Tests use in-memory storage and mock networking to execute protocols without side effects. See [Test Infrastructure Reference](118_testkit.md) for test patterns.
+
+## Local timeout failure identity
+
+Local budget failures distinguish policy rejection, clock unavailability, deadline expiry, and attempt exhaustion. A required clock failure remains observable through the standard error source chain and cannot be treated as deadline evidence. Native clock causes are omitted from serialized diagnostic errors. The local timeout result retains operation failures as distinct typed causes.
+
+## Storage profile exclusivity and immutable publication
+
+Profile storage ownership is a move-owned infrastructure lease covering one physical profile lifetime. It does not authorize domain actions. Cooperative persistent writers require the same profile owner; unsupported exclusivity is a typed failure. Resource release on cancellation or process death permits a new owner, whose durable recovery still requires authenticated domain evidence.
+
+Immutable secure publication has two outcomes: Created acknowledges complete encrypted and durable publication; AlreadyExists identifies an existing record without proving equality or trust. Publication does not replace existing bytes. A failure after publication can leave a complete record, so recovery validates the original stored record rather than assuming rollback. Backends without these transactional guarantees report unsupported semantics explicitly. Multi-record profile handoff requires a separately owned durable transaction and recovery contract; a runtime mutex or several atomic file replacements do not establish that contract.
+
+The selected production provider's private concrete lease, rather than an arbitrary core trait implementation, establishes physical profile ownership. Persistent writer clones retain that resource owner. Browser ownership is scoped to the actual origin and storage namespace through Web Locks; immutable records require strict-durability IndexedDB transaction completion. Historical plaintext secret namespaces cannot authorize fresh signing-state creation. Shared platform credential namespaces need their own supported ownership contract; filesystem-profile ownership does not substitute for it.
+
+### Local timeout observation contract
+
+A local timeout owner preserves its original deadline and the greatest required physical-clock observation across awaited operations, timer completion, retries, and child deadlines. Physical-clock rollback terminates that owner as a required service failure; it does not extend its allowance or imply deadline expiration. Observation contention is an ownership failure. Successful timer completion latches exhaustion. Persisted timeout state must include and validate the original window, observation, rollback, and exhaustion state; missing state cannot reconstruct an active allowance.
+
+### Window coordinate separation
+
+Physical timeout intervals and receipt-generation intervals share checked half-open arithmetic with distinct sealed coordinate types. A coordinate cannot cross domains. A valid interval alone grants no observation, admission or persistence authority. Physical execution windows have positive millisecond extent and a fixed representable deadline; empty generation allowances admit no receipts. Restored owner state must preserve its original bound interval and observation history.
+
+Required enhanced-time scheduling propagates actual provider query and sleep failures. A failed timer does not constitute deadline expiration or successful wake-up. Native source traversal retains the concrete time-effect error through runtime scheduling and effect-system forwarding.
+
+### VM bridge delivery custody
+
+Synchronous VM callbacks enqueue frames; asynchronous transport delivery requires
+an exclusive `VmBridgeSendLease`. Queue snapshots are observations and do not
+remove frames. The lease retains the oldest frame through the awaited send and
+removes it only after acknowledgment. Concurrent enqueue preserves FIFO order,
+and a second delivery owner fails explicitly. Providers without this contract
+reject owned delivery instead of emulating it by draining a queue.
+
+Dropping an in-flight lease retains the frame with an unknown delivery outcome.
+Unknown delivery blocks automatic replay; it requires protocol reconciliation or
+terminal session teardown. A native definitely-unsent result may release the
+frame for an owned retry. Display text cannot establish that result. These
+states are local delivery custody, not peer consensus or durable receipt proof.
+
+Required choreography clock and timeout effects preserve their native source
+through `ChoreographyError::RequiredTime`. Failed clock reads do not provide
+timestamps or expiry evidence. Session cleanup remains required when its clock
+observation fails; the runtime retains both primary and secondary typed failures.
+
+Secure storage distinguishes atomic initial publication of mutable owner state
+(`secure_create_mutable`) from lifetime-immutable evidence
+(`secure_store_immutable`). Both preserve an existing record and acknowledge a
+new publication; an interrupted call requires rereading the actual original.
+Atomic creation alone does not authorize later mutation or generation renewal.
+Providers without the atomic-create contract return a typed unsupported failure.

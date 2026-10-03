@@ -49,6 +49,36 @@ impl AppCore {
         .map_err(|error| IntentError::internal_error(error.to_string()))
     }
 
+    pub(super) async fn with_native_runtime_timeout<T, F, Fut>(
+        &self,
+        no_runtime_message: &'static str,
+        operation: &'static str,
+        stage: &'static str,
+        duration: Duration,
+        call: F,
+    ) -> Result<T, crate::runtime_bridge::RuntimeBridgeError>
+    where
+        F: FnOnce(Arc<dyn RuntimeBridge>) -> Fut,
+        Fut: Future<Output = T>,
+    {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| IntentError::no_agent(no_runtime_message))?;
+        let runtime = Arc::clone(runtime);
+        let runtime_for_call = Arc::clone(&runtime);
+        timeout_runtime_call_bounded(&runtime, operation, stage, duration, move || {
+            call(runtime_for_call)
+        })
+        .await
+        .map_err(|error| {
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error(error.to_string()),
+                error,
+            )
+        })
+    }
+
     /// Get a reference to the runtime bridge, if available.
     pub fn runtime(&self) -> Option<&Arc<dyn RuntimeBridge>> {
         self.runtime.as_ref()
@@ -187,8 +217,10 @@ impl AppCore {
     }
 
     /// Bootstrap signing keys for the current authority.
-    pub async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
-        self.with_runtime_timeout(
+    pub async fn bootstrap_signing_keys(
+        &self,
+    ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError> {
+        self.with_native_runtime_timeout(
             "No runtime available - cannot bootstrap signing keys",
             "bootstrap_signing_keys",
             "bootstrap_signing_keys",
@@ -289,7 +321,7 @@ impl AppCore {
             Vec<BridgeDeviceInfo>,
             Vec<BridgeAuthorityInfo>,
         )>,
-        IntentError,
+        crate::runtime_bridge::RuntimeBridgeError,
     > {
         let Some(runtime) = self.runtime.as_ref() else {
             return Ok(None);
@@ -302,7 +334,12 @@ impl AppCore {
             || runtime.try_get_settings(),
         )
         .await
-        .map_err(|error| IntentError::internal_error(error.to_string()))??;
+        .map_err(|error| {
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error("Required settings snapshot budget failed"),
+                error,
+            )
+        })??;
         let devices = timeout_runtime_call_bounded(
             runtime,
             "settings_snapshot",
@@ -311,7 +348,12 @@ impl AppCore {
             || runtime.try_list_devices(),
         )
         .await
-        .map_err(|error| IntentError::internal_error(error.to_string()))??;
+        .map_err(|error| {
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error("Required settings snapshot budget failed"),
+                error,
+            )
+        })??;
         let authorities = timeout_runtime_call_bounded(
             runtime,
             "settings_snapshot",
@@ -320,7 +362,12 @@ impl AppCore {
             || runtime.try_list_authorities(),
         )
         .await
-        .map_err(|error| IntentError::internal_error(error.to_string()))??;
+        .map_err(|error| {
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error("Required settings snapshot budget failed"),
+                error,
+            )
+        })??;
         Ok(Some((settings, devices, authorities)))
     }
 
@@ -395,8 +442,11 @@ impl AppCore {
     pub(crate) async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<crate::runtime_bridge::KeyRotationCeremonyStatus, IntentError> {
-        self.with_runtime_timeout(
+    ) -> Result<
+        crate::runtime_bridge::KeyRotationCeremonyStatus,
+        crate::runtime_bridge::RuntimeBridgeError,
+    > {
+        self.with_native_runtime_timeout(
             "get_key_rotation_ceremony_status requires a runtime",
             "get_key_rotation_ceremony_status",
             "get_key_rotation_ceremony_status",
@@ -409,8 +459,8 @@ impl AppCore {
     pub(crate) async fn cancel_key_rotation_ceremony(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<(), IntentError> {
-        self.with_runtime_timeout(
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError> {
+        self.with_native_runtime_timeout(
             "cancel_key_rotation_ceremony requires a runtime",
             "cancel_key_rotation_ceremony",
             "cancel_key_rotation_ceremony",

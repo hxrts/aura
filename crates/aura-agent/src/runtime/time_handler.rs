@@ -10,6 +10,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+// Preserve the actual effect error through higher-level scheduling APIs.
+fn required_time_failure(error: aura_core::effects::TimeError) -> AuraError {
+    AuraError::Internal {
+        message: format!("required time effect failed: {error}"),
+        source: Some(Arc::new(error)),
+    }
+}
+
 /// Timeout task information
 #[derive(Debug, Clone)]
 struct TimeoutTask {
@@ -101,7 +109,10 @@ impl EnhancedTimeHandler {
     }
 
     /// Sleep for a given number of milliseconds
-    pub async fn sleep_ms(&self, ms: u64) {
+    pub async fn sleep_ms(
+        &self,
+        ms: u64,
+    ) -> std::result::Result<(), aura_core::effects::TimeError> {
         with_state_mut_validated(
             &self.shared.state,
             |state| {
@@ -112,14 +123,24 @@ impl EnhancedTimeHandler {
         .await;
 
         // Delegate to the underlying provider
-        let _ = self.provider.sleep_ms(ms).await;
+        self.provider.sleep_ms(ms).await
     }
 
     /// Set a timeout and return a handle
     pub async fn set_timeout(&self, timeout_ms: u64) -> Result<TimeoutHandle> {
         let timeout_id = self.random_provider.random_uuid().await;
         let current_ms = self.current_timestamp().await?;
-        let expires_at_ms = current_ms.saturating_add(timeout_ms);
+        let interval = aura_core::types::window::WindowInterval::<
+            aura_core::types::window::PhysicalMillis,
+        >::new(
+            aura_core::types::window::WindowPosition::new(current_ms),
+            timeout_ms,
+        )
+        .map_err(|source| AuraError::Invalid {
+            message: "required timer window endpoint is not representable".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        let expires_at_ms = interval.end().value();
 
         let timeout_task = TimeoutTask {
             expires_at_ms,
@@ -140,7 +161,24 @@ impl EnhancedTimeHandler {
         Ok(timeout_id)
     }
 
-    /// Cancel a timeout
+    /// Wait for an owned fixed deadline without registering a detached timer.
+    pub(crate) async fn wait_owned_timeout(&self, budget: &aura_core::TimeoutBudget) -> Result<()> {
+        match aura_core::execute_with_timeout_budget(self, budget, || {
+            std::future::pending::<
+                std::result::Result<std::convert::Infallible, std::convert::Infallible>,
+            >()
+        })
+        .await
+        {
+            Err(aura_core::TimeoutRunError::Timeout(
+                aura_core::TimeoutBudgetError::DeadlineExceeded { .. },
+            )) => Ok(()),
+            Err(aura_core::TimeoutRunError::Timeout(error)) => Err(AuraError::from(error)),
+            Ok(never) | Err(aura_core::TimeoutRunError::Operation(never)) => match never {},
+        }
+    }
+
+    /// Cancel a registered legacy timeout.
     pub async fn cancel_timeout(&self, timeout_handle: TimeoutHandle) -> Result<()> {
         with_state_mut_validated(
             &self.shared.state,
@@ -233,7 +271,9 @@ impl EnhancedTimeHandler {
                 }
 
                 let sleep_duration = target_timestamp.saturating_sub(current);
-                self.sleep_ms(sleep_duration).await;
+                self.sleep_ms(sleep_duration)
+                    .await
+                    .map_err(required_time_failure)?;
                 Ok(())
             }
             WakeCondition::ThresholdEvents {
@@ -251,23 +291,28 @@ impl EnhancedTimeHandler {
                         }
 
                         // Polling loop yields via sleep to remain simulator-controllable
-                        let _ = self.sleep_ms(10).await;
+                        self.sleep_ms(10).await.map_err(required_time_failure)?;
                     }
                 };
 
                 futures::pin_mut!(timeout_future, wait_future);
                 match futures::future::select(wait_future, timeout_future).await {
                     futures::future::Either::Left((res, _)) => res,
-                    futures::future::Either::Right((_, _)) => Err(AuraError::invalid(
-                        "Threshold events not reached within timeout",
-                    )),
+                    futures::future::Either::Right((result, _)) => {
+                        result.map_err(required_time_failure)?;
+                        Err(AuraError::invalid(
+                            "Threshold events not reached within timeout",
+                        ))
+                    }
                 }
             }
             WakeCondition::TimeoutExpired { timeout_id } => {
                 let expires_at_ms = self.timeout_expiration(&timeout_id).await?;
                 let current = self.current_timestamp().await?;
                 if current < expires_at_ms {
-                    self.sleep_ms(expires_at_ms.saturating_sub(current)).await;
+                    self.sleep_ms(expires_at_ms.saturating_sub(current))
+                        .await
+                        .map_err(required_time_failure)?;
                 }
                 self.complete_timeout(&timeout_id).await
             }
@@ -295,7 +340,7 @@ impl EnhancedTimeHandler {
             .physical_time()
             .await
             .map(|p| p.ts_ms)
-            .map_err(|e| AuraError::internal(format!("time error: {e}")))
+            .map_err(required_time_failure)
     }
 
     /// Current epoch in milliseconds (alias)
@@ -461,8 +506,7 @@ impl aura_core::effects::PhysicalTimeEffects for EnhancedTimeHandler {
     }
 
     async fn sleep_ms(&self, ms: u64) -> std::result::Result<(), aura_core::effects::TimeError> {
-        self.sleep_ms(ms).await;
-        Ok(())
+        EnhancedTimeHandler::sleep_ms(self, ms).await
     }
 }
 
@@ -507,6 +551,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn required_timer_window_rejects_overflow_before_registration() {
+        use std::error::Error;
+        let time =
+            EnhancedTimeHandler::with_provider(Arc::new(FixedTimeProvider { ts_ms: u64::MAX }));
+        let error = time
+            .set_timeout(1)
+            .await
+            .expect_err("overflow cannot mint timeout evidence");
+        assert_eq!(
+            error
+                .source()
+                .expect("native interval cause")
+                .downcast_ref::<aura_core::types::window::WindowIntervalError>(),
+            Some(&aura_core::types::window::WindowIntervalError::EndpointOverflow)
+        );
+        assert!(time.shared.state.read().await.timeouts.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_time_operations() {
         let fixed_ts = 1_772_576_325_465;
         let handler =
@@ -528,7 +591,7 @@ mod tests {
         let handler = EnhancedTimeHandler::default();
 
         let start_time = handler.current_timestamp().await.unwrap();
-        handler.sleep_ms(1).await;
+        handler.sleep_ms(1).await.expect("required test sleep");
         let end_time = handler.current_timestamp().await.unwrap();
 
         let stats = handler.get_statistics().await;
@@ -630,7 +693,7 @@ mod tests {
 
         let timeout_handle = handler.set_timeout(1).await.unwrap();
 
-        handler.sleep_ms(10).await;
+        handler.sleep_ms(10).await.expect("required test sleep");
 
         handler.cleanup_expired_timeouts().await.unwrap();
 
@@ -655,5 +718,66 @@ mod tests {
             result.is_err(),
             "timeout handle should be consumed after expiry"
         );
+    }
+}
+
+#[cfg(test)]
+mod required_provider_failure_tests {
+    use super::*;
+    use aura_core::effects::TimeError;
+    use aura_core::time::PhysicalTime;
+    use std::error::Error;
+
+    struct FailedProvider;
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for FailedProvider {
+        async fn physical_time(&self) -> std::result::Result<PhysicalTime, TimeError> {
+            Err(TimeError::OperationFailed {
+                reason: "injected required clock query".into(),
+            })
+        }
+        async fn sleep_ms(&self, _: u64) -> std::result::Result<(), TimeError> {
+            Err(TimeError::OperationFailed {
+                reason: "injected required provider sleep".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn required_sleep_and_timestamp_preserve_provider_errors() {
+        let handler = EnhancedTimeHandler::with_provider(Arc::new(FailedProvider));
+        assert!(matches!(
+            handler.sleep_ms(1).await,
+            Err(TimeError::OperationFailed { .. })
+        ));
+        assert!(matches!(
+            PhysicalTimeEffects::sleep_ms(&handler, 1).await,
+            Err(TimeError::OperationFailed { .. })
+        ));
+        let error = handler
+            .current_timestamp()
+            .await
+            .expect_err("required provider query fails");
+        assert!(error
+            .source()
+            .expect("actual time effect cause")
+            .is::<TimeError>());
+    }
+
+    #[tokio::test]
+    async fn threshold_wait_does_not_convert_failed_sleep_to_expiration() {
+        let handler = EnhancedTimeHandler::with_provider(Arc::new(FailedProvider));
+        let error = handler
+            .yield_until(WakeCondition::ThresholdEvents {
+                threshold: 1,
+                timeout_ms: 10,
+            })
+            .await
+            .expect_err("either required sleep branch fails");
+        assert!(error
+            .source()
+            .expect("actual sleep cause")
+            .is::<TimeError>());
+        assert!(matches!(error, AuraError::Internal { .. }));
     }
 }

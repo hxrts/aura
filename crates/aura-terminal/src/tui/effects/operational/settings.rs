@@ -14,7 +14,7 @@ use aura_app::ui::prelude::*;
 
 // Re-export workflows for convenience
 use aura_app::ui::workflows::ceremonies::{
-    start_device_enrollment_ceremony, start_device_removal_ceremony,
+    start_device_enrollment_ceremony_from_setup_code, start_device_removal_ceremony,
 };
 pub use aura_app::ui::workflows::settings::update_threshold;
 pub use aura_app::ui::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
@@ -27,16 +27,17 @@ pub async fn handle_settings(
     match command {
         EffectCommand::AddDevice {
             nickname_suggestion,
-            invitee_authority_id,
+            setup_code,
         } => {
-            match start_device_enrollment_ceremony(
+            match start_device_enrollment_ceremony_from_setup_code(
                 app_core,
                 nickname_suggestion.clone(),
-                *invitee_authority_id,
+                setup_code.clone(),
             )
             .await
             {
                 Ok(start) => Some(Ok(OpResponse::DeviceEnrollmentStarted {
+                    manifest_transfer: start.manifest_transfer,
                     ceremony_id: start.ceremony_id.to_string(),
                     enrollment_code: start.enrollment_code,
                     pending_epoch: start.pending_epoch,

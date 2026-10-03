@@ -179,13 +179,13 @@ impl SettingsCallbacks {
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
         Arc::new(
             move |nickname_suggestion: String,
-                  invitee_authority_id: AuthorityId,
+                  setup_code: String,
                   operation: LocalTerminalOperationOwner| {
                 let ctx = ctx.clone();
                 let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
                     let start = match ctx
-                        .start_device_enrollment(&nickname_suggestion, invitee_authority_id)
+                        .start_device_enrollment(&nickname_suggestion, setup_code)
                         .await
                     {
                         Ok(start) => start,
@@ -206,6 +206,7 @@ impl SettingsCallbacks {
                     send_ui_update_reliable(
                         &tx,
                         UiUpdate::DeviceEnrollmentStarted {
+                            manifest_transfer: start.manifest_transfer.clone(),
                             ceremony_id: start.ceremony_id.clone(),
                             nickname_suggestion: nickname_suggestion.clone(),
                             enrollment_code: start.enrollment_code.clone(),
@@ -389,34 +390,51 @@ impl SettingsCallbacks {
         tx: UiUpdateSender,
     ) -> ImportDeviceEnrollmentCallback {
         Arc::new(
-            move |code: String, operation: LocalTerminalOperationOwner| {
-                let should_complete_onboarding = !ctx.has_account();
-                spawn_local_terminal_result_callback(
+            move |code: String,
+                  manifest_transfer: Option<
+                aura_app::ui::contract::EnrollmentManifestTransferInput,
+            >,
+                  operation: WorkflowHandoffOperationOwner| {
+                let persist_ctx = ctx.clone();
+                spawn_handoff_workflow_callback_with_success(
                     ctx.clone(),
                     tx.clone(),
                     operation,
-                    "ImportDeviceEnrollmentOnMobile callback",
-                    move |ctx| async move { ctx.import_device_enrollment_code(&code).await },
-                    move |tx, ()| async move {
-                        if should_complete_onboarding {
-                            send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
+                    WorkflowHandoffSpec::new(
+                        SemanticOperationTransferScope::ImportDeviceEnrollment,
+                        "devices",
+                        "Import device enrollment failed",
+                        "import device enrollment workflow",
+                    ),
+                    move |app_core, instance| async move {
+                        aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
+                        &app_core,code,manifest_transfer,instance).await
+                    },
+                    move |tx, completion| async move {
+                        if let Err(error) = persist_ctx
+                            .persist_completed_enrollment_identity(&completion)
+                            .await
+                        {
+                            tracing::error!(error=%error,"Accepted enrollment profile persistence failed");
+                            send_ui_update_required(
+                                &tx,
+                                UiUpdate::ToastAdded(ToastMessage::error(
+                                    "devices",
+                                    format!(
+                                        "Enrollment accepted; profile persistence failed: {error}"
+                                    ),
+                                )),
+                            )
+                            .await;
+                            return;
                         }
+                        send_ui_update_required(&tx, UiUpdate::AccountCreated).await;
                         send_ui_update_required(
                             &tx,
                             UiUpdate::ToastAdded(ToastMessage::success(
                                 "devices",
                                 "Device enrollment invitation accepted",
                             )),
-                        )
-                        .await;
-                    },
-                    |tx, error| async move {
-                        send_ui_update_required(
-                            &tx,
-                            UiUpdate::operation_failed(
-                                UiOperation::ImportDeviceEnrollmentCode,
-                                error,
-                            ),
                         )
                         .await;
                     },

@@ -561,7 +561,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn amp_create_channel(
         &self,
         params: ChannelCreateParams,
-    ) -> Result<ChannelId, IntentError> {
+    ) -> Result<ChannelId, aura_app::runtime_bridge::RuntimeBridgeError> {
         let channel_id = params.channel.unwrap_or_else(|| self.next_channel_id());
         self.amp_channel_contexts
             .write()
@@ -576,7 +576,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
         _recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, IntentError> {
+    ) -> Result<ChannelBootstrapPackage, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(ChannelBootstrapPackage {
             bootstrap_id: Hash32::default(),
             key: vec![0u8; 32],
@@ -587,7 +587,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _context: ContextId,
         _channel: ChannelId,
-    ) -> Result<bool, IntentError> {
+    ) -> Result<bool, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(*self.amp_channel_state_exists.read().await)
     }
 
@@ -595,7 +595,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Vec<AuthorityId>, IntentError> {
+    ) -> Result<Vec<AuthorityId>, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(self
             .amp_channel_participants
             .read()
@@ -609,7 +609,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _context: ContextId,
         _channel: ChannelId,
-    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError> {
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, aura_app::runtime_bridge::RuntimeBridgeError>
+    {
         Ok(None)
     }
 
@@ -619,7 +620,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         channel_id: ChannelId,
         authority_id: AuthorityId,
         _current_time_ms: u64,
-    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+    ) -> Result<AuthoritativeModerationStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(self
             .moderation_statuses
             .read()
@@ -632,7 +633,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
-    ) -> Result<Option<ContextId>, IntentError> {
+    ) -> Result<Option<ContextId>, aura_app::runtime_bridge::RuntimeBridgeError> {
         if let Some(context) = self
             .amp_channel_contexts
             .read()
@@ -659,7 +660,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<ChannelId>, IntentError> {
+    ) -> Result<Vec<ChannelId>, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(self
             .materialized_channel_name_matches
             .read()
@@ -672,16 +673,22 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn amp_repair_local_channel_membership(
         &self,
         _params: ChannelJoinParams,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         *self.amp_channel_state_exists.write().await = true;
         Ok(())
     }
 
-    async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
+    async fn amp_close_channel(
+        &self,
+        _params: ChannelCloseParams,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
     }
 
-    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError> {
+    async fn amp_join_channel(
+        &self,
+        params: ChannelJoinParams,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         self.amp_channel_contexts
             .write()
             .await
@@ -697,7 +704,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn amp_leave_channel(&self, _params: ChannelLeaveParams) -> Result<(), IntentError> {
+    async fn amp_leave_channel(
+        &self,
+        _params: ChannelLeaveParams,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
     }
 
@@ -722,7 +732,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,
-    ) -> Result<AmpCiphertext, IntentError> {
+    ) -> Result<AmpCiphertext, aura_app::runtime_bridge::RuntimeBridgeError> {
         // Return a mock ciphertext
         Ok(AmpCiphertext {
             header: AmpHeader {
@@ -903,7 +913,9 @@ impl RuntimeBridge for MockRuntimeBridge {
         })
     }
 
-    async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
+    async fn bootstrap_signing_keys(
+        &self,
+    ) -> Result<Vec<u8>, aura_app::runtime_bridge::RuntimeBridgeError> {
         // Return mock key material
         Ok(vec![0u8; 32])
     }
@@ -983,13 +995,15 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        _invitee_authority_id: AuthorityId,
-    ) -> Result<DeviceEnrollmentStart, IntentError> {
+        setup: aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<DeviceEnrollmentStart, aura_app::runtime_bridge::EnrollmentIssuanceError> {
         Ok(DeviceEnrollmentStart {
+            // Mock issuance cannot authenticate an initiator manifest.
+            manifest_transfer: None,
             ceremony_id: self.next_ceremony_id(),
             enrollment_code: format!("aura-enroll:mock:{nickname_suggestion}"),
             pending_epoch: Epoch::new(1),
-            device_id: DeviceId::new_from_entropy([3u8; 32]),
+            device_id: setup.statement().device,
         })
     }
 
@@ -1003,7 +1017,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn get_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<CeremonyStatus, IntentError> {
+    ) -> Result<CeremonyStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(CeremonyStatus {
             ceremony_id: ceremony_id.clone(),
             accepted_count: 0,
@@ -1022,7 +1036,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<KeyRotationCeremonyStatus, IntentError> {
+    ) -> Result<KeyRotationCeremonyStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(KeyRotationCeremonyStatus {
             ceremony_id: ceremony_id.clone(),
             kind: CeremonyKind::GuardianRotation,
@@ -1042,7 +1056,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn cancel_key_rotation_ceremony(
         &self,
         _ceremony_id: &CeremonyId,
-    ) -> Result<(), IntentError> {
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(())
     }
 
@@ -1243,7 +1257,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn accept_invitation(
         &self,
         invitation_id: &str,
-    ) -> Result<InvitationMutationOutcome, IntentError> {
+    ) -> Result<InvitationMutationOutcome, aura_app::runtime_bridge::RuntimeBridgeError> {
         // First, update the invitation status
         let invitation = {
             let mut invitations = self.invitations.write().await;
@@ -1475,7 +1489,9 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Settings
     // =========================================================================
 
-    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError> {
+    async fn try_get_settings(
+        &self,
+    ) -> Result<SettingsBridgeState, aura_app::runtime_bridge::RuntimeBridgeError> {
         let nickname_suggestion = self.nickname_suggestion.read().await.clone();
         let mfa_policy = self.mfa_policy.read().await.clone();
         let devices = self.devices.read().await;
@@ -1490,20 +1506,29 @@ impl RuntimeBridge for MockRuntimeBridge {
         })
     }
 
-    async fn has_account_config(&self) -> Result<bool, IntentError> {
+    async fn has_account_config(
+        &self,
+    ) -> Result<bool, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(true)
     }
 
-    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError> {
+    async fn initialize_account(
+        &self,
+        nickname_suggestion: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         *self.nickname_suggestion.write().await = nickname_suggestion.to_string();
         Ok(())
     }
 
-    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
+    async fn try_list_devices(
+        &self,
+    ) -> Result<Vec<BridgeDeviceInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(self.devices.read().await.clone())
     }
 
-    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError> {
+    async fn try_list_authorities(
+        &self,
+    ) -> Result<Vec<BridgeAuthorityInfo>, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(vec![BridgeAuthorityInfo {
             id: self.authority_id,
             nickname_suggestion: Some(self.nickname_suggestion.read().await.clone()),
@@ -1511,12 +1536,18 @@ impl RuntimeBridge for MockRuntimeBridge {
         }])
     }
 
-    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
+    async fn set_nickname_suggestion(
+        &self,
+        name: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         *self.nickname_suggestion.write().await = name.to_string();
         Ok(())
     }
 
-    async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError> {
+    async fn set_mfa_policy(
+        &self,
+        policy: &str,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         *self.mfa_policy.write().await = policy.to_string();
         Ok(())
     }
@@ -1525,25 +1556,28 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Misc
     // =========================================================================
 
-    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError> {
+    async fn authentication_status(
+        &self,
+    ) -> Result<AuthenticationStatus, aura_app::runtime_bridge::RuntimeBridgeError> {
         Ok(AuthenticationStatus::Authenticated {
             authority_id: self.authority_id,
             device_id: self.device_id,
         })
     }
 
-    async fn current_time_ms(&self) -> Result<u64, IntentError> {
+    async fn current_time_ms(&self) -> Result<u64, aura_app::runtime_bridge::RuntimeBridgeError> {
         // Auto-advance time by 1ms on each call to ensure unique timestamps
         // This is important for message deduplication (message IDs include timestamp)
         let time = self.current_time_ms.fetch_add(1, Ordering::SeqCst);
         Ok(time)
     }
 
-    async fn sleep_ms(&self, ms: u64) {
+    async fn sleep_ms(&self, ms: u64) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         // Mock bridge advances virtual time instead of sleeping
         self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
         // Yield to allow other tasks to run
         tokio::task::yield_now().await;
+        Ok(())
     }
 }
 

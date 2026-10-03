@@ -108,7 +108,18 @@ just check-arch
 
 ## References
 
+`ChoreographyError::RequiredTime` preserves a required time-effect source and
+exposes the stable `choreography_required_time` protocol code. Runtime admission
+must obtain required clock evidence before installing session state. Runtime
+retirement must still release owned resources when the clock fails, preserving
+the primary clock fault and any typed secondary cleanup failure. See
+`docs/104_runtime.md` for this lifecycle contract.
+
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Ownership Model](../../docs/122_ownership_model.md)
 - [System Internals Guide](../../docs/807_system_internals_guide.md)
+
+### Complete tree publication
+
+`PersistentTreeHandler` serializes local mutations, writes complete content-addressed operation blobs before publishing the canonical ordered index, and updates its observed cache only after publication is acknowledged. An index-write error is an uncertain outcome: subsequent reads reload the canonical index. Original blobs are retained; reclamation is a separate maintenance responsibility. Storage comparison never authenticates a peer batch. The runtime supplies an independently admitted baseline and the immutable digest of its original local history; replay of an existing complete baseline prefix preserves later local operations. Snapshot-state representation remains a separate contract from this index-publication guarantee.

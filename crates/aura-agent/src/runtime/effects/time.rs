@@ -12,8 +12,7 @@ impl PhysicalTimeEffects for AuraEffectSystem {
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        self.time_handler.sleep_ms(ms).await;
-        Ok(())
+        self.time_handler.sleep_ms(ms).await
     }
 }
 

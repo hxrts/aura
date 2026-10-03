@@ -894,10 +894,70 @@ pub fn public_key_package_from_bytes(bytes: &[u8]) -> Result<PublicKeyPackage, A
 }
 
 /// Deserialize a FROST key package from bytes and convert to an Aura signing share.
+/// A key package must additionally pass `validate_retained_threshold_key_package`
+/// before it can establish a restored local signing context.
 pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, AuraError> {
     let frost_pkg = frost_ed25519::keys::KeyPackage::deserialize(bytes)
         .map_err(|e| AuraError::crypto(format!("Failed to deserialize key package: {e}")))?;
     Ok(Share::from(frost_pkg))
+}
+
+/// Mismatches between a retained FROST share and authenticated signing policy.
+#[derive(Debug, thiserror::Error)]
+pub enum RetainedThresholdKeyError {
+    #[error("invalid retained threshold policy")]
+    InvalidPolicy,
+    #[error("retained FROST package cannot be decoded: {0}")]
+    Encoding(#[from] frost::Error),
+    #[error("retained FROST package has the wrong signer or threshold")]
+    SignerPolicyMismatch,
+    #[error("FROST public package does not contain the exact participant inventory")]
+    ParticipantInventoryMismatch,
+    #[error("retained FROST package does not match the group or verifying share")]
+    PublicPackageMismatch,
+    #[error("retained FROST signing scalar does not match its verifying share")]
+    SigningShareMismatch,
+}
+
+/// Validate one retained local share without requiring a signing quorum.
+///
+/// The caller separately authenticates the storage envelope's authority, epoch
+/// and participant. Native public packages carry no threshold policy: use the
+/// authenticated policy, never the lossy Aura public-package conversion.
+pub fn validate_retained_threshold_key_package(
+    key_bytes: &[u8],
+    public_bytes: &[u8],
+    signer_index: u16,
+    threshold: u16,
+    participants: u16,
+) -> Result<(), RetainedThresholdKeyError> {
+    if threshold < 2 || threshold > participants || signer_index == 0 || signer_index > participants
+    {
+        return Err(RetainedThresholdKeyError::InvalidPolicy);
+    }
+    let key = frost::keys::KeyPackage::deserialize(key_bytes)?;
+    let public = frost::keys::PublicKeyPackage::deserialize(public_bytes)?;
+    let expected = frost::Identifier::try_from(signer_index)?;
+    if key.identifier() != &expected || key.min_signers() != &threshold {
+        return Err(RetainedThresholdKeyError::SignerPolicyMismatch);
+    }
+    if public.verifying_shares().len() != usize::from(participants)
+        || !(1..=participants).all(|index| {
+            frost::Identifier::try_from(index)
+                .is_ok_and(|id| public.verifying_shares().contains_key(&id))
+        })
+    {
+        return Err(RetainedThresholdKeyError::ParticipantInventoryMismatch);
+    }
+    if key.verifying_key() != public.verifying_key()
+        || public.verifying_shares().get(&expected) != Some(key.verifying_share())
+    {
+        return Err(RetainedThresholdKeyError::PublicPackageMismatch);
+    }
+    if frost::keys::VerifyingShare::from(*key.signing_share()) != *key.verifying_share() {
+        return Err(RetainedThresholdKeyError::SigningShareMismatch);
+    }
+    Ok(())
 }
 
 impl From<frost_ed25519::keys::KeyPackage> for Share {

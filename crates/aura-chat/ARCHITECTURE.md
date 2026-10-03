@@ -114,3 +114,5 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
+
+Authoritative readers use `ChatFact::try_from_envelope`, which preserves type/schema/encoding/codec failures. The optional domain decoder remains available for observed reduction; corrupt committed chat facts cannot imply that a named canonical channel is absent. Encoding and required decoding share `CHAT_FACT_SCHEMA_VERSION`.

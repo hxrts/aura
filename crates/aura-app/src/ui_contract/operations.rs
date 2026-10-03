@@ -216,6 +216,16 @@ pub enum SemanticFailureCode {
     Banned,
     Unavailable,
     CommandFailed,
+    /// A required native crypto operation failed.
+    CryptoFailure,
+    /// A required native serialization operation failed.
+    SerializationFailure,
+    /// A required native storage operation failed.
+    StorageFailure,
+    /// A required native journal operation failed.
+    JournalFailure,
+    /// A required native reactive operation failed.
+    ReactiveFailure,
     MissingAuthoritativeContext,
     ContactLinkDidNotConverge,
     ChannelBootstrapUnavailable,
@@ -907,6 +917,29 @@ impl OperationId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_failure_codes_preserve_domain_across_foreign_snapshot_roundtrip() {
+        for (code, wire) in [
+            (SemanticFailureCode::CryptoFailure, "crypto_failure"),
+            (
+                SemanticFailureCode::SerializationFailure,
+                "serialization_failure",
+            ),
+            (SemanticFailureCode::StorageFailure, "storage_failure"),
+            (SemanticFailureCode::JournalFailure, "journal_failure"),
+            (SemanticFailureCode::ReactiveFailure, "reactive_failure"),
+        ] {
+            let error = SemanticOperationError::new(SemanticFailureDomain::Projection, code)
+                .with_detail("same text");
+            let json = serde_json::to_value(&error).expect("serialize shared failure");
+            assert_eq!(json["code"], wire);
+            assert_eq!(json["domain"], "projection");
+            let restored: SemanticOperationError =
+                serde_json::from_value(json).expect("restore foreign shared failure");
+            assert_eq!(restored, error);
+        }
+    }
 
     #[test]
     fn amp_transition_action_operation_ids_are_stable() {

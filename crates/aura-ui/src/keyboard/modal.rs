@@ -232,16 +232,15 @@ pub(super) fn handle_modal_enter(
             if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
                 match state.step {
                     AddDeviceWizardStep::Name => {
-                        let Some(_name) = state.commit_draft_name() else {
+                        if state.name_input.trim().is_empty() {
                             set_toast(model, '✗', "Device name is required");
                             return;
-                        };
-                        model.device_enrollment_counter =
-                            model.device_enrollment_counter.saturating_add(1);
-                        state.enrollment_code =
-                            format!("DEVICE-ENROLL-{}", model.device_enrollment_counter);
-                        state.step = AddDeviceWizardStep::ShareCode;
-                        model.modal_hint = "Add Device — Step 2 of 3".to_string();
+                        }
+                        if state.setup_code_input.trim().is_empty() {
+                            set_toast(model, '✗', "Paste the new device's setup code");
+                        }
+                        // Issuance and the ShareCode transition are published
+                        // only after the app-owned runtime workflow succeeds.
                     }
                     AddDeviceWizardStep::ShareCode => {
                         state.step = AddDeviceWizardStep::Confirm;
@@ -255,20 +254,10 @@ pub(super) fn handle_modal_enter(
             }
         }
         ModalState::ImportDeviceEnrollmentCode => {
-            let code = match model.active_modal.as_ref() {
-                Some(ActiveModal::ImportDeviceEnrollmentCode(state)) => state.value.trim(),
-                _ => "",
-            };
-            if code.is_empty() {
-                set_toast(model, '✗', "Enrollment code is required");
-                return;
+            if !matches!(model.active_modal.as_ref(),Some(ActiveModal::ImportDeviceEnrollmentCode(state)) if state.can_submit())
+            {
+                set_toast(model,'✗',"Enrollment code, signed manifest, and separately transferred initiator verifier are required");
             }
-            set_toast(
-                model,
-                'ℹ',
-                "Enrollment code entered; import requires runtime confirmation",
-            );
-            dismiss_modal(model);
         }
         ModalState::SelectDeviceToRemove => {
             let candidate_name = match model.active_modal.as_ref() {
@@ -401,6 +390,22 @@ pub(super) fn dismiss_modal(model: &mut UiModel) {
 }
 
 pub(super) fn handle_modal_tab(model: &mut UiModel, reverse: bool) -> bool {
+    if let Some(ActiveModal::ImportDeviceEnrollmentCode(state)) = model.active_modal.as_mut() {
+        state.focus_index = (state.focus_index + if reverse { 2 } else { 1 }) % 3;
+        return true;
+    }
+
+    if let Some(ActiveModal::AddDevice(state)) = model.active_modal.as_mut() {
+        if state.accepts_name_input() {
+            state.active_field = match state.active_field {
+                aura_app::ui::contract::FieldId::DeviceSetupCode => {
+                    aura_app::ui::contract::FieldId::DeviceName
+                }
+                _ => aura_app::ui::contract::FieldId::DeviceSetupCode,
+            };
+            return true;
+        }
+    }
     let channel_details_mode = matches!(
         model.active_modal,
         Some(ActiveModal::CreateChannel(CreateChannelModalState {

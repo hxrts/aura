@@ -43,17 +43,11 @@ use crate::harness::channel_selection::{
     authoritative_channel_binding, selected_authority_id, selected_channel_binding,
     selected_or_removable_device_id, SelectionError,
 };
-use crate::harness_bridge::{
-    BootstrapHandoff, PendingAccountBootstrapSource, RuntimeIdentityStageSource,
-};
+use crate::harness_bridge::{BootstrapHandoff, PendingAccountBootstrapSource};
 use crate::{
-    active_storage_prefix, load_selected_runtime_identity, selected_runtime_identity_key,
-    submit_runtime_bootstrap_handoff_accepted,
+    active_storage_prefix, submit_runtime_bootstrap_handoff_accepted,
     task_owner::shared_web_task_owner,
-    workflows::{
-        self, AccountCreationStageMode, CurrentRuntimeIdentity, DeviceEnrollmentImportRequest,
-        RebootstrapPolicy,
-    },
+    workflows::{self, AccountCreationStageMode},
 };
 
 fn schedule_immediate_bootstrap_handoff(handoff: BootstrapHandoff) -> Result<(), JsValue> {
@@ -127,6 +121,7 @@ impl BrowserSemanticBridgeResponse {
 
 #[derive(Clone, Debug)]
 enum RoutedSemanticIntent {
+    ExportDeviceEnrollmentSetup,
     OpenScreen {
         screen: ScreenId,
         channel_id: Option<String>,
@@ -142,10 +137,11 @@ enum RoutedSemanticIntent {
     },
     StartDeviceEnrollment {
         device_name: String,
-        invitee_authority_id: AuthorityId,
+        setup_code: String,
     },
     ImportDeviceEnrollmentCode {
         code: String,
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     },
     OpenSettingsSection(SettingsSection),
     RemoveSelectedDevice {
@@ -247,6 +243,10 @@ fn submission_value_matches_contract(
     value: &SemanticCommandValue,
 ) -> bool {
     match (contract, value) {
+        (
+            SubmissionValueContract::DeviceEnrollmentSetup,
+            SemanticCommandValue::DeviceEnrollmentSetup { .. },
+        ) => true,
         (SubmissionValueContract::None, SemanticCommandValue::None) => true,
         (
             SubmissionValueContract::ContactInvitationCode,
@@ -574,6 +574,9 @@ async fn route_semantic_intent(
             let _ = context_id;
             Ok(RoutedSemanticIntent::OpenScreen { screen, channel_id })
         }
+        IntentAction::ExportDeviceEnrollmentSetup => {
+            Ok(RoutedSemanticIntent::ExportDeviceEnrollmentSetup)
+        }
         IntentAction::CreateAccount { account_name } => {
             Ok(RoutedSemanticIntent::CreateAccount { account_name })
         }
@@ -585,17 +588,19 @@ async fn route_semantic_intent(
         }
         IntentAction::StartDeviceEnrollment {
             device_name,
-            invitee_authority_id,
+            setup_code,
             ..
         } => Ok(RoutedSemanticIntent::StartDeviceEnrollment {
             device_name,
-            invitee_authority_id: invitee_authority_id
-                .parse::<AuthorityId>()
-                .map_err(RouteSemanticIntentError::invalid_authority_id)?,
+            setup_code,
         }),
-        IntentAction::ImportDeviceEnrollmentCode { code } => {
-            Ok(RoutedSemanticIntent::ImportDeviceEnrollmentCode { code })
-        }
+        IntentAction::ImportDeviceEnrollmentCode {
+            code,
+            manifest_transfer,
+        } => Ok(RoutedSemanticIntent::ImportDeviceEnrollmentCode {
+            code,
+            manifest_transfer,
+        }),
         IntentAction::OpenSettingsSection(section) => {
             Ok(RoutedSemanticIntent::OpenSettingsSection(section))
         }
@@ -788,9 +793,21 @@ async fn execute_semantic_intent(
                 .semantic_value(),
             )
         }
+        RoutedSemanticIntent::ExportDeviceEnrollmentSetup => {
+            let setup_code =
+                aura_app::ui::workflows::ceremonies::export_device_enrollment_setup_code(
+                    controller.app_core(),
+                )
+                .await
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            declared_immediate_response(
+                &contract,
+                SemanticCommandValue::DeviceEnrollmentSetup { setup_code },
+            )
+        }
         RoutedSemanticIntent::StartDeviceEnrollment {
             device_name,
-            invitee_authority_id,
+            setup_code,
         } => {
             crate::harness_bridge::apply_browser_ui_mutation(
                 controller.clone(),
@@ -818,10 +835,10 @@ async fn execute_semantic_intent(
                 transfer,
                 "start_device_enrollment callback",
                 async move {
-                    ceremony_workflows::start_device_enrollment_ceremony_with_terminal_status(
+                    ceremony_workflows::start_device_enrollment_ceremony_from_setup_code_with_terminal_status(
                         &app_core,
                         workflow_device_name,
-                        invitee_authority_id,
+                        setup_code,
                         Some(workflow_instance_id),
                     )
                     .await
@@ -829,6 +846,7 @@ async fn execute_semantic_intent(
                 move |controller, start| async move {
                     controller.write_clipboard(&start.enrollment_code);
                     controller.push_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                        manifest_transfer: start.manifest_transfer.clone(),
                         device_name: Some(success_device_name),
                         code_len: Some(start.enrollment_code.len()),
                         code: Some(start.enrollment_code),
@@ -838,47 +856,46 @@ async fn execute_semantic_intent(
             );
             declared_handle_unit_response(&contract, handle)
         }
-        RoutedSemanticIntent::ImportDeviceEnrollmentCode { code } => {
+        RoutedSemanticIntent::ImportDeviceEnrollmentCode {
+            code,
+            manifest_transfer,
+        } => {
             let app_core = controller.app_core().clone();
-            let runtime = runtime_workflows::require_runtime(&app_core)
-                .await
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            let storage_prefix = active_storage_prefix();
-            let result = workflows::accept_device_enrollment_import(
-                &app_core,
-                DeviceEnrollmentImportRequest {
-                    code: &code,
-                    current_runtime_identity: CurrentRuntimeIdentity {
-                        authority_id: runtime.authority_id(),
-                        selected_runtime_identity: load_selected_runtime_identity(
-                            &selected_runtime_identity_key(&storage_prefix),
-                        )
-                        .map_err(|error| JsValue::from_str(&error.to_string()))?,
-                    },
-                    storage_prefix: &storage_prefix,
-                    rebootstrap_policy: RebootstrapPolicy::StageIfRequired,
-                    operation: crate::WebUiOperation::ImportDeviceEnrollmentCode,
-                },
-            )
-            .await
-            .map_err(|error| JsValue::from_str(&error.user_message()))?;
-            if result.rebootstrap_required {
-                let staged_runtime_identity = result.staged_runtime_identity;
-                schedule_immediate_bootstrap_handoff(BootstrapHandoff::RuntimeIdentityStaged {
-                    authority_id: staged_runtime_identity.authority_id,
-                    device_id: staged_runtime_identity.device_id,
-                    source: RuntimeIdentityStageSource::ImportDeviceEnrollment,
-                })
-                .map_err(|error| JsValue::from_str(&format!("{error:?}")))?;
-                return declared_immediate_unit_response(&contract);
-            }
-            crate::harness_bridge::apply_browser_ui_mutation(
+            let (handle, transfer) = begin_declared_handoff_operation(
                 controller.clone(),
-                move |controller| {
-                    controller.finalize_account_setup(ScreenId::Neighborhood);
+                &contract,
+                OperationId::device_enrollment(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+                UiOperationTransferScope::ImportDeviceEnrollment,
+            )?;
+            let instance = Some(handle.instance_id.clone());
+            spawn_handoff_workflow_task(
+                "import_device_enrollment",
+                controller.clone(),
+                transfer,
+                "import_device_enrollment",
+                async move {
+                    aura_app::ui::workflows::invitation::import_device_enrollment_with_terminal_status(
+                        &app_core,code,manifest_transfer,instance).await
+                },
+                move |controller, completed| async move {
+                    workflows::persist_completed_enrollment_identity(
+                        controller.app_core(),
+                        &completed,
+                        &active_storage_prefix(),
+                    )
+                    .await
+                    .map_err(|error| JsValue::from_str(&error.user_message()))?;
+                    crate::harness_bridge::apply_browser_ui_mutation(
+                        controller.clone(),
+                        move |controller| {
+                            controller.finalize_account_setup(ScreenId::Neighborhood);
+                        },
+                    );
+                    Ok(())
                 },
             );
-            declared_immediate_unit_response(&contract)
+            declared_handle_unit_response(&contract, handle)
         }
         RoutedSemanticIntent::OpenSettingsSection(section) => {
             crate::harness_bridge::apply_browser_ui_mutation(
@@ -1447,9 +1464,7 @@ mod tests {
         let contract = IntentAction::StartDeviceEnrollment {
             device_name: "Browser Device".to_string(),
             code_name: "Browser Code".to_string(),
-            invitee_authority_id:
-                "aura:a:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+            setup_code: "explicitly transferred setup code".to_string(),
         }
         .contract();
 

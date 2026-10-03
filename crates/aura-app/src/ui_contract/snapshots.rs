@@ -159,6 +159,8 @@ pub enum RuntimeFact {
     },
     PendingHomeInvitationReady,
     DeviceEnrollmentCodeReady {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest_transfer: Option<super::EnrollmentManifestTransferInput>,
         device_name: Option<String>,
         code_len: Option<usize>,
         code: Option<String>,
@@ -396,6 +398,7 @@ impl RuntimeFact {
                 device_name,
                 code_len,
                 code,
+                ..
             } => {
                 device_name
                     .as_deref()

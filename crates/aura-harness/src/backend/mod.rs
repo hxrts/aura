@@ -144,6 +144,19 @@ pub trait SharedSemanticBackend {
         )
     }
 
+    fn export_device_enrollment_setup(&mut self) -> Result<String> {
+        let response = self.submit_semantic_command(SemanticCommandRequest::new(
+            IntentAction::ExportDeviceEnrollmentSetup,
+        ))?;
+        if response.handle.ui_operation.is_some() {
+            bail!("setup export unexpectedly returned an operation handle");
+        }
+        match response.value {
+            SemanticCommandValue::DeviceEnrollmentSetup { setup_code } => Ok(setup_code),
+            _ => bail!("setup export did not return a device enrollment setup code"),
+        }
+    }
+
     fn submit_create_home(&mut self, home_name: &str) -> Result<SubmittedAction<()>> {
         expect_semantic_command_unit(
             self.submit_semantic_command(SemanticCommandRequest::new(IntentAction::CreateHome {
@@ -178,6 +191,9 @@ pub trait SharedSemanticBackend {
             },
         ))?;
         match response.value {
+            SemanticCommandValue::DeviceEnrollmentSetup { .. } => Err(anyhow!(
+                "submit_create_contact_invitation produced an unexpected setup code payload"
+            )),
             SemanticCommandValue::ContactInvitationCode { code } => Ok(SubmittedAction {
                 value: ContactInvitationCode { code },
                 submission: response.submission,
@@ -272,6 +288,9 @@ fn expect_semantic_command_unit(
     operation: &str,
 ) -> Result<SubmittedAction<()>> {
     match response.value {
+        SemanticCommandValue::DeviceEnrollmentSetup { .. } => Err(anyhow!(
+            "{operation} produced an unexpected setup code payload"
+        )),
         SemanticCommandValue::None => Ok(SubmittedAction {
             value: (),
             submission: response.submission,
@@ -307,6 +326,7 @@ fn expect_semantic_command_channel_binding(
     operation: &str,
 ) -> Result<SubmittedAction<ChannelBinding>> {
     match response.value {
+        SemanticCommandValue::DeviceEnrollmentSetup { .. } => Err(anyhow!("{operation} produced an unexpected setup code payload")),
         SemanticCommandValue::AuthoritativeChannelBinding {
             channel_id,
             context_id,
@@ -693,6 +713,17 @@ impl BackendHandle {
             ),
         }
     }
+
+    pub fn export_device_enrollment_setup(&mut self) -> Result<String> {
+        match self {
+            Self::Local(backend) => backend.export_device_enrollment_setup(),
+            Self::Browser(backend) => backend.export_device_enrollment_setup(),
+            Self::Ssh(backend) => bail!(
+                "backend {} does not support device enrollment setup export",
+                backend.backend_kind()
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1002,6 +1033,37 @@ mod tests {
             OperationId::invitation_accept_contact(),
             OperationInstanceId("test-op-1".to_string()),
         )
+    }
+
+    #[test]
+    fn setup_export_preserves_exact_code_and_rejects_ceremony_handle_or_wrong_value() {
+        let expected = "opaque runtime-owned code".to_string();
+        let mut backend = RecordingSemanticBackend::new().with_response(Ok(
+            SemanticCommandResponse::accepted(SemanticCommandValue::DeviceEnrollmentSetup {
+                setup_code: expected.clone(),
+            }),
+        ));
+        assert_eq!(backend.export_device_enrollment_setup().unwrap(), expected);
+        assert_eq!(
+            backend.submit_requests.borrow()[0].intent,
+            IntentAction::ExportDeviceEnrollmentSetup
+        );
+
+        let mut wrong = RecordingSemanticBackend::new().with_response(Ok(
+            SemanticCommandResponse::accepted_contact_invitation_code("invitation".to_string()),
+        ));
+        assert!(wrong.export_device_enrollment_setup().is_err());
+        let mut with_handle =
+            RecordingSemanticBackend::new().with_response(Ok(SemanticCommandResponse {
+                submission: SubmissionState::Accepted,
+                handle: SemanticSubmissionHandle {
+                    ui_operation: Some(operation_handle()),
+                },
+                value: SemanticCommandValue::DeviceEnrollmentSetup {
+                    setup_code: "setup".to_string(),
+                },
+            }));
+        assert!(with_handle.export_device_enrollment_setup().is_err());
     }
 
     #[test]

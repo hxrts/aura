@@ -56,18 +56,17 @@ mod tui_tracing;
 
 use account::{
     cleanup_demo_storage, clear_pending_account_bootstrap, load_pending_account_bootstrap,
-    load_prepared_device_enrollment_invitee_authority, load_selected_runtime_identity,
-    open_bootstrap_storage, persist_selected_authority, try_load_account,
-    wait_for_persisted_account,
+    load_selected_runtime_identity, open_bootstrap_storage, persist_selected_authority,
+    try_load_account, wait_for_persisted_account,
 };
 #[cfg(feature = "development")]
 use demo_mode::seed_realistic_demo_world;
 use tui_tracing::init_tui_tracing;
 
 pub use account::{
-    create_account, create_account_with_device_enrollment,
-    create_account_with_device_enrollment_runtime_identity, export_account_backup,
-    import_account_backup, restore_recovered_account, try_load_account_from_path,
+    create_account, export_account_backup, import_account_backup,
+    persist_completed_enrollment_runtime_identity, restore_recovered_account,
+    try_load_account_from_path,
 };
 
 pub use aura_app::ui::types::{
@@ -451,8 +450,21 @@ async fn handle_tui_launch(
 
     let app_config = launch.app_config();
     let selected_runtime_identity = load_selected_runtime_identity(storage.as_ref()).await?;
-    let prepared_invitee_authority =
-        load_prepared_device_enrollment_invitee_authority(&launch.base_path)?;
+    if load_pending_account_bootstrap(storage.as_ref())
+        .await?
+        .is_some_and(|pending| pending.has_pending_device_enrollment())
+    {
+        return Err(AuraError::PermissionDenied {
+            message:
+                "Legacy pending enrollment requires independently transferred manifest and verifier"
+                    .into(),
+            source: Some(Arc::new(
+                aura_app::ui::workflows::ceremonies::EnrollmentManifestError::MissingPin,
+            )),
+        }
+        .into());
+    }
+
     let device_id = selected_runtime_identity
         .as_ref()
         .map(|identity| identity.device_id)
@@ -774,7 +786,6 @@ async fn handle_tui_launch(
             if let Some(runtime_authority) = selected_runtime_identity
                 .as_ref()
                 .map(|identity| identity.authority_id)
-                .or(prepared_invitee_authority)
             {
                 let context = default_context_id_for_authority(runtime_authority);
                 let runtime_spec = launch.runtime_spec(runtime_authority, context, device_id);

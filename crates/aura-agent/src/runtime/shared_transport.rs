@@ -130,8 +130,15 @@ impl SharedTransport {
 
     /// Route an envelope into the destination authority inbox.
     pub fn route_envelope(&self, envelope: TransportEnvelope) {
-        let inbox = self.ensure_inbox(envelope.destination);
-        let notify = self.inbox_notify_inner(envelope.destination);
+        // Device routing selects a physical mailbox, never rewrites identity evidence.
+        let mailbox = envelope
+            .metadata
+            .get("aura-destination-device-id")
+            .and_then(|raw| raw.parse::<aura_core::DeviceId>().ok())
+            .and_then(|device| self.authority_for_device(device))
+            .unwrap_or(envelope.destination);
+        let inbox = self.ensure_inbox(mailbox);
+        let notify = self.inbox_notify_inner(mailbox);
         inbox.write().push(envelope);
         notify.notify_waiters();
     }
@@ -238,6 +245,31 @@ mod tests {
         assert_eq!(inbox_a[0].destination, a);
         assert_eq!(inbox_b.len(), 1);
         assert_eq!(inbox_b[0].destination, b);
+    }
+
+    #[test]
+    fn physical_device_routing_preserves_authenticated_authority_fields() {
+        let shared = SharedTransport::new();
+        let subject = AuthorityId::new_from_entropy([91; 32]);
+        let provisional = AuthorityId::new_from_entropy([92; 32]);
+        let source = AuthorityId::new_from_entropy([93; 32]);
+        let device = aura_core::DeviceId::new_from_entropy([94; 32]);
+        shared.register_device(device, provisional);
+        let mut envelope = envelope_for(subject, source);
+        envelope
+            .metadata
+            .insert("aura-destination-device-id".into(), device.to_string());
+        shared.route_envelope(envelope);
+        assert!(shared.inbox_for(subject).read().is_empty());
+        let mailbox = shared.inbox_for(provisional);
+        let inbox = mailbox.read();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].destination, subject);
+        assert_eq!(inbox[0].source, source);
+        assert_eq!(
+            inbox[0].metadata["aura-destination-device-id"],
+            device.to_string()
+        );
     }
 
     #[tokio::test]

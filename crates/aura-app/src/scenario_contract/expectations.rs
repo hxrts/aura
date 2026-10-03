@@ -183,7 +183,11 @@ pub struct SemanticScenarioFileStep {
     pub operation_id: Option<OperationId>,
     pub operation_state: Option<OperationState>,
     pub peer_actor: Option<ActorId>,
-    pub invitee_authority_id: Option<String>,
+    pub setup_code: Option<String>,
+    #[serde(default)]
+    pub manifest_code: Option<String>,
+    #[serde(default)]
+    pub initiator_verifier_code: Option<String>,
     pub confirmation: Option<ConfirmationState>,
     pub section: Option<SettingsSection>,
     pub amp_transition_fixture: Option<AmpTransitionFixture>,
@@ -245,7 +249,7 @@ pub enum SemanticActionKind {
     RuntimeEventOccurred,
     OperationStateIs,
     ParityWithActor,
-    PrepareDeviceEnrollmentInviteeAuthority,
+    PrepareDeviceEnrollmentSetup,
     CaptureCurrentAuthorityId,
     CaptureSelection,
     SetVar,
@@ -334,16 +338,24 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                 ScenarioAction::Intent(IntentAction::StartDeviceEnrollment {
                     device_name: required(value.value, "value", value.action)?,
                     code_name: required(value.name, "name", value.action)?,
-                    invitee_authority_id: required(
-                        value.invitee_authority_id,
-                        "invitee_authority_id",
-                        value.action,
-                    )?,
+                    setup_code: required(value.setup_code, "setup_code", value.action)?,
                 })
             }
             SemanticActionKind::ImportDeviceEnrollmentCode => {
                 ScenarioAction::Intent(IntentAction::ImportDeviceEnrollmentCode {
                     code: required(value.value, "value", value.action)?,
+                    manifest_transfer: Some(crate::ui_contract::EnrollmentManifestTransferInput {
+                        manifest_code: required(
+                            value.manifest_code,
+                            "manifest_code",
+                            value.action,
+                        )?,
+                        initiator_verifier_code: required(
+                            value.initiator_verifier_code,
+                            "initiator_verifier_code",
+                            value.action,
+                        )?,
+                    }),
                 })
             }
             SemanticActionKind::OpenSettingsSection => {
@@ -526,8 +538,8 @@ impl TryFrom<SemanticScenarioFileStep> for ScenarioStep {
                     actor: required(value.peer_actor, "peer_actor", value.action)?,
                 })
             }
-            SemanticActionKind::PrepareDeviceEnrollmentInviteeAuthority => {
-                ScenarioAction::Variables(VariableAction::PrepareDeviceEnrollmentInviteeAuthority {
+            SemanticActionKind::PrepareDeviceEnrollmentSetup => {
+                ScenarioAction::Variables(VariableAction::PrepareDeviceEnrollmentSetup {
                     name: required(value.name, "name", value.action)?,
                 })
             }

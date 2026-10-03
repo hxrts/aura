@@ -65,9 +65,69 @@ pub struct PersistentTreeHandler {
     ops_cache: RwLock<Vec<AttestedOp>>,
     /// Whether we've loaded from storage yet
     initialized: AtomicBool,
+    mutation_gate: tokio::sync::Mutex<()>,
+}
+
+/// Exclusive current-tree decision custody. It excludes local tree writers,
+/// but does not authenticate the tree or establish remote freshness.
+/// ```compile_fail
+/// use aura_protocol::handlers::tree::TreeDecisionLease;
+/// let _ = TreeDecisionLease { guard: () };
+/// ```
+pub struct TreeDecisionLease<'a> {
+    owner: &'a PersistentTreeHandler,
+    _guard: tokio::sync::MutexGuard<'a, ()>,
+}
+
+impl TreeDecisionLease<'_> {
+    /// Storage comparison only: runtime callers must supply authenticated history.
+    /// A held lease may publish its exact extension without reacquiring the gate.
+    /// Divergence is rejected; any later history is returned intact for validation.
+    pub async fn install_authenticated_extension(
+        &self,
+        admitted_prefix_len: usize,
+        history: &[AttestedOp],
+    ) -> Result<Vec<AttestedOp>, AuraError> {
+        #[derive(Debug, thiserror::Error)]
+        #[error("current tree is not an exact extension of the admitted enrollment history")]
+        struct DivergentAuthenticatedExtension;
+        self.owner.ensure_initialized().await?;
+        let current = self.owner.export_ops().await?;
+        if admitted_prefix_len == 0
+            || history.len() <= admitted_prefix_len
+            || current.len() < admitted_prefix_len
+        {
+            return Err(AuraError::PermissionDenied {
+                message: "authenticated tree installation lacks complete original baseline".into(),
+                source: Some(Arc::new(DivergentAuthenticatedExtension)),
+            });
+        }
+        for (existing, expected) in current.iter().zip(history) {
+            if tree_storage::op_hash(existing)? != tree_storage::op_hash(expected)? {
+                return Err(AuraError::PermissionDenied {
+                    message: "authenticated tree extension diverges from current evidence".into(),
+                    source: Some(Arc::new(DivergentAuthenticatedExtension)),
+                });
+            }
+        }
+        if current.len() >= history.len() {
+            return Ok(current);
+        }
+        self.owner.persist_candidate(history).await?;
+        Ok(history.to_vec())
+    }
 }
 
 impl PersistentTreeHandler {
+    /// Hold the existing mutation gate over required reads and a decision.
+    /// Read methods do not reacquire this gate. Calling a mutation while this
+    /// lease is held would recursively wait and must be avoided.
+    pub async fn lock_decision(&self) -> TreeDecisionLease<'_> {
+        TreeDecisionLease {
+            owner: self,
+            _guard: self.mutation_gate.lock().await,
+        }
+    }
     /// Create a new persistent tree handler (synchronous, lazy loading).
     ///
     /// Operations are loaded from storage on first access to the tree state.
@@ -76,6 +136,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(Vec::new()),
             initialized: AtomicBool::new(false),
+            mutation_gate: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -88,6 +149,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(ops_cache),
             initialized: AtomicBool::new(true),
+            mutation_gate: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -115,7 +177,10 @@ impl PersistentTreeHandler {
         let index_bytes = storage
             .retrieve(tree_storage::TREE_OPS_INDEX_KEY)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to load tree ops index: {e}")))?;
+            .map_err(|source| AuraError::Storage {
+                message: "load canonical tree index".into(),
+                source: Some(Arc::new(source)),
+            })?;
 
         let op_hashes: Vec<[u8; 32]> = match index_bytes {
             Some(bytes) => tree_storage::deserialize_op_index(&bytes)?,
@@ -129,49 +194,99 @@ impl PersistentTreeHandler {
             let op_bytes = storage
                 .retrieve(&key)
                 .await
-                .map_err(|e| AuraError::storage(format!("Failed to load tree op {key}: {e}")))?
+                .map_err(|source| AuraError::Storage {
+                    message: "load canonical tree operation".into(),
+                    source: Some(Arc::new(source)),
+                })?
                 .ok_or_else(|| AuraError::storage(format!("Missing tree op: {key}")))?;
 
             let op: AttestedOp = tree_storage::deserialize_op(&op_bytes)?;
+            if tree_storage::op_hash(&op)? != op_hash {
+                return Err(AuraError::invalid(
+                    "stored tree operation differs from canonical index digest",
+                ));
+            }
             ops.push(op);
         }
 
         Ok(ops)
     }
 
-    /// Persist an operation to storage.
-    async fn persist_op(&self, op: &AttestedOp, op_hash: [u8; 32]) -> Result<(), AuraError> {
-        // Serialize the operation
-        let op_bytes = tree_storage::serialize_op(op)?;
-
-        // Store the operation by hash
-        let key = tree_storage::op_key(op_hash);
-        self.storage
-            .store(&key, op_bytes)
+    /// Content blobs are written before the sole canonical index. Failure leaves
+    /// the previous cache visible; an uncertain index outcome forces reread.
+    async fn persist_candidate(&self, ops: &[AttestedOp]) -> Result<(), AuraError> {
+        let mut hashes = Vec::with_capacity(ops.len());
+        for op in ops {
+            let digest = tree_storage::op_hash(op)?;
+            let key = tree_storage::op_key(digest);
+            self.storage
+                .store(&key, tree_storage::serialize_op(op)?)
+                .await
+                .map_err(|source| AuraError::Storage {
+                    message: "persist candidate tree operation".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            hashes.push(digest);
+        }
+        let bytes = tree_storage::serialize_op_index(&hashes)?;
+        if let Err(source) = self
+            .storage
+            .store(tree_storage::TREE_OPS_INDEX_KEY, bytes)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to store tree op: {e}")))?;
-
-        // Update the index
-        let hashes: Vec<[u8; 32]> = {
-            let ops = self
-                .ops_cache
-                .read()
-                .expect("PersistentTreeHandler lock poisoned");
-            let mut hashes = Vec::with_capacity(ops.len());
-            for op in ops.iter() {
-                hashes.push(tree_storage::op_hash(op)?);
-            }
-            hashes
-        };
-
-        let index_bytes = tree_storage::serialize_op_index(&hashes)?;
-
-        self.storage
-            .store(tree_storage::TREE_OPS_INDEX_KEY, index_bytes)
-            .await
-            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {e}")))?;
-
+        {
+            self.initialized.store(false, Ordering::Release);
+            return Err(AuraError::Storage {
+                message: "publish canonical tree index".into(),
+                source: Some(Arc::new(source)),
+            });
+        }
+        *self
+            .ops_cache
+            .write()
+            .expect("PersistentTreeHandler lock poisoned") = ops.to_vec();
         Ok(())
+    }
+    /// Digest the exact ordered history for storage comparison, without granting authorization.
+    pub fn ordered_ops_digest(ops: &[AttestedOp]) -> Result<[u8; 32], AuraError> {
+        let bytes = to_vec(&ops).map_err(|source| AuraError::Serialization {
+            message: "encode ordered tree operation digest".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        Ok(hash::hash(&bytes))
+    }
+    /// Storage comparison is not authorization. The caller supplies an
+    /// independently authenticated baseline and its actual original snapshot.
+    /// An existing complete baseline prefix retains any later local operations.
+    pub async fn install_baseline_if_original(
+        &self,
+        original: [u8; 32],
+        baseline: &[AttestedOp],
+    ) -> Result<(), AuraError> {
+        let _writer = self.mutation_gate.lock().await;
+        self.ensure_initialized().await?;
+        if baseline.is_empty() {
+            return Err(AuraError::invalid(
+                "authenticated enrollment baseline is empty",
+            ));
+        }
+        let current = self.export_ops().await?;
+        let mut prefix = current.len() >= baseline.len();
+        if prefix {
+            for (a, b) in current.iter().zip(baseline) {
+                if tree_storage::op_hash(a)? != tree_storage::op_hash(b)? {
+                    prefix = false;
+                    break;
+                }
+            }
+        }
+
+        if prefix {
+            return Ok(());
+        }
+        if Self::ordered_ops_digest(&current)? != original {
+            return Err(AuraError::invalid("current tree is neither original installation state nor authenticated baseline prefix"));
+        }
+        self.persist_candidate(baseline).await
     }
 
     /// Export the current ordered OpLog.
@@ -192,55 +307,23 @@ impl PersistentTreeHandler {
     /// must verify every operation against a trusted parent-epoch package and
     /// stage the complete transition before calling it.
     pub async fn import_ops(&self, imported_ops: &[AttestedOp]) -> Result<(), AuraError> {
+        let _writer = self.mutation_gate.lock().await;
         self.ensure_initialized().await?;
-
-        let (added, hashes) = {
-            let mut cache = self
-                .ops_cache
-                .write()
-                .expect("PersistentTreeHandler lock poisoned");
-
-            let mut existing_hashes = std::collections::BTreeSet::new();
-            for op in cache.iter() {
-                existing_hashes.insert(tree_storage::op_hash(op)?);
+        let mut candidate = self.export_ops().await?;
+        let mut known = std::collections::BTreeSet::new();
+        for op in &candidate {
+            known.insert(tree_storage::op_hash(op)?);
+        }
+        let previous = candidate.len();
+        for op in imported_ops {
+            if known.insert(tree_storage::op_hash(op)?) {
+                candidate.push(op.clone());
             }
-
-            let mut added = Vec::new();
-            for op in imported_ops {
-                let op_hash = tree_storage::op_hash(op)?;
-                if existing_hashes.insert(op_hash) {
-                    cache.push(op.clone());
-                    added.push((op.clone(), op_hash));
-                }
-            }
-
-            let hashes = cache
-                .iter()
-                .map(tree_storage::op_hash)
-                .collect::<Result<Vec<_>, _>>()?;
-            (added, hashes)
-        };
-
-        if added.is_empty() {
+        }
+        if candidate.len() == previous {
             return Ok(());
         }
-
-        for (op, op_hash) in &added {
-            let key = tree_storage::op_key(*op_hash);
-            let op_bytes = tree_storage::serialize_op(op)?;
-            self.storage
-                .store(&key, op_bytes)
-                .await
-                .map_err(|e| AuraError::storage(format!("Failed to import tree op {key}: {e}")))?;
-        }
-
-        let index_bytes = tree_storage::serialize_op_index(&hashes)?;
-        self.storage
-            .store(tree_storage::TREE_OPS_INDEX_KEY, index_bytes)
-            .await
-            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {e}")))?;
-
-        Ok(())
+        self.persist_candidate(&candidate).await
     }
 
     /// Replace the local OpLog with an already authenticated baseline.
@@ -250,27 +333,9 @@ impl PersistentTreeHandler {
     /// authority's ops. Callers must verify the account baseline and its
     /// ceremony-scoped trust anchor before discarding provisional history.
     pub async fn replace_ops(&self, ops: &[AttestedOp]) -> Result<(), AuraError> {
+        let _writer = self.mutation_gate.lock().await;
         self.ensure_initialized().await?;
-        let keys = self
-            .storage
-            .list_keys(Some(tree_storage::TREE_OPS_PREFIX))
-            .await
-            .map_err(|e| AuraError::storage(format!("Failed to list tree ops: {e}")))?;
-        for key in keys {
-            self.storage
-                .remove(&key)
-                .await
-                .map_err(|e| AuraError::storage(format!("Failed to remove tree op {key}: {e}")))?;
-        }
-        self.storage
-            .remove(tree_storage::TREE_OPS_INDEX_KEY)
-            .await
-            .map_err(|e| AuraError::storage(format!("Failed to remove ops index: {e}")))?;
-        self.ops_cache
-            .write()
-            .expect("PersistentTreeHandler lock poisoned")
-            .clear();
-        self.import_ops(ops).await
+        self.persist_candidate(ops).await
     }
 
     /// Reduce the current operations to tree state.
@@ -409,41 +474,21 @@ impl TreeEffects for PersistentTreeHandler {
     }
 
     async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
+        let _writer = self.mutation_gate.lock().await;
         self.ensure_initialized().await?;
-        let op_hash = Self::op_hash(&op)?;
-
-        // Check for duplicate (lock released before await)
-        let already = {
-            let ops = self
-                .ops_cache
-                .read()
-                .expect("PersistentTreeHandler lock poisoned");
-            ops.iter().any(|existing| {
-                Self::op_hash(existing)
-                    .map(|h| h == op_hash)
-                    .unwrap_or(false)
-            })
-        };
-
-        if already {
-            // Already have this op, just return current state
-            let state = self.reduce_state().await?;
-            return Ok(Hash32(state.root_commitment));
+        let digest = Self::op_hash(&op)?;
+        let mut candidate = self.export_ops().await?;
+        let mut already = false;
+        for existing in &candidate {
+            if Self::op_hash(existing)? == digest {
+                already = true;
+                break;
+            }
         }
-
-        // Add to cache first (so persist_op sees it in index)
-        {
-            let mut ops = self
-                .ops_cache
-                .write()
-                .expect("PersistentTreeHandler lock poisoned");
-            ops.push(op.clone());
+        if !already {
+            candidate.push(op);
+            self.persist_candidate(&candidate).await?;
         }
-
-        // Persist to storage
-        self.persist_op(&op, op_hash).await?;
-
-        // Return new root commitment
         let state = self.reduce_state().await?;
         Ok(Hash32(state.root_commitment))
     }
@@ -510,37 +555,10 @@ impl TreeEffects for PersistentTreeHandler {
     }
 
     async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError> {
-        // Ensure initialized first (so we know what to clear)
+        let _writer = self.mutation_gate.lock().await;
         self.ensure_initialized().await?;
         verify_snapshot_signature(snapshot)?;
-
-        // Clear in-memory cache
-        {
-            let mut ops = self
-                .ops_cache
-                .write()
-                .expect("PersistentTreeHandler lock poisoned");
-            ops.clear();
-        }
-
-        // Clear storage
-        // First, list all tree_ops keys
-        let keys = self
-            .storage
-            .list_keys(Some(tree_storage::TREE_OPS_PREFIX))
-            .await
-            .map_err(|e| AuraError::storage(format!("Failed to list tree ops: {e}")))?;
-
-        for key in keys {
-            let _ = self.storage.remove(&key).await;
-        }
-
-        // Clear the index
-        let _ = self.storage.remove(tree_storage::TREE_OPS_INDEX_KEY).await;
-
-        // Snapshot application replaces history; we store no additional ops
-        let _ = snapshot;
-        Ok(())
+        self.persist_candidate(&[]).await
     }
 }
 
@@ -554,15 +572,49 @@ mod tests {
     use std::collections::HashMap;
     use tokio::sync::RwLock;
 
+    #[tokio::test]
+    async fn current_decision_lease_excludes_actual_replacement() {
+        let handler = PersistentTreeHandler::new(Arc::new(TestStorage::default()));
+        let lease = handler.lock_decision().await;
+        assert!(handler.export_ops().await.expect("owned read").is_empty());
+        let replacement = handler.replace_ops(&[]);
+        tokio::pin!(replacement);
+        assert!(futures::poll!(&mut replacement).is_pending());
+        drop(lease);
+        replacement
+            .await
+            .expect("writer progresses after decision release");
+    }
+
     #[derive(Debug, Default)]
     struct TestStorage {
         data: RwLock<HashMap<String, Vec<u8>>>,
+        fail_index_before: AtomicBool,
+        fail_index_after: AtomicBool,
     }
 
     #[async_trait]
     impl StorageCoreEffects for TestStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+            let fault = || StorageError::BackendFailure {
+                operation: "fault canonical tree index".into(),
+                source: AuraError::Storage {
+                    message: "injected publication boundary".into(),
+                    source: Some(Arc::new(std::io::Error::other("canonical index fault"))),
+                },
+            };
+            if key == tree_storage::TREE_OPS_INDEX_KEY
+                && self.fail_index_before.swap(false, Ordering::AcqRel)
+            {
+                return Err(fault());
+            }
             self.data.write().await.insert(key.to_string(), value);
+            if key == tree_storage::TREE_OPS_INDEX_KEY
+                && self.fail_index_after.swap(false, Ordering::AcqRel)
+            {
+                return Err(fault());
+            }
+
             Ok(())
         }
 
@@ -755,6 +807,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_tree_replacement_keeps_complete_original_before_index() -> Result<(), AuraError>
+    {
+        let storage = Arc::new(TestStorage::default());
+        let handler = PersistentTreeHandler::new(storage.clone());
+        let old = vec![remove_leaf_op(1)];
+        handler.import_ops(&old).await?;
+        storage.fail_index_before.store(true, Ordering::Release);
+        assert!(handler.replace_ops(&[remove_leaf_op(2)]).await.is_err());
+        assert_eq!(handler.export_ops().await?, old);
+        assert_eq!(PersistentTreeHandler::new(storage).export_ops().await?, old);
+        Ok(())
+    }
+    #[tokio::test]
+    async fn uncertain_index_outcome_reloads_complete_canonical_publication(
+    ) -> Result<(), AuraError> {
+        let storage = Arc::new(TestStorage::default());
+        let handler = PersistentTreeHandler::new(storage.clone());
+        handler.import_ops(&[remove_leaf_op(1)]).await?;
+        storage.fail_index_after.store(true, Ordering::Release);
+        let replacement = vec![remove_leaf_op(2)];
+        assert!(handler.replace_ops(&replacement).await.is_err());
+        assert_eq!(handler.export_ops().await?, replacement);
+        assert_eq!(
+            PersistentTreeHandler::new(storage).export_ops().await?,
+            replacement
+        );
+        Ok(())
+    }
+    #[tokio::test]
+    async fn original_baseline_replay_preserves_later_operations() -> Result<(), AuraError> {
+        let storage = Arc::new(TestStorage::default());
+        let handler = PersistentTreeHandler::new(storage);
+        handler.import_ops(&[remove_leaf_op(1)]).await?;
+        let original = PersistentTreeHandler::ordered_ops_digest(&handler.export_ops().await?)?;
+        let baseline = vec![remove_leaf_op(2)];
+        handler
+            .install_baseline_if_original(original, &baseline)
+            .await?;
+        handler.import_ops(&[remove_leaf_op(3)]).await?;
+        handler
+            .install_baseline_if_original(original, &baseline)
+            .await?;
+        assert_eq!(
+            handler.export_ops().await?,
+            vec![remove_leaf_op(2), remove_leaf_op(3)]
+        );
+        assert!(handler
+            .install_baseline_if_original(original, &[remove_leaf_op(4)])
+            .await
+            .is_err());
+        assert_eq!(
+            handler.export_ops().await?,
+            vec![remove_leaf_op(2), remove_leaf_op(3)]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn apply_snapshot_accepts_valid_signed_snapshot() {
         let handler = PersistentTreeHandler::new(Arc::new(TestStorage::default()));
         let snapshot = signed_snapshot().await;
@@ -763,5 +873,44 @@ mod tests {
             .apply_snapshot(&snapshot)
             .await
             .expect("valid signed snapshot should apply");
+    }
+    /// Tests the held storage owner only; crypto provenance is supplied by the
+    /// runtime's sealed committed transition, never by these unsigned fixtures.
+    #[tokio::test]
+    async fn held_extension_preserves_later_evidence_and_rejects_divergence(
+    ) -> Result<(), AuraError> {
+        let storage = Arc::new(TestStorage::default());
+        let handler = PersistentTreeHandler::new(storage.clone());
+        let baseline = remove_leaf_op(1);
+        let committed = vec![baseline.clone(), remove_leaf_op(2)];
+        handler.import_ops(&[baseline]).await?;
+        {
+            let lease = handler.lock_decision().await;
+            assert_eq!(
+                lease.install_authenticated_extension(1, &committed).await?,
+                committed
+            );
+            assert_eq!(
+                lease.install_authenticated_extension(1, &committed).await?,
+                committed
+            );
+        }
+        handler.import_ops(&[remove_leaf_op(3)]).await?;
+        let expected = handler.export_ops().await?;
+        {
+            let lease = handler.lock_decision().await;
+            assert_eq!(
+                lease.install_authenticated_extension(1, &committed).await?,
+                expected
+            );
+            assert!(lease
+                .install_authenticated_extension(1, &[remove_leaf_op(1), remove_leaf_op(4)])
+                .await
+                .is_err());
+        }
+        assert_eq!(handler.export_ops().await?, expected);
+        let reloaded = PersistentTreeHandler::new(storage);
+        assert_eq!(reloaded.export_ops().await?, expected);
+        Ok(())
     }
 }

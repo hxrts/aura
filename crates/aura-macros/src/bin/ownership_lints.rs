@@ -358,7 +358,12 @@ fn scan_file(
             return scan_browser_transport_single_owner(file, source);
         }
         LintMode::ActorOwnedTaskSpawn => return scan_actor_owned_task_spawn(file, syntax),
-        LintMode::AsyncSessionOwnership => return scan_async_session_ownership(file, source),
+        LintMode::AsyncSessionOwnership => {
+            let mut violations = scan_async_session_ownership(file, source);
+            violations.extend(scan_enrollment_durable_window_boundary(file, syntax));
+            return violations;
+        }
+
         LintMode::FrontendSemanticHandoffBoundary => {
             return scan_frontend_semantic_handoff_boundary(file, syntax);
         }
@@ -2393,6 +2398,179 @@ fn scan_browser_transport_single_owner(file: &Path, source: &str) -> Vec<String>
     violations
 }
 
+/// Authoritative enrollment execution must retain its sealed durable window.
+/// AST traversal excludes explicit test fixtures, including nested test modules.
+fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<String> {
+    if !file_matches_suffix(
+        file,
+        &["crates/aura-agent/src/handlers/invitation/device_enrollment.rs"],
+    ) {
+        return Vec::new();
+    }
+    fn is_explicit_test_only(attrs: &[syn::Attribute]) -> bool {
+        fn requires_test(meta: &syn::Meta) -> bool {
+            match meta {
+                syn::Meta::Path(path) => path.is_ident("test"),
+                syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
+                    let nested = list.parse_args_with(
+                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                    );
+                    nested.is_ok_and(|nested| {
+                        !nested.is_empty()
+                            && if list.path.is_ident("all") {
+                                nested.iter().any(requires_test)
+                            } else {
+                                nested.iter().all(requires_test)
+                            }
+                    })
+                }
+                syn::Meta::List(_) | syn::Meta::NameValue(_) => false,
+            }
+        }
+        attrs.iter().any(|attr| {
+            attr.path().is_ident("cfg")
+                && attr
+                    .parse_args::<syn::Meta>()
+                    .is_ok_and(|meta| requires_test(&meta))
+        })
+    }
+    struct WindowVisitor {
+        file: PathBuf,
+        violations: Vec<String>,
+    }
+    impl WindowVisitor {
+        fn check_attempt_signature(&mut self, signature: &syn::Signature) {
+            if !signature
+                .ident
+                .to_string()
+                .starts_with("run_device_enrollment_")
+            {
+                return;
+            }
+            let has_window = signature.inputs.iter().any(|input| {
+                matches!(input, FnArg::Typed(input) if matches!(&*input.ty,
+                    Type::Reference(reference) if matches!(&*reference.elem,
+                        Type::Path(path) if path.path.segments.last().is_some_and(|last|
+                            last.ident == "EnrollmentWindowCapability"))))
+            });
+            if !has_window {
+                self.violations.push(format!(
+                    "{}:{} enrollment attempt requires the sealed durable window type",
+                    self.file.display(),
+                    signature.span().start().line
+                ));
+            }
+        }
+    }
+    impl<'ast> Visit<'ast> for WindowVisitor {
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if !is_explicit_test_only(&node.attrs) && !has_test_attr(&node.attrs) {
+                self.check_attempt_signature(&node.sig);
+                visit::visit_item_fn(self, node);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+            if is_explicit_test_only(&node.attrs) || has_test_attr(&node.attrs) {
+                return;
+            }
+            self.check_attempt_signature(&node.sig);
+            visit::visit_impl_item_fn(self, node);
+        }
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if !is_explicit_test_only(&node.attrs) {
+                visit::visit_item_mod(self, node);
+            }
+        }
+        fn visit_expr_path(&mut self, node: &'ast ExprPath) {
+            if let Some(last) = node.path.segments.last() {
+                if matches!(
+                    last.ident.to_string().as_str(),
+                    "execute_with_timeout_budget" | "execute_with_timeout_budget_and_checkpoint"
+                ) {
+                    self.violations.push(format!(
+                        "{}:{} authoritative enrollment references a bypass executor",
+                        self.file.display(),
+                        node.span().start().line
+                    ));
+                }
+            }
+            visit::visit_expr_path(self, node);
+        }
+        fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+            if let Expr::Path(path) = strip_expression(&node.func) {
+                if let Some(last) = path.path.segments.last() {
+                    let name = last.ident.to_string();
+                    if matches!(
+                        name.as_str(),
+                        "execute_with_timeout_budget"
+                            | "execute_with_timeout_budget_and_checkpoint"
+                            | "from_start_and_timeout"
+                            | "from_start_and_timeout_with_observation"
+                    ) {
+                        self.violations.push(format!(
+                            "{}:{} authoritative enrollment bypasses sealed durable window: {name}",
+                            self.file.display(),
+                            node.span().start().line
+                        ));
+                    }
+                }
+            }
+            visit::visit_expr_call(self, node);
+        }
+        fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+            let name = node.method.to_string();
+            if matches!(
+                name.as_str(),
+                "enrollment_window_budget" | "remaining_at" | "child_budget" | "expire_at"
+            ) {
+                self.violations.push(format!(
+                    "{}:{} authoritative enrollment downgrades durable window: {name}",
+                    self.file.display(),
+                    node.span().start().line
+                ));
+            }
+            visit::visit_expr_method_call(self, node);
+        }
+        fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+            if is_explicit_test_only(&node.attrs) {
+                return;
+            }
+            struct RawImports {
+                found: bool,
+            }
+            impl<'ast> Visit<'ast> for RawImports {
+                fn visit_use_name(&mut self, node: &'ast syn::UseName) {
+                    self.found |= node
+                        .ident
+                        .to_string()
+                        .starts_with("execute_with_timeout_budget");
+                }
+                fn visit_use_rename(&mut self, node: &'ast syn::UseRename) {
+                    self.found |= node
+                        .ident
+                        .to_string()
+                        .starts_with("execute_with_timeout_budget");
+                }
+            }
+            let mut imports = RawImports { found: false };
+            imports.visit_item_use(node);
+            if imports.found {
+                self.violations.push(format!(
+                    "{}:{} authoritative enrollment imports a bypass executor",
+                    self.file.display(),
+                    node.span().start().line
+                ));
+            }
+        }
+    }
+    let mut visitor = WindowVisitor {
+        file: file.to_path_buf(),
+        violations: Vec::new(),
+    };
+    visitor.visit_file(syntax);
+    visitor.violations
+}
+
 fn scan_async_session_ownership(file: &Path, source: &str) -> Vec<String> {
     source_line_violations(
         file,
@@ -3051,6 +3229,41 @@ mod tests {
     use super::scan_semantic_owner_stable_wrapper;
     use std::path::Path;
     use syn::parse_file;
+
+    #[test]
+    fn durable_enrollment_window_rejects_raw_executor_and_aliased_import() {
+        let path = Path::new("crates/aura-agent/src/handlers/invitation/device_enrollment.rs");
+        for source in [
+            "async fn run() { execute_with_timeout_budget(time, budget, operation).await; }",
+            "#[cfg(not(test))] async fn run() { execute_with_timeout_budget(time, budget, operation).await; }",
+            "async fn run() { execute_with_timeout_budget_and_checkpoint(time, budget, || async { Ok(()) }, operation).await; }",
+            "use aura_core::execute_with_timeout_budget as noop; async fn run() { noop(time, budget, operation).await; }",
+            "async fn run() { let noop = execute_with_timeout_budget; noop(time, budget, operation).await; }",
+            "async fn run() { let budget = TimeoutBudget::from_start_and_timeout(start, duration); }",
+            "async fn run() { runner.enrollment_window_budget(id).await; }",
+            "impl Handler { async fn run_device_enrollment_invitee_attempt(&self, budget: &TimeoutBudget) {} }",
+            "impl Handler { async fn run_device_enrollment_invitee_attempt(&self, renamed: &TimeoutBudget) {} }",
+            "async fn run_device_enrollment_invitee_attempt(renamed: &TimeoutBudget) {}",
+            "async fn run_device_enrollment_invitee_attempt() {}",
+        ] {
+            let parsed = parse_file(source).expect("valid adversarial Rust fixture");
+            assert!(!super::scan_enrollment_durable_window_boundary(path, &parsed).is_empty());
+        }
+        let source = "async fn run() { let window = runner.registered_enrollment_window(id).await?; window.execute(time, operation).await?; window.retry_delay(time, delay).await?; } #[cfg(test)] async fn model() { execute_with_timeout_budget(time, budget, operation).await; }";
+        assert!(super::scan_enrollment_durable_window_boundary(
+            path,
+            &parse_file(source).expect("valid sanctioned fixture")
+        )
+        .is_empty());
+        for source in [
+            "impl Handler { async fn run_device_enrollment_invitee_attempt(&self, window: &EnrollmentWindowCapability) {} }",
+            "async fn run_device_enrollment_invitee_attempt(window: &EnrollmentWindowCapability) {}",
+        ] {
+            assert!(super::scan_enrollment_durable_window_boundary(
+                path, &parse_file(source).expect("valid sealed attempt fixture")
+            ).is_empty());
+        }
+    }
 
     #[test]
     fn semantic_owner_stable_wrapper_accepts_declared_public_wrapper() {

@@ -33,9 +33,13 @@ pub struct AccountSetupOverlayProps {
     pub visible: bool,
     pub nickname_suggestion: String,
     pub device_import_code: String,
+    pub device_import_manifest: String,
+    pub device_import_initiator_verifier: String,
     pub bootstrap_candidates: Vec<String>,
     pub name_focused: bool,
     pub import_code_focused: bool,
+    pub import_manifest_focused: bool,
+    pub import_initiator_verifier_focused: bool,
     pub creating: bool,
     pub show_spinner: bool,
     pub success: bool,
@@ -164,6 +168,10 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                 visible: true,
                 nickname_suggestion: global.account_setup.nickname_suggestion.clone(),
                 device_import_code: global.account_setup.device_import_code.clone(),
+                device_import_manifest:global.account_setup.device_import_manifest.clone(),
+                device_import_initiator_verifier:global.account_setup.device_import_initiator_verifier.clone(),
+                import_manifest_focused:global.account_setup.import_manifest_focused,
+                import_initiator_verifier_focused:global.account_setup.import_initiator_verifier_focused,
                 bootstrap_candidates: global.account_setup.bootstrap_candidates.clone(),
                 name_focused: global.account_setup.name_focused,
                 import_code_focused: global.account_setup.import_code_focused,
@@ -562,14 +570,14 @@ fn add_device_modal_body(modal: &AddDeviceModalViewProps) -> AnyElement<'static>
             .with_value(modal.name.clone())
             .with_focused(!modal.invitee_focused);
     let invitee_props = crate::tui::components::LabeledInputProps::new(
-        "New device's authority ID",
-        "Shown on the new device",
+        "New device's setup code",
+        "Export on the new device, then paste here",
     )
-    .with_value(modal.invitee_authority_id.clone())
+    .with_value(modal.setup_code.clone())
     .with_focused(modal.invitee_focused);
 
     let header_props = crate::tui::components::ModalHeaderProps::new("Add Device — Step 1 of 3")
-        .with_subtitle("This is the device you're inviting (not the current device).");
+        .with_subtitle("Transfer the setup code from the new device.");
     let footer_props = crate::tui::components::ModalFooterProps::new(vec![
         crate::tui::types::KeyHint::new("Esc", "Cancel"),
         crate::tui::types::KeyHint::new("Tab", "Switch field"),
@@ -605,16 +613,28 @@ fn add_device_modal_body(modal: &AddDeviceModalViewProps) -> AnyElement<'static>
 
 pub fn render_device_import_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
     let modal = &settings.modals.device_import;
-    render_text_input_modal(TextInputOverlayProps {
-        visible: modal.visible,
-        focused: true,
-        title: "Import Device Enrollment Code".to_string(),
-        value: modal.code.clone(),
-        placeholder: "Paste enrollment code...".to_string(),
-        hint: "Used by the new device to join this account".to_string(),
-        error: String::new(),
-        submitting: false,
-    })
+    let fields = [
+        ("Enrollment code", &modal.code),
+        ("Signed manifest", &modal.manifest_code),
+        (
+            "Initiator verifier (separate transfer)",
+            &modal.initiator_verifier_code,
+        ),
+    ];
+    render_modal(modal.visible,element! {
+        View(flex_direction:FlexDirection::Column,padding:Spacing::MODAL_PADDING) {
+            Text(content:"Import Device Enrollment",weight:Weight::Bold,color:Theme::PRIMARY)
+            #(fields.iter().enumerate().map(|(index,(label,value))| {
+                element! {
+                    View(flex_direction:FlexDirection::Column,margin_top:Spacing::SM) {
+                        Text(content:format!("{}{}",if modal.focused_input==index {"> "}else{"  "},label),color:Theme::TEXT_MUTED)
+                        Text(content:value.to_string(),color:Theme::PRIMARY)
+                    }
+                }.into_any()
+            }).collect::<Vec<_>>())
+            Text(content:"Tab: next input • Enter: import all three values",color:Theme::TEXT_MUTED)
+        }
+    }.into_any())
 }
 
 pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
@@ -625,7 +645,8 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
             DeviceEnrollmentModal(
                 visible: true,
                 nickname_suggestion: modal.nickname_suggestion.clone(),
-                enrollment_code: modal.code.clone(),
+                enrollment_code:modal.code.clone(),
+                manifest_transfer:modal.manifest_transfer.clone(),
                 accepted_count: modal.accepted_count,
                 total_count: modal.total_count,
                 threshold: modal.threshold,
@@ -812,15 +833,15 @@ mod tests {
         let modal = AddDeviceModalViewProps {
             visible: true,
             name: "Laptop".to_string(),
-            invitee_authority_id: String::new(),
+            setup_code: String::new(),
             invitee_focused: true,
-            error: "Enter the new device's authority ID".to_string(),
+            error: "Enter the new device's setup code".to_string(),
         };
         let rendered = add_device_modal_body(&modal).to_string();
         assert!(rendered.contains("Device name"), "{rendered}");
-        assert!(rendered.contains("authority ID"), "{rendered}");
+        assert!(rendered.contains("setup code"), "{rendered}");
         assert!(
-            rendered.contains("Enter the new device's authority ID"),
+            rendered.contains("Enter the new device's setup code"),
             "{rendered}"
         );
     }

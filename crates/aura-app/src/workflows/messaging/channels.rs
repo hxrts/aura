@@ -2,7 +2,7 @@ use super::*;
 use crate::workflows::error;
 use crate::workflows::parse::parse_context_id;
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Error)]
 pub(super) enum JoinChannelError {
     #[error("JoinChannel requires an authoritative context for channel {channel_id}")]
     MissingAuthoritativeContext { channel_id: ChannelId },
@@ -10,6 +10,8 @@ pub(super) enum JoinChannelError {
     Transport {
         channel_id: ChannelId,
         detail: String,
+        #[source]
+        source: AuraError,
     },
 }
 
@@ -19,17 +21,30 @@ impl JoinChannelError {
             Self::MissingAuthoritativeContext { channel_id } => {
                 AuraError::not_found(channel_id.to_string())
             }
-            Self::Transport {
-                channel_id: _,
-                detail,
-            } => error::runtime_call("join channel transport", detail).into(),
+            transport @ Self::Transport { .. } => {
+                error::runtime_call("join channel transport", transport).into()
+            }
         }
     }
 
     fn semantic_error(&self) -> SemanticOperationError {
         SemanticOperationError::new(
             SemanticFailureDomain::Command,
-            SemanticFailureCode::InternalError,
+            match self {
+                Self::MissingAuthoritativeContext { .. } => {
+                    SemanticFailureCode::MissingAuthoritativeContext
+                }
+                Self::Transport { source, .. } => crate::workflows::moderation::denial_from_error(
+                    source,
+                )
+                .map(|denial| denial.semantic_code())
+                .or_else(|| {
+                    crate::workflows::runtime_error_classification::native_runtime_failure_code(
+                        source,
+                    )
+                })
+                .unwrap_or(SemanticFailureCode::InternalError),
+            },
         )
         .with_detail(self.to_string())
     }
@@ -449,9 +464,7 @@ async fn join_channel_with_name_hint(
 
     enforce_home_join_allowed(app_core, context_id, channel_id, runtime.authority_id()).await?;
 
-    let canonical_state_exists = runtime_channel_state_exists(&runtime, channel)
-        .await
-        .unwrap_or(false);
+    let canonical_state_exists = runtime_channel_state_exists(&runtime, channel).await?;
     if !canonical_state_exists {
         if let Err(error) = timeout_runtime_call(
             &runtime,
@@ -466,23 +479,19 @@ async fn join_channel_with_name_hint(
                 })
             },
         )
-        .await
-        .map_err(|error| AuraError::internal(error.to_string()))?
+        .await?
         {
-            let canonical_state_exists = runtime_channel_state_exists(&runtime, channel)
-                .await
-                .unwrap_or(false);
+            let canonical_state_exists = runtime_channel_state_exists(&runtime, channel).await?;
             if intent_error_is_not_found(&error) && !canonical_state_exists {
                 return Err(
                     JoinChannelError::MissingAuthoritativeContext { channel_id }.into_aura_error()
                 );
             }
-            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists
-                && !canonical_state_exists
             {
                 return Err(JoinChannelError::Transport {
                     channel_id,
                     detail: error.to_string(),
+                    source: error::runtime_call("amp join channel", error).into(),
                 }
                 .into_aura_error());
             }
@@ -566,6 +575,7 @@ async fn join_channel_authoritative(
             _ => JoinChannelError::Transport {
                 channel_id,
                 detail: error.to_string(),
+                source: error,
             },
         };
         return fail_join_channel(owner, join_error).await;

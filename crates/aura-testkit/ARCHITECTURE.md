@@ -28,6 +28,10 @@ Shared testing infrastructure providing test fixtures, effect system harnesses, 
 - Must NOT be imported by Layer 1-3 crates (would create circular dependencies).
 - May be imported by Layer 4-7 in `[dev-dependencies]` only.
 - Tests are deterministic and isolated.
+- Actual runtime clock-fault and ownership fixtures may inject `ManualPhysicalClock`.
+  Its sleeps remain pending until an explicit physical observation reaches the
+  original target; background services cannot advance the test clock by sleeping.
+  Deliberate rollback remains visible to production timeout validation.
 - Mock effects behave consistently with production ones.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
 - Host-only helpers must be explicit and local; shared or wasm-exercised test surfaces must stay aligned with the same async-trait and boundary contracts as production.
@@ -94,6 +98,9 @@ Contract alignment:
 - stateful effect doubles may expose mutation for deterministic control, but those shortcuts must not become production-facing backdoors
 - mock transport/journal/time helpers should preserve the same capability and ownership semantics the production code expects to consume
 
+- Mock acceptance and time APIs mirror the native `RuntimeBridgeError` contract;
+  fixtures cannot silently convert native causes back into foreign diagnostics.
+
 ## Testing
 
 ### Strategy
@@ -131,3 +138,11 @@ cargo test -p aura-testkit
 
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Testing Guide](../../docs/804_testing_guide.md)
+
+### Native identity query failures
+
+The mock runtime bridge implements the native identity/settings `RuntimeBridgeError` contracts directly; mock success does not change production readiness or canonical device materialization rules.
+
+### Manual physical runtime clock
+
+`ManualPhysicalClock` is a shared injected physical-time provider for real runtime/ceremony fixtures. Sleep remains pending until the test explicitly publishes an observation that reaches the original sleep deadline. Tests can publish rollback without masking it. The provider does not advance time during sleep, avoiding background-service loops that silently consume ceremony budgets. Enrollment fixtures must obtain actual setup pins and held generation reservations; test clock control does not authorize registration or activation.

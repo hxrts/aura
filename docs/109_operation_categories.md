@@ -407,6 +407,47 @@ messages; a conflicting later result cannot replace it. Failure and cancellation
 carry stable, typed reasons independently of display text. An unauthenticated
 response cannot terminate a valid ceremony.
 
+An enrollment request must match the issued invitation's subject authority,
+invitation, ceremony, target device and pending epoch. Successful confirmation
+must identify that same invitation and ceremony, explicitly establish enrollment,
+and carry the expected resulting epoch. A mismatch is a typed failure rather than
+an observation of completion. Matching message contents alone does not establish
+authentication or commit provenance.
+
+Enrollment setup statements bind the exporting authority, physical device,
+request nonce, bounded validity interval, signing epoch, signing mode, threshold
+policy and public key package in a dedicated canonical signing transcript.
+Possession verification requires the proof's epoch and package to match that
+statement and produces sealed, non-deserializable evidence. This evidence
+certifies possession of the embedded key only. Association with the intended
+physical device requires explicit user transfer or an independently authenticated
+binding; decoding or self-certification cannot establish that association.
+
+The initiator retains the selected setup statement and digest with its subject,
+ceremony, pending epoch and physical initiator before admitting response owners.
+Enrollment acceptance requires proof under that retained provisional package,
+epoch, mode and signer policy. A missing verifier record, unknown record version,
+corrupt binding or response-supplied substitute key cannot count a participant.
+The setup expiry gates issuance; an admitted response remains subject to the
+invitation and ceremony deadline. Persisted verifier selection alone does not
+prove baseline authentication, authenticated refusal, nonce consumption,
+first-decision persistence or atomic activation.
+
+Issuance reserves its invitation identity before fact preparation or delivery.
+The reservation has one physical issuer and is consumed by the preparation
+owner. The complete signed payload binds that identity before publication;
+later payload repair cannot change an already committed invitation. Invalid
+or overflowing expiration fails before preparation mutates authoritative state.
+
+A signed setup admission includes the setup nonce/digest, both device identities,
+subject and provisional authority, invitation/ceremony, pending epoch, manifest
+digest and exact-parent verifier inventory digest. Its expected verification key
+comes from the independently pinned manifest inventory at the exact prestate;
+the pending enrollment package and the receipt's embedded key are insufficient.
+Signature-only evidence remains separate from authenticated admission provenance.
+An invitee response owner requires that provenance and locally owned admission
+and revocation state before selecting a retained historical signing share.
+
 ### 6.5 Unified Consistency Type
 
 For cross-category queries and generic handling:
@@ -653,3 +694,16 @@ Right: Channel creation is optimistic. Show immediately, sync status later.
 - [MPST and Choreography](110_mpst_and_choreography.md) for session types in Category C
 - [Transport and Information Flow](111_transport_and_information_flow.md) for sync status tracking
 - [Effect System](103_effect_system.md) for effect policies
+
+### Enrollment manifest ownership
+
+Exporting setup or manifest transfer material is read-only with respect to enrollment business state. Invitation reservation and pending generation ownership precede key writes; signed manifest retention precedes invitation publication. Import admission requires the app-issued explicit transfer selection and produces a runtime-private, non-deserializable witness. The bootstrap session consumes that witness without changing global transport identity or durable membership. Enrollment acceptance and activation require their separate verified response and registered generation permissions.
+
+The app owns the complete manifest-pin, import, acceptance, and convergence lifecycle under one `ImportDeviceEnrollmentCode` operation. Frontends transfer submission ownership before the first awaited workflow step. Missing transfer input is a typed terminal failure before import mutation. Browser persistence consumes only the app-issued completed enrollment result after acceptance and adoption; received authority/device identifiers cannot stage that result.
+
+Enrollment invitee adoption is the application of an authenticated committed
+ceremony result. Its local persistence and signing-context activation consume
+runtime-owned durable confirmation evidence for the exact imported generation.
+They are not independent agreement operations, and local accepted status or
+receipt locator fields do not authorize adoption. Generic key-rotation commit
+is not an alternate enrollment activation path.

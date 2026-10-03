@@ -127,28 +127,6 @@ pub(crate) fn selected_contact_for_modal(
         .cloned()
 }
 
-pub(crate) fn next_device_enrollment_invitee_authority_id(
-    controller: &UiController,
-    device_name: &str,
-) -> AuthorityId {
-    if let Some(authority_id) = controller
-        .ui_model()
-        .and_then(|model| model.demo_device_invitee_authority_id(device_name))
-    {
-        return authority_id;
-    }
-
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let seed = format!(
-        "ui-add-device:{}:{}:{}",
-        controller.authority_id(),
-        device_name,
-        seq
-    );
-    AuthorityId::new_from_entropy(hash(seed.as_bytes()))
-}
-
 pub(crate) fn monitor_runtime_device_enrollment_ceremony(
     controller: Arc<UiController>,
     app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
@@ -361,6 +339,7 @@ enum SimpleModalSubmitAction {
     CreateHome,
     AcceptContactInvitation,
     AcceptChannelInvitation,
+    ImportDeviceEnrollment,
     CreateInvitation,
     EditNickname,
     RemoveContact,
@@ -455,7 +434,7 @@ fn classify_modal_submit(
             SimpleModalSubmitAction::AcceptChannelInvitation,
         )),
         Some(ModalState::ImportDeviceEnrollmentCode) => Some(ModalSubmitClass::SimpleDispatch(
-            SimpleModalSubmitAction::AcceptContactInvitation,
+            SimpleModalSubmitAction::ImportDeviceEnrollment,
         )),
         Some(ModalState::CreateInvitation) => Some(ModalSubmitClass::SimpleDispatch(
             SimpleModalSubmitAction::CreateInvitation,
@@ -516,14 +495,18 @@ fn submit_wizard_modal_action(
     action: WizardModalSubmitAction,
     current_model: Option<UiModel>,
     add_device_ceremony_id: Option<CeremonyId>,
-    modal_buffer: String,
     contacts_runtime: ContactsRuntimeView,
     settings_runtime: SettingsRuntimeView,
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) -> bool {
     match action {
         WizardModalSubmitAction::StartAddDevice => {
-            let name = modal_buffer.trim().to_string();
+            let Some(state) = current_model.as_ref().and_then(UiModel::add_device_modal) else {
+                controller.runtime_error_toast("Device setup input is unavailable");
+                rerender();
+                return true;
+            };
+            let name = state.name_input.trim().to_string();
             if name.is_empty() {
                 controller.runtime_error_toast("Device name is required");
                 rerender();
@@ -537,13 +520,12 @@ fn submit_wizard_modal_action(
             );
             let app_core = controller.app_core().clone();
             let rerender_for_start = rerender.clone();
-            let invitee_authority_id =
-                next_device_enrollment_invitee_authority_id(&controller, &name);
+            let setup_code = state.setup_code_input.trim().to_owned();
             spawn_ui(async move {
-                match ceremony_workflows::start_device_enrollment_ceremony(
+                match ceremony_workflows::start_device_enrollment_ceremony_from_setup_code(
                     &app_core,
                     name.clone(),
-                    invitee_authority_id,
+                    setup_code,
                 )
                 .await
                 {
@@ -556,6 +538,7 @@ fn submit_wizard_modal_action(
                         controller.complete_runtime_device_enrollment_started(
                             &name,
                             &start.enrollment_code,
+                            start.manifest_transfer.clone(),
                         );
                         monitor_runtime_device_enrollment_ceremony(
                             controller.clone(),
@@ -838,6 +821,54 @@ fn submit_simple_modal_action(
     rerender: Arc<dyn Fn() + Send + Sync>,
 ) -> bool {
     match action {
+        SimpleModalSubmitAction::ImportDeviceEnrollment => {
+            let Some(ActiveModal::ImportDeviceEnrollmentCode(input)) =
+                current_model.and_then(|model| model.active_modal)
+            else {
+                controller.runtime_error_toast("Device enrollment import form is unavailable");
+                rerender();
+                return true;
+            };
+            if !input.can_submit() {
+                controller.runtime_error_toast("Enrollment code, signed manifest, and separate initiator verifier are required");
+                rerender();
+                return true;
+            }
+            let operation = UiWorkflowHandoffOwner::submit(
+                controller.clone(),
+                OperationId::device_enrollment(),
+                SemanticOperationKind::ImportDeviceEnrollmentCode,
+            );
+            let instance = operation.workflow_instance_id();
+            let transfer =
+                operation.handoff_to_app_workflow(UiOperationTransferScope::ImportDeviceEnrollment);
+            let app = controller.app_core().clone();
+            spawn_ui(async move {
+                let outcome = transfer
+                    .run_workflow(
+                        controller.clone(),
+                        "import_device_enrollment",
+                        invitation_workflows::import_device_enrollment_with_terminal_status(
+                            &app,
+                            input.value,
+                            Some(aura_app::ui::contract::EnrollmentManifestTransferInput {
+                                manifest_code: input.manifest_code,
+                                initiator_verifier_code: input.initiator_verifier_code,
+                            }),
+                            instance,
+                        ),
+                    )
+                    .await;
+                match outcome {
+                    Ok(_) => controller.info_toast("Device enrollment accepted"),
+                    Err(error) => {
+                        controller.runtime_error_toast(format!("Device enrollment failed: {error}"))
+                    }
+                }
+                rerender();
+            });
+            true
+        }
         SimpleModalSubmitAction::CreateHome => {
             let name = modal_text_value.trim().to_string();
             if name.is_empty() {
@@ -1544,7 +1575,6 @@ pub(crate) fn submit_runtime_modal_action(
             action,
             current_model,
             add_device_ceremony_id,
-            modal_buffer,
             contacts_runtime,
             settings_runtime,
             rerender,

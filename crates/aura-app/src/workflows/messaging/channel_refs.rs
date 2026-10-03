@@ -395,6 +395,30 @@ pub(crate) async fn require_authoritative_channel_ref(
     })
 }
 
+pub(in crate::workflows) async fn runtime_amp_duplicate_is_reconciled(
+    runtime: &Arc<dyn RuntimeBridge>,
+    error: &(impl std::error::Error + 'static),
+    context: ContextId,
+    channel: ChannelId,
+) -> Result<bool, AuraError> {
+    if super::super::runtime_error_classification::classify_amp_channel_error(
+        error, context, channel,
+    ) != super::super::runtime_error_classification::AmpChannelErrorClass::AlreadyExists
+    {
+        return Ok(false);
+    }
+    timeout_runtime_call(
+        runtime,
+        "reconcile AMP duplicate",
+        "amp_channel_state_exists",
+        MESSAGING_RUNTIME_QUERY_TIMEOUT,
+        || runtime.amp_channel_state_exists(context, channel),
+    )
+    .await
+    .map_err(|error| super::super::error::runtime_call("reconcile AMP duplicate", error))?
+    .map_err(|error| super::super::error::runtime_call("reconcile AMP duplicate", error).into())
+}
+
 pub(in crate::workflows) async fn runtime_channel_state_exists(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,

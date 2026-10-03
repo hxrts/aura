@@ -4,10 +4,62 @@
 
 use aura_core::effects::{
     VmBridgeBlockedEdge, VmBridgeEffects, VmBridgeLeaseMetadataSnapshot, VmBridgePendingSend,
-    VmBridgeSchedulerSignals, VmBridgeTransferMetadataSnapshot,
+    VmBridgeSchedulerSignals, VmBridgeSendError, VmBridgeSendLease,
+    VmBridgeTransferMetadataSnapshot,
 };
 use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard};
+
+#[derive(Debug, Default)]
+struct PendingSendQueue {
+    frames: VecDeque<VmBridgePendingSend>,
+    owned: bool,
+    unknown: bool,
+}
+
+struct PendingSendLease<'a> {
+    queue: &'a Mutex<PendingSendQueue>,
+    front: Option<VmBridgePendingSend>,
+    in_flight: bool,
+}
+
+impl VmBridgeSendLease for PendingSendLease<'_> {
+    fn pending(&self) -> Option<&VmBridgePendingSend> {
+        self.front.as_ref()
+    }
+    fn begin_delivery(&mut self) -> Result<(), VmBridgeSendError> {
+        if self.in_flight || self.front.is_none() {
+            return Err(VmBridgeSendError::InvalidTransition);
+        }
+        self.in_flight = true;
+        Ok(())
+    }
+    fn acknowledge(&mut self) -> Result<(), VmBridgeSendError> {
+        if !self.in_flight {
+            return Err(VmBridgeSendError::InvalidTransition);
+        }
+        let mut queue = lock_unpoisoned(self.queue);
+        queue.frames.pop_front();
+        self.front = queue.frames.front().cloned();
+        self.in_flight = false;
+        Ok(())
+    }
+    fn definitely_unsent(&mut self) -> Result<(), VmBridgeSendError> {
+        if !self.in_flight {
+            return Err(VmBridgeSendError::InvalidTransition);
+        }
+        self.in_flight = false;
+        Ok(())
+    }
+}
+
+impl Drop for PendingSendLease<'_> {
+    fn drop(&mut self) {
+        let mut queue = lock_unpoisoned(self.queue);
+        queue.unknown |= self.in_flight;
+        queue.owned = false;
+    }
+}
 
 /// Production in-memory implementation of the synchronous VM bridge effect surface.
 #[derive(Debug, Default)]
@@ -15,7 +67,7 @@ pub struct VmBridgeState {
     outbound_payloads: Mutex<VecDeque<Vec<u8>>>,
     inbound_payloads: Mutex<VecDeque<Vec<u8>>>,
     branch_choices: Mutex<VecDeque<String>>,
-    pending_sends: Mutex<VecDeque<VmBridgePendingSend>>,
+    pending_sends: Mutex<PendingSendQueue>,
     blocked_edge: Mutex<Option<VmBridgeBlockedEdge>>,
     scheduler_signals: Mutex<VmBridgeSchedulerSignals>,
 }
@@ -59,11 +111,31 @@ impl VmBridgeEffects for VmBridgeState {
     }
 
     fn record_pending_send(&self, send: VmBridgePendingSend) {
-        lock_unpoisoned(&self.pending_sends).push_back(send);
+        lock_unpoisoned(&self.pending_sends).frames.push_back(send);
     }
 
-    fn drain_pending_sends(&self) -> Vec<VmBridgePendingSend> {
-        lock_unpoisoned(&self.pending_sends).drain(..).collect()
+    fn pending_send_snapshot(&self) -> Vec<VmBridgePendingSend> {
+        lock_unpoisoned(&self.pending_sends)
+            .frames
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    fn lease_pending_sends(&self) -> Result<Box<dyn VmBridgeSendLease + '_>, VmBridgeSendError> {
+        let mut queue = lock_unpoisoned(&self.pending_sends);
+        if queue.unknown {
+            return Err(VmBridgeSendError::DeliveryUnknown);
+        }
+        if queue.owned {
+            return Err(VmBridgeSendError::AlreadyOwned);
+        }
+        queue.owned = true;
+        Ok(Box::new(PendingSendLease {
+            queue: &self.pending_sends,
+            front: queue.frames.front().cloned(),
+            in_flight: false,
+        }))
     }
 
     fn set_blocked_edge(&self, edge: Option<VmBridgeBlockedEdge>) {
@@ -105,10 +177,89 @@ mod tests {
             payload: vec![1, 2, 3],
         });
 
-        let drained = state.drain_pending_sends();
+        let drained = state.pending_send_snapshot();
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].payload, vec![1, 2, 3]);
-        assert!(state.drain_pending_sends().is_empty());
+        let mut lease = state.lease_pending_sends().unwrap();
+        lease.begin_delivery().unwrap();
+        lease.acknowledge().unwrap();
+        assert!(state.pending_send_snapshot().is_empty());
+    }
+
+    #[test]
+    fn delivery_lease_retains_order_and_requires_acknowledgment() {
+        let state = VmBridgeState::new();
+        let frame = |value| VmBridgePendingSend {
+            payload: vec![value],
+            ..Default::default()
+        };
+        state.record_pending_send(frame(1));
+        state.record_pending_send(frame(2));
+        let mut lease = state.lease_pending_sends().unwrap();
+        assert!(matches!(
+            state.lease_pending_sends(),
+            Err(VmBridgeSendError::AlreadyOwned)
+        ));
+        assert!(matches!(
+            lease.acknowledge(),
+            Err(VmBridgeSendError::InvalidTransition)
+        ));
+        lease.begin_delivery().unwrap();
+        state.record_pending_send(frame(3));
+        lease.acknowledge().unwrap();
+        lease.begin_delivery().unwrap();
+        lease.definitely_unsent().unwrap();
+        drop(lease);
+        assert_eq!(state.pending_send_snapshot(), vec![frame(2), frame(3)]);
+        let lease = state.lease_pending_sends().unwrap();
+        assert_eq!(lease.pending(), Some(&frame(2)));
+    }
+
+    #[test]
+    fn cancelled_delivery_retains_frame_and_prevents_automatic_replay() {
+        let state = VmBridgeState::new();
+        let frame = VmBridgePendingSend {
+            payload: vec![9],
+            ..Default::default()
+        };
+        state.record_pending_send(frame.clone());
+        let mut lease = state.lease_pending_sends().unwrap();
+        lease.begin_delivery().unwrap();
+        drop(lease);
+        assert_eq!(state.pending_send_snapshot(), vec![frame]);
+        assert!(matches!(
+            state.lease_pending_sends(),
+            Err(VmBridgeSendError::DeliveryUnknown)
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancelling_an_awaited_delivery_future_retains_unknown_outcome() {
+        let state = VmBridgeState::new();
+        let frame = VmBridgePendingSend {
+            payload: vec![7],
+            ..Default::default()
+        };
+        state.record_pending_send(frame.clone());
+        {
+            let delivery = async {
+                let mut lease = state.lease_pending_sends().unwrap();
+                lease.begin_delivery().unwrap();
+                std::future::pending::<()>().await;
+                lease.acknowledge().unwrap();
+            };
+            tokio::pin!(delivery);
+            tokio::select! {
+                biased;
+                _ = &mut delivery => panic!("delivery must remain in flight"),
+                _ = std::future::ready(()) => {}
+            }
+        }
+        assert_eq!(state.pending_send_snapshot(), vec![frame]);
+        assert!(matches!(
+            state.lease_pending_sends(),
+            Err(VmBridgeSendError::DeliveryUnknown)
+        ));
     }
 
     #[test]

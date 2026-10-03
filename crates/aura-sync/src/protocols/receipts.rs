@@ -59,7 +59,8 @@ pub struct Receipt {
     /// Canonical receipt schema version bound into the transcript.
     pub protocol_version: u16,
 
-    /// Test-only self-supplied key material retained for negative tests.
+    /// Test-only untrusted key material retained for negative tests; it cannot
+    /// resolve the signing device identity or authorize receipt acceptance.
     #[cfg(test)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub legacy_untrusted_public_key: Vec<u8>,

@@ -24,7 +24,7 @@ pub(super) fn handle_settings_char(model: &mut UiModel, ch: char) {
         'i' if matches!(model.settings_section, SettingsSection::Devices) => {
             model.modal_hint = "Import Device Enrollment Code".to_string();
             model.active_modal = Some(ActiveModal::ImportDeviceEnrollmentCode(
-                TextModalState::default(),
+                crate::model::EnrollmentImportModalState::default(),
             ));
         }
         'r' if matches!(model.settings_section, SettingsSection::Devices) => {

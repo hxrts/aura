@@ -31,6 +31,23 @@ pub enum AgentError {
     #[error("Agent timeout error: {0}")]
     Timeout(String),
 
+    /// Timeout retaining the actual typed failure while preserving its category.
+    #[error("Agent timeout error: {message}")]
+    TimeoutWithSource {
+        /// Diagnostic operation detail.
+        message: String,
+        /// Original timeout or protocol deadline failure.
+        #[source]
+        source: AuraError,
+    },
+
+    /// An enrollment message does not match the invitation-owned postcondition.
+    #[error("Device enrollment message error: {0}")]
+    DeviceEnrollmentMessage(#[from] aura_invitation::protocol::DeviceEnrollmentMessageError),
+    /// Independent manifest admission preserves its typed failure and sources.
+    #[error("Enrollment manifest admission failed: {0}")]
+    EnrollmentManifest(#[from] aura_invitation::enrollment_manifest::EnrollmentManifestError),
+
     /// A known authority is not yet bound to the claimed sender device key.
     #[error("known sender {authority} has unresolved device binding for {device}: {source}")]
     UnresolvedDeviceBinding {
@@ -52,6 +69,12 @@ pub enum AgentError {
 pub type AgentResult<T> = std::result::Result<T, AgentError>;
 
 impl AgentError {
+    /// Inspect the typed timeout category without parsing diagnostic text.
+    #[must_use]
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout(_) | Self::TimeoutWithSource { .. })
+    }
+
     /// Create a configuration error
     pub fn config(msg: impl Into<String>) -> Self {
         Self::Config(msg.into())

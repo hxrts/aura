@@ -96,6 +96,18 @@ pub mod identifiers;
 pub mod leakage;
 pub mod network_monitor;
 pub mod noise;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd"
+))]
+mod platform_namespace;
+#[cfg(unix)]
+mod profile_directory;
+pub mod profile_storage;
 pub mod query;
 pub mod random;
 pub mod reactive;

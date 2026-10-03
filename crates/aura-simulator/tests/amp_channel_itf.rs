@@ -9,30 +9,17 @@ use aura_simulator::quint::{
 };
 
 #[tokio::test]
-#[ignore = "requires local ITF trace artifact; re-enable when artifacts/traces/amp_channel.itf.json is regenerated for the current simulator contract"]
 async fn replay_amp_channel_lifecycle_trace() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|path| path.parent())
         .expect("missing manifest ancestors");
-    let preferred = workspace_root.join("artifacts/traces/amp_channel.itf.json");
-    let legacy = workspace_root.join("traces/amp_channel.itf.json");
-    let trace_path = if preferred.exists() {
-        preferred
-    } else {
-        legacy
-    };
-
-    if !trace_path.exists() {
-        println!("Skipping: AMP channel trace not found at {trace_path:?}");
-        return;
-    }
+    let trace_path = workspace_root.join("verification/quint/traces/amp_channel.itf.json");
 
     let trace = ITFLoader::load_from_file(&trace_path).expect("failed to load AMP trace");
 
-    let base_dir =
-        std::env::temp_dir().join(format!("aura-amp-channel-itf-{}", std::process::id()));
-    let harness = AmpChannelHarness::new(2025, base_dir)
+    let storage = tempfile::tempdir().expect("isolated AMP replay storage");
+    let harness = AmpChannelHarness::new(2025, storage.path().to_path_buf())
         .await
         .expect("failed to build AMP harness");
     let registry = amp_channel_registry(harness);

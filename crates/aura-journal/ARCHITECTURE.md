@@ -210,3 +210,7 @@ cargo test -p aura-journal --lib               # inline unit tests
 - [Project Structure](../../docs/999_project_structure.md) — fact pattern selection, invariant traceability
 - [Ownership Model](../../docs/122_ownership_model.md) — ownership taxonomy
 - [Testing Guide](../../docs/804_testing_guide.md) — test patterns and ownership testing requirements
+
+## AMP checkpoint evidence
+
+`ChannelEpochState::canonical_checkpoint` contains the reducer-selected checkpoint or is absent when only policies, bootstrap metadata, or transitions have arrived. Partial epoch entries remain staged observations and cannot establish channel materialization. Checkpoint data is observed journal content; it is not a capability or a journal-issued commit-provenance token.

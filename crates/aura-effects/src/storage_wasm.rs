@@ -13,6 +13,8 @@ use web_sys::{window, Storage};
 #[derive(Debug, Clone)]
 pub struct FilesystemStorageHandler {
     namespace: String,
+    profile_path: PathBuf,
+    profile_owner: Option<std::sync::Arc<crate::profile_storage::OwnedProfileLease>>,
 }
 
 impl FilesystemStorageHandler {
@@ -21,7 +23,26 @@ impl FilesystemStorageHandler {
         let path_str = base_path.to_string_lossy();
         let digest = aura_core::hash::hash(path_str.as_bytes());
         let namespace = format!("aura_storage_{}", hex::encode(&digest[..8]));
-        Self { namespace }
+        Self {
+            namespace,
+            profile_path: base_path,
+            profile_owner: None,
+        }
+    }
+
+    pub fn retain_profile_owner(
+        mut self,
+        owner: std::sync::Arc<crate::profile_storage::OwnedProfileLease>,
+    ) -> Result<Self, aura_core::effects::profile_storage::ProfileStorageError> {
+        if !owner.matches_profile(&self.profile_path)? {
+            return Err(
+                aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                    "browser writer differs from selected profile".into(),
+                ),
+            );
+        }
+        self.profile_owner = Some(owner);
+        Ok(self)
     }
 
     /// Alias for clarity; avoids relying on `new` naming in higher layers.

@@ -184,8 +184,8 @@ impl AuraQueuedVmBridgeHandler {
         self.bridge_effects.enqueue_outbound_payload(payload);
     }
 
-    pub fn drain_pending_sends(&self) -> Vec<VmBridgePendingSend> {
-        self.bridge_effects.drain_pending_sends()
+    pub fn pending_send_snapshot(&self) -> Vec<VmBridgePendingSend> {
+        self.bridge_effects.pending_send_snapshot()
     }
 
     pub fn push_choice_label(&self, label: impl Into<String>) {
@@ -620,27 +620,79 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
     open_result
 }
 
+/// Native VM bridge failures retain their cause for owner retry decisions.
+#[derive(Debug, thiserror::Error)]
+pub enum AuraVmBridgeRoundError {
+    #[error("missing peer mapping for VM send target role {role}")]
+    MissingPeer { role: String },
+    #[error("VM send custody failed: {source}")]
+    SendCustody {
+        #[source]
+        source: aura_core::effects::VmBridgeSendError,
+    },
+    #[error("{active_role} VM step failed: {source}")]
+    Step {
+        active_role: String,
+        #[source]
+        source: crate::runtime::AuraChoreoEngineError,
+    },
+    #[error("failed to bridge VM send {from_role}->{to_role}:{label}: {source}")]
+    Send {
+        from_role: String,
+        to_role: String,
+        label: String,
+        #[source]
+        source: ChoreographyError,
+    },
+    #[error("{active_role} VM receive failed: {source}")]
+    Receive {
+        active_role: String,
+        #[source]
+        source: ChoreographyError,
+    },
+}
+
 pub async fn flush_pending_vm_sends(
     effects: &AuraEffectSystem,
     handler: &AuraQueuedVmBridgeHandler,
     peer_roles: &BTreeMap<String, ChoreographicRole>,
-) -> Result<(), String> {
-    for pending in handler.drain_pending_sends() {
+) -> Result<(), AuraVmBridgeRoundError> {
+    let mut lease = handler
+        .bridge_effects
+        .lease_pending_sends()
+        .map_err(|source| AuraVmBridgeRoundError::SendCustody { source })?;
+    while let Some(pending) = lease.pending().cloned() {
         let peer_role = peer_roles.get(&pending.to_role).copied().ok_or_else(|| {
-            format!(
-                "missing peer mapping for VM send target role {}",
-                pending.to_role
-            )
+            AuraVmBridgeRoundError::MissingPeer {
+                role: pending.to_role.clone(),
+            }
         })?;
-        effects
-            .send_to_role_bytes(peer_role, pending.payload)
-            .await
-            .map_err(|error| {
-                format!(
-                    "failed to bridge VM send {}->{}:{}: {error}",
-                    pending.from_role, pending.to_role, pending.label
-                )
-            })?;
+        lease
+            .begin_delivery()
+            .map_err(|source| AuraVmBridgeRoundError::SendCustody { source })?;
+        match effects.send_to_role_bytes(peer_role, pending.payload).await {
+            Ok(()) => lease
+                .acknowledge()
+                .map_err(|source| AuraVmBridgeRoundError::SendCustody { source })?,
+            Err(source) => {
+                // Only a native definitely-unsent outcome can leave replay admissible.
+                if matches!(&source, ChoreographyError::SessionNotStarted)
+                    || matches!(&source, ChoreographyError::Transport { source }
+                        if matches!(source.downcast_ref::<aura_core::effects::TransportError>(),
+                            Some(aura_core::effects::TransportError::DestinationUnreachable { .. })))
+                {
+                    lease
+                        .definitely_unsent()
+                        .map_err(|source| AuraVmBridgeRoundError::SendCustody { source })?;
+                }
+                return Err(AuraVmBridgeRoundError::Send {
+                    from_role: pending.from_role,
+                    to_role: pending.to_role,
+                    label: pending.label,
+                    source,
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -652,15 +704,21 @@ pub async fn advance_host_bridged_vm_round(
     sid: SessionId,
     active_role: &str,
     peer_roles: &BTreeMap<String, ChoreographicRole>,
-) -> Result<AuraVmBridgeRound, String> {
+) -> Result<AuraVmBridgeRound, AuraVmBridgeRoundError> {
     let step = engine
         .step()
-        .map_err(|error| format!("{active_role} VM step failed: {error}"))?;
+        .map_err(|source| AuraVmBridgeRoundError::Step {
+            active_role: active_role.to_owned(),
+            source,
+        })?;
     flush_pending_vm_sends(effects, handler, peer_roles).await?;
     let (blocked_receive, host_wait_status) =
         classify_blocked_receive(effects, engine.vm(), sid, active_role, peer_roles)
             .await
-            .map_err(|error| format!("{active_role} VM receive failed: {error}"))?;
+            .map_err(|source| AuraVmBridgeRoundError::Receive {
+                active_role: active_role.to_owned(),
+                source,
+            })?;
     Ok(AuraVmBridgeRound {
         step,
         blocked_receive,
@@ -676,13 +734,16 @@ pub async fn advance_host_bridged_vm_round_until_receive<F>(
     active_role: &str,
     peer_roles: &BTreeMap<String, ChoreographicRole>,
     stop_on_receive_error: F,
-) -> Result<AuraVmBridgeRound, String>
+) -> Result<AuraVmBridgeRound, AuraVmBridgeRoundError>
 where
     F: Fn(&ChoreographyError) -> bool,
 {
     let step = engine
         .step()
-        .map_err(|error| format!("{active_role} VM step failed: {error}"))?;
+        .map_err(|source| AuraVmBridgeRoundError::Step {
+            active_role: active_role.to_owned(),
+            source,
+        })?;
     flush_pending_vm_sends(effects, handler, peer_roles).await?;
     let (blocked_receive, host_wait_status) = match receive_blocked_vm_message(
         effects,
@@ -704,7 +765,12 @@ where
         Err(error) if stop_on_receive_error(&error) => (None, AuraVmHostWaitStatus::Deferred),
         Err(error) if is_receive_cancelled(&error) => (None, AuraVmHostWaitStatus::Cancelled),
         Err(error) if is_receive_timed_out(&error) => (None, AuraVmHostWaitStatus::TimedOut),
-        Err(error) => return Err(format!("{active_role} VM receive failed: {error}")),
+        Err(source) => {
+            return Err(AuraVmBridgeRoundError::Receive {
+                active_role: active_role.to_owned(),
+                source,
+            })
+        }
     };
     Ok(AuraVmBridgeRound {
         step,
@@ -1006,6 +1072,88 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn enrollment_host_injection_resumes_separate_role_owners() {
+        use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::vm_artifacts;
+
+        let manifest = vm_artifacts::composition_manifest();
+        let global = vm_artifacts::global_type();
+        let locals = vm_artifacts::local_types();
+        let mut owners = Vec::new();
+        for role in ["Initiator", "Invitee"] {
+            owners.push(
+                open_role_scoped_vm_session_admitted(
+                    &["Initiator", "Invitee"],
+                    role,
+                    &global,
+                    &locals,
+                    &manifest.protocol_id,
+                    manifest.determinism_policy_ref.as_deref(),
+                    AuraVmSchedulerSignals::default(),
+                    &[],
+                    Some(&manifest),
+                )
+                .await
+                .expect("enrollment role owner opens"),
+            );
+        }
+        owners[0].1.push_send_bytes(b"request".to_vec());
+        owners[0].1.push_send_bytes(b"confirmation".to_vec());
+        owners[1].1.push_send_bytes(b"acceptance".to_vec());
+        let mut delivered = Vec::new();
+        let mut rounds = Vec::new();
+        let mut completed = [false; 2];
+        for _ in 0..32 {
+            for index in 0..2 {
+                if completed[index] {
+                    continue;
+                }
+                let step = owners[index].0.step().expect("owner advances");
+                rounds.push(format!(
+                    "owner={index} step={step:?} scheduler={:?} coroutines={:?}",
+                    owners[index].0.vm().last_sched_step(),
+                    owners[index].0.vm().coroutines(),
+                ));
+                completed[index] = matches!(step, ProtocolMachineStepResult::AllDone);
+                let sends = owners[index].1.pending_send_snapshot();
+                for send in sends {
+                    delivered.push(send.payload.clone());
+                    let peer = 1 - index;
+                    let sid = owners[peer].2;
+                    inject_vm_receive(
+                        &mut owners[peer].0,
+                        sid,
+                        &BlockedVmReceive {
+                            from_role: send.from_role,
+                            to_role: send.to_role,
+                            peer_role: authority_device_role(
+                                AuthorityId::new_from_entropy([199; 32]),
+                                index as u16,
+                            ),
+                            payload: send.payload,
+                        },
+                    )
+                    .expect("host injects peer message");
+                }
+            }
+            if completed.iter().all(|done| *done) {
+                break;
+            }
+        }
+        assert_eq!(
+            delivered,
+            [
+                b"request".to_vec(),
+                b"acceptance".to_vec(),
+                b"confirmation".to_vec()
+            ],
+            "bounded exchange stalled: rounds={rounds:#?}, initiator={:?}, invitee={:?}",
+            owners[0].0.vm().coroutines(),
+            owners[1].0.vm().coroutines(),
+        );
+        assert_eq!(completed, [true, true], "both role owners must terminate");
+    }
+
     #[test]
     fn queued_bridge_handler_surfaces_pending_send_payloads() {
         let handler = AuraQueuedVmBridgeHandler::default();
@@ -1020,7 +1168,7 @@ mod tests {
             AuraQueuedVmBridgeHandler::bytes_to_value(&[0xaa, 0xbb])
         );
 
-        let sends = handler.drain_pending_sends();
+        let sends = handler.pending_send_snapshot();
         assert_eq!(sends.len(), 1);
         assert_eq!(sends[0].label, "InvitationOffer");
         assert_eq!(sends[0].payload, vec![0xaa, 0xbb]);
@@ -1069,7 +1217,9 @@ mod tests {
         let err = flush_pending_vm_sends(effects.as_ref(), &handler, &BTreeMap::new())
             .await
             .expect_err("missing peer mapping must fail flush");
-        assert!(err.contains("missing peer mapping for VM send target role Receiver"));
+        assert_eq!(handler.pending_send_snapshot().len(), 1);
+        assert_eq!(handler.pending_send_snapshot()[0].payload, vec![0xAB]);
+        assert!(matches!(err, AuraVmBridgeRoundError::MissingPeer { role } if role == "Receiver"));
 
         effects.end_session().await.expect("session ends");
     }
@@ -1099,7 +1249,15 @@ mod tests {
         let err = flush_pending_vm_sends(effects.as_ref(), &handler, &peer_roles)
             .await
             .expect_err("teardown before flush must fail explicitly");
-        assert!(err.contains("failed to bridge VM send Sender->Receiver:msg"));
+        assert_eq!(handler.pending_send_snapshot().len(), 1);
+        assert!(handler.bridge_effects.lease_pending_sends().is_ok());
+        assert!(matches!(
+            err,
+            AuraVmBridgeRoundError::Send {
+                source: ChoreographyError::SessionNotStarted,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -21,6 +21,7 @@ aura-composition = { package = "hxrts-aura-composition", path = "../aura-composi
 aura-guards = { package = "hxrts-aura-guards", path = "../aura-guards", version = "=0.2.0" }
 
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 

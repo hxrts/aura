@@ -69,7 +69,14 @@ impl std::fmt::Display for SubmittedOperationWorkflowError {
     }
 }
 
-impl std::error::Error for SubmittedOperationWorkflowError {}
+impl std::error::Error for SubmittedOperationWorkflowError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Workflow(error) => Some(error),
+            Self::Protocol(_) | Self::Panicked(_) => None,
+        }
+    }
+}
 
 impl SubmittedOperationRelease {
     #[must_use]

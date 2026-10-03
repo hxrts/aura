@@ -1435,7 +1435,7 @@ fn shared_intent_waits_bind_only_to_declared_barriers() {
     let start_device_contract = IntentAction::StartDeviceEnrollment {
         device_name: "phone".to_string(),
         code_name: "device_code".to_string(),
-        invitee_authority_id: "authority:peer".to_string(),
+        setup_code: "explicitly transferred setup code".to_string(),
     }
     .contract();
     assert!(ensure_wait_contract_declared(
@@ -1481,6 +1481,7 @@ fn shared_intent_waits_bind_only_to_declared_barriers() {
 
     let import_contract = IntentAction::ImportDeviceEnrollmentCode {
         code: "invite".to_string(),
+                manifest_transfer: None,
     }
     .contract();
     assert!(ensure_wait_contract_declared(
@@ -1605,15 +1606,15 @@ fn parity_critical_executor_paths_do_not_fallback_to_runtime_event_waits() {
 }
 
 #[test]
-fn shared_semantic_variable_actions_use_typed_authority_helpers() {
+fn shared_semantic_variable_actions_use_typed_setup_and_authority_helpers() {
     let source = include_str!("executor.rs");
     let production_source = source
         .split("\n#[cfg(test)]\nmod tests {")
         .next()
         .unwrap_or(source);
     assert!(
-        production_source.contains("tool_api.prepare_device_enrollment_invitee_authority("),
-        "shared semantic executor should use the typed invitee-authority helper"
+        production_source.contains("tool_api.prepare_device_enrollment_setup("),
+        "shared semantic executor should export the actual invitee setup code"
     );
     assert!(
         production_source.contains("tool_api.current_authority_id("),

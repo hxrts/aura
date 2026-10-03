@@ -81,7 +81,15 @@ pub fn serialize_authority(record: &AuthorityRecord) -> Result<Vec<u8>, String> 
     serde_json::to_vec(record).map_err(|e| format!("Failed to serialize authority record: {e}"))
 }
 
-/// Deserialize an authority record from bytes.
+/// Decode required native authority records, retaining the original JSON cause.
+///
+/// # Errors
+/// Returns the native JSON codec error.
+pub fn deserialize_authority_required(bytes: &[u8]) -> Result<AuthorityRecord, serde_json::Error> {
+    serde_json::from_slice(bytes)
+}
+
+/// Deserialize an authority record for a legacy diagnostic caller.
 pub fn deserialize_authority(bytes: &[u8]) -> Result<AuthorityRecord, String> {
     serde_json::from_slice(bytes).map_err(|e| format!("Failed to parse authority record: {e}"))
 }

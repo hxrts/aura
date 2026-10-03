@@ -95,12 +95,6 @@ impl InvitationManager {
             .insert(access_tick, invitation_id.clone());
     }
 
-    fn remove_invitation_tracking(state: &mut InvitationState, invitation_id: &InvitationId) {
-        if let Some(access_tick) = state.invitation_access.remove(invitation_id) {
-            state.invitation_lru.remove(&access_tick);
-        }
-    }
-
     fn evict_excess_invitations(state: &mut InvitationState, max_invitations: usize) {
         while state.invitations.len() > max_invitations {
             let Some((oldest_tick, oldest_invitation_id)) = state
@@ -163,19 +157,6 @@ impl InvitationManager {
                     Self::touch_invitation(state, invitation_id);
                 }
                 result
-            },
-            |_| Ok(()),
-        )
-        .await
-    }
-
-    /// Remove a cached invitation.
-    pub async fn remove_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
-        with_state_mut_validated(
-            &self.state,
-            |state| {
-                Self::remove_invitation_tracking(state, invitation_id);
-                state.invitations.remove(invitation_id)
             },
             |_| Ok(()),
         )

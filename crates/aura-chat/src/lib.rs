@@ -107,7 +107,8 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 
 pub use fact_service::ChatFactService;
 pub use facts::{
-    ChannelContextIndex, ChatFact, ChatFactReducer, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID,
+    ChannelContextIndex, ChatFact, ChatFactReducer, ChatMessageDeliveryStatus,
+    CHAT_FACT_SCHEMA_VERSION, CHAT_FACT_TYPE_ID,
 };
 pub use group::ChatGroup;
 pub use types::*;

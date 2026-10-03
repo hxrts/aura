@@ -2,15 +2,25 @@ use super::*;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-enum InvitationValidationError {
+pub(crate) enum InvitationValidationError {
     #[error("invitation {invitation_id} is not pending")]
-    NotPending { invitation_id: InvitationId },
+    NotPending {
+        invitation_id: InvitationId,
+        status: InvitationStatus,
+    },
     #[error("invitation {invitation_id} expired")]
     Expired { invitation_id: InvitationId },
     #[error("invitation {invitation_id} not found")]
     NotFound { invitation_id: InvitationId },
-    #[error("only sender can cancel invitation {invitation_id}")]
-    CancelNotSender { invitation_id: InvitationId },
+}
+
+impl From<InvitationValidationError> for AgentError {
+    fn from(error: InvitationValidationError) -> Self {
+        AgentError::Aura(aura_core::AuraError::Invalid {
+            message: error.to_string(),
+            source: Some(std::sync::Arc::new(error)),
+        })
+    }
 }
 
 pub(super) struct InvitationValidationHandler<'a> {
@@ -47,12 +57,11 @@ impl<'a> InvitationValidationHandler<'a> {
                     sender = %invitation.sender_id,
                     "Invitation is not pending"
                 );
-                return Err(AgentError::invalid(
-                    InvitationValidationError::NotPending {
-                        invitation_id: invitation_id.clone(),
-                    }
-                    .to_string(),
-                ));
+                return Err(InvitationValidationError::NotPending {
+                    invitation_id: invitation_id.clone(),
+                    status: invitation.status,
+                }
+                .into());
             }
 
             if invitation.is_expired(now_ms) {
@@ -62,24 +71,20 @@ impl<'a> InvitationValidationHandler<'a> {
                     now_ms = now_ms,
                     "Invitation has expired"
                 );
-                return Err(AgentError::invalid(
-                    InvitationValidationError::Expired {
-                        invitation_id: invitation_id.clone(),
-                    }
-                    .to_string(),
-                ));
+                return Err(InvitationValidationError::Expired {
+                    invitation_id: invitation_id.clone(),
+                }
+                .into());
             }
         } else {
             tracing::info!(
                 invitation_id = %invitation_id,
                 "Rejecting invitation accept because the invitation is not present in cache or storage"
             );
-            return Err(AgentError::invalid(
-                InvitationValidationError::NotFound {
-                    invitation_id: invitation_id.clone(),
-                }
-                .to_string(),
-            ));
+            return Err(InvitationValidationError::NotFound {
+                invitation_id: invitation_id.clone(),
+            }
+            .into());
         }
 
         Ok(())
@@ -96,44 +101,11 @@ impl<'a> InvitationValidationHandler<'a> {
             .await
         {
             if !invitation.is_pending() {
-                return Err(AgentError::invalid(
-                    InvitationValidationError::NotPending {
-                        invitation_id: invitation_id.clone(),
-                    }
-                    .to_string(),
-                ));
-            }
-        }
-
-        Ok(())
-    }
-
-    pub(super) async fn validate_cached_invitation_cancel(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<()> {
-        if let Some(invitation) = self
-            .handler
-            .get_invitation_with_storage(effects, invitation_id)
-            .await
-        {
-            if !invitation.is_pending() {
-                return Err(AgentError::invalid(
-                    InvitationValidationError::NotPending {
-                        invitation_id: invitation_id.clone(),
-                    }
-                    .to_string(),
-                ));
-            }
-
-            if invitation.sender_id != self.handler.context.authority.authority_id() {
-                return Err(AgentError::invalid(
-                    InvitationValidationError::CancelNotSender {
-                        invitation_id: invitation_id.clone(),
-                    }
-                    .to_string(),
-                ));
+                return Err(InvitationValidationError::NotPending {
+                    invitation_id: invitation_id.clone(),
+                    status: invitation.status,
+                }
+                .into());
             }
         }
 

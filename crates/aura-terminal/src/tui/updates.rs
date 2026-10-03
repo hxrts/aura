@@ -284,6 +284,7 @@ pub enum UiUpdate {
 
     /// Device enrollment ("add device") ceremony started.
     DeviceEnrollmentStarted {
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
         ceremony_id: String,
         nickname_suggestion: String,
         enrollment_code: String,

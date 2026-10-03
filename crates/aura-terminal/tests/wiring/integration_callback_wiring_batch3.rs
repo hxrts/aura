@@ -1137,9 +1137,14 @@ async fn test_device_management() {
     let result = ctx
         .dispatch(EffectCommand::AddDevice {
             nickname_suggestion: "My Laptop".to_string(),
-            invitee_authority_id: aura_core::AuthorityId::new_from_entropy([17u8; 32]),
+            setup_code: String::new(),
         })
         .await;
+
+    assert!(
+        result.is_err(),
+        "missing verified setup must reject enrollment"
+    );
 
     match &result {
         Ok(response) => println!("  AddDevice response: {response:?}"),

@@ -73,7 +73,7 @@ impl NicknameSuggestionModalState {
 pub enum AddDeviceField {
     #[default]
     Name,
-    InviteeAuthority,
+    SetupCode,
 }
 
 /// State for add device modal
@@ -82,20 +82,16 @@ pub enum AddDeviceField {
 ///
 /// ## Two-step exchange
 ///
-/// For secure device enrollment, the invitee device must first create its own
-/// authority and share it with the initiator. The `invitee_authority_id` field
-/// is required for this addressed exchange:
-///
-/// 1. Invitee creates authority and shows their authority ID (via QR/text)
-/// 2. Initiator enters the invitee's authority ID here
-/// 3. Invitation is cryptographically bound to that specific authority
+/// The new device exports a signed setup request from its actual runtime.
+/// The user transfers that code to the initiating device and enters it here.
+/// App workflows verify possession and pin the explicit transfer before issuance.
 ///
 #[derive(Clone, Debug, Default)]
 pub struct AddDeviceModalState {
     /// Device name input
     pub name: String,
-    /// Invitee's authority ID for addressed device enrollment.
-    pub invitee_authority_id: String,
+    /// Invitee's setup code for addressed device enrollment.
+    pub setup_code: String,
     /// Which field is currently focused
     pub focused_field: AddDeviceField,
     /// Error message if any
@@ -111,29 +107,29 @@ impl AddDeviceModalState {
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
         self.name.clear();
-        self.invitee_authority_id.clear();
+        self.setup_code.clear();
         self.focused_field = AddDeviceField::Name;
         self.error = None;
     }
 
     pub fn can_submit(&self) -> bool {
-        !self.name.trim().is_empty() && !self.invitee_authority_id.trim().is_empty()
+        !self.name.trim().is_empty() && !self.setup_code.trim().is_empty()
     }
 
     /// The inline error naming the first required field that is still empty.
     pub fn missing_field_error(&self) -> Option<&'static str> {
         if self.name.trim().is_empty() {
             Some("Enter a name for the new device")
-        } else if self.invitee_authority_id.trim().is_empty() {
-            Some("Enter the new device's authority ID (Tab to switch fields)")
+        } else if self.setup_code.trim().is_empty() {
+            Some("Paste the new device's setup code (Tab to switch fields)")
         } else {
             None
         }
     }
 
-    /// Get the required invitee authority ID input.
-    pub fn invitee_authority(&self) -> &str {
-        self.invitee_authority_id.trim()
+    /// Get the required invitee setup code input.
+    pub fn setup_code(&self) -> &str {
+        self.setup_code.trim()
     }
 }
 
@@ -148,6 +144,7 @@ pub struct DeviceEnrollmentCeremonyModalState {
     pub nickname_suggestion: String,
     /// Enrollment code to import on the new device
     pub enrollment_code: String,
+    pub manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     /// Whether code was copied to clipboard
     pub copied: bool,
 }
@@ -165,8 +162,17 @@ impl DeviceEnrollmentCeremonyModalState {
             },
             nickname_suggestion,
             enrollment_code,
+            manifest_transfer: None,
             copied: false,
         }
+    }
+
+    pub fn with_manifest_transfer(
+        mut self,
+        transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
+    ) -> Self {
+        self.manifest_transfer = transfer;
+        self
     }
 
     pub fn update_from_status(

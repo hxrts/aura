@@ -3,8 +3,13 @@
 use super::*;
 use std::future::Future;
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Error)]
 pub(super) enum SendMessageError {
+    #[error("Authoritative moderation denied message: {source}")]
+    ModerationDenied {
+        #[source]
+        source: AuraError,
+    },
     #[error("Failed to resolve channel {channel}: {detail}")]
     ChannelResolution { channel: String, detail: String },
     #[error("Missing authoritative context for channel {channel_id}")]
@@ -21,17 +26,26 @@ pub(super) enum SendMessageError {
     ChannelBootstrapUnavailable {
         channel_id: ChannelId,
         context_id: ContextId,
+        #[source]
+        source: AuraError,
     },
     #[error("Transport error while sending on channel {channel_id}: {detail}")]
     Transport {
         channel_id: ChannelId,
         detail: String,
+        #[source]
+        source: AuraError,
     },
 }
 
 impl SendMessageError {
     pub(super) fn semantic_error(&self) -> SemanticOperationError {
         match self {
+            Self::ModerationDenied { source } => SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                send_transport_failure_code(source),
+            )
+            .with_detail(source.to_string()),
             Self::ChannelResolution { channel, detail } => SemanticOperationError::new(
                 SemanticFailureDomain::Command,
                 SemanticFailureCode::InternalError,
@@ -62,14 +76,19 @@ impl SendMessageError {
             Self::ChannelBootstrapUnavailable {
                 channel_id,
                 context_id,
+                ..
             } => SemanticOperationError::new(
                 SemanticFailureDomain::Transport,
                 SemanticFailureCode::ChannelBootstrapUnavailable,
             )
             .with_detail(format!("channel_id={channel_id}; context_id={context_id}")),
-            Self::Transport { channel_id, detail } => SemanticOperationError::new(
-                SemanticFailureDomain::Internal,
-                SemanticFailureCode::InternalError,
+            Self::Transport {
+                channel_id,
+                detail,
+                source,
+            } => SemanticOperationError::new(
+                SemanticFailureDomain::Transport,
+                send_transport_failure_code(source),
             )
             .with_detail(format!("channel_id={channel_id}; detail={detail}")),
         }
@@ -78,8 +97,58 @@ impl SendMessageError {
 
 impl From<SendMessageError> for AuraError {
     fn from(error: SendMessageError) -> Self {
-        AuraError::agent(error.to_string())
+        AuraError::Internal {
+            message: error.to_string(),
+            source: Some(Arc::new(error)),
+        }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum AmpSendRetryError {
+    #[error("canonical AMP channel state required: {0}")]
+    ChannelStateUnavailable(#[source] crate::runtime_bridge::RuntimeBridgeError),
+    #[error("{0}")]
+    Transport(#[source] AuraError),
+}
+
+fn send_transport_failure_code(error: &AuraError) -> SemanticFailureCode {
+    if let Some(denial) = crate::workflows::moderation::denial_from_error(error) {
+        return denial.semantic_code();
+    }
+    use crate::runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind as K};
+    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = current {
+        if let Some(native) = cause.downcast_ref::<RuntimeBridgeError>() {
+            return match native.kind() {
+                K::Unauthorized => SemanticFailureCode::PermissionDenied,
+                K::Validation => SemanticFailureCode::InvalidArgument,
+                K::NotFound | K::ContextNotFound => SemanticFailureCode::NotFound,
+                K::NoAgent | K::Service => SemanticFailureCode::Unavailable,
+                K::TimedOut => SemanticFailureCode::OperationTimedOut,
+                K::Crypto => SemanticFailureCode::CryptoFailure,
+                K::Serialization => SemanticFailureCode::SerializationFailure,
+                K::Storage => SemanticFailureCode::StorageFailure,
+                K::Journal => SemanticFailureCode::JournalFailure,
+                K::Reactive => SemanticFailureCode::ReactiveFailure,
+                K::Network => SemanticFailureCode::CommandFailed,
+                K::Internal => SemanticFailureCode::InternalError,
+            };
+        }
+        if let Some(budget) = cause.downcast_ref::<aura_core::TimeoutBudgetError>() {
+            return crate::workflows::runtime_error_classification::timeout_budget_failure_code(
+                budget,
+            );
+        }
+        if matches!(
+            cause.downcast_ref::<crate::workflows::error::WorkflowError>(),
+            Some(crate::workflows::error::WorkflowError::TimedOut { .. })
+        ) {
+            return SemanticFailureCode::OperationTimedOut;
+        }
+        current = cause.source();
+    }
+    SemanticFailureCode::InternalError
 }
 
 type PostTerminalDelivery = (
@@ -91,11 +160,35 @@ type PostTerminalDelivery = (
     String,
 );
 
+#[derive(Debug, Error)]
+#[error("Message operation failed: {cause}; failure publication also failed: {publication}")]
+struct SendMessageFailurePublication {
+    #[source]
+    cause: SendMessageError,
+    publication: AuraError,
+}
+
 async fn fail_send_message<T>(
     owner: &SemanticWorkflowOwner,
     error: SendMessageError,
 ) -> Result<T, AuraError> {
-    publish_send_message_failure(owner, &error).await?;
+    if let Err(publication) = publish_send_message_failure(owner, &error).await {
+        let retained = SendMessageFailurePublication {
+            cause: error,
+            publication,
+        };
+        return Err(
+            match crate::workflows::runtime_error_classification::native_runtime_error_kind(
+                &retained,
+            ) {
+                Some(kind) => kind.wrap_source(retained.to_string(), retained),
+                None => AuraError::Internal {
+                    message: retained.to_string(),
+                    source: Some(Arc::new(retained)),
+                },
+            },
+        );
+    }
     Err(error.into())
 }
 
@@ -166,7 +259,10 @@ async fn deliver_message_fact_remotely(
             if attempts.can_attempt() {
                 runtime
                     .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
-                    .await;
+                    .await
+                    .map_err(|error| {
+                        super::super::error::runtime_call("remote delivery retry delay", error)
+                    })?;
                 recipients =
                     authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
                 continue;
@@ -217,7 +313,10 @@ async fn deliver_message_fact_remotely(
             converge_runtime(runtime).await;
             runtime
                 .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
-                .await;
+                .await
+                .map_err(|error| {
+                    super::super::error::runtime_call("remote delivery retry delay", error)
+                })?;
             recipients =
                 authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
         } else {
@@ -661,14 +760,21 @@ async fn send_message_ref_owned(
                         .await?;
                 }
             }
-            enforce_home_moderation_for_sender(
+            if let Err(error) = enforce_home_moderation_for_sender(
                 app_core,
                 context_id,
                 channel_id,
                 sender_id,
                 timestamp_ms,
             )
-            .await?;
+            .await
+            {
+                return fail_send_message(
+                    owner,
+                    SendMessageError::ModerationDenied { source: error },
+                )
+                .await;
+            }
             channel_context = Some(context_id);
 
             let send_params = ChannelSendParams {
@@ -678,7 +784,7 @@ async fn send_message_ref_owned(
                 plaintext: content.as_bytes().to_vec(),
                 reply_to: None,
             };
-            let mut maybe_cipher = match timeout_runtime_call(
+            let initial = match timeout_runtime_call(
                 &runtime,
                 "send_message_ref_owned",
                 "amp_send_message",
@@ -686,35 +792,38 @@ async fn send_message_ref_owned(
                 || runtime.amp_send_message(send_params.clone()),
             )
             .await
-            .map_err(|error| AuraError::internal(error.to_string()))?
             {
-                Ok(cipher) => Some(cipher),
+                Ok(result) => result,
                 Err(error) => {
-                    if is_amp_channel_state_unavailable(&error) {
-                        None
-                    } else {
-                        return fail_send_message(
-                            owner,
-                            SendMessageError::Transport {
-                                channel_id,
-                                detail: format!(
-                                    "context_id={context_id}; amp_send_message failed: {error}"
-                                ),
-                            },
-                        )
-                        .await;
-                    }
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::Transport {
+                            channel_id,
+                            detail: error.to_string(),
+                            source: error,
+                        },
+                    )
+                    .await
                 }
             };
-            if maybe_cipher.is_none() {
-                #[derive(Debug, thiserror::Error)]
-                enum AmpSendRetryError {
-                    #[error("canonical AMP channel state required")]
-                    ChannelStateUnavailable,
-                    #[error("{0}")]
-                    Transport(String),
+            let mut cipher_result: Result<_, AuraError> = match initial {
+                Ok(cipher) => Ok(cipher),
+                Err(error) if is_amp_channel_state_unavailable(&error, context_id, channel_id) => {
+                    Err(super::super::error::runtime_call("AMP channel state", error).into())
                 }
-
+                Err(error) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::Transport {
+                            channel_id,
+                            detail: error.to_string(),
+                            source: super::super::error::runtime_call("AMP send", error).into(),
+                        },
+                    )
+                    .await
+                }
+            };
+            if cipher_result.is_err() {
                 let retry_policy = workflow_retry_policy(
                     AMP_SEND_RETRY_ATTEMPTS as u32,
                     Duration::from_millis(AMP_SEND_RETRY_BACKOFF_MS),
@@ -737,84 +846,100 @@ async fn send_message_ref_owned(
                             || runtime.amp_send_message(send_params),
                         )
                         .await
-                        .map_err(|error| AmpSendRetryError::Transport(error.to_string()))?
+                        .map_err(AmpSendRetryError::Transport)?
                         {
                             Ok(cipher) => Ok(cipher),
-                            Err(error) if is_amp_channel_state_unavailable(&error) => {
-                                Err(AmpSendRetryError::ChannelStateUnavailable)
+                            Err(error)
+                                if is_amp_channel_state_unavailable(
+                                    &error, context_id, channel_id,
+                                ) =>
+                            {
+                                Err(AmpSendRetryError::ChannelStateUnavailable(error))
                             }
-                            Err(error) => Err(AmpSendRetryError::Transport(error.to_string())),
+                            Err(error) => Err(AmpSendRetryError::Transport(
+                                super::super::error::runtime_call("AMP send retry", error).into(),
+                            )),
                         }
                     }
                 })
                 .await
                 {
-                    Ok(cipher) => maybe_cipher = Some(cipher),
+                    Ok(cipher) => cipher_result = Ok(cipher),
                     Err(RetryRunError::Timeout(timeout_error)) => {
                         return fail_send_message(
                             owner,
                             SendMessageError::Transport {
                                 channel_id,
-                                detail: format!(
-                                    "context_id={context_id}; amp_send_message retry timed out: {timeout_error}"
-                                ),
+                                detail: timeout_error.to_string(),
+                                source: timeout_error.into(),
                             },
                         )
-                        .await;
+                        .await
                     }
                     Err(RetryRunError::AttemptsExhausted {
-                        last_error: AmpSendRetryError::ChannelStateUnavailable,
+                        last_error: AmpSendRetryError::ChannelStateUnavailable(error),
                         ..
                     }) => {
-                        maybe_cipher = None;
+                        cipher_result = Err(super::super::error::runtime_call(
+                            "AMP channel state after retries",
+                            error,
+                        )
+                        .into());
                     }
                     Err(RetryRunError::AttemptsExhausted { last_error, .. }) => {
                         return fail_send_message(
                             owner,
                             SendMessageError::Transport {
                                 channel_id,
-                                detail: format!(
-                                    "context_id={context_id}; amp_send_message retry failed: {last_error}"
-                                ),
+                                detail: last_error.to_string(),
+                                source: super::super::error::runtime_call(
+                                    "AMP send retry",
+                                    last_error,
+                                )
+                                .into(),
                             },
                         )
-                        .await;
+                        .await
                     }
                 }
             }
 
-            let maybe_fact = if let Some(cipher) = maybe_cipher {
+            let cipher = match cipher_result {
+                Ok(cipher) => cipher,
+                Err(source) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::ChannelBootstrapUnavailable {
+                            channel_id,
+                            context_id,
+                            source,
+                        },
+                    )
+                    .await
+                }
+            };
+            let fact = {
                 let wire = AmpMessage::new(cipher.header, cipher.ciphertext.clone());
                 let sealed =
                     serialize_amp_message(&wire).map_err(super::super::error::fact_encoding)?;
 
                 epoch_hint = Some(cipher.header.chan_epoch as u32);
 
-                Some(
-                    ChatFact::message_sent_sealed_ms(
-                        context_id,
-                        channel_id,
-                        message_id.clone(),
-                        sender_id,
-                        "You".to_string(),
-                        sealed,
-                        timestamp_ms,
-                        None,
-                        epoch_hint,
-                    )
-                    .to_generic(),
-                )
-            } else {
-                messaging_warn!(
-                    "AMP send unavailable for context {} channel {} after {} retries; falling back to optimistic local send",
+                ChatFact::message_sent_sealed_ms(
                     context_id,
                     channel_id,
-                    AMP_SEND_RETRY_ATTEMPTS
-                );
-                None
+                    message_id.clone(),
+                    sender_id,
+                    "You".to_string(),
+                    sealed,
+                    timestamp_ms,
+                    None,
+                    epoch_hint,
+                )
+                .to_generic()
             };
 
-            if let Some(fact) = maybe_fact {
+            {
                 timeout_runtime_call(
                     &runtime,
                     "send_message_ref_owned",
@@ -838,15 +963,6 @@ async fn send_message_ref_owned(
                     context_id,
                     message_id.clone(),
                 ));
-            } else {
-                return fail_send_message(
-                    owner,
-                    SendMessageError::ChannelBootstrapUnavailable {
-                        channel_id,
-                        context_id,
-                    },
-                )
-                .await;
             }
 
             (sender_id, message_id)
@@ -1025,9 +1141,11 @@ pub async fn start_direct_chat_with_authority(
                 })
             },
         )
-        .await;
+        .await?;
         if let Err(error) = create_result {
-            if classify_amp_channel_error(&error) != AmpChannelErrorClass::AlreadyExists {
+            if !runtime_amp_duplicate_is_reconciled(&runtime, &error, context_id, channel_id)
+                .await?
+            {
                 return Err(
                     super::super::error::runtime_call("create direct channel", error).into(),
                 );
@@ -1265,5 +1383,209 @@ pub async fn retry_message_by_name_with_terminal_status(
     crate::ui_contract::WorkflowTerminalOutcome {
         result,
         terminal: owner.terminal_status().await,
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use crate::runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind as K};
+    use std::error::Error as _;
+
+    fn has_io(error: &(dyn std::error::Error + 'static)) -> bool {
+        let mut current = Some(error);
+        while let Some(cause) = current {
+            if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+                return io.kind() == std::io::ErrorKind::ConnectionReset;
+            }
+            current = cause.source();
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn actual_send_failure_publisher_fault_retains_original_concrete_source() {
+        let authority = AuthorityId::new_from_entropy([242; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let app = Arc::new(RwLock::new(
+            AppCore::with_runtime(crate::AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .expect("actual reactive graph");
+        }
+        let owner = SemanticWorkflowOwner::new(
+            &app,
+            OperationId::send_message(),
+            Some(OperationInstanceId("publisher-fault-exact-instance".into())),
+            SemanticOperationKind::SendChatMessage,
+        );
+        owner
+            .publish_failure(SemanticOperationError::new(
+                SemanticFailureDomain::Command,
+                SemanticFailureCode::InvalidState,
+            ))
+            .await
+            .expect("first actual terminal publication");
+        let result: Result<(), AuraError> = fail_send_message(
+            &owner,
+            SendMessageError::Transport {
+                channel_id: ChannelId::from_bytes([243; 32]),
+                detail: "actual transport failure".into(),
+                source: AuraError::Network {
+                    message: "transport reset".into(),
+                    source: Some(Arc::new(std::io::Error::from(
+                        std::io::ErrorKind::ConnectionReset,
+                    ))),
+                },
+            },
+        )
+        .await;
+        let error = result.expect_err("already-terminal owner rejects second publication");
+        assert!(has_io(&error));
+        let retained = error
+            .source()
+            .unwrap()
+            .downcast_ref::<SendMessageFailurePublication>()
+            .expect("both faults retained by real failure publisher");
+        assert!(matches!(retained.publication, AuraError::Invalid { .. }));
+    }
+
+    #[test]
+    fn failed_terminal_publication_retains_original_and_publication_faults() {
+        let cause = SendMessageError::Transport {
+            channel_id: ChannelId::from_bytes([241; 32]),
+            detail: "display irrelevant".into(),
+            source: AuraError::Network {
+                message: "transport unavailable".into(),
+                source: Some(Arc::new(std::io::Error::from(
+                    std::io::ErrorKind::ConnectionReset,
+                ))),
+            },
+        };
+        let failure = SendMessageFailurePublication {
+            cause,
+            publication: AuraError::Storage {
+                message: "publisher unavailable".into(),
+                source: Some(Arc::new(std::io::Error::from(
+                    std::io::ErrorKind::PermissionDenied,
+                ))),
+            },
+        };
+        assert!(has_io(&failure));
+        assert_eq!(
+            failure
+                .publication
+                .source()
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
+
+    #[test]
+    fn retry_and_send_conversion_preserve_original_io_after_clone() {
+        let native = RuntimeBridgeError::with_source(
+            IntentError::network_error("send failed"),
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "actual transport reset",
+            ),
+        );
+        let retry = AmpSendRetryError::Transport(
+            super::super::super::error::runtime_call("retry", native).into(),
+        );
+        assert!(has_io(&retry));
+        let error = SendMessageError::Transport {
+            channel_id: ChannelId::from_bytes([0x7a; 32]),
+            detail: retry.to_string(),
+            source: super::super::super::error::runtime_call("AMP retry exhausted", retry).into(),
+        };
+        assert_eq!(
+            error.semantic_error().code,
+            SemanticFailureCode::CommandFailed
+        );
+        let cloned: AuraError = error.clone().into();
+        assert!(cloned
+            .source()
+            .expect("send error retains cause")
+            .is::<SendMessageError>());
+        assert!(has_io(&cloned));
+        assert!(has_io(&error));
+    }
+
+    #[test]
+    fn transport_codes_use_exhaustive_native_kinds_without_display_policy() {
+        for (kind, expected) in [
+            (K::Unauthorized, SemanticFailureCode::PermissionDenied),
+            (K::Validation, SemanticFailureCode::InvalidArgument),
+            (K::NotFound, SemanticFailureCode::NotFound),
+            (K::ContextNotFound, SemanticFailureCode::NotFound),
+            (K::NoAgent, SemanticFailureCode::Unavailable),
+            (K::Service, SemanticFailureCode::Unavailable),
+            (K::TimedOut, SemanticFailureCode::OperationTimedOut),
+            (K::Crypto, SemanticFailureCode::CryptoFailure),
+            (K::Serialization, SemanticFailureCode::SerializationFailure),
+            (K::Journal, SemanticFailureCode::JournalFailure),
+            (K::Reactive, SemanticFailureCode::ReactiveFailure),
+            (K::Network, SemanticFailureCode::CommandFailed),
+            (K::Storage, SemanticFailureCode::StorageFailure),
+            (K::Internal, SemanticFailureCode::InternalError),
+        ] {
+            let native = RuntimeBridgeError::with_source(
+                IntentError::internal_error("timeout not found permission denied"),
+                std::io::Error::other("misleading timeout display"),
+            )
+            .with_kind(kind);
+            let error: AuraError =
+                super::super::super::error::runtime_call("transport", native).into();
+            assert_eq!(send_transport_failure_code(&error), expected);
+            assert_eq!(send_transport_failure_code(&error.clone()), expected);
+        }
+        assert_eq!(
+            send_transport_failure_code(&AuraError::internal(
+                "deadline exceeded permission denied"
+            )),
+            SemanticFailureCode::InternalError
+        );
+    }
+
+    #[test]
+    fn required_clock_failure_is_unavailable_and_real_deadline_is_timeout() {
+        let clock = aura_core::TimeoutBudgetError::time_source_failure(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "clock failed",
+        ));
+        let clock_error: AuraError = clock.into();
+        assert_eq!(
+            send_transport_failure_code(&clock_error),
+            SemanticFailureCode::Unavailable
+        );
+        assert!(has_io(&clock_error));
+        let deadline: AuraError = aura_core::TimeoutBudgetError::DeadlineExceeded {
+            deadline_at_ms: 2,
+            observed_at_ms: 3,
+        }
+        .into();
+        assert_eq!(
+            send_transport_failure_code(&deadline),
+            SemanticFailureCode::OperationTimedOut
+        );
+        for budget in [
+            aura_core::TimeoutBudgetError::invalid_policy("invalid"),
+            aura_core::TimeoutBudgetError::AttemptBudgetExhausted {
+                max_attempts: 1,
+                attempts_used: 1,
+            },
+        ] {
+            assert_eq!(
+                send_transport_failure_code(&budget.into()),
+                SemanticFailureCode::InvalidArgument
+            );
+        }
     }
 }

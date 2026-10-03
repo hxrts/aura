@@ -60,6 +60,8 @@ pub enum ChatMessageDeliveryStatus {
 
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
+/// Current schema shared by encoding and required decoding.
+pub const CHAT_FACT_SCHEMA_VERSION: u16 = 1;
 /// Key for indexing chat facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatFactKey {
@@ -74,7 +76,7 @@ pub struct ChatFactKey {
 /// These facts represent chat-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `ChatFactReducer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "chat", schema_version = 1, context = "context_id")]
+#[domain_fact(type_id = "chat", schema_version = CHAT_FACT_SCHEMA_VERSION, context = "context_id")]
 pub enum ChatFact {
     /// Channel created in a relational context
     ChannelCreated {
@@ -262,6 +264,45 @@ impl ChannelContextIndex {
 }
 
 impl ChatFact {
+    /// Required decoding for authoritative reads. Type, schema, declared
+    /// encoding, payload limit, and concrete codec failures are preserved.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, aura_core::AuraError> {
+        use aura_core::types::facts::{FactEncoding, FactError, FactSchemaCompatibility};
+        let invalid = |error: FactError| aura_core::AuraError::Invalid {
+            message: error.to_string(),
+            source: Some(std::sync::Arc::new(error)),
+        };
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            return Err(invalid(FactError::TypeMismatch {
+                expected: CHAT_FACT_TYPE_ID.to_string(),
+                actual: envelope.type_id.to_string(),
+            }));
+        }
+        FactSchemaCompatibility::exact(CHAT_FACT_SCHEMA_VERSION)
+            .ensure_supported(envelope.schema_version)
+            .map_err(invalid)?;
+        if envelope.payload.len() > aura_core::types::facts::MAX_FACT_PAYLOAD_BYTES {
+            return Err(invalid(FactError::PayloadTooLarge {
+                size: envelope.payload.len() as u64,
+                max: aura_core::types::facts::MAX_FACT_PAYLOAD_BYTES as u64,
+            }));
+        }
+        match envelope.encoding {
+            FactEncoding::DagCbor => aura_core::util::serialization::from_slice(&envelope.payload)
+                .map_err(|error| aura_core::AuraError::Serialization {
+                    message: "decode required canonical chat fact".to_string(),
+                    source: Some(std::sync::Arc::new(error)),
+                }),
+            FactEncoding::Json => serde_json::from_slice(&envelope.payload).map_err(|error| {
+                aura_core::AuraError::Serialization {
+                    message: "decode required JSON chat fact".to_string(),
+                    source: Some(std::sync::Arc::new(error)),
+                }
+            }),
+        }
+    }
     fn physical_time(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
             ts_ms,
@@ -745,5 +786,75 @@ mod tests {
         ));
 
         assert_eq!(index.context_for_channel(channel, creator), Some(context));
+    }
+}
+
+#[cfg(test)]
+mod required_decode_tests {
+    use super::*;
+    use std::error::Error as _;
+    #[test]
+    fn required_chat_decoder_preserves_codec_schema_and_type_failures() {
+        let fact = ChatFact::channel_created_ms(
+            ContextId::new_from_entropy([0x51; 32]),
+            ChannelId::from_bytes([0x52; 32]),
+            "required chat decode".to_string(),
+            None,
+            false,
+            1,
+            AuthorityId::new_from_entropy([0x53; 32]),
+        );
+        let envelope = fact.to_envelope();
+        assert_eq!(
+            ChatFact::try_from_envelope(&envelope).expect("canonical fixture decodes"),
+            fact
+        );
+        let mut json = envelope.clone();
+        json.encoding = aura_core::types::facts::FactEncoding::Json;
+        json.payload = serde_json::to_vec(&fact).expect("encode JSON fixture");
+        assert_eq!(
+            ChatFact::try_from_envelope(&json).expect("declared JSON fixture decodes"),
+            fact
+        );
+        json.payload = b"{broken JSON".to_vec();
+        let error = ChatFact::try_from_envelope(&json).expect_err("corrupt declared JSON fails");
+        assert!(error
+            .source()
+            .expect("JSON cause")
+            .is::<serde_json::Error>());
+        let mut cbor = envelope.clone();
+        cbor.payload = vec![0xff];
+        let error = ChatFact::try_from_envelope(&cbor).expect_err("corrupt canonical CBOR fails");
+        let cloned = error.clone();
+        let original = std::sync::Arc::new(error);
+        assert!(original
+            .source()
+            .expect("original CBOR cause")
+            .is::<aura_core::util::serialization::SerializationError>());
+        drop(original);
+        assert!(cloned
+            .source()
+            .expect("cloned CBOR cause after original release")
+            .is::<aura_core::util::serialization::SerializationError>());
+        let mut version = envelope.clone();
+        version.schema_version = CHAT_FACT_SCHEMA_VERSION + 1;
+        let error = ChatFact::try_from_envelope(&version).expect_err("unsupported schema fails");
+        assert!(matches!(
+            error
+                .source()
+                .expect("schema cause")
+                .downcast_ref::<aura_core::types::facts::FactError>(),
+            Some(aura_core::types::facts::FactError::VersionMismatch { .. })
+        ));
+        let mut wrong_type = envelope;
+        wrong_type.type_id = aura_core::types::facts::FactTypeId::from("contact");
+        let error = ChatFact::try_from_envelope(&wrong_type).expect_err("foreign type fails");
+        assert!(matches!(
+            error
+                .source()
+                .expect("type cause")
+                .downcast_ref::<aura_core::types::facts::FactError>(),
+            Some(aura_core::types::facts::FactError::TypeMismatch { .. })
+        ));
     }
 }

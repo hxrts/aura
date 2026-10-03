@@ -877,3 +877,19 @@ See [Simulation Guide](805_simulation_guide.md) for fault injection and adversar
 - [Journal](105_journal.md) - CRDT and fact semantics
 - [Testing Guide](804_testing_guide.md) - Test patterns
 - [Simulation Guide](805_simulation_guide.md) - Fault injection testing
+
+### Changing enrollment response messages
+
+When changing the enrollment response wire shape, update the choreography
+message declaration, generated wrapper imports, runtime codec consumers, and
+both role owners together. Acceptance and refusal must be exercised with actual
+independently pinned runtime signatures. Test that relabeling either signed
+response as the other disposition fails without moving the VM or changing the
+terminal owner. Test two connected runtimes through the public decline surface
+and verify the durable failed readout cannot be loaded as an adoption receipt.
+
+Retain the original window across retries. Classify transient sends from the
+native VM bridge and transport variants, including the expected destination and
+message phase. Flattened diagnostic text must never authorize retry. Close the
+owned session on every attempted path and preserve secondary cleanup errors;
+an unsuccessful close is not a transport retry opportunity.

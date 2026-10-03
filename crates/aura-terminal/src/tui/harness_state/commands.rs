@@ -210,11 +210,7 @@ pub(crate) fn apply_harness_command(
             }
             ControlId::SettingsAddDeviceButton => {
                 select_settings_section(state, SettingsSection::Devices);
-                let mut modal_state = crate::tui::state::AddDeviceModalState::default();
-                if !state.settings.demo_mobile_authority_id.is_empty() {
-                    modal_state.invitee_authority_id =
-                        state.settings.demo_mobile_authority_id.clone();
-                }
+                let modal_state = crate::tui::state::AddDeviceModalState::default();
                 state
                     .modal_queue
                     .enqueue(QueuedModal::SettingsAddDevice(modal_state));
@@ -296,6 +292,9 @@ pub(crate) fn apply_harness_command(
             }
             _ => Ok(Vec::new()),
         },
+        HarnessUiCommand::ExportDeviceEnrollmentSetup => {
+            Err("setup export requires the app workflow command owner".to_string())
+        }
         HarnessUiCommand::CreateAccount { account_name } => {
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::CreateAccount {
                 name: account_name,
@@ -332,21 +331,23 @@ pub(crate) fn apply_harness_command(
         }
         HarnessUiCommand::StartDeviceEnrollment {
             device_name,
-            invitee_authority_id,
+            setup_code,
         } => {
             select_settings_section(state, SettingsSection::Devices);
-            let invitee_authority_id = invitee_authority_id
-                .parse::<aura_core::AuthorityId>()
-                .map_err(|error| {
-                    format!("invalid invitee authority id in harness command: {error}")
-                })?;
+
             Ok(vec![TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name: device_name,
-                invitee_authority_id,
+                setup_code,
             })])
         }
-        HarnessUiCommand::ImportDeviceEnrollmentCode { code } => Ok(vec![TuiCommand::Dispatch(
-            DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code },
+        HarnessUiCommand::ImportDeviceEnrollmentCode {
+            code,
+            manifest_transfer,
+        } => Ok(vec![TuiCommand::Dispatch(
+            DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+                code,
+                manifest_transfer,
+            },
         )]),
         HarnessUiCommand::RemoveSelectedDevice { device_id } => {
             select_settings_section(state, SettingsSection::Devices);

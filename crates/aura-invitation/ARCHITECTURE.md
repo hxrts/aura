@@ -31,8 +31,33 @@ Invitation protocol for establishing relationships between authorities, includin
 
 ## Invariants
 
+- Enrollment invitation facts emit schema 2 and continue decoding schema-1
+  canonical DAG-CBOR map payloads. Missing setup bindings remain absent during
+  replay; historical decoding never manufactures response authorization.
+- Signed setup admission binds nonce/digest, both physical devices, provisional
+  invitee, subject, invitation/ceremony, pending epoch, baseline manifest and
+  exact-parent verifier inventory digests. Admission signature verification
+  alone does not authenticate that inventory or mint historical signing rights.
+  Independently pinned manifest provenance and owned revocation/admission state
+  are runtime prerequisites.
+
 - Facts with known context must reduce under their matching `ContextId`.
 - Invitation identifiers are treated as stable binding keys.
+- `enrollment_setup` owns bounded versioned setup-code decoding and a dedicated
+  canonical signing transcript. `VerifiedEnrollmentSetupPossession` is minted
+  only after validity, policy, proof binding and cryptographic verification; it
+  has private fields and no deserialization path. It proves possession under an
+  embedded key, not an independently authenticated authority/device binding.
+  Explicit user transfer and ceremony-specific trust remain app/runtime-owned.
+  `EnrollmentSetupExportError` preserves readiness, admission, physical-time,
+  proof and persistence sources through the runtime bridge instead of erasing
+  them into display strings. `EnrollmentSetupVerificationError` likewise
+  preserves physical-time, setup-proof and workflow-boundary failures; runtime
+  possession verification does not mint the app's explicit user-transfer pin.
+- Enrollment receive validation preserves typed mismatches for invitation,
+  authority, ceremony, device and epoch. A negative or missing-epoch confirmation
+  cannot establish enrollment. Message shape validation is separate from the
+  runtime owner's authentication and committed ceremony evidence.
 - Invitation redemption creates mutual relational context.
 - The `shareable` module owns code decoding, sender-proof verification, expiry and channel-context validation. Only the signature-verifying `verify_code` method mints `ValidatedImportedInvitation`; its private fields prevent a caller from promoting an arbitrary cache record into creation evidence. The optional `test-support` feature exposes unsigned codec fixtures for agent unit tests but cannot mint a validated-import token.
 - Invitation projections are created through an app-owned `InvitationCreationWitness` from a sealed validated-import token or `InvitationFact::Sent`; acceptance, decline, and cancellation facts settle existing invitations or wait for their creation evidence rather than inventing missing metadata.
@@ -117,3 +142,26 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
+
+## Enrollment trust transfer boundary
+
+The bounded enrollment manifest domain defines the signed exact parent/node verifier inventory, setup and invitation bindings, participant/share/package/policy digests, and independently transferred initiator identity statement. Pure signature and baseline verification produce sealed evidence without assigning runtime trust or granting signing/membership rights. Legacy absent bindings may decode but never authorize admission or acceptance.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+### Enrollment response manifest binding
+
+`DeviceEnrollmentAccept` includes an optional manifest digest for wire compatibility. Legacy absence does not authorize enrollment. The runtime's v3 acceptance transcript binds that digest together with the canonical invitation, setup, subject, physical device, ceremony and decision. The invitee selects it only through independent manifest admission; the issuer compares it to its own retained signed artifact. Persistence and process-local proof constructors belong to `aura-agent`.
+
+### Required invitation fact decoding
+
+Required recovery uses `InvitationFact::try_from_envelope`, which bounds payloads, accepts only supported schema versions 1–2, obeys the declared DAG-CBOR or JSON encoding, and retains structural envelope and original codec errors. `try_from_envelope_in_context` also validates explicit payload context against the relational wrapper. Historical contextless lifecycle records remain contextless. Observational `DomainFact::from_envelope` retains its optional compatibility contract. Domain regressions exercise independent schema-1 enrollment bytes, encoding mismatches, unsupported schemas, malformed payloads, size bounds and typed sources.
+
+### Device-enrollment response contract
+
+`DeviceEnrollmentResponse` is an untrusted wire sum of accepted and refused
+responses. Its fields do not grant acceptance or rejection authority. L6 binds
+and verifies the distinct signed decision transcripts against the independently
+transferred setup pin before advancing the choreography or settling a ceremony.
+The response message does not declare an unconditional accepted journal fact.
+Terminal failure remains separate from committed membership and activation.

@@ -25,6 +25,20 @@ impl AmpChannelEffects for AuraEffectSystem {
             ChannelId::from_bytes(hash(&bytes))
         };
 
+        match aura_protocol::amp::get_channel_state(self, params.context, channel).await {
+            Ok(_) => {
+                return Err(AmpChannelError::AlreadyExists {
+                    context: params.context,
+                    channel,
+                })
+            }
+            Err(error)
+                if aura_protocol::amp::ChannelStateUnavailable::find(&error).is_some_and(
+                    |absence| absence.context() == params.context && absence.channel() == channel,
+                ) => {}
+            Err(error) => return Err(AmpChannelError::Effect(error)),
+        }
+
         let window = params.skip_window.unwrap_or(DEFAULT_WINDOW);
 
         let checkpoint = aura_journal::fact::ChannelCheckpoint {
@@ -95,9 +109,10 @@ impl AmpChannelEffects for AuraEffectSystem {
             hasher.update(params.context.as_bytes());
             for fact in journal.facts.iter() {
                 let bytes = aura_core::util::serialization::to_vec(fact).map_err(|e| {
-                    map_amp_err(AuraError::internal(format!(
-                        "Failed to serialize context fact: {e}"
-                    )))
+                    map_amp_err(AuraError::Serialization {
+                        message: format!("Failed to serialize context fact: {e}"),
+                        source: Some(std::sync::Arc::new(e)),
+                    })
                 })?;
                 hasher.update(&bytes);
             }
@@ -106,7 +121,12 @@ impl AmpChannelEffects for AuraEffectSystem {
                 vec![(self.authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
             )
-            .map_err(|e| map_amp_err(AuraError::invalid(format!("Invalid AMP prestate: {e}"))))?;
+            .map_err(|error| {
+                map_amp_err(AuraError::Invalid {
+                    message: format!("Invalid AMP prestate: {error}"),
+                    source: Some(std::sync::Arc::new(error)),
+                })
+            })?;
             let consensus_params = crate::runtime::consensus::build_consensus_params(
                 params.context,
                 self,
@@ -167,7 +187,7 @@ impl AmpChannelEffects for AuraEffectSystem {
         // committed facts, so commit (persist and publish) there as well.
         self.commit_relational_facts(vec![membership.to_generic()])
             .await
-            .map_err(|e| AmpChannelError::Storage(e.to_string()))?;
+            .map_err(AmpChannelError::Effect)?;
 
         tracing::debug!(
             "Participant {:?} joined channel {:?} in context {:?}",
@@ -229,5 +249,180 @@ impl AmpChannelEffects for AuraEffectSystem {
 }
 
 fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {
-    AmpChannelError::Internal(e.to_string())
+    AmpChannelError::Effect(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[tokio::test]
+    async fn canonical_checkpoint_admission_emits_typed_absence_and_duplicate() {
+        let config = crate::core::AgentConfig::default();
+        let effects = AuraEffectSystem::simulation_for_named_test(
+            &config,
+            "amp-canonical-checkpoint-admission",
+        )
+        .unwrap();
+        let context = aura_core::ContextId::new_from_entropy([0x41; 32]);
+        let channel = aura_core::ChannelId::from_bytes([0x42; 32]);
+        let participant = effects.authority_id;
+        let missing = effects
+            .join_channel(ChannelJoinParams {
+                context,
+                channel,
+                participant,
+            })
+            .await
+            .unwrap_err();
+        let cause = missing
+            .source()
+            .unwrap()
+            .source()
+            .unwrap()
+            .downcast_ref::<aura_protocol::amp::ChannelStateUnavailable>()
+            .unwrap();
+        assert_eq!((cause.context(), cause.channel()), (context, channel));
+        let create = ChannelCreateParams {
+            context,
+            channel: Some(channel),
+            skip_window: None,
+            topic: None,
+        };
+        assert_eq!(
+            effects.create_channel(create.clone()).await.unwrap(),
+            channel
+        );
+        let original = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .unwrap();
+        let duplicate = effects.create_channel(create).await.unwrap_err();
+        assert!(matches!(duplicate, AmpChannelError::AlreadyExists {
+            context: actual_context, channel: actual_channel,
+        } if actual_context == context && actual_channel == channel));
+        let retained = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .unwrap();
+        assert_eq!(retained, original);
+    }
+    #[tokio::test]
+    async fn partial_amp_facts_do_not_materialize_checkpoint_or_suppress_creation() {
+        use aura_core::time::PhysicalTime;
+        use aura_journal::fact::{
+            ChannelBootstrap, ChannelBumpReason, ChannelPolicy, ProposedChannelEpochBump,
+        };
+        let config = crate::core::AgentConfig::default();
+        let effects = AuraEffectSystem::simulation_for_named_test(
+            &config,
+            "amp-partial-facts-before-canonical-checkpoint",
+        )
+        .unwrap();
+        let replay_effects = AuraEffectSystem::simulation_for_named_test(
+            &config,
+            "amp-canonical-checkpoint-before-partial-replay",
+        )
+        .unwrap();
+        let context = aura_core::ContextId::new_from_entropy([0x71; 32]);
+        for (index, channel) in [
+            ChannelId::from_bytes([0x72; 32]),
+            ChannelId::from_bytes([0x73; 32]),
+            ChannelId::from_bytes([0x74; 32]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let partial = match index {
+                0 => aura_journal::ProtocolRelationalFact::AmpChannelPolicy(ChannelPolicy {
+                    context,
+                    channel,
+                    skip_window: Some(17),
+                }),
+                1 => aura_journal::ProtocolRelationalFact::AmpChannelBootstrap(ChannelBootstrap {
+                    context,
+                    channel,
+                    bootstrap_id: Hash32::default(),
+                    dealer: effects.authority_id,
+                    recipients: vec![effects.authority_id],
+                    created_at: PhysicalTime::exact(1),
+                    expires_at: None,
+                }),
+                _ => aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(
+                    ProposedChannelEpochBump::new(
+                        context,
+                        channel,
+                        0,
+                        1,
+                        Hash32::default(),
+                        ChannelBumpReason::Routine,
+                    ),
+                ),
+            };
+            let partial_fact = aura_journal::fact::RelationalFact::Protocol(partial);
+            effects
+                .insert_relational_fact(partial_fact.clone())
+                .await
+                .unwrap();
+            let staged = aura_protocol::amp::get_reduced_channel_state(&effects, context, channel)
+                .await
+                .unwrap();
+            assert!(staged.canonical_checkpoint.is_none());
+            let missing = aura_protocol::amp::get_channel_state(&effects, context, channel)
+                .await
+                .unwrap_err();
+            let absence = aura_protocol::amp::ChannelStateUnavailable::find(&missing).unwrap();
+            assert_eq!((absence.context(), absence.channel()), (context, channel));
+            assert_eq!(
+                effects
+                    .create_channel(ChannelCreateParams {
+                        context,
+                        channel: Some(channel),
+                        skip_window: None,
+                        topic: None,
+                    })
+                    .await
+                    .unwrap(),
+                channel
+            );
+            let canonical = aura_protocol::amp::get_channel_state(&effects, context, channel)
+                .await
+                .unwrap();
+            let checkpoint = canonical.canonical_checkpoint.as_ref().unwrap();
+            assert_eq!((checkpoint.context, checkpoint.channel), (context, channel));
+            let duplicate = effects
+                .create_channel(ChannelCreateParams {
+                    context,
+                    channel: Some(channel),
+                    skip_window: None,
+                    topic: None,
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(duplicate, AmpChannelError::AlreadyExists { .. }));
+            assert_eq!(
+                aura_protocol::amp::get_channel_state(&effects, context, channel)
+                    .await
+                    .unwrap(),
+                canonical
+            );
+
+            replay_effects
+                .insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint.clone()),
+                ))
+                .await
+                .unwrap();
+            replay_effects
+                .insert_relational_fact(partial_fact)
+                .await
+                .unwrap();
+            let replay = aura_protocol::amp::get_channel_state(&replay_effects, context, channel)
+                .await
+                .unwrap();
+            assert_eq!(
+                replay, canonical,
+                "checkpoint-first replay must retain the exact canonical state"
+            );
+        }
+    }
 }

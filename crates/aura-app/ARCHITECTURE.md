@@ -1,5 +1,7 @@
 # Aura App (Layer 6)
 
+AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
+
 ## Purpose
 
 Portable, platform-agnostic application core containing pure business logic (intents, reducers, views) without runtime dependencies. Enables dependency inversion through the `RuntimeBridge` trait.
@@ -43,6 +45,20 @@ The crate uses explicit concern-owned submodules.
 
 - **Pure logic**: no runtime dependencies or impure I/O.
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
+- **Enrollment setup export**: `RuntimeBridge` exports the runtime-owned setup
+  code with `EnrollmentSetupExportError` preserved across the inversion boundary.
+  Unavailable exporters fail explicitly; callers cannot assemble the device/key
+  snapshot from separate bridge reads. Export does not mint user-transfer trust.
+  `export_device_enrollment_setup_code` bounds the runtime export call and
+  preserves typed readiness, storage and deadline failures; submission adapters
+  transfer its exact returned code rather than reconstructing device identity.
+  The explicit user-transfer workflow verifies possession through a bounded
+  runtime call before constructing private-field `UserTransferredEnrollmentSetup`.
+  This pin has no deserialization path and is not durable authority/device trust.
+  Enrollment issuance APIs require this strongest pin through owner and retry
+  boundaries. Production issuance rechecks validity and uses its exact device
+  identity; frontend migration and persisted replay/acceptance binding remain
+  incomplete until their integration coverage passes.
 - **Push-based reactive flow**: Intent -> Journal -> Reduce -> ViewState -> Signal -> UI.
 - **Complete signal initialization**: each required app signal is ensured independently without resetting an existing value. A single registered signal never proves that the full set is ready; partial initialization is retryable.
 - **Runtime hook ownership**: one `AppCore` hook group owns one subscription per required signal for one runtime attachment. Installation is serialized, enters `Installing`, and reaches `Ready` only after every receiver attaches and listener startup is acknowledged. Failure returns to `Stopped` with a typed reactive cause; detach drops the group and cancels its listeners.
@@ -187,11 +203,25 @@ Converted semantic-owner paths also follow two stricter publication rules:
   explicit degraded outcomes such as runtime-unavailable and timed-out; app or
   frontend code may not encode those states as string-parsed `AuraError`
   payloads
+- invitation acceptance policy uses native structural failure reasons retained
+  through the original error chain. Only an observed `Accepted` status may
+  classify a failed attempt as already handled; `Cancelled`, `Expired`, and
+  `Declined` remain distinct failures. Contact confirmation reasons and
+  deadlines select stable semantic codes without parsing diagnostic text.
+  Device enrollment acceptance failures settle the same owner that dispatched
+  the workflow and return the original runtime or convergence cause.
+- workflow context wrappers accept concrete standard errors and retain their
+  original causes. Converting a workflow error to `AuraError` preserves the
+  typed context; core passthrough preserves its category and direct source.
+  Time-query and parity-time failures retain their bounded/runtime sources.
+  Human-readable detail is diagnostic only and cannot replace source provenance.
 - runtime bridge composition is the outbound error-classification boundary:
   runtime-facing implementations may keep local error styles internally, but
-  anything surfaced through `RuntimeBridge` must arrive as typed
-  `IntentError` categories with stable semantic meaning rather than ad hoc
-  formatted strings for Layer 7 to interpret
+  native acceptance and time calls return `RuntimeBridgeError`, retaining
+  original causes and an exhaustive typed diagnostic kind. The existing foreign
+  `IntentError` enum stays unchanged. Only an explicit terminal diagnostic
+  adapter may omit native sources; diagnostic text never authorizes a retry.
+  Other bridge operations remain scheduled for the same native migration
 - runtime-backed hook installation must fail explicitly when the required task
   spawner is unavailable; Layer 6 may not report hook installation success and
   then silently skip authoritative refresh ownership
@@ -210,6 +240,17 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - converted ceremony-processing convergence in invitation/device-enrollment
   workflows must fail immediately on runtime processing errors; owner code may
   not log those errors and continue into later polling/count-based success tests
+- enrollment issuance has one app semantic owner per submission. Both the
+  verified setup entry point and the user-transferred code entry point publish
+  their own start proof from the actual runtime result; common runtime preparation
+  never publishes success and never nests a second owner.
+- enrollment failure codes are selected structurally from typed setup and issuance
+  errors, retaining the original cause through the standard error source chain.
+  Setup validity failures use `InvalidArgument`: a setup may be expired or not
+  yet valid and is not an issued invitation. Invalid possession signatures and
+  proof bindings use `PermissionDenied`; bounded workflow deadlines use
+  `OperationTimedOut`. Local cryptographic, time, and retained-package failures
+  use `CeremonyRuntimeFailed`. Message text never determines these codes.
 - device-enrollment code issuance and completion use separate semantic
   operation instances linked by ceremony ID. The app/runtime hook group owns
   completion observation and reattachment across frontend remount and runtime
@@ -219,6 +260,11 @@ Converted semantic-owner paths also follow two stricter publication rules:
   and stable failure domain/code. Cancellation remains distinct from failure,
   and guardian acceptance cannot publish success until the runtime supplies
   authenticated post-verification completion evidence.
+- channel join requires every canonical runtime read to succeed, including
+  the read after a rejected join attempt. Query failure cannot become absent
+  state, allow another mutation, or publish membership readiness. The
+  `signals` test lane injects failures after successful earlier reads and checks
+  original query sources, mutation counts, and absent membership publication.
 - channel-membership readiness facts are owner-published and runtime-revalidated;
   refresh helpers may reconcile or prune existing authoritative facts, but they
   may not mine `observed_chat_snapshot` or renderer-local chat projection state
@@ -292,6 +338,21 @@ just ci-ownership-policy
 | Signal boundary leaked | InvariantSharedUiContractAuthority | `tests/ui_signals/` (1 compile-fail) | Covered |
 | Home role E2E flow broken | — | `tests/home_role_e2e.rs` | Covered |
 
+Pending invitation acceptance distinguishes absent pending entities (`NotFound`)
+from a selected entity of the wrong kind (`InvalidState`) with explicit owner
+error variants. Both remain recoverable through the native error source chain;
+display text does not choose the semantic code. The acceptance owner regression
+`pending_selection_failures_have_explicit_semantic_codes_and_typed_causes`
+enforces this mapping.
+
+Pending invitation selection propagates authoritative lookup and required
+invitation readiness refresh failures. Account-wide settings/recovery enrichment
+is explicitly best-effort for this operation. Cached pending or accepted entries cannot repair a
+lookup error. Accepted-history recovery uses a typed not-materialized cause or
+an actual deadline; clock unavailability and invalid policy remain failures.
+The signals-enabled lookup fault regression and the readiness failure matrix
+enforce these boundaries.
+
 ## References
 
 - [System Architecture](../../docs/001_system_architecture.md)
@@ -300,3 +361,64 @@ just ci-ownership-policy
 - [Testing Guide](../../docs/804_testing_guide.md)
 - [Verification Guide](../../docs/806_verification_guide.md)
 - [Project Structure](../../docs/999_project_structure.md)
+
+Native AMP checkpoint resolution, staged transition diagnostics, materialized name identification, and membership repair return `RuntimeBridgeError`. Required query causes remain available through standard error sources; foreign diagnostic conversion is explicit. Deadline exhaustion is a timeout, while clock unavailability and invalid budgets remain distinct failures.
+
+## Enrollment trust transfer boundary
+
+The app owns explicit independently transferred initiator manifest selection and one ImportDeviceEnrollmentCode operation covering pin, runtime import, acceptance, and convergence. Raw form/semantic inputs are not trust tokens. A completion result has private fields and is minted only after verified acceptance/adoption; frontend identity persistence consumes that result. Typed missing-pin causes survive the workflow and handoff error chain.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+### Native settings and identity failures
+
+Required identity/settings bridge queries and mutations retain `RuntimeBridgeError` through bounded runtime calls and workflow error sources. `settings_snapshot` preserves budget failures and native query causes; its `None` represents an explicitly absent runtime. Aggregate runtime status retains native authentication failures, while its legacy sync/rendezvous diagnostic components do not provide stronger readiness evidence. Trait signatures and native-error compile-fail guards prevent implicit conversion back into `IntentError`.
+
+### Native failure projection
+
+Native runtime failures keep their category and concrete sources through required settings workflow context. Callback foreign error payloads project the native category directly; crypto and codec failures have explicit `crypto_error` and `serialization_error` codes. Semantic projection traverses retained native sources and classifies all native categories exhaustively. Diagnostic words never supply category evidence. The callback payload remains a terminal display projection and cannot carry a Rust error source.
+
+### Native semantic failure codes
+
+Native crypto, serialization, storage, journal, and reactive failures project to distinct shared semantic failure codes. Typed native evidence is read through retained workflow sources before legacy terminal classification. Foreign callback codes and shared semantic snapshot codes remain explicit presentation projections, never trust evidence.
+
+### Native account bootstrap failures
+
+Account initialization retains native runtime sources through failure publication and return. Signing bootstrap is one required bounded operation on the existing runtime owner on both native and browser; permanent native faults are not rewritten as transient readiness or retried blindly. Failed semantic publication retains both the original bootstrap cause and publication failure structurally.
+
+### Typed command failure classification
+
+Authoritative strong-command execution retains typed resolver and plan failures as standard sources. Terminal classification uses these domain variants and structural native categories; Invalid and PermissionDenied display text cannot assert missing scope, stale snapshots, membership denial, mute, or ban subreasons.
+
+### Typed moderation decisions
+
+Messaging send/join denial is derived from the required runtime-owned moderation status and retains exact context, channel, and authority in `ModerationDenial`. NotMember/Muted/Banned semantics are read from retained typed sources. Send failure goes through its existing semantic owner terminal publisher; failed status reads do not manufacture a denial subreason.
+
+Enrollment import completion retains the original provisional identity,
+invitation, ceremony, pending epoch, setup digest and independent manifest digest
+alongside the resulting subject/device. These values identify the runtime-owned
+immutable confirmation receipt for subsequent profile handoff; they are not
+serializable completion capabilities or authority reconstructed from received
+identifiers. Completion is returned only after authenticated committed
+confirmation and sanctioned exact-generation activation succeed.
+
+### Enrollment acceptance ownership
+
+Enrollment acceptance terminal publication belongs to the annotated acceptance owner. Both the import wrapper and direct acceptance wrapper await that owner; neither publishes a second success. The acceptance owner requires runtime-confirmed activation and settled local state before publishing the typed imported proof.
+
+### Checkpoint failure category
+
+Required timeout checkpoint storage/codec failures retain their actual lower-owner category through semantic projection. The shared budget classifier walks retained sources; actual clock failures remain unavailable and actual elapsed deadlines remain timed out. Diagnostic wording and unclassified IO do not identify a service category.
+
+### Required refresh attachment health
+
+One hook group owns its attached signal streams, bounded first failure, and shared cancellation. Required signal receipt, refresh, or interval failure cancels the entire group and returns the original native error to the fallible runtime spawner. `AppCore::refresh_hook_failure` exposes the typed stage and original cause even without tracing. Failed groups are inactive; explicit reattachment replaces attachment health but does not clear the runtime supervisor's retained failure. Cancellation alone remains successful task completion.
+
+### Enrollment terminal failure projection
+
+The native runtime bridge retains a structural enrollment terminal reason in
+addition to its original cause. Shared workflow projection handles all terminal
+reasons exhaustively before generic native categories; cancellation and rejection
+remain distinct from crypto verification faults. The reason is a diagnostic, not
+a signed-proof constructor or retry witness. The foreign IntentError payload
+contract remains unchanged.

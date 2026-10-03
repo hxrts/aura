@@ -73,14 +73,14 @@ use aura_invitation::protocol::guardian::telltale_session_types_invitation_guard
     GuardianRequest as GuardianInvitationRequest,
 };
 use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
-    DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
-    DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
-    DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
+    DeviceEnrollmentResponse as DeviceEnrollmentResponseWrapper,
 };
 use aura_invitation::{
-    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest, GuardianAccept, GuardianConfirm, GuardianRequest,
+    DeviceEnrollmentResponse, GuardianAccept, GuardianConfirm, GuardianRequest,
     InvitationAck, InvitationOffer, InvitationOperation,
 };
+#[cfg(test)]
+use aura_invitation::DeviceEnrollmentAccept;
 
 use crate::runtime::services::TrustedKeyResolutionService;
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
@@ -97,7 +97,6 @@ use aura_signature::{
     threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt;
 use std::future::Future;
 #[cfg(test)]
 use std::str::FromStr;
@@ -107,13 +106,49 @@ use std::time::Duration;
 use telltale_machine::StepResult;
 use uuid::Uuid;
 use validation::InvitationValidationHandler;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 mod cache;
 mod channel;
 mod contact;
-mod contact_confirmation;
+pub(crate) mod contact_confirmation;
 mod device_enrollment;
+pub(crate) mod enrollment_manifest_admission;
+/// Guard preparation owns its exact sender record and commands. It cannot
+/// authorize enrollment terminal mutation or be constructed by callers.
+/// Required sender storage custody; private fields prevent observed Invitation
+/// values from becoming cancellation preparation input.
+pub(crate) struct SenderInvitationRecordCapability {
+    runtime_owner: Arc<AuraEffectSystem>,
+    invitation: Invitation,
+}
+impl SenderInvitationRecordCapability {
+    pub(crate) fn invitation(&self) -> &Invitation {
+        &self.invitation
+    }
+    pub(crate) fn runtime_owner(&self) -> Arc<AuraEffectSystem> {
+        self.runtime_owner.clone()
+    }
+}
+
+pub(crate) struct AuthorizedInvitationCancellationCapability {
+    runtime_owner: Arc<AuraEffectSystem>,
+
+    invitation: Invitation,
+    outcome: aura_invitation::guards::GuardOutcome,
+}
+impl AuthorizedInvitationCancellationCapability {
+    pub(crate) fn invitation(&self) -> &Invitation {
+        &self.invitation
+    }
+}
+
+pub(crate) mod enrollment_trust;
+mod enrollment_vm_admission;
+mod required_channel_read;
+pub(crate) use enrollment_trust::VerifiedEnrollmentResponse;
+pub(crate) use enrollment_vm_admission::{
+    EnrollmentVmAdmissionError, VerifiedEnrollmentFailureCapability,
+};
 mod exchange;
 mod execution;
 mod guardian;
@@ -122,7 +157,7 @@ pub(crate) fn guardian_confirmation_storage_key(invitation_id: &InvitationId) ->
     format!("guardian-confirmation:{invitation_id}")
 }
 mod shareable;
-mod validation;
+pub(crate) mod validation;
 mod vm_loop;
 
 // Re-export types from aura_invitation for public API
@@ -245,6 +280,8 @@ impl SecurityTranscript for ChannelInvitationAcceptanceTranscript<'_> {
 
 #[derive(Debug, Clone, serde::Serialize)]
 struct DeviceEnrollmentAcceptanceTranscriptPayload {
+    manifest_digest: [u8; 32],
+    setup_binding: Option<aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding>,
     invitation_id: InvitationId,
     subject_authority: AuthorityId,
     acceptor_id: AuthorityId,
@@ -259,6 +296,7 @@ struct DeviceEnrollmentAcceptanceTranscriptPayload {
 /// Binds the acceptance to the invitation, the account being joined, the
 /// ceremony, and the enrolled device so it cannot be replayed elsewhere.
 struct DeviceEnrollmentAcceptanceTranscript<'a> {
+    manifest_digest: [u8; 32],
     invitation: &'a Invitation,
     acceptor_id: AuthorityId,
     subject_authority: AuthorityId,
@@ -269,10 +307,15 @@ struct DeviceEnrollmentAcceptanceTranscript<'a> {
 impl SecurityTranscript for DeviceEnrollmentAcceptanceTranscript<'_> {
     type Payload = DeviceEnrollmentAcceptanceTranscriptPayload;
 
-    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.device-enrollment-acceptance";
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.device-enrollment-acceptance.v3";
 
     fn transcript_payload(&self) -> Self::Payload {
         DeviceEnrollmentAcceptanceTranscriptPayload {
+            manifest_digest: self.manifest_digest,
+            setup_binding: match &self.invitation.invitation_type {
+                InvitationType::DeviceEnrollment { setup_binding, .. } => setup_binding.clone(),
+                _ => None,
+            },
             invitation_id: self.invitation.invitation_id.clone(),
             subject_authority: self.subject_authority,
             acceptor_id: self.acceptor_id,
@@ -281,6 +324,18 @@ impl SecurityTranscript for DeviceEnrollmentAcceptanceTranscript<'_> {
             expires_at: self.invitation.expires_at,
             decision: "accepted",
         }
+    }
+}
+
+/// Refusal never reuses an acceptance signature or acceptance capability.
+struct DeviceEnrollmentRefusalTranscript<'a>(DeviceEnrollmentAcceptanceTranscript<'a>);
+impl SecurityTranscript for DeviceEnrollmentRefusalTranscript<'_> {
+    type Payload = DeviceEnrollmentAcceptanceTranscriptPayload;
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.device-enrollment-refusal.v1";
+    fn transcript_payload(&self) -> Self::Payload {
+        let mut payload = self.0.transcript_payload();
+        payload.decision = "refused";
+        payload
     }
 }
 
@@ -338,6 +393,25 @@ pub(crate) struct PreparedInvitation {
     pub(crate) deferred_network_effects: DeferredInvitationNetworkEffects,
 }
 
+/// Single-use issuance identity. Reservation performs no fact commit or send.
+/// This identifies an operation; it is not evidence of invitation trust.
+#[must_use]
+pub(crate) struct ReservedInvitationIssuance {
+    invitation_id: InvitationId,
+    authority: AuthorityId,
+    device: DeviceId,
+    created_at_ms: u64,
+}
+
+impl ReservedInvitationIssuance {
+    pub(crate) fn invitation_id(&self) -> &InvitationId {
+        &self.invitation_id
+    }
+    pub(crate) fn created_at_ms(&self) -> u64 {
+        self.created_at_ms
+    }
+}
+
 pub(crate) struct ChannelInviteDetails {
     pub(crate) context_id: ContextId,
     pub(crate) channel_id: ChannelId,
@@ -352,7 +426,6 @@ pub(crate) struct ChannelInviteDetails {
 enum CachedInvitationActionValidation {
     Accept { now_ms: u64 },
     Decline,
-    Cancel,
 }
 
 fn is_generic_contact_invitation(
@@ -881,16 +954,6 @@ impl InvitationHandler {
             .await
     }
 
-    async fn validate_cached_invitation_cancel(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<()> {
-        InvitationValidationHandler::new(self)
-            .validate_cached_invitation_cancel(effects, invitation_id)
-            .await
-    }
-
     async fn validate_cached_invitation_for_action(
         &self,
         effects: &AuraEffectSystem,
@@ -905,10 +968,6 @@ impl InvitationHandler {
             }
             CachedInvitationActionValidation::Decline => {
                 self.validate_cached_invitation_decline(effects, invitation_id)
-                    .await
-            }
-            CachedInvitationActionValidation::Cancel => {
-                self.validate_cached_invitation_cancel(effects, invitation_id)
                     .await
             }
         }
@@ -979,14 +1038,75 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<PreparedInvitation> {
+        let reserved = self.reserve_invitation_issuance(effects.as_ref()).await?;
+        Box::pin(self.prepare_reserved_invitation_with_context(
+            effects,
+            reserved,
+            receiver_id,
+            invitation_type,
+            receiver_nickname,
+            context_override,
+            message,
+            expires_in_ms,
+        ))
+        .await
+    }
+
+    pub(crate) async fn reserve_invitation_issuance(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<ReservedInvitationIssuance> {
+        HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        Ok(ReservedInvitationIssuance {
+            invitation_id: InvitationId::new(format!(
+                "inv-{}",
+                effects.random_uuid().await.simple()
+            )),
+            authority: self.context.authority.authority_id(),
+            device: effects.device_id(),
+            created_at_ms: effects
+                .physical_time()
+                .await
+                .map_err(|source| {
+                    AgentError::from(aura_core::AuraError::Internal {
+                        message: "read invitation reservation time".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?
+                .ts_ms,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn prepare_reserved_invitation_with_context(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        reserved: ReservedInvitationIssuance,
+        receiver_id: AuthorityId,
+        invitation_type: InvitationType,
+        receiver_nickname: Option<String>,
+        context_override: Option<ContextId>,
+        message: Option<String>,
+        expires_in_ms: Option<u64>,
+    ) -> AgentResult<PreparedInvitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
         let sender_id = self.context.authority.authority_id();
-
-        // Generate unique invitation ID
-        let invitation_id =
-            InvitationId::new(format!("inv-{}", effects.random_uuid().await.simple()));
-        let current_time = Self::best_effort_current_timestamp_ms(&effects).await;
-        let expires_at = expires_in_ms.map(|ms| current_time + ms);
+        if reserved.authority != sender_id || reserved.device != effects.device_id() {
+            return Err(AgentError::from(aura_core::AuraError::invalid(
+                "Invitation reservation belongs to another issuer",
+            )));
+        }
+        let invitation_id = reserved.invitation_id;
+        let current_time = reserved.created_at_ms;
+        let expires_at = expires_in_ms
+            .map(|ms| {
+                current_time.checked_add(ms).ok_or_else(|| {
+                    AgentError::from(aura_core::AuraError::invalid(
+                        "invitation expiration overflow",
+                    ))
+                })
+            })
+            .transpose()?;
 
         let invitation_context = if let Some(context_id) = context_override {
             context_id
@@ -1219,6 +1339,22 @@ impl InvitationHandler {
                     CachedInvitationActionValidation::Accept { now_ms },
                 )
                 .await?;
+                if let Some(invitation) = self
+                    .get_invitation_with_storage(effects.as_ref(), invitation_id)
+                    .await
+                {
+                    if matches!(
+                        invitation.invitation_type,
+                        InvitationType::DeviceEnrollment { .. }
+                    ) {
+                        enrollment_manifest_admission::load_admitted_baseline(
+                            effects.as_ref(),
+                            invitation.receiver_id,
+                            &invitation,
+                        )
+                        .await?;
+                    }
+                }
                 Ok(now_ms)
             },
         )
@@ -1547,117 +1683,27 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
         invitation_id: &InvitationId,
     ) -> AgentResult<()> {
-        // Device enrollment acceptance installs the issued share before the
-        // invitee notifies the initiator runtime.
-        if let Some(enrollment) = self
-            .resolve_device_enrollment_invitation(effects, invitation_id)
-            .await?
-        {
-            tracing::info!(
-                baseline_ops = enrollment.baseline_tree_ops.len(),
-                "materializing device enrollment baseline tree"
-            );
-            if !enrollment.baseline_tree_ops.is_empty() {
-                let baseline_ops = enrollment
-                    .baseline_tree_ops
-                    .iter()
-                    .map(|bytes| {
-                        aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-                            crate::core::AgentError::internal(format!(
-                                "decode device enrollment baseline tree op: {e}"
-                            ))
-                        })
-                    })
-                    .collect::<Result<Vec<aura_core::AttestedOp>, _>>()?;
-                // The joining device adopts the account's tree; ops it holds are
-                // from its provisional identity and must not be merged in.
-                effects.replace_tree_ops(&baseline_ops).await?;
-                if let Ok(state) =
-                    aura_protocol::effects::TreeEffects::get_current_state(effects).await
-                {
-                    tracing::info!(
-                        leaves = ?state.leaves.values().map(|leaf| leaf.device_id).collect::<Vec<_>>(),
-                        "adopted the account tree"
-                    );
-                }
-            }
-
-            let participant =
-                aura_core::threshold::ParticipantIdentity::device(enrollment.device_id);
-            let location = SecureStorageLocation::with_sub_key(
-                "participant_shares",
-                format!(
-                    "{}:{}",
-                    enrollment.subject_authority, enrollment.pending_epoch
-                ),
-                participant.storage_key(),
-            );
-
-            effects
-                .secure_store(
-                    &location,
-                    &enrollment.key_package,
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    crate::core::AgentError::effects(format!(
-                        "store device enrollment key package: {e}"
-                    ))
-                })?;
-
-            let config_location = SecureStorageLocation::with_sub_key(
-                "threshold_config",
-                format!("{}", enrollment.subject_authority),
-                format!("{}", enrollment.pending_epoch),
-            );
-            let pubkey_location = SecureStorageLocation::with_sub_key(
-                "threshold_pubkey",
-                format!("{}", enrollment.subject_authority),
-                format!("{}", enrollment.pending_epoch),
-            );
-
-            if !enrollment.threshold_config.is_empty() {
-                effects
-                    .secure_store(
-                        &config_location,
-                        &enrollment.threshold_config,
-                        &[
-                            SecureStorageCapability::Read,
-                            SecureStorageCapability::Write,
-                        ],
-                    )
-                    .await
-                    .map_err(|e| {
-                        crate::core::AgentError::effects(format!(
-                            "store device enrollment threshold config: {e}"
-                        ))
-                    })?;
-            }
-
-            if !enrollment.public_key_package.is_empty() {
-                effects
-                    .secure_store(
-                        &pubkey_location,
-                        &enrollment.public_key_package,
-                        &[
-                            SecureStorageCapability::Read,
-                            SecureStorageCapability::Write,
-                        ],
-                    )
-                    .await
-                    .map_err(|e| {
-                        crate::core::AgentError::effects(format!(
-                            "store device enrollment public key package: {e}"
-                        ))
-                    })?;
-            }
+        let Some(canonical) = self
+            .get_invitation_with_storage(effects, invitation_id)
+            .await
+        else {
+            return Ok(());
+        };
+        if !matches!(
+            canonical.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            return Ok(());
         }
-
-        Ok(())
+        let admitted = enrollment_manifest_admission::load_admitted_baseline(
+            effects,
+            canonical.receiver_id,
+            &canonical,
+        )
+        .await?;
+        crate::runtime::services::enrollment_import::install_admitted_generation(effects, &admitted)
+            .await
+            .map_err(AgentError::from)
     }
 
     async fn execute_accept_invitation_follow_up(
@@ -1738,16 +1784,6 @@ impl InvitationHandler {
     ) -> AgentResult<Option<(AuthorityId, String, Option<String>)>> {
         InvitationContactHandler::new(self)
             .resolve_contact_invitation(effects, invitation_id)
-            .await
-    }
-
-    async fn resolve_device_enrollment_invitation(
-        &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<Option<DeviceEnrollmentInvitation>> {
-        InvitationDeviceEnrollmentHandler::new(self)
-            .resolve_device_enrollment_invitation(effects, invitation_id)
             .await
     }
 
@@ -1911,6 +1947,17 @@ impl InvitationHandler {
         };
         #[cfg(not(test))]
         let invitation = validated_import.invitation().clone();
+        if matches!(
+            invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            enrollment_manifest_admission::load_admitted_baseline(
+                effects,
+                invitation.receiver_id,
+                &invitation,
+            )
+            .await?;
+        }
         let sender_trust = self
             .classify_imported_sender_trust(effects, &shareable, sender_proof.as_ref())
             .await?;
@@ -2129,6 +2176,19 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
+        let admitted = enrollment_manifest_admission::load_admitted_enrollment_for_id(
+            effects.as_ref(),
+            self.context.authority.authority_id(),
+            invitation_id,
+        )
+        .await
+        .map_err(AgentError::EnrollmentManifest)?;
+        let enrollment_response = admitted.is_some();
+        if let Some(admitted) = admitted {
+            device_enrollment::InvitationDeviceEnrollmentHandler::new(self)
+                .execute_device_enrollment_invitee_decline(effects.clone(), &admitted)
+                .await?;
+        }
         self.validate_cached_invitation_for_action(
             effects.as_ref(),
             invitation_id,
@@ -2168,25 +2228,27 @@ impl InvitationHandler {
             })
             .await;
 
-        if let Some(invitation) = self
-            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
-            .await
-        {
-            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                tracing::debug!(
-                    invitation_id = %invitation_id,
-                    "Skipping synchronous invitation exchange receiver for declined channel invitation"
-                );
-            } else if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
-                if let Err(error) = self
-                    .execute_invitation_exchange_receiver(effects.clone(), &invitation, false)
-                    .await
-                {
-                    tracing::warn!(
+        if !enrollment_response {
+            if let Some(invitation) = self
+                .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+                .await
+            {
+                if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                    tracing::debug!(
                         invitation_id = %invitation_id,
-                        error = %error,
-                        "decline invitation follow-up exchange failed after local decline"
+                        "Skipping synchronous invitation exchange receiver for declined channel invitation"
                     );
+                } else if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+                    if let Err(error) = self
+                        .execute_invitation_exchange_receiver(effects.clone(), &invitation, false)
+                        .await
+                    {
+                        tracing::warn!(
+                            invitation_id = %invitation_id,
+                            error = %error,
+                            "decline invitation follow-up exchange failed after local decline"
+                        );
+                    }
                 }
             }
         }
@@ -2197,49 +2259,269 @@ impl InvitationHandler {
         ))
     }
 
-    /// Cancel an invitation (sender only)
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "sender_invitation_record",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn created_invitation_required(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<SenderInvitationRecordCapability> {
+        let invitation = required_channel_read::created_required(
+            effects.as_ref(),
+            self.context.authority.authority_id(),
+            invitation_id,
+        )
+        .await
+        .map_err(AgentError::from)?;
+        let invitation = required_channel_read::hydrate_created_enrollment_required(
+            effects.as_ref(),
+            self.context.authority.authority_id(),
+            invitation,
+        )
+        .await
+        .map_err(AgentError::from)?;
+        Ok(SenderInvitationRecordCapability {
+            runtime_owner: effects,
+            invitation,
+        })
+    }
+
+    /// Publish the local cancellation only after the actual enrollment terminal
+    /// owner has durably won its first-decision CAS.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "verified_enrollment_cancellation",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn publish_verified_enrollment_cancellation(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        prepared: AuthorizedInvitationCancellationCapability,
+        cancelled: crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
+    ) -> AgentResult<InvitationResult> {
+        cancelled
+            .require_runtime_owner(&effects)
+            .map_err(AgentError::from)?;
+        let invitation = prepared.invitation();
+        if cancelled.invitation() != &invitation.invitation_id
+            || !matches!(&invitation.invitation_type,
+                InvitationType::DeviceEnrollment { ceremony_id, .. }
+                if ceremony_id == cancelled.ceremony())
+        {
+            return Err(AgentError::invalid("cancellation evidence binding differs"));
+        }
+        self.publish_cancelled_invitation(effects, prepared).await
+    }
+
+    /// Cancel a non-enrollment invitation (sender only). Enrollment cancellation
+    /// requires the stronger actual terminal-CAS token above.
     pub async fn cancel_invitation(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
-        let own_id = self.context.authority.authority_id();
+        let record = self
+            .created_invitation_required(effects, invitation_id)
+            .await?;
+        self.cancel_required_invitation(record).await
+    }
 
-        self.validate_cached_invitation_for_action(
-            effects.as_ref(),
-            invitation_id,
-            CachedInvitationActionValidation::Cancel,
-        )
-        .await?;
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "sender_invitation_cancellation",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn cancel_required_invitation(
+        &self,
+        record: SenderInvitationRecordCapability,
+    ) -> AgentResult<InvitationResult> {
+        if matches!(
+            record.invitation().invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            return Err(AgentError::invalid(
+                "enrollment cancellation requires terminal owner",
+            ));
+        }
+        let effects = record.runtime_owner();
+        let prepared = self.prepare_invitation_cancellation(record).await?;
+        self.publish_cancelled_invitation(effects, prepared).await
+    }
 
-        // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects.as_ref()).await;
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "issued_enrollment_cancellation",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn prepare_enrollment_cancellation(
+        &self,
+        issued: &enrollment_trust::RetainedEnrollmentVmControl,
+        record: SenderInvitationRecordCapability,
+    ) -> AgentResult<AuthorizedInvitationCancellationCapability> {
+        issued
+            .require_runtime_owner(record.runtime_owner.as_ref())
+            .map_err(AgentError::from)?;
+        if issued.canonical_invitation().invitation_id != record.invitation().invitation_id
+            || issued.canonical_invitation().sender_id != record.invitation().sender_id
+            || issued.canonical_invitation().context_id != record.invitation().context_id
+        {
+            return Err(AgentError::invalid(
+                "issued cancellation source record differs",
+            ));
+        }
+        self.prepare_invitation_cancellation(record).await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "prepared_invitation_cancellation",
+        family = "authorizer"
+    )]
+    pub(crate) async fn prepare_invitation_cancellation(
+        &self,
+        record: SenderInvitationRecordCapability,
+    ) -> AgentResult<AuthorizedInvitationCancellationCapability> {
+        let SenderInvitationRecordCapability {
+            runtime_owner,
+            invitation,
+        } = record;
+
+        if invitation.status != InvitationStatus::Pending
+            && invitation.status != InvitationStatus::Cancelled
+        {
+            return Err(AgentError::invalid(
+                "only a pending invitation can be cancelled",
+            ));
+        }
+        let snapshot = self
+            .cancellation_snapshot_required(runtime_owner.as_ref())
+            .await?;
         let outcome = self
             .service
-            .prepare_cancel_invitation(&snapshot, invitation_id);
-
-        // Execute the outcome
-        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
-
-        if let Some(mut invitation) =
-            InvitationCacheHandler::load_created_invitation(effects.as_ref(), own_id, invitation_id)
-                .await
-        {
-            invitation.status = InvitationStatus::Cancelled;
-            InvitationCacheHandler::persist_created_invitation(
-                effects.as_ref(),
-                own_id,
-                &invitation,
-            )
-            .await?;
-            self.invitation_cache.cache_invitation(invitation).await;
-        } else {
-            let _ = self.invitation_cache.remove_invitation(invitation_id).await;
+            .prepare_cancel_invitation(&snapshot, &invitation.invitation_id);
+        if outcome.is_denied() {
+            return Err(AgentError::from(aura_core::AuraError::permission_denied(
+                aura_invitation::guards::denial_reason(&outcome),
+            )));
         }
+        Ok(AuthorizedInvitationCancellationCapability {
+            runtime_owner,
+            invitation,
+            outcome,
+        })
+    }
 
-        Ok(InvitationResult::new(
-            invitation_id.clone(),
-            InvitationStatus::Cancelled,
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "prepared_invitation_cancellation",
+        family = "runtime_helper"
+    )]
+    async fn publish_cancelled_invitation(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        prepared: AuthorizedInvitationCancellationCapability,
+    ) -> AgentResult<InvitationResult> {
+        if !Arc::ptr_eq(&effects, &prepared.runtime_owner) {
+            return Err(AgentError::from(aura_core::AuraError::Invalid {
+                message: "cancellation publication has another prepared runtime owner".into(),
+                source: Some(Arc::new(
+                    enrollment_trust::EnrollmentVerifierError::RuntimeOwner,
+                )),
+            }));
+        }
+        let AuthorizedInvitationCancellationCapability {
+            runtime_owner: _,
+            invitation,
+            outcome,
+        } = prepared;
+        if invitation.status == InvitationStatus::Cancelled {
+            return Ok(InvitationResult::new(
+                invitation.invitation_id,
+                InvitationStatus::Cancelled,
+            ));
+        }
+        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
+        let mut cancelled = invitation;
+        cancelled.status = InvitationStatus::Cancelled;
+        // The required record may contain redacted enrollment secrets. Updating
+        // this status must not replace the separately retained secret payload.
+        let regular = InvitationCacheHandler::redact_device_enrollment_payload(&cancelled);
+        let bytes = serde_json::to_vec(&regular).map_err(|source| {
+            AgentError::from(aura_core::AuraError::Serialization {
+                message: "encode cancelled sender invitation".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        effects
+            .store(
+                &InvitationCacheHandler::created_invitation_key(
+                    self.context.authority.authority_id(),
+                    &cancelled.invitation_id,
+                ),
+                bytes,
+            )
+            .await
+            .map_err(|source| {
+                AgentError::from(aura_core::AuraError::Storage {
+                    message: "persist cancelled sender invitation".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        let id = cancelled.invitation_id.clone();
+        self.invitation_cache.cache_invitation(cancelled).await;
+        Ok(InvitationResult::new(id, InvitationStatus::Cancelled))
+    }
+
+    async fn cancellation_snapshot_required(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<GuardSnapshot> {
+        let now = effects.physical_time().await.map_err(|source| {
+            AgentError::from(aura_core::AuraError::Internal {
+                message: "required cancellation clock".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        let mut capabilities = Vec::new();
+        if let Some((token, bridge)) = effects.verified_biscuit_frontier().map_err(|source| {
+            AgentError::from(aura_core::AuraError::Internal {
+                message: "required cancellation capability frontier".into(),
+                source: Some(Arc::new(source)),
+            })
+        })? {
+            for capability in evaluation_candidates_for_invitation_guard() {
+                let name: CapabilityName = capability.as_name();
+                if bridge
+                    .has_capability_with_time(&token, name.as_str(), Some(now.ts_ms / 1_000))
+                    .map_err(|source| {
+                        AgentError::from(aura_core::AuraError::Internal {
+                            message: "required cancellation capability evaluation".into(),
+                            source: Some(Arc::new(source)),
+                        })
+                    })?
+                {
+                    capabilities.push(name);
+                }
+            }
+        }
+        let context = self.context.effect_context.context_id();
+        let budget = aura_core::effects::JournalEffects::get_flow_budget(
+            effects,
+            &context,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .map_err(AgentError::from)?;
+        Ok(GuardSnapshot::new(
+            self.context.authority.authority_id(),
+            context,
+            FlowCost::new(u32::try_from(budget.remaining()).unwrap_or(u32::MAX)),
+            capabilities,
+            u64::from(budget.epoch),
+            now.ts_ms,
         ))
     }
 
@@ -2259,6 +2541,22 @@ impl InvitationHandler {
     }
 
     /// List invitations from cache plus persisted stores.
+    /// Read channel invitations required by canonical participant augmentation.
+    /// Required storage, decode, context and time failures are propagated;
+    /// enrollment payload restoration is outside this channel-only read.
+    pub async fn list_channel_invitations_with_storage_required(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<Vec<Invitation>, aura_core::AuraError> {
+        required_channel_read::list_required(
+            effects,
+            self.context.authority.authority_id(),
+            self.list_cached_matching(|_| true).await,
+        )
+        .await
+    }
+
+    /// Observed-only best-effort listing; not an authoritative absence/readiness API.
     pub async fn list_with_storage(&self, effects: &AuraEffectSystem) -> Vec<Invitation> {
         let mut invitations: HashMap<InvitationId, Invitation> = HashMap::new();
         for invitation in self.list_cached_matching(|_| true).await {
@@ -2418,44 +2716,6 @@ impl InvitationHandler {
         InvitationCacheHandler::new(self)
             .get_invitation_with_storage(effects, invitation_id)
             .await
-    }
-}
-
-#[derive(Zeroize, ZeroizeOnDrop)]
-struct DeviceEnrollmentInvitation {
-    #[zeroize(skip)]
-    subject_authority: AuthorityId,
-    #[zeroize(skip)]
-    device_id: aura_core::DeviceId,
-    #[zeroize(skip)]
-    pending_epoch: u64,
-    /// Security-sensitive serialized key package carried through device
-    /// enrollment. Zeroized on drop.
-    key_package: Vec<u8>,
-    /// Security-sensitive threshold configuration payload. Zeroized on drop.
-    threshold_config: Vec<u8>,
-    /// Public package bytes are cleared alongside the rest of the invitation
-    /// payload to avoid retaining mixed ceremony material.
-    public_key_package: Vec<u8>,
-    /// Baseline tree ops can embed serialized device-enrollment material and
-    /// are treated as sensitive during invitation handling.
-    baseline_tree_ops: Vec<Vec<u8>>,
-}
-
-impl fmt::Debug for DeviceEnrollmentInvitation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DeviceEnrollmentInvitation")
-            .field("subject_authority", &self.subject_authority)
-            .field("device_id", &self.device_id)
-            .field("pending_epoch", &self.pending_epoch)
-            .field("key_package_len", &self.key_package.len())
-            .field("key_package", &"<redacted>")
-            .field("threshold_config_len", &self.threshold_config.len())
-            .field("threshold_config", &"<redacted>")
-            .field("public_key_package_len", &self.public_key_package.len())
-            .field("baseline_tree_ops_count", &self.baseline_tree_ops.len())
-            .field("baseline_tree_ops", &"<redacted>")
-            .finish()
     }
 }
 

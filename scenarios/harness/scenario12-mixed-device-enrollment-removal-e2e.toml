@@ -44,10 +44,24 @@ screen_id = "onboarding"
 timeout_ms = 60000
 
 [[steps]]
-id = "bob-prepare-device-enrollment-invitee-authority"
-action = "prepare_device_enrollment_invitee_authority"
+id = "bob-create-provisional-account"
+action = "create_account"
 actor = "bob"
-name = "bob_authority_id"
+value = "BobEnrollmentSetup"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-provisional-account-ready"
+action = "screen_is"
+actor = "bob"
+screen_id = "neighborhood"
+timeout_ms = 60000
+
+[[steps]]
+id = "bob-prepare-device-enrollment-setup"
+action = "prepare_device_enrollment_setup"
+actor = "bob"
+name = "bob_setup_code"
 timeout_ms = 3000
 
 [[steps]]
@@ -91,7 +105,7 @@ action = "start_device_enrollment"
 actor = "alice"
 value = "BobApp"
 name = "device_code"
-invitee_authority_id = "${bob_authority_id}"
+setup_code = "${bob_setup_code}"
 timeout_ms = 120000
 
 [[steps]]
@@ -107,6 +121,8 @@ id = "bob-import-device-code"
 action = "import_device_enrollment_code"
 actor = "bob"
 value = "${device_code}"
+manifest_code = "${device_code_manifest}"
+initiator_verifier_code = "${device_code_initiator_verifier}"
 timeout_ms = 4000
 
 [[steps]]

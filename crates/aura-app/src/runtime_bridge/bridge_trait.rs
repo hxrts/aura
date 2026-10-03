@@ -1,5 +1,6 @@
 //! RuntimeBridge trait and boxed trait alias.
 
+use super::RuntimeBridgeError;
 use super::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
@@ -56,7 +57,7 @@ pub trait RuntimeBridge: Send + Sync {
     }
 
     /// Query the explicit runtime authentication status.
-    async fn authentication_status(&self) -> Result<AuthenticationStatus, IntentError>;
+    async fn authentication_status(&self) -> Result<AuthenticationStatus, RuntimeBridgeError>;
 
     // =========================================================================
     // Typed Fact Commit (Canonical)
@@ -117,7 +118,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn amp_create_channel(
         &self,
         params: ChannelCreateParams,
-    ) -> Result<ChannelId, IntentError>;
+    ) -> Result<ChannelId, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Create or retrieve a bootstrap key for provisional AMP messaging.
     async fn amp_create_channel_bootstrap(
@@ -125,7 +126,7 @@ pub trait RuntimeBridge: Send + Sync {
         context: ContextId,
         channel: ChannelId,
         recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, IntentError>;
+    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError>;
 
     /// Return whether canonical AMP state is materialized for the given channel.
     ///
@@ -136,21 +137,21 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<bool, IntentError>;
+    ) -> Result<bool, RuntimeBridgeError>;
 
     /// Return the authoritative current participant set for an AMP channel.
     async fn amp_list_channel_participants(
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Vec<AuthorityId>, IntentError>;
+    ) -> Result<Vec<AuthorityId>, RuntimeBridgeError>;
 
     /// Return reducer-visible AMP transition diagnostics for one channel.
     async fn amp_channel_transition_diagnostics(
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<Option<AmpChannelTransitionSnapshot>, IntentError>;
+    ) -> Result<Option<AmpChannelTransitionSnapshot>, RuntimeBridgeError>;
 
     /// Retry channel-invitation acceptance notifications for an already
     /// accepted imported invitation once the receiver has established
@@ -170,7 +171,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn resolve_amp_channel_context(
         &self,
         channel: ChannelId,
-    ) -> Result<Option<ContextId>, IntentError>;
+    ) -> Result<Option<ContextId>, RuntimeBridgeError>;
 
     /// Load creation evidence committed for an authoritative channel binding.
     /// A metadata update, invitation hint, or AMP checkpoint alone cannot
@@ -192,14 +193,14 @@ pub trait RuntimeBridge: Send + Sync {
     async fn identify_materialized_channel_ids_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<ChannelId>, IntentError>;
+    ) -> Result<Vec<ChannelId>, RuntimeBridgeError>;
 
     /// Identify already-materialized channel bindings by normalized display
     /// name.
     async fn identify_materialized_channel_bindings_by_name(
         &self,
         channel_name: &str,
-    ) -> Result<Vec<AuthoritativeChannelBinding>, IntentError> {
+    ) -> Result<Vec<AuthoritativeChannelBinding>, RuntimeBridgeError> {
         let mut bindings = Vec::new();
         for channel_id in self
             .identify_materialized_channel_ids_by_name(channel_name)
@@ -223,13 +224,22 @@ pub trait RuntimeBridge: Send + Sync {
     async fn amp_repair_local_channel_membership(
         &self,
         params: ChannelJoinParams,
-    ) -> Result<(), IntentError>;
+    ) -> Result<(), RuntimeBridgeError>;
 
-    async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError>;
+    async fn amp_close_channel(
+        &self,
+        params: ChannelCloseParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
 
-    async fn amp_join_channel(&self, params: ChannelJoinParams) -> Result<(), IntentError>;
+    async fn amp_join_channel(
+        &self,
+        params: ChannelJoinParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
 
-    async fn amp_leave_channel(&self, params: ChannelLeaveParams) -> Result<(), IntentError>;
+    async fn amp_leave_channel(
+        &self,
+        params: ChannelLeaveParams,
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Bump channel epoch to rotate the group key.
     async fn bump_channel_epoch(
@@ -250,7 +260,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn amp_send_message(
         &self,
         params: ChannelSendParams,
-    ) -> Result<AmpCiphertext, IntentError>;
+    ) -> Result<AmpCiphertext, crate::runtime_bridge::RuntimeBridgeError>;
 
     // =========================================================================
     // Moderation Operations
@@ -316,11 +326,12 @@ pub trait RuntimeBridge: Send + Sync {
         channel_id: ChannelId,
         authority_id: AuthorityId,
         current_time_ms: u64,
-    ) -> Result<AuthoritativeModerationStatus, IntentError> {
+    ) -> Result<AuthoritativeModerationStatus, RuntimeBridgeError> {
         let _ = (context_id, channel_id, authority_id, current_time_ms);
-        Err(IntentError::no_agent(
-            "Authoritative moderation status not available in offline mode",
-        ))
+        Err(
+            IntentError::no_agent("Authoritative moderation status not available in offline mode")
+                .into(),
+        )
     }
 
     async fn channel_set_topic(
@@ -460,7 +471,9 @@ pub trait RuntimeBridge: Send + Sync {
     /// Bootstrap signing keys for the authority
     ///
     /// Returns the public key package bytes for signature verification.
-    async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError>;
+    async fn bootstrap_signing_keys(
+        &self,
+    ) -> Result<Vec<u8>, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Get threshold configuration for the authority
     async fn get_threshold_config(&self) -> Option<ThresholdConfig>;
@@ -470,6 +483,41 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Get the public key package for signature verification
     async fn get_public_key_package(&self) -> Option<Vec<u8>>;
+
+    /// Export a signed setup code from the actual device-owned signing snapshot.
+    /// Identity staging must finish and signing keys must be ready first. A code
+    /// proves possession only; explicit user transfer establishes its selection.
+    async fn export_device_enrollment_setup_request(
+        &self,
+    ) -> Result<String, aura_invitation::enrollment_setup::EnrollmentSetupExportError> {
+        Err(aura_invitation::enrollment_setup::EnrollmentSetupExportError::Unavailable)
+    }
+
+    /// Verify setup possession with runtime-owned cryptography and physical time.
+    /// This evidence does not establish explicit user transfer or device trust.
+    async fn verify_device_enrollment_setup_possession(
+        &self,
+        _code: String,
+    ) -> Result<
+        aura_invitation::enrollment_setup::VerifiedEnrollmentSetupPossession,
+        aura_invitation::enrollment_setup::EnrollmentSetupVerificationError,
+    > {
+        Err(aura_invitation::enrollment_setup::EnrollmentSetupVerificationError::Unavailable)
+    }
+
+    /// Sign with a custom signing context
+    /// Verify manifest integrity against a separately user-supplied verifier.
+    /// This method does not establish the app's explicit transfer provenance.
+    async fn verify_enrollment_manifest_transfer(
+        &self,
+        _manifest_code: String,
+        _initiator_verifier_code: String,
+    ) -> Result<
+        aura_invitation::enrollment_manifest::VerifiedEnrollmentManifestSignature,
+        aura_invitation::enrollment_manifest::EnrollmentManifestError,
+    > {
+        Err(aura_invitation::enrollment_manifest::EnrollmentManifestError::Unavailable)
+    }
 
     /// Sign with a custom signing context
     async fn sign_with_context(
@@ -559,20 +607,18 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// For the two-step exchange flow:
     /// 1. The new device creates its own authority first
-    /// 2. The new device shares its authority_id with the initiator
-    /// 3. The initiator passes the invitee's authority_id to this function
+    /// 2. The user transfers the runtime-exported signed setup code
+    /// 3. The app verifies possession and pins the explicit transfer
     /// 4. An addressed enrollment invitation is created
     ///
     /// # Arguments
     /// * `nickname_suggestion` - Suggested name for the device
-    /// * `invitee_authority_id` - The authority ID of the new device.
-    ///   Device enrollment always creates an addressed invitation bound to this
-    ///   authority.
+    /// * `setup` - Verified app-owned transfer selection; issuance rechecks expiry.
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
-        invitee_authority_id: AuthorityId,
-    ) -> Result<DeviceEnrollmentStart, IntentError>;
+        setup: crate::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<DeviceEnrollmentStart, aura_invitation::enrollment_setup::EnrollmentIssuanceError>;
 
     /// Initiate a device removal ("remove device") ceremony.
     ///
@@ -598,21 +644,24 @@ pub trait RuntimeBridge: Send + Sync {
     async fn get_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<CeremonyStatus, IntentError>;
+    ) -> Result<CeremonyStatus, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Return the runtime owner's terminal result, if this ceremony has settled.
     async fn get_ceremony_terminal_outcome(
         &self,
         _ceremony_id: &CeremonyId,
-    ) -> Result<Option<CeremonyTerminalOutcome>, IntentError> {
-        Err(IntentError::no_agent(
-            "ceremony terminal outcome is unavailable from this runtime",
-        ))
+    ) -> Result<Option<CeremonyTerminalOutcome>, crate::runtime_bridge::RuntimeBridgeError> {
+        Err(
+            IntentError::no_agent("ceremony terminal outcome is unavailable from this runtime")
+                .into(),
+        )
     }
 
     /// Enumerate enrollment ceremonies retained by the runtime, including
     /// terminal ceremonies that need replay after an app restart.
-    async fn list_device_enrollment_ceremonies(&self) -> Result<Vec<CeremonyId>, IntentError> {
+    async fn list_device_enrollment_ceremonies(
+        &self,
+    ) -> Result<Vec<CeremonyId>, crate::runtime_bridge::RuntimeBridgeError> {
         Ok(Vec::new())
     }
 
@@ -631,7 +680,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<KeyRotationCeremonyStatus, IntentError>;
+    ) -> Result<KeyRotationCeremonyStatus, crate::runtime_bridge::RuntimeBridgeError>;
 
     /// Cancel an in-progress key rotation ceremony (best effort).
     ///
@@ -641,7 +690,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn cancel_key_rotation_ceremony(
         &self,
         ceremony_id: &CeremonyId,
-    ) -> Result<(), IntentError>;
+    ) -> Result<(), crate::runtime_bridge::RuntimeBridgeError>;
 
     // =========================================================================
     // Invitation Operations
@@ -709,7 +758,7 @@ pub trait RuntimeBridge: Send + Sync {
     async fn accept_invitation(
         &self,
         invitation_id: &str,
-    ) -> Result<InvitationMutationOutcome, IntentError>;
+    ) -> Result<InvitationMutationOutcome, super::RuntimeBridgeError>;
 
     /// Decline a received invitation
     async fn decline_invitation(
@@ -732,6 +781,15 @@ pub trait RuntimeBridge: Send + Sync {
     /// Parses the code and returns invitation info without accepting it.
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError>;
 
+    /// Explicit enrollment import consumes an independently selected app pin.
+    async fn import_enrollment_invitation(
+        &self,
+        _code: &str,
+        _pin: crate::ui::workflows::ceremonies::UserTransferredEnrollmentManifest,
+    ) -> Result<InvitationInfo, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
+        Err(aura_invitation::enrollment_manifest::EnrollmentManifestError::Unavailable)
+    }
+
     /// Get IDs of peers with pending invitations, distinguishing runtime
     /// unavailability from a real empty invited set.
     async fn try_get_invited_peer_ids(&self) -> Result<Vec<AuthorityId>, IntentError>;
@@ -742,30 +800,39 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Get current settings state, distinguishing runtime unavailability from a
     /// real stored settings snapshot.
-    async fn try_get_settings(&self) -> Result<SettingsBridgeState, IntentError>;
+    async fn try_get_settings(&self) -> Result<SettingsBridgeState, RuntimeBridgeError>;
 
     /// Returns true when an account configuration has been persisted for this runtime.
-    async fn has_account_config(&self) -> Result<bool, IntentError>;
+    async fn has_account_config(&self) -> Result<bool, RuntimeBridgeError>;
 
     /// Initialize account configuration for the current authority/runtime.
     ///
     /// This persists the current authority/context bootstrap metadata and
     /// nickname suggestion for first-run onboarding.
-    async fn initialize_account(&self, nickname_suggestion: &str) -> Result<(), IntentError>;
+    async fn initialize_account(&self, nickname_suggestion: &str)
+        -> Result<(), RuntimeBridgeError>;
 
     /// List devices for the current account, distinguishing runtime
     /// unavailability from a real empty device list.
-    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, IntentError>;
+    /// Required identity errors cannot implicitly become diagnostic errors.
+    ///
+    /// ```compile_fail
+    /// use aura_app::{IntentError, runtime_bridge::{RuntimeBridge, BridgeDeviceInfo}};
+    /// async fn downgrade(runtime: &dyn RuntimeBridge) -> Result<Vec<BridgeDeviceInfo>, IntentError> {
+    ///     runtime.try_list_devices().await
+    /// }
+    /// ```
+    async fn try_list_devices(&self) -> Result<Vec<BridgeDeviceInfo>, RuntimeBridgeError>;
 
     /// List authorities available to this runtime/device, distinguishing
     /// runtime unavailability from a real empty authority list.
-    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, IntentError>;
+    async fn try_list_authorities(&self) -> Result<Vec<BridgeAuthorityInfo>, RuntimeBridgeError>;
 
     /// Update nickname suggestion (what the user wants to be called)
-    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError>;
+    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), RuntimeBridgeError>;
 
     /// Update MFA policy
-    async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError>;
+    async fn set_mfa_policy(&self, policy: &str) -> Result<(), RuntimeBridgeError>;
 
     // =========================================================================
     // Recovery Operations
@@ -818,23 +885,23 @@ pub trait RuntimeBridge: Send + Sync {
     /// This provides a deterministic time source for simulation and testing.
     /// Production implementations use wall-clock time; test implementations
     /// can provide controlled time for reproducible tests.
-    async fn current_time_ms(&self) -> Result<u64, IntentError>;
+    async fn current_time_ms(&self) -> Result<u64, super::RuntimeBridgeError>;
 
     /// Sleep for the specified number of milliseconds.
     ///
     /// This provides a runtime-agnostic sleep mechanism. Production implementations
     /// delegate to the runtime's sleep primitive; simulation implementations can
     /// use virtual time.
-    async fn sleep_ms(&self, ms: u64);
+    async fn sleep_ms(&self, ms: u64) -> Result<(), super::RuntimeBridgeError>;
 
     /// Wait between long-lived app hook refreshes. Offline runtimes may park
     /// until cancellation because they have no external ceremony progress.
-    async fn wait_for_background_refresh(&self, ms: u64) {
-        self.sleep_ms(ms).await;
+    async fn wait_for_background_refresh(&self, ms: u64) -> Result<(), super::RuntimeBridgeError> {
+        self.sleep_ms(ms).await
     }
 
     /// Get overall runtime status.
-    async fn get_status(&self) -> Result<RuntimeStatus, IntentError> {
+    async fn get_status(&self) -> Result<RuntimeStatus, RuntimeBridgeError> {
         Ok(RuntimeStatus {
             sync: self.try_get_sync_status().await?,
             rendezvous: self.try_get_rendezvous_status().await?,

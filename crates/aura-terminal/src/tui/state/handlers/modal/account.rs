@@ -55,6 +55,10 @@ pub(super) fn handle_account_setup_key_queue(
                     match s.active_field {
                         AccountSetupField::AccountName => s.push_nickname_char(c),
                         AccountSetupField::DeviceImportCode => s.device_import_code.push(c),
+                        AccountSetupField::DeviceImportManifest => s.device_import_manifest.push(c),
+                        AccountSetupField::DeviceImportInitiatorVerifier => {
+                            s.device_import_initiator_verifier.push(c)
+                        }
                     }
                 }
             });
@@ -69,6 +73,12 @@ pub(super) fn handle_account_setup_key_queue(
                         }
                         AccountSetupField::DeviceImportCode => {
                             s.device_import_code.pop();
+                        }
+                        AccountSetupField::DeviceImportManifest => {
+                            s.device_import_manifest.pop();
+                        }
+                        AccountSetupField::DeviceImportInitiatorVerifier => {
+                            s.device_import_initiator_verifier.pop();
                         }
                     }
                 }
@@ -94,7 +104,11 @@ pub(super) fn handle_account_setup_key_queue(
                     }
                 });
             }
-            AccountSetupField::DeviceImportCode if current_state.can_import_device() => {
+            AccountSetupField::DeviceImportCode
+            | AccountSetupField::DeviceImportManifest
+            | AccountSetupField::DeviceImportInitiatorVerifier
+                if current_state.can_import_device() =>
+            {
                 let code = current_state.device_import_code;
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::AccountSetup(ref mut s) = modal {
@@ -102,7 +116,16 @@ pub(super) fn handle_account_setup_key_queue(
                     }
                 });
                 commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code },
+                    DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+                        code,
+                        manifest_transfer: Some(
+                            aura_app::ui::contract::EnrollmentManifestTransferInput {
+                                manifest_code: current_state.device_import_manifest,
+                                initiator_verifier_code: current_state
+                                    .device_import_initiator_verifier,
+                            },
+                        ),
+                    },
                 ));
             }
             _ => {}

@@ -292,8 +292,8 @@ pub enum DispatchCommand {
     },
     AddDevice {
         name: String,
-        /// Invitee's authority ID for addressed device enrollment.
-        invitee_authority_id: AuthorityId,
+        /// User-transferred setup request exported by the new device.
+        setup_code: String,
     },
     RemoveDevice {
         device_id: DeviceId,
@@ -304,11 +304,13 @@ pub enum DispatchCommand {
     /// In demo mode this routes to the simulated Mobile agent.
     ImportDeviceEnrollmentOnMobile {
         code: String,
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     },
     /// Import a device enrollment code while completing onboarding.
     /// Success must always dismiss the onboarding flow.
     ImportDeviceEnrollmentDuringOnboarding {
         code: String,
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     },
     /// Open authority picker modal (for switching between authorities)
     OpenAuthorityPicker,

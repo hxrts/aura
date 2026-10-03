@@ -16,6 +16,18 @@ pub(super) fn build_global_modals(
                 global_modals.account_setup.visible = true;
                 global_modals.account_setup.nickname_suggestion = state.nickname_suggestion.clone();
                 global_modals.account_setup.device_import_code = state.device_import_code.clone();
+                global_modals.account_setup.device_import_manifest =
+                    state.device_import_manifest.clone();
+                global_modals.account_setup.device_import_initiator_verifier =
+                    state.device_import_initiator_verifier.clone();
+                global_modals.account_setup.import_manifest_focused =
+                    matches!(state.active_field, AccountSetupField::DeviceImportManifest);
+                global_modals
+                    .account_setup
+                    .import_initiator_verifier_focused = matches!(
+                    state.active_field,
+                    AccountSetupField::DeviceImportInitiatorVerifier
+                );
                 global_modals.account_setup.name_focused =
                     matches!(state.active_field, AccountSetupField::AccountName);
                 global_modals.account_setup.import_code_focused =

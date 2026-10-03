@@ -73,6 +73,7 @@ pub mod leakage; // Privacy leakage tracking
 pub mod ledger; // Event sourcing and audit trails
 pub mod network;
 pub mod noise;
+pub mod profile_storage;
 pub mod query; // Datalog query effects (bridges Journal + Biscuit + Reactive)
 pub mod random;
 pub mod reactive; // FRP as algebraic effects
@@ -245,7 +246,8 @@ pub use transport::{
 };
 pub use vm_bridge::{
     VmBridgeBlockedEdge, VmBridgeEffects, VmBridgeLeaseMetadataSnapshot, VmBridgePendingSend,
-    VmBridgeSchedulerSignals, VmBridgeTransferMetadataSnapshot,
+    VmBridgeSchedulerSignals, VmBridgeSendError, VmBridgeSendLease,
+    VmBridgeTransferMetadataSnapshot,
 };
 
 // Re-export protocol coordination effect traits

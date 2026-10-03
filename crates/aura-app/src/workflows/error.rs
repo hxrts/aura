@@ -4,6 +4,8 @@
 //! structured error variants that preserve context without losing type info.
 
 use aura_core::AuraError;
+use std::error::Error;
+use std::sync::Arc;
 
 /// Typed errors for workflow operations.
 ///
@@ -141,38 +143,219 @@ impl From<WorkflowError> for AuraError {
     fn from(error: WorkflowError) -> Self {
         match error {
             WorkflowError::Core(inner) => inner,
-            other => AuraError::agent(other.to_string()),
+            other @ WorkflowError::RuntimeCall { .. } => {
+                match super::runtime_error_classification::native_runtime_error_kind(&other) {
+                    Some(kind) => kind.wrap_source(other.to_string(), other),
+                    None => AuraError::Internal {
+                        message: other.to_string(),
+                        source: Some(Arc::new(other)),
+                    },
+                }
+            }
+            other => AuraError::Internal {
+                message: other.to_string(),
+                source: Some(Arc::new(other)),
+            },
         }
     }
 }
 
 /// Helper to wrap a runtime bridge call failure.
-pub fn runtime_call(operation: &'static str, source: impl std::fmt::Display) -> WorkflowError {
+/// Causes must implement the standard error contract; display-only values lose type information.
+/// ```compile_fail
+/// use aura_app::workflows::error::runtime_call;
+/// runtime_call("query", "string-only cause");
+/// ```
+pub fn runtime_call(
+    operation: &'static str,
+    source: impl Error + Send + Sync + 'static,
+) -> WorkflowError {
     WorkflowError::RuntimeCall {
         operation,
-        source: AuraError::agent(source.to_string()),
+        source: AuraError::Internal {
+            message: source.to_string(),
+            source: Some(Arc::new(source)),
+        },
+    }
+}
+
+/// Wrap a required native runtime call without downgrading its category.
+/// ```compile_fail
+/// use aura_app::{IntentError, workflows::error::native_runtime_call};
+/// native_runtime_call("settings", IntentError::internal_error("diagnostic only"));
+/// ```
+pub fn native_runtime_call(
+    operation: &'static str,
+    source: crate::runtime_bridge::RuntimeBridgeError,
+) -> WorkflowError {
+    WorkflowError::RuntimeCall {
+        operation,
+        source: source.into(),
     }
 }
 
 /// Helper to wrap a journal operation failure.
-pub fn journal_op(operation: &'static str, source: impl std::fmt::Display) -> WorkflowError {
+/// Causes must implement the standard error contract; display-only values lose type information.
+/// ```compile_fail
+/// use aura_app::workflows::error::journal_op;
+/// journal_op("load", String::from("string-only cause"));
+/// ```
+pub fn journal_op(
+    operation: &'static str,
+    source: impl Error + Send + Sync + 'static,
+) -> WorkflowError {
     WorkflowError::Journal {
         operation,
-        source: AuraError::agent(source.to_string()),
+        source: AuraError::Internal {
+            message: source.to_string(),
+            source: Some(Arc::new(source)),
+        },
     }
 }
 
 /// Helper to wrap a fact encoding failure.
-pub fn fact_encoding(source: impl std::fmt::Display) -> WorkflowError {
+/// Causes must implement the standard error contract; display-only values lose type information.
+/// ```compile_fail
+/// use aura_app::workflows::error::fact_encoding;
+/// fact_encoding("string-only cause");
+/// ```
+pub fn fact_encoding(source: impl Error + Send + Sync + 'static) -> WorkflowError {
     WorkflowError::FactEncoding {
-        source: AuraError::serialization(source.to_string()),
+        source: AuraError::Serialization {
+            message: source.to_string(),
+            source: Some(Arc::new(source)),
+        },
     }
 }
 
 /// Helper to wrap a ceremony operation failure.
-pub fn ceremony_op(operation: &'static str, source: impl std::fmt::Display) -> WorkflowError {
+/// Causes must implement the standard error contract; display-only values lose type information.
+/// ```compile_fail
+/// use aura_app::workflows::error::ceremony_op;
+/// ceremony_op("start", "string-only cause");
+/// ```
+pub fn ceremony_op(
+    operation: &'static str,
+    source: impl Error + Send + Sync + 'static,
+) -> WorkflowError {
     WorkflowError::Ceremony {
         operation,
-        source: AuraError::agent(source.to_string()),
+        source: AuraError::Internal {
+            message: source.to_string(),
+            source: Some(Arc::new(source)),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workflow_conversion_preserves_context_and_concrete_io_causes() {
+        let constructors: [fn(std::io::Error) -> WorkflowError; 4] = [
+            |source| runtime_call("runtime read", source),
+            |source| journal_op("journal load", source),
+            fact_encoding,
+            |source| ceremony_op("ceremony prepare", source),
+        ];
+        for construct in constructors {
+            let workflow = construct(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "denied",
+            ));
+            let display = workflow.to_string();
+            let outer = AuraError::from(workflow);
+            assert_eq!(outer.category(), "internal");
+            assert_eq!(outer.to_string(), format!("Internal error: {display}"));
+            for candidate in [outer.clone(), outer] {
+                let workflow = candidate
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<WorkflowError>()
+                    .unwrap();
+                let context = workflow
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<AuraError>()
+                    .unwrap();
+                let concrete = context
+                    .source()
+                    .unwrap()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap();
+                assert_eq!(concrete.kind(), std::io::ErrorKind::PermissionDenied);
+                assert_eq!(concrete.to_string(), "denied");
+            }
+        }
+    }
+
+    #[test]
+    fn workflow_context_remains_distinguishable_from_same_display_text() {
+        let typed = AuraError::from(WorkflowError::TimedOut {
+            operation: "enrollment",
+            stage: "issuance",
+            timeout_ms: 30000,
+        });
+        let textual = AuraError::agent("enrollment timed out in stage issuance after 30000ms");
+        assert_eq!(typed.to_string(), textual.to_string());
+        assert!(matches!(
+            typed.source().unwrap().downcast_ref::<WorkflowError>(),
+            Some(WorkflowError::TimedOut {
+                timeout_ms: 30000,
+                ..
+            })
+        ));
+        assert!(textual.source().is_none());
+        let unavailable = AuraError::from(WorkflowError::RuntimeUnavailable);
+        assert!(matches!(
+            unavailable
+                .source()
+                .unwrap()
+                .downcast_ref::<WorkflowError>(),
+            Some(WorkflowError::RuntimeUnavailable)
+        ));
+    }
+
+    #[test]
+    fn core_passthrough_preserves_category_and_direct_source() {
+        let core = AuraError::Serialization {
+            message: "wire encoding".into(),
+            source: Some(Arc::new(serde_json::from_str::<u8>("invalid").unwrap_err())),
+        };
+        let before = core.to_string();
+        let outer = AuraError::from(WorkflowError::from(core));
+        assert_eq!(outer.category(), "serialization");
+        assert_eq!(outer.to_string(), before);
+        assert!(outer.source().unwrap().is::<serde_json::Error>());
+    }
+
+    #[test]
+    fn runtime_context_preserves_nested_workflow_timeout() {
+        let timeout = AuraError::from(WorkflowError::TimedOut {
+            operation: "delivery",
+            stage: "send",
+            timeout_ms: 10,
+        });
+        let outer = AuraError::from(runtime_call("dispatch", timeout));
+        let workflow = outer
+            .source()
+            .unwrap()
+            .downcast_ref::<WorkflowError>()
+            .unwrap();
+        let helper = workflow
+            .source()
+            .unwrap()
+            .downcast_ref::<AuraError>()
+            .unwrap();
+        let inner = helper
+            .source()
+            .unwrap()
+            .downcast_ref::<AuraError>()
+            .unwrap();
+        assert!(matches!(
+            inner.source().unwrap().downcast_ref::<WorkflowError>(),
+            Some(WorkflowError::TimedOut { .. })
+        ));
     }
 }

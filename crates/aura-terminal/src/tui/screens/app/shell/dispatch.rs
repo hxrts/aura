@@ -439,14 +439,17 @@ pub(super) fn execute_harness_followup_command(
             }
             Ok(None)
         }
-        TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding { code }) => {
+        TuiCommand::Dispatch(DispatchCommand::ImportDeviceEnrollmentDuringOnboarding {
+            code,
+            manifest_transfer,
+        }) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("App callbacks are unavailable".to_string());
             };
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = submit_local_terminal_operation(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
@@ -454,7 +457,11 @@ pub(super) fn execute_harness_followup_command(
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
             );
             let handle = operation.harness_handle();
-            (cb.app.on_import_device_enrollment_during_onboarding)(code, operation);
+            (cb.app.on_import_device_enrollment_during_onboarding)(
+                code,
+                manifest_transfer,
+                operation,
+            );
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::CreateInvitation {
@@ -776,10 +783,7 @@ pub(super) fn execute_harness_followup_command(
             });
             Ok(Some(handle))
         }
-        TuiCommand::Dispatch(DispatchCommand::AddDevice {
-            name,
-            invitee_authority_id,
-        }) => {
+        TuiCommand::Dispatch(DispatchCommand::AddDevice { name, setup_code }) => {
             let Some(cb) = callbacks.as_ref() else {
                 return Err("Settings callbacks are unavailable".to_string());
             };
@@ -794,7 +798,7 @@ pub(super) fn execute_harness_followup_command(
                 SemanticOperationKind::StartDeviceEnrollment,
             );
             let handle = operation.harness_handle();
-            (cb.settings.on_add_device)(name, invitee_authority_id, operation);
+            (cb.settings.on_add_device)(name, setup_code, operation);
             Ok(Some(handle))
         }
         TuiCommand::Dispatch(DispatchCommand::RemoveDevice { device_id }) => {

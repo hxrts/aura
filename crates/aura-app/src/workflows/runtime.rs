@@ -17,8 +17,8 @@ use crate::runtime_bridge::RuntimeBridge;
 use crate::AppCore;
 use aura_core::{
     time::PhysicalTime, AuraError, ExponentialBackoffPolicy, PostTerminalBestEffort,
-    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionProfile,
-    TimeoutRunError,
+    RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutClockObservation,
+    TimeoutExecutionProfile, TimeoutRunError,
 };
 
 // Harness-only convergence tuning for observed workflow stabilization. These
@@ -114,7 +114,7 @@ pub async fn workflow_timeout_budget(
     let started_at = runtime
         .current_time_ms()
         .await
-        .map_err(|error| TimeoutBudgetError::time_source_unavailable(error.to_string()))
+        .map_err(TimeoutBudgetError::time_source_failure)
         .map(|ts_ms| PhysicalTime {
             ts_ms,
             uncertainty: None,
@@ -142,21 +142,31 @@ where
     let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
 
     let operation_future = operation();
-    let sleep_future = async {
-        runtime.sleep_ms(sleep_ms).await;
-    };
+    let sleep_future = runtime.sleep_ms(sleep_ms);
     pin_mut!(operation_future);
     pin_mut!(sleep_future);
 
     match select(operation_future, sleep_future).await {
-        Either::Left((result, _sleep_future)) => result.map_err(TimeoutRunError::Operation),
-        Either::Right(((), _operation_future)) => {
-            let observed_at_ms = runtime
-                .current_time_ms()
+        Either::Left((result, _sleep_future)) => {
+            let observed = runtime_current_physical_time(runtime)
                 .await
-                .unwrap_or(budget.deadline_at_ms());
+                .map_err(TimeoutRunError::Timeout)?;
+            budget
+                .remaining_at(&observed)
+                .map_err(TimeoutRunError::Timeout)?;
+            result.map_err(TimeoutRunError::Operation)
+        }
+        Either::Right((sleep, _operation_future)) => {
+            sleep.map_err(|error| {
+                TimeoutRunError::Timeout(TimeoutBudgetError::time_source_failure(error))
+            })?;
+            let observed = runtime_current_physical_time(runtime)
+                .await
+                .map_err(TimeoutRunError::Timeout)?;
             Err(TimeoutRunError::Timeout(
-                TimeoutBudgetError::deadline_exceeded(budget.deadline_at_ms(), observed_at_ms),
+                budget
+                    .expire_at(&observed)
+                    .map_err(TimeoutRunError::Timeout)?,
             ))
         }
     }
@@ -198,15 +208,17 @@ where
     .await
     {
         Ok(value) => Ok(value),
-        Err(TimeoutRunError::Timeout(TimeoutBudgetError::DeadlineExceeded { .. })) => {
+        Err(TimeoutRunError::Timeout(source @ TimeoutBudgetError::DeadlineExceeded { .. })) => {
             warn_workflow_timeout(operation, stage, budget.timeout_ms());
-            Err(AuraError::from(
-                crate::workflows::error::WorkflowError::TimedOut {
-                    operation,
-                    stage,
-                    timeout_ms: budget.timeout_ms(),
-                },
-            ))
+            let cause = crate::workflows::error::WorkflowError::TimedOut {
+                operation,
+                stage,
+                timeout_ms: budget.timeout_ms(),
+            };
+            Err(AuraError::Internal {
+                message: cause.to_string(),
+                source: Some(Arc::new(source)),
+            })
         }
         Err(TimeoutRunError::Timeout(error)) => Err(error.into()),
         Err(TimeoutRunError::Operation(error)) => Err(error),
@@ -248,21 +260,35 @@ where
     F: FnMut(u32) -> Fut,
     Fut: Future<Output = Result<T, E>>,
 {
+    let initial = runtime_current_physical_time(runtime)
+        .await
+        .map_err(RetryRunError::Timeout)?;
+    let clock = TimeoutClockObservation::new(&initial);
     let mut attempts = policy.attempt_budget();
     let mut operation = operation;
 
     loop {
+        let observed = runtime_current_physical_time(runtime)
+            .await
+            .map_err(RetryRunError::Timeout)?;
+        clock.observe(&observed).map_err(RetryRunError::Timeout)?;
         let attempt = attempts.record_attempt().map_err(RetryRunError::Timeout)?;
 
         let result = if let Some(timeout) = policy.per_attempt_timeout() {
-            let now = runtime_current_physical_time(runtime)
-                .await
-                .map_err(RetryRunError::Timeout)?;
-            let budget = TimeoutBudget::from_start_and_timeout(&now, timeout)
-                .map_err(RetryRunError::Timeout)?;
+            let budget = TimeoutBudget::from_start_and_timeout_with_observation(
+                &observed,
+                timeout,
+                clock.clone(),
+            )
+            .map_err(RetryRunError::Timeout)?;
             execute_with_runtime_timeout_budget(runtime, &budget, || operation(attempt)).await
         } else {
-            operation(attempt).await.map_err(TimeoutRunError::Operation)
+            let result = operation(attempt).await;
+            let observed = runtime_current_physical_time(runtime)
+                .await
+                .map_err(RetryRunError::Timeout)?;
+            clock.observe(&observed).map_err(RetryRunError::Timeout)?;
+            result.map_err(TimeoutRunError::Operation)
         };
 
         match result {
@@ -278,7 +304,13 @@ where
 
                 let delay_ms = duration_to_ms(policy.delay_for_attempt(attempt))
                     .map_err(RetryRunError::Timeout)?;
-                runtime.sleep_ms(delay_ms).await;
+                runtime.sleep_ms(delay_ms).await.map_err(|error| {
+                    RetryRunError::Timeout(TimeoutBudgetError::time_source_failure(error))
+                })?;
+                let observed = runtime_current_physical_time(runtime)
+                    .await
+                    .map_err(RetryRunError::Timeout)?;
+                clock.observe(&observed).map_err(RetryRunError::Timeout)?;
             }
         }
     }
@@ -325,7 +357,7 @@ async fn runtime_current_physical_time(
             ts_ms,
             uncertainty: None,
         })
-        .map_err(|error| TimeoutBudgetError::time_source_unavailable(error.to_string()))
+        .map_err(TimeoutBudgetError::time_source_failure)
 }
 
 fn duration_to_ms(duration: Duration) -> Result<u64, TimeoutBudgetError> {
@@ -367,7 +399,7 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
                     Either::Left((result, _)) => {
                         let _ = result;
                     }
-                    Either::Right(((), _)) => {
+                    Either::Right((_sleep_result, _)) => {
                         // Hard ceiling reached — drop the operation and continue.
                     }
                 }
@@ -398,7 +430,10 @@ pub async fn converge_runtime(runtime: &Arc<dyn RuntimeBridge>) {
         cooperative_yield().await;
 
         if round + 1 < rounds && harness_mode_enabled() && backoff_ms > 0 {
-            runtime.sleep_ms(backoff_ms).await;
+            // Post-terminal convergence remains explicitly best effort.
+            if runtime.sleep_ms(backoff_ms).await.is_err() {
+                return;
+            }
         }
     }
 }
@@ -593,5 +628,86 @@ mod tests {
         let message = final_error.to_string();
         assert!(message.contains("first best-effort failure"));
         assert!(!message.contains("second best-effort failure"));
+    }
+}
+
+#[cfg(test)]
+mod clock_owner_regressions {
+    use super::*;
+    use crate::runtime_bridge::OfflineRuntimeBridge;
+    fn bridge(times: &[u64]) -> (Arc<OfflineRuntimeBridge>, Arc<dyn RuntimeBridge>) {
+        let bridge = Arc::new(OfflineRuntimeBridge::new(
+            aura_core::AuthorityId::new_from_entropy([81; 32]),
+        ));
+        bridge.queue_clock_answers(times.iter().copied().map(Ok).collect());
+        let runtime: Arc<dyn RuntimeBridge> = bridge.clone();
+        (bridge, runtime)
+    }
+    #[tokio::test]
+    async fn runtime_both_await_outcomes_reject_rollback_after_progress() {
+        for timer in [false, true] {
+            let (bridge, runtime) = bridge(&[150, 140]);
+            if timer {
+                bridge.queue_sleep_answers(vec![Ok(())]);
+            }
+            let budget = TimeoutBudget::from_start_and_timeout(
+                &PhysicalTime::exact(100),
+                Duration::from_millis(100),
+            )
+            .expect("valid test budget");
+            let result = execute_with_runtime_timeout_budget(&runtime, &budget, || async move {
+                if timer {
+                    futures::future::pending::<()>().await;
+                }
+                Ok::<_, AuraError>(())
+            })
+            .await;
+            assert!(matches!(
+                result,
+                Err(TimeoutRunError::Timeout(
+                    TimeoutBudgetError::ClockRollback {
+                        previous_observed_at_ms: 150,
+                        observed_at_ms: 140
+                    }
+                ))
+            ));
+        }
+    }
+    #[tokio::test]
+    async fn runtime_required_sleep_failure_retains_concrete_original_source() {
+        use std::error::Error;
+        #[derive(Debug, thiserror::Error)]
+        #[error("injected required timer failure")]
+        struct TimerFault;
+        let (bridge, runtime) = bridge(&[150]);
+        bridge.queue_sleep_answers(vec![Err(
+            crate::runtime_bridge::RuntimeBridgeError::with_source(
+                crate::IntentError::service_error("required timer failed"),
+                TimerFault,
+            ),
+        )]);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime::exact(100),
+            Duration::from_millis(100),
+        )
+        .expect("valid test budget");
+        let error = execute_with_runtime_timeout_budget(&runtime, &budget, || {
+            futures::future::pending::<Result<(), AuraError>>()
+        })
+        .await
+        .expect_err("required timer failure must fail the owner");
+        let mut cause: &(dyn Error + 'static) = &error;
+        loop {
+            if cause.downcast_ref::<TimerFault>().is_some() {
+                break;
+            }
+            cause = cause
+                .source()
+                .expect("original timer fault remains in standard source chain");
+        }
+        assert!(matches!(
+            error,
+            TimeoutRunError::Timeout(TimeoutBudgetError::TimeSourceUnavailable { .. })
+        ));
     }
 }

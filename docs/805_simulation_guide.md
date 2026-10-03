@@ -1,5 +1,12 @@
 # Simulation Guide
 
+The AMP lifecycle harness uses a checked-in deterministic Quint trace.
+`just ci-amp-lifecycle-trace` checks regeneration, and
+`cargo test -p aura-simulator --test amp_channel_itf` replays it with isolated
+storage. The creation action commits the protocol checkpoint and complete
+canonical chat creation before an invitation resolves its context. See
+[Testing Guide](804_testing_guide.md#amp-lifecycle-replay) for regeneration.
+
 This guide covers how to use Aura's simulation infrastructure for testing distributed protocols under controlled conditions.
 
 ## When to Use Simulation

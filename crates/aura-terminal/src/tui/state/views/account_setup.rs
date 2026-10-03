@@ -14,6 +14,8 @@ pub enum AccountSetupField {
     #[default]
     AccountName,
     DeviceImportCode,
+    DeviceImportManifest,
+    DeviceImportInitiatorVerifier,
 }
 
 /// State for account setup modal
@@ -23,6 +25,8 @@ pub struct AccountSetupModalState {
     pub nickname_suggestion: String,
     /// Current device import code input
     pub device_import_code: String,
+    pub device_import_manifest: String,
+    pub device_import_initiator_verifier: String,
     /// Currently focused onboarding field
     pub active_field: AccountSetupField,
     /// Whether account creation is in progress
@@ -74,7 +78,11 @@ impl AccountSetupModalState {
     /// Whether we can import a device enrollment code with the current input.
     #[must_use]
     pub fn can_import_device(&self) -> bool {
-        !self.device_import_code.trim().is_empty() && !self.creating && !self.success
+        !self.device_import_code.trim().is_empty()
+            && !self.device_import_manifest.trim().is_empty()
+            && !self.device_import_initiator_verifier.trim().is_empty()
+            && !self.creating
+            && !self.success
     }
 
     /// Start the creating state.
@@ -115,7 +123,11 @@ impl AccountSetupModalState {
     pub fn focus_next_field(&mut self) {
         self.active_field = match self.active_field {
             AccountSetupField::AccountName => AccountSetupField::DeviceImportCode,
-            AccountSetupField::DeviceImportCode => AccountSetupField::AccountName,
+            AccountSetupField::DeviceImportCode => AccountSetupField::DeviceImportManifest,
+            AccountSetupField::DeviceImportManifest => {
+                AccountSetupField::DeviceImportInitiatorVerifier
+            }
+            AccountSetupField::DeviceImportInitiatorVerifier => AccountSetupField::AccountName,
         };
     }
 

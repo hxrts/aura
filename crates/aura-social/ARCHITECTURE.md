@@ -115,3 +115,7 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md)
 - [Social Architecture](../../docs/115_social_architecture.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
+
+### Required moderation evidence
+
+Required ban/mute decisions use bounded fallible decoding of ban, unban, mute, and unmute facts before reduction. Schema 1 and declared DAG-CBOR/JSON are checked without codec fallback; payload and committed wrapper contexts must agree. Observational compatibility reducers remain available and must not serve the required runtime decision boundary. This decoder does not mint journal authentication or authorization evidence.

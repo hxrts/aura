@@ -13,6 +13,7 @@ pub struct AgentBuilder {
     authority_id: Option<AuthorityId>,
     sync_config: Option<SyncManagerConfig>,
     rendezvous_config: Option<RendezvousManagerConfig>,
+    profile_owner: Option<std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>>,
 }
 
 impl AgentBuilder {
@@ -23,7 +24,31 @@ impl AgentBuilder {
             authority_id: None,
             sync_config: None,
             rendezvous_config: None,
+            profile_owner: None,
         }
+    }
+
+    /// Share the actual bootstrap provider resource with production assembly.
+    pub fn with_profile_owner(
+        mut self,
+        owner: std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>,
+    ) -> Self {
+        self.profile_owner = Some(owner);
+        self
+    }
+
+    fn reject_profile_in_nonproduction(&self) -> AgentResult<()> {
+        if self.profile_owner.is_some() {
+            return Err(AgentError::from(aura_core::AuraError::Storage {
+                message: "production profile resource requires production runtime assembly".into(),
+                source: Some(std::sync::Arc::new(
+                    aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                        "profile resource supplied to nonproduction assembly".into(),
+                    ),
+                )),
+            }));
+        }
+        Ok(())
     }
 
     /// Set the authority ID
@@ -81,19 +106,25 @@ impl AgentBuilder {
         let mut builder = EffectSystemBuilder::production()
             .with_config(self.config)
             .with_authority(authority_id);
+        if let Some(owner) = self.profile_owner {
+            builder = builder.with_profile_owner(owner);
+        }
         builder = builder
             .with_sync_config(sync_config)
             .with_rendezvous_config(rendezvous_config);
-        let runtime = builder
-            .build(&temp_context)
-            .await
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build(&temp_context).await.map_err(|source| {
+            AgentError::from(aura_core::AuraError::Internal {
+                message: "assemble original owned production profile".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        })?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
 
     /// Build a testing agent
     pub fn build_testing(self) -> AgentResult<AuraAgent> {
+        self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -118,6 +149,7 @@ impl AgentBuilder {
 
     /// Build a testing agent using an existing async runtime
     pub async fn build_testing_async(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
+        self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -143,6 +175,7 @@ impl AgentBuilder {
 
     /// Build a simulation agent
     pub fn build_simulation(self, seed: u64) -> AgentResult<AuraAgent> {
+        self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -171,6 +204,7 @@ impl AgentBuilder {
         seed: u64,
         ctx: &EffectContext,
     ) -> AgentResult<AuraAgent> {
+        self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -204,6 +238,7 @@ impl AgentBuilder {
         ctx: &EffectContext,
         shared_transport: crate::SharedTransport,
     ) -> AgentResult<AuraAgent> {
+        self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self

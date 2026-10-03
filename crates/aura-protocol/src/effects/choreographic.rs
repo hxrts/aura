@@ -200,6 +200,16 @@ impl ChoreographicRole {
 /// Choreography-related errors
 #[derive(Debug, thiserror::Error)]
 pub enum ChoreographyError {
+    /// A required clock or timeout service failed; this does not prove expiry.
+    #[error("required choreography time operation {operation} failed: {source}")]
+    RequiredTime {
+        /// The required operation whose clock evidence is unavailable.
+        operation: &'static str,
+        /// The original provider error, retaining its native source chain.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// Role not found in the choreography
     #[error("Role not found: {role:?}")]
     RoleNotFound {
@@ -421,6 +431,7 @@ impl aura_core::ProtocolErrorCode for ChoreographyError {
 impl ChoreographyError {
     fn protocol_code(&self) -> &'static str {
         match self {
+            ChoreographyError::RequiredTime { .. } => "choreography_required_time",
             ChoreographyError::RoleNotFound { .. } => "choreography_role_not_found",
             ChoreographyError::CommunicationTimeout { .. } => "choreography_timeout",
             ChoreographyError::SerializationFailed { .. } => "choreography_serialization",

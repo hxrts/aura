@@ -74,6 +74,7 @@ pub struct WebPresetBuilder {
     context_id: Option<ContextId>,
     execution_mode: ExecutionMode,
     config: AgentConfig,
+    profile_owner: Option<std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>>,
 }
 
 impl WebPresetBuilder {
@@ -87,7 +88,23 @@ impl WebPresetBuilder {
             context_id: None,
             execution_mode: ExecutionMode::Production,
             config: AgentConfig::default(),
+            profile_owner: None,
         }
+    }
+
+    /// Retain the exact lease acquired before reading the selected browser profile.
+    /// The runtime verifies its physical namespace before constructing adapters.
+    /// A concrete adapter lease cannot be replaced with an arbitrary guard.
+    /// ```compile_fail
+    /// use aura_agent::AgentBuilder;
+    /// AgentBuilder::web().with_profile_owner(std::sync::Arc::new(()));
+    /// ```
+    pub fn with_profile_owner(
+        mut self,
+        owner: std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>,
+    ) -> Self {
+        self.profile_owner = Some(owner);
+        self
     }
 
     /// Set the storage prefix for IndexedDB database names.
@@ -177,6 +194,16 @@ impl WebPresetBuilder {
 
         #[cfg(feature = "web")]
         {
+            if self.profile_owner.is_some() && self.execution_mode != ExecutionMode::Production {
+                return Err(crate::core::AgentError::from(
+                    aura_core::AuraError::PermissionDenied {
+                        message:
+                            "owned selected browser profile requires production runtime assembly"
+                                .into(),
+                        source: None,
+                    },
+                ));
+            }
             let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
                 preset: "web",
                 identity: "authority_id",
@@ -210,21 +237,28 @@ impl WebPresetBuilder {
                     .with_authority(authority_id)
                     .build(&effect_context)
                     .await
-                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
-                ExecutionMode::Production => EffectSystemBuilder::production()
-                    .with_config(config)
-                    .with_authority(authority_id)
-                    .with_sync()
-                    .with_rendezvous_config(rendezvous_config)
-                    .build(&effect_context)
-                    .await
-                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                    .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
+                ExecutionMode::Production => {
+                    let mut builder = EffectSystemBuilder::production()
+                        .with_config(config)
+                        .with_authority(authority_id)
+                        .with_sync()
+                        .with_rendezvous_config(rendezvous_config);
+                    if let Some(owner) = self.profile_owner {
+                        builder = builder.with_profile_owner(owner);
+                    }
+                    builder
+                        .build(&effect_context)
+                        .await
+                        .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?
+                }
+
                 ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                     .with_config(config)
                     .with_authority(authority_id)
                     .build(&effect_context)
                     .await
-                    .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                    .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             };
 
             Ok(AuraAgent::new(runtime, authority_id))

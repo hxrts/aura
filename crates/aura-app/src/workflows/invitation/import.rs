@@ -50,17 +50,18 @@ pub async fn import_invitation_details(
 
 fn invitation_import_failure(error: &AuraError) -> crate::ui_contract::SemanticOperationError {
     use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
-    let code = match error {
-        AuraError::Invalid { .. } | AuraError::Serialization { .. } => {
-            SemanticFailureCode::InvalidArgument
-        }
-        AuraError::PermissionDenied { .. } | AuraError::Crypto { .. } => {
-            SemanticFailureCode::PermissionDenied
-        }
-        AuraError::NotFound { .. } => SemanticFailureCode::NotFound,
-        AuraError::Network { .. } => SemanticFailureCode::Unavailable,
-        _ => SemanticFailureCode::CommandFailed,
-    };
+    let code = super::super::runtime_error_classification::native_runtime_failure_code(error)
+        .unwrap_or_else(|| match error {
+            AuraError::Invalid { .. } | AuraError::Serialization { .. } => {
+                SemanticFailureCode::InvalidArgument
+            }
+            AuraError::PermissionDenied { .. } | AuraError::Crypto { .. } => {
+                SemanticFailureCode::PermissionDenied
+            }
+            AuraError::NotFound { .. } => SemanticFailureCode::NotFound,
+            AuraError::Network { .. } => SemanticFailureCode::Unavailable,
+            _ => SemanticFailureCode::CommandFailed,
+        });
     SemanticOperationError::new(SemanticFailureDomain::Invitation, code)
         .with_detail(error.to_string())
 }

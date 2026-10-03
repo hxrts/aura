@@ -10,6 +10,27 @@
 use aura_app::ui::types::ErrorCategory;
 use thiserror::Error;
 
+/// Opaque native provenance. Equality compares retained source identity;
+/// independently created diagnostic strings do not make native errors equal.
+#[derive(Debug, Clone)]
+pub struct TerminalNativeSource(std::sync::Arc<dyn std::error::Error + Send + Sync>);
+impl std::fmt::Display for TerminalNativeSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.0.as_ref(), f)
+    }
+}
+impl std::error::Error for TerminalNativeSource {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+impl PartialEq for TerminalNativeSource {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for TerminalNativeSource {}
+
 /// Unified result type for terminal-facing code.
 pub type TerminalResult<T> = Result<T, TerminalError>;
 
@@ -32,6 +53,15 @@ pub enum TerminalError {
     NotImplemented(String),
     #[error("Operation failed: {0}")]
     Operation(String),
+    /// Required operation failure retaining its original native cause.
+    #[error("Operation failed: {message}")]
+    NativeOperation {
+        /// Presentation context for the failed operation.
+        message: String,
+        /// Process-local native error provenance.
+        #[source]
+        source: TerminalNativeSource,
+    },
     #[error("Operation failed [{code}]: {message}")]
     StructuredOperation { code: &'static str, message: String },
 }
@@ -45,6 +75,22 @@ impl TerminalError {
         }
     }
 
+    /// Preserve the concrete native error without using its display as policy.
+    ///
+    /// ```compile_fail
+    /// aura_terminal::error::TerminalError::native_operation("failed", "string-only cause");
+    /// ```
+    #[must_use]
+    pub fn native_operation(
+        message: impl Into<String>,
+        error: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::NativeOperation {
+            message: message.into(),
+            source: TerminalNativeSource(std::sync::Arc::new(error)),
+        }
+    }
+
     /// Stable error code for UI and telemetry.
     #[must_use]
     pub fn code(&self) -> &'static str {
@@ -55,7 +101,7 @@ impl TerminalError {
             Self::NotFound(_) => "TERM_NOT_FOUND",
             Self::Network(_) => "TERM_NETWORK",
             Self::NotImplemented(_) => "TERM_NOT_IMPLEMENTED",
-            Self::Operation(_) => "TERM_OPERATION",
+            Self::Operation(_) | Self::NativeOperation { .. } => "TERM_OPERATION",
             Self::StructuredOperation { code, .. } => code,
         }
     }
@@ -71,7 +117,8 @@ impl TerminalError {
             | Self::Network(message)
             | Self::NotImplemented(message)
             | Self::Operation(message)
-            | Self::StructuredOperation { message, .. } => message,
+            | Self::StructuredOperation { message, .. }
+            | Self::NativeOperation { message, .. } => message,
         }
     }
 
@@ -87,7 +134,9 @@ impl TerminalError {
             Self::NotFound(_) => ErrorCategory::NotFound,
             Self::Network(_) => ErrorCategory::Network,
             Self::NotImplemented(_) => ErrorCategory::NotImplemented,
-            Self::Operation(_) | Self::StructuredOperation { .. } => ErrorCategory::Operation,
+            Self::Operation(_)
+            | Self::StructuredOperation { .. }
+            | Self::NativeOperation { .. } => ErrorCategory::Operation,
         }
     }
 
@@ -106,14 +155,14 @@ impl TerminalError {
 
 impl From<aura_core::AuraError> for TerminalError {
     fn from(err: aura_core::AuraError) -> Self {
-        TerminalError::Operation(err.to_string())
+        TerminalError::native_operation(err.to_string(), err)
     }
 }
 
 #[cfg(feature = "terminal")]
 impl From<aura_agent::AgentError> for TerminalError {
     fn from(err: aura_agent::AgentError) -> Self {
-        TerminalError::Operation(err.to_string())
+        TerminalError::native_operation(err.to_string(), err)
     }
 }
 

@@ -60,6 +60,11 @@ Shared commands are typed `IntentAction` requests (account creation, device enro
 - Each command returns a typed response with submission metadata and an optional operation handle.
 - Post-action waits require a strictly newer authoritative projection or another declared barrier.
 - Unsupported semantic commands fail closed. No silent fallback to renderer-specific behavior.
+- `ExportDeviceEnrollmentSetup` returns an immediate typed
+  `DeviceEnrollmentSetup { setup_code }` value from the runtime's bounded
+  signing export. It has no ceremony operation handle. Native and browser
+  adapters transfer the exact code; missing runtime or signing readiness
+  rejects export rather than manufacturing identity evidence.
 - Enrollment code issuance and enrollment completion are separate operation
   instances. A code-ready response confirms only issuance. Wait for the
   ceremony-linked completion instance and its authoritative terminal state
@@ -113,3 +118,30 @@ Harness mode may add instrumentation and render-stability hooks. It must not cha
 `aura-harness` is tooling. It is not the authority for domain semantics, effect traits, or protocol safety rules. Those contracts remain owned by `aura-core`, `aura-app`, and the other runtime and specification crates.
 
 The harness drives instances through process boundaries and typed tool surfaces. It must not mutate protocol state out of band. Shared UX identifiers, parity metadata, and observation shapes remain owned by `aura-app::ui_contract`.
+
+### Enrollment manifest transfer surface
+
+`ImportDeviceEnrollmentCode` takes an enrollment code plus explicit signed manifest and independently transferred initiator verifier inputs. Its submission is a `device_enrollment` operation handle. The shared fields are `DeviceImportCode`, `DeviceImportManifest`, and `DeviceImportInitiatorVerifier`; browser DOM identifiers are `aura-account-import-code-input`, `aura-device-import-manifest-input`, and `aura-device-import-initiator-verifier-input`. Import requires a real provisional runtime with its actual exported setup signing context. Received invitation identities cannot create or replace this runtime before verification.
+
+`DeviceEnrollmentCodeReady` carries the actual issuer's manifest/verifier transfer alongside the enrollment code. Capturing event variable `name` also captures `name_manifest` and `name_initiator_verifier`. Shared scenarios pass all three explicitly. Missing event payload fails rather than consulting the clipboard or reconstructing trust from the enrollment code. Legacy pending-code records cannot replay an enrollment without owned authenticated transfer evidence.
+
+### Native semantic failure codes
+
+Shared semantic operation errors preserve the operation failure domain and native failure code across frontend and harness snapshots. Required native categories map to `crypto_failure`, `serialization_failure`, `storage_failure`, `journal_failure`, or `reactive_failure`. Generic crypto failure does not assert unauthorized access or signature denial. All frontends and harness observers consume this canonical shared error contract; display text is not category evidence.
+
+### Typed command failure classification
+
+Strong-command terminal outcomes classify typed resolver/precondition/plan failures and native runtime error categories. The display text of generic Invalid or PermissionDenied failures cannot manufacture a more specific semantic subreason. A membership/mute/ban result requires an originating typed domain reason; generic denial remains permission_denied.
+
+### Typed moderation decisions
+
+A command's not_member, muted, or banned code requires the corresponding typed moderation decision retained from the authoritative status query. Send/join operations retain the exact queried context/channel/authority. Generic permission text cannot supply those codes. The existing owned send failure boundary publishes moderation denial before returning its original source chain.
+
+Enrollment import success requires the actual independently pinned issuer
+committed confirmation, durable original-window acknowledgement and sanctioned
+exact-generation adoption. Frontends receive an opaque completion with receipt
+locator fields; they cannot reconstruct completion from persisted JSON or
+subject/device IDs. A profile handoff or restart must revalidate the runtime's
+original durable receipt before publishing the selected identity. Persisting
+selection, account configuration and pending-state cleanup separately does not
+satisfy this profile transaction contract.

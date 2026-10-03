@@ -45,10 +45,6 @@ const PROTOCOL_ID: &str = "aura.sync.device_epoch_rotation";
 const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
-/// Upper bound for the invitee to import the code and accept (matches the
-/// enrollment ceremony timeout).
-/// Matches the enrollment acceptance window: a person imports the code later.
-const SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS: u64 = 600_000;
 const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
 const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
 
@@ -97,6 +93,92 @@ pub struct DeviceEpochRotationService {
     ceremony_runner: CeremonyRunner,
     signing_service: ThresholdSigningService,
     reconfiguration: ReconfigurationManager,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredEnrollmentActivation {
+    version: u16,
+    subject: AuthorityId,
+    ceremony: CeremonyId,
+    pending_epoch: u64,
+    prestate: Hash32,
+    setup_digest: [u8; 32],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    epoch_fence: Option<AttestedOp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    baseline: Option<Vec<AttestedOp>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manifest_digest: Option<[u8; 32]>,
+    attested: AttestedOp,
+}
+#[derive(Debug, thiserror::Error)]
+enum EnrollmentEpochFenceError {
+    #[error("legacy enrollment activation has no authenticated epoch fence")]
+    LegacyMissingFence,
+    #[error("enrollment activation differs from its owned original generation")]
+    Binding,
+    #[error("enrollment tree changed from the original signed activation history")]
+    HistoryChanged,
+    #[error("enrollment pending epoch is not the next authenticated tree epoch")]
+    EpochMismatch,
+    #[error("current enrollment tree lacks required physical device membership")]
+    Membership,
+}
+fn enrollment_fence_failure(source: EnrollmentEpochFenceError) -> AgentError {
+    AgentError::from(aura_core::AuraError::PermissionDenied {
+        message: format!("owned enrollment epoch fence rejected: {source}"),
+        source: Some(std::sync::Arc::new(source)),
+    })
+}
+/// Actual tree custody is retained through key activation and terminal commit.
+/// Serialized preparation by itself is never an activation capability.
+struct PreparedEnrollmentActivationCapability<'a> {
+    stored: StoredEnrollmentActivation,
+    _tree: aura_protocol::handlers::tree::TreeDecisionLease<'a>,
+}
+fn enrollment_activation_prestate(
+    authority: AuthorityId,
+    baseline: &[AttestedOp],
+    participants: &std::collections::HashSet<ParticipantIdentity>,
+    issuer_device: DeviceId,
+    enrolling_device: DeviceId,
+) -> AgentResult<Hash32> {
+    let state = aura_journal::commitment_tree::reduce(baseline).map_err(map_internal_error)?;
+    // Reconstruct the exact issuance order: actual issuer first, other existing
+    // devices sorted by the original string key, enrolling physical device last.
+    // Tracker participants are acceptance-only and exclude the actual issuer.
+    // Reconstructing the signing roster must prepend that owned issuer.
+    if issuer_device == enrolling_device
+        || participants.contains(&ParticipantIdentity::device(issuer_device))
+        || !participants.contains(&ParticipantIdentity::device(enrolling_device))
+    {
+        return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+    }
+    let mut others = participants
+        .iter()
+        .map(|participant| match participant {
+            ParticipantIdentity::Device(device) => Ok(*device),
+            _ => Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding)),
+        })
+        .collect::<AgentResult<Vec<_>>>()?;
+    others.retain(|device| *device != issuer_device && *device != enrolling_device);
+    others.sort_by_key(|device| device.to_string());
+    let mut devices = Vec::with_capacity(participants.len() + 1);
+    devices.push(issuer_device);
+    devices.extend(others);
+    devices.push(enrolling_device);
+    let input = serde_json::to_vec(&(state.epoch, state.root_commitment, devices))
+        .map_err(map_encode_error)?;
+    let prestate = aura_core::Prestate::new(
+        vec![(authority, Hash32(state.root_commitment))],
+        Hash32(hash::hash(&input)),
+    )
+    .map_err(map_internal_error)?;
+    Ok(prestate.compute_hash())
+}
+fn enrollment_activation_location(ceremony: &CeremonyId) -> SecureStorageLocation {
+    SecureStorageLocation::new("device_enrollment_activation_v1", ceremony.to_string())
 }
 
 impl DeviceEpochRotationService {
@@ -603,22 +685,71 @@ impl DeviceEpochRotationService {
         request: &DeviceEpochRotationInitRequest,
         proposal: &DeviceEpochProposal,
     ) -> AgentResult<DeviceEpochCommit> {
+        let activation = if request.kind == DeviceEpochRotationKind::Enrollment {
+            self.ceremony_tracker
+                .begin_enrollment_activation(&request.ceremony_id)
+                .await
+                .map_err(AgentError::from)?
+        } else {
+            None
+        };
+        if request.kind == DeviceEpochRotationKind::Enrollment && activation.is_none() {
+            return self.load_commit(&request.ceremony_id).await;
+        }
+        if activation.is_some() {
+            crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+                self.effects.as_ref(),
+                &self.signing_service,
+                &request.ceremony_id,
+                self.authority_id,
+                self.ceremony_tracker
+                    .get(&request.ceremony_id)
+                    .await
+                    .map_err(map_internal_error)?
+                    .new_epoch,
+                self.ceremony_tracker
+                    .get(&request.ceremony_id)
+                    .await
+                    .map_err(map_internal_error)?
+                    .prestate_hash,
+            )
+            .await?;
+        }
+        let prepared_activation =
+            if request.kind == DeviceEpochRotationKind::Enrollment {
+                Some(
+                    self.finalize_enrollment(activation.as_ref().ok_or_else(|| {
+                        enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
+                    })?)
+                    .await?,
+                )
+            } else {
+                None
+            };
         let commit = match request.kind {
             DeviceEpochRotationKind::Enrollment => {
-                let attested_leaf_op = self.finalize_enrollment(&request.ceremony_id).await?;
-                self.build_signed_commit(proposal, attested_leaf_op).await?
+                let owned = prepared_activation
+                    .as_ref()
+                    .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+                self.build_signed_commit(proposal, Some(owned.stored.attested.clone()))
+                    .await?
             }
             DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
                 self.build_signed_commit(proposal, None).await?
             }
         };
 
-        self.commit_local_rotation(&request.ceremony_id).await?;
+        self.commit_local_rotation(&request.ceremony_id, activation.as_ref())
+            .await?;
         self.store_commit(&commit).await?;
-        self.ceremony_runner
-            .commit(&request.ceremony_id, CeremonyCommitMetadata::default())
-            .await
-            .map_err(map_internal_error)?;
+        if let Some(activation) = activation {
+            activation.commit().await.map_err(AgentError::from)?;
+        } else {
+            self.ceremony_runner
+                .commit(&request.ceremony_id, CeremonyCommitMetadata::default())
+                .await
+                .map_err(map_internal_error)?;
+        }
 
         Ok(commit)
     }
@@ -632,12 +763,6 @@ impl DeviceEpochRotationService {
         &self,
         ceremony_id: &CeremonyId,
     ) -> AgentResult<()> {
-        let start = self
-            .effects
-            .physical_time()
-            .await
-            .map_err(map_internal_error)?
-            .ts_ms;
         loop {
             let ceremony = self
                 .ceremony_tracker
@@ -655,6 +780,10 @@ impl DeviceEpochRotationService {
             if ceremony.threshold_k > 0
                 && ceremony.accepted_participants.len() >= usize::from(ceremony.threshold_k)
             {
+                self.ceremony_tracker
+                    .require_verified_enrollment_response(ceremony_id)
+                    .await
+                    .map_err(map_internal_error)?;
                 break;
             }
             let now = self
@@ -663,7 +792,10 @@ impl DeviceEpochRotationService {
                 .await
                 .map_err(map_internal_error)?
                 .ts_ms;
-            if now.saturating_sub(start) >= SOLE_DEVICE_ENROLLMENT_TIMEOUT_MS {
+            if now.saturating_sub(ceremony.started_at.ts_ms)
+                >= u64::try_from(ceremony.timeout.as_millis())
+                    .map_err(|_| AgentError::invalid("enrollment deadline overflow"))?
+            {
                 return Err(AgentError::timeout(format!(
                     "timed out waiting for enrollment acceptance on {ceremony_id}"
                 )));
@@ -674,12 +806,35 @@ impl DeviceEpochRotationService {
                 .map_err(map_internal_error)?;
         }
 
-        self.finalize_enrollment(ceremony_id).await?;
-        self.commit_local_rotation(ceremony_id).await?;
-        self.ceremony_runner
-            .commit(ceremony_id, CeremonyCommitMetadata::default())
+        let Some(activation) = self
+            .ceremony_tracker
+            .begin_enrollment_activation(ceremony_id)
             .await
-            .map_err(map_internal_error)?;
+            .map_err(AgentError::from)?
+        else {
+            return Ok(());
+        };
+        crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+            self.effects.as_ref(),
+            &self.signing_service,
+            ceremony_id,
+            self.authority_id,
+            self.ceremony_tracker
+                .get(ceremony_id)
+                .await
+                .map_err(map_internal_error)?
+                .new_epoch,
+            self.ceremony_tracker
+                .get(ceremony_id)
+                .await
+                .map_err(map_internal_error)?
+                .prestate_hash,
+        )
+        .await?;
+        let _prepared_activation = self.finalize_enrollment(&activation).await?;
+        self.commit_local_rotation(ceremony_id, Some(&activation))
+            .await?;
+        activation.commit().await.map_err(AgentError::from)?;
         Ok(())
     }
 
@@ -825,32 +980,192 @@ impl DeviceEpochRotationService {
         Ok(())
     }
 
-    async fn finalize_enrollment(
+    // The exact original activation owner and tree lease exclude local mutation.
+    async fn recover_prepared_enrollment_activation(
         &self,
-        ceremony_id: &CeremonyId,
-    ) -> AgentResult<Option<AttestedOp>> {
+        ceremony: &crate::runtime::services::ceremony_tracker::TrackedCeremony,
+        tree: &aura_protocol::handlers::tree::TreeDecisionLease<'_>,
+    ) -> AgentResult<Option<StoredEnrollmentActivation>> {
+        let location = enrollment_activation_location(&ceremony.ceremony_id);
+        if !self
+            .effects
+            .secure_exists(&location)
+            .await
+            .map_err(AgentError::from)?
+        {
+            return Ok(None);
+        }
+        let bytes = self
+            .effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await?;
+        if bytes.len() > 1_048_576 {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+        let raw: StoredEnrollmentActivation = from_slice(&bytes).map_err(map_decode_error)?;
+        if raw.version != 2 {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::LegacyMissingFence,
+            ));
+        }
+        let fence = raw.epoch_fence.as_ref().ok_or_else(|| {
+            enrollment_fence_failure(EnrollmentEpochFenceError::LegacyMissingFence)
+        })?;
+        let baseline = raw
+            .baseline
+            .as_ref()
+            .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
+        let proof = self
+            .ceremony_tracker
+            .verified_enrollment_response(&ceremony.ceremony_id)
+            .await
+            .map_err(AgentError::from)?;
+        let aura_core::TreeOpKind::AddLeaf { leaf, under } = &raw.attested.op.op else {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        };
+        let aura_core::TreeOpKind::RotateEpoch { affected } = &fence.op.op else {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        };
+        if raw.subject != self.authority_id
+            || raw.ceremony != ceremony.ceremony_id
+            || raw.pending_epoch != ceremony.new_epoch
+            || raw.prestate != ceremony.prestate_hash
+            || raw.setup_digest != proof.setup_digest()
+            || raw.manifest_digest != proof.acceptance().manifest_digest
+            || raw.manifest_digest.is_none()
+            || Some(leaf.device_id) != ceremony.enrollment_device_id
+            || leaf.role != LeafRole::Device
+            || *under != NodeIndex(0)
+            || affected.as_slice() != [NodeIndex(0)]
+            || enrollment_activation_prestate(
+                self.authority_id,
+                baseline,
+                &ceremony.participants,
+                self.effects.device_id(),
+                leaf.device_id,
+            )? != raw.prestate
+        {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+        let before = aura_journal::commitment_tree::reduce(baseline).map_err(map_internal_error)?;
+        if before.epoch.value().checked_add(1) != Some(raw.pending_epoch) {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::EpochMismatch,
+            ));
+        }
+        let mut candidate = baseline.clone();
+        candidate.push(raw.attested.clone());
+        candidate.push(fence.clone());
+        // The actual original parent packages verify both saved signatures. No
+        // historical private-key signing or new epoch inference is used here.
+        self.effects
+            .collect_enrollment_parent_inventory(&candidate)
+            .await
+            .map_err(map_internal_error)?;
+        let current = tree
+            .install_authenticated_extension(baseline.len(), &candidate)
+            .await
+            .map_err(AgentError::from)?;
+        self.effects
+            .collect_enrollment_parent_inventory(&current)
+            .await
+            .map_err(map_internal_error)?;
+        let state = aura_journal::commitment_tree::reduce(&current).map_err(map_internal_error)?;
+        if state.epoch.value() != raw.pending_epoch
+            || ![self.effects.device_id(), leaf.device_id]
+                .iter()
+                .all(|device| {
+                    state
+                        .leaves
+                        .values()
+                        .any(|entry| entry.device_id == *device && entry.role == LeafRole::Device)
+                })
+        {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::Membership,
+            ));
+        }
+        Ok(Some(raw))
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "enrollment_activation",
+        family = "runtime_helper"
+    )]
+    async fn finalize_enrollment<'a>(
+        &'a self,
+        activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+    ) -> AgentResult<PreparedEnrollmentActivationCapability<'a>> {
+        activation
+            .require_tracker(&self.ceremony_tracker)
+            .map_err(AgentError::from)?;
+        let ceremony_id = activation.ceremony_id();
+        let tree = self.effects.lock_tree_decision().await;
+        self.ceremony_tracker
+            .require_verified_enrollment_response(ceremony_id)
+            .await
+            .map_err(map_internal_error)?;
         let ceremony_state = self
             .ceremony_tracker
             .get(ceremony_id)
             .await
             .map_err(map_internal_error)?;
 
+        activation
+            .require_generation(self.authority_id, ceremony_state.new_epoch)
+            .await
+            .map_err(AgentError::from)?;
+        if let Some(attested) = self
+            .recover_prepared_enrollment_activation(&ceremony_state, &tree)
+            .await?
+        {
+            return Ok(PreparedEnrollmentActivationCapability {
+                stored: attested,
+                _tree: tree,
+            });
+        }
         let Some(device_id) = ceremony_state.enrollment_device_id else {
-            return Ok(None);
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
         };
 
-        let tree_state = self
+        let baseline = self
             .effects
-            .get_current_state()
+            .export_tree_ops()
             .await
             .map_err(map_internal_error)?;
+        self.effects
+            .collect_enrollment_parent_inventory(&baseline)
+            .await
+            .map_err(map_internal_error)?;
+        let tree_state =
+            aura_journal::commitment_tree::reduce(&baseline).map_err(map_internal_error)?;
+        if enrollment_activation_prestate(
+            self.authority_id,
+            &baseline,
+            &ceremony_state.participants,
+            self.effects.device_id(),
+            device_id,
+        )? != ceremony_state.prestate_hash
+        {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::HistoryChanged,
+            ));
+        }
+        if tree_state.epoch.value().checked_add(1) != Some(ceremony_state.new_epoch) {
+            return Err(enrollment_fence_failure(
+                EnrollmentEpochFenceError::EpochMismatch,
+            ));
+        }
 
         if tree_state
             .leaves
             .values()
             .any(|leaf| leaf.device_id == device_id)
         {
-            return Ok(None);
+            return Err(AgentError::invalid(
+                "enrollment device exists without owned activation evidence",
+            ));
         }
 
         let participant = ParticipantIdentity::device(device_id);
@@ -937,19 +1252,138 @@ impl DeviceEpochRotationService {
             agg_sig: signature.signature,
             signer_count: signature.signer_count,
         };
-        self.effects
-            .apply_attested_op(attested.clone())
+        let mut candidate = baseline.clone();
+        candidate.push(attested.clone());
+        let after_leaf =
+            aura_journal::commitment_tree::reduce(&candidate).map_err(map_internal_error)?;
+        let fence_op = TreeOp {
+            parent_epoch: after_leaf.epoch,
+            parent_commitment: after_leaf.root_commitment,
+            op: aura_core::TreeOpKind::RotateEpoch {
+                affected: vec![NodeIndex(0)],
+            },
+            version: 1,
+        };
+        // The original active signing context signs this exact parent before
+        // crypto activation. Quorum signing follows the actual signing service.
+        let fence_signature = self
+            .signing_service
+            .sign(SigningContext::self_tree_op(
+                self.authority_id,
+                fence_op.clone(),
+            ))
             .await
             .map_err(map_internal_error)?;
-        Ok(Some(attested))
+        let epoch_fence = AttestedOp {
+            op: fence_op,
+            agg_sig: fence_signature.signature,
+            signer_count: fence_signature.signer_count,
+        };
+        candidate.push(epoch_fence.clone());
+        self.effects
+            .collect_enrollment_parent_inventory(&candidate)
+            .await
+            .map_err(map_internal_error)?;
+        let proof = self
+            .ceremony_tracker
+            .verified_enrollment_response(ceremony_id)
+            .await
+            .map_err(AgentError::from)?;
+        let prepared = StoredEnrollmentActivation {
+            version: 2,
+            subject: self.authority_id,
+            ceremony: ceremony_id.clone(),
+            pending_epoch: ceremony_state.new_epoch,
+            prestate: ceremony_state.prestate_hash,
+            setup_digest: proof.setup_digest(),
+            attested: attested.clone(),
+            epoch_fence: Some(epoch_fence),
+            baseline: Some(baseline),
+            manifest_digest: proof.acceptance().manifest_digest,
+        };
+        let bytes = to_vec(&prepared).map_err(map_encode_error)?;
+        if bytes.len() > 1_048_576 {
+            return Err(AgentError::invalid("oversized enrollment activation"));
+        }
+        // Required durable preparation precedes the irreversible tree mutation.
+        let location = enrollment_activation_location(ceremony_id);
+        let outcome = self
+            .effects
+            .secure_store_immutable(
+                &location,
+                &bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(AgentError::from)?;
+        if outcome == aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists
+            && self
+                .effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?
+                != bytes
+        {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
+
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        inject_activation_fault(self.effects.as_ref(), ceremony_id, false).await?;
+
+        tree.install_authenticated_extension(
+            prepared
+                .baseline
+                .as_ref()
+                .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?
+                .len(),
+            &candidate,
+        )
+        .await
+        .map_err(AgentError::from)?;
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        inject_activation_fault(self.effects.as_ref(), ceremony_id, true).await?;
+        Ok(PreparedEnrollmentActivationCapability {
+            stored: prepared,
+            _tree: tree,
+        })
     }
 
-    async fn commit_local_rotation(&self, ceremony_id: &CeremonyId) -> AgentResult<()> {
+    async fn commit_local_rotation(
+        &self,
+        ceremony_id: &CeremonyId,
+        activation: Option<
+            &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
+        >,
+    ) -> AgentResult<()> {
         let ceremony_state = self
             .ceremony_tracker
             .get(ceremony_id)
             .await
             .map_err(map_internal_error)?;
+        if ceremony_state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment {
+            let generation =
+                crate::handlers::invitation::enrollment_trust::restore_pending_signing_generation(
+                    self.effects.as_ref(),
+                    &self.signing_service,
+                    ceremony_id,
+                    self.authority_id,
+                    ceremony_state.new_epoch,
+                    ceremony_state.prestate_hash,
+                )
+                .await?;
+            self.signing_service
+                .commit_verified_pending_generation(
+                    &generation,
+                    activation.ok_or_else(|| {
+                        AgentError::invalid("missing enrollment activation lease")
+                    })?,
+                )
+                .await
+                .map_err(AgentError::from)?;
+            return Ok(());
+        }
         self.effects
             .commit_key_rotation(&self.authority_id, ceremony_state.new_epoch)
             .await
@@ -1163,20 +1597,74 @@ fn verified_device_epoch_envelope(
         .map_err(|error| AgentError::internal(format!("promote device epoch ingress: {error}")))
 }
 
-fn map_internal_error(error: impl std::fmt::Display) -> AgentError {
-    AgentError::internal(error.to_string())
+fn map_internal_error(error: impl std::error::Error + Send + Sync + 'static) -> AgentError {
+    AgentError::from(aura_core::AuraError::Internal {
+        message: "device epoch rotation internal".into(),
+        source: Some(std::sync::Arc::new(error)),
+    })
 }
 
-fn map_encode_error(error: impl std::fmt::Display) -> AgentError {
-    AgentError::internal(format!("device epoch rotation encode failed: {error}"))
+fn map_encode_error(error: impl std::error::Error + Send + Sync + 'static) -> AgentError {
+    AgentError::from(aura_core::AuraError::Internal {
+        message: "device epoch rotation encode".into(),
+        source: Some(std::sync::Arc::new(error)),
+    })
 }
 
-fn map_decode_error(error: impl std::fmt::Display) -> AgentError {
-    AgentError::internal(format!("device epoch rotation decode failed: {error}"))
+fn map_decode_error(error: impl std::error::Error + Send + Sync + 'static) -> AgentError {
+    AgentError::from(aura_core::AuraError::Internal {
+        message: "device epoch rotation decode".into(),
+        source: Some(std::sync::Arc::new(error)),
+    })
 }
 
 fn map_session_error(error: SessionIngressError) -> AgentError {
     AgentError::internal(format!("device epoch rotation session failed: {error}"))
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+fn activation_faults(
+) -> &'static async_lock::Mutex<std::collections::HashMap<(std::path::PathBuf, CeremonyId), bool>> {
+    static FAULTS: std::sync::OnceLock<
+        async_lock::Mutex<std::collections::HashMap<(std::path::PathBuf, CeremonyId), bool>>,
+    > = std::sync::OnceLock::new();
+    FAULTS.get_or_init(Default::default)
+}
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) async fn fail_activation_for_test(
+    effects: &AuraEffectSystem,
+    ceremony: CeremonyId,
+    after_tree: bool,
+) {
+    let owner = (effects.config().storage.base_path.clone(), ceremony);
+    activation_faults().lock().await.insert(owner, after_tree);
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+async fn inject_activation_fault(
+    effects: &AuraEffectSystem,
+    ceremony: &CeremonyId,
+    after_tree: bool,
+) -> AgentResult<()> {
+    let owner = (effects.config().storage.base_path.clone(), ceremony.clone());
+    let inject = {
+        let mut faults = activation_faults().lock().await;
+        if faults.get(&owner) == Some(&after_tree) {
+            faults.remove(&owner);
+            true
+        } else {
+            false
+        }
+    };
+    if inject {
+        return Err(AgentError::from(aura_core::AuraError::Internal {
+            message: "injected activation interruption".into(),
+            source: Some(std::sync::Arc::new(std::io::Error::from(
+                std::io::ErrorKind::Interrupted,
+            ))),
+        }));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1428,5 +1916,102 @@ mod tests {
         assert!(replay_error
             .to_string()
             .contains("authority signature verification failed"));
+    }
+    #[test]
+    fn genuine_legacy_activation_codec_has_no_fence_and_cannot_resume() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            #[derive(serde::Serialize)]
+            struct LegacyActivation {
+                version: u16,
+                subject: AuthorityId,
+                ceremony: CeremonyId,
+                pending_epoch: u64,
+                prestate: Hash32,
+                setup_digest: [u8; 32],
+                attested: AttestedOp,
+            }
+            // Real prechange schema representation and actual owner-exported
+            // attestation. This tests legacy codec/admission, never trusts a fixture.
+            let (issuer, _invitee, _invitation, start, _accept, proof) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "legacy-activation-fence-codec",
+                ),
+            )
+            .await;
+            let effects = issuer.runtime().effects();
+            let tracker = issuer.runtime().ceremony_tracker();
+            let state = tracker
+                .get(&start.ceremony_id)
+                .await
+                .expect("actual registration");
+            let original = effects
+                .export_tree_ops()
+                .await
+                .expect("actual original history");
+            let legacy = LegacyActivation {
+                version: 1,
+                subject: issuer.authority_id(),
+                ceremony: start.ceremony_id.clone(),
+                pending_epoch: state.new_epoch,
+                prestate: state.prestate_hash,
+                setup_digest: proof.setup_digest(),
+                attested: original
+                    .first()
+                    .expect("actual bootstrap attestation")
+                    .clone(),
+            };
+            let bytes = to_vec(&legacy).expect("actual prechange codec");
+            let decoded: StoredEnrollmentActivation =
+                from_slice(&bytes).expect("real legacy binary decodes with absent v2 fields");
+            assert!(decoded.epoch_fence.is_none());
+            assert!(decoded.baseline.is_none());
+            assert!(decoded.manifest_digest.is_none());
+            assert_eq!(to_vec(&decoded).expect("legacy reencoding"), bytes);
+            effects
+                .secure_store_immutable(
+                    &enrollment_activation_location(&start.ceremony_id),
+                    &bytes,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .expect("actual legacy storage fixture");
+            let service = DeviceEpochRotationService::new(
+                issuer.authority_id(),
+                effects.clone(),
+                tracker.clone(),
+                issuer.runtime().ceremony_runner().clone(),
+                issuer.runtime().threshold_signing(),
+                issuer.runtime().reconfiguration().clone(),
+            );
+            let tree = effects.lock_tree_decision().await;
+            let error = match service
+                .recover_prepared_enrollment_activation(&state, &tree)
+                .await
+            {
+                Ok(_) => panic!("legacy activation cannot invent a missing signed fence"),
+                Err(error) => error,
+            };
+            let AgentError::Aura(aura_core::AuraError::PermissionDenied {
+                source: Some(source),
+                ..
+            }) = error
+            else {
+                panic!("legacy failure must preserve its typed cause")
+            };
+            assert!(matches!(
+                source.downcast_ref::<EnrollmentEpochFenceError>(),
+                Some(EnrollmentEpochFenceError::LegacyMissingFence)
+            ));
+            assert_eq!(
+                effects
+                    .export_tree_ops()
+                    .await
+                    .expect("unchanged original history"),
+                original
+            );
+        });
     }
 }

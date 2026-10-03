@@ -31,15 +31,12 @@ cfg_if! {
         use aura_agent::AuraAgent;
     }
 }
-use aura_agent::handlers::{InvitationType as AgentInvitationType, ShareableInvitation};
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_app::ui::types::{BootstrapRuntimeIdentity, InvitationBridgeType};
 use aura_app::ui::workflows::ceremonies::{CeremonyHandle, CeremonyStatusHandle};
-use aura_app::ui::workflows::invitation::import_invitation_details;
 use aura_app::ui::workflows::{
     ceremonies as ceremony_workflows, context as context_workflows, runtime as runtime_workflows,
     settings as settings_workflows, system as system_workflows,
@@ -120,6 +117,7 @@ pub struct IoContext {
 pub struct DeviceEnrollmentStartInfo {
     pub ceremony_id: String,
     pub enrollment_code: String,
+    pub manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
     pub pending_epoch: Epoch,
     pub device_id: String,
     pub status_handle: CeremonyStatusHandle,
@@ -639,23 +637,33 @@ impl IoContext {
     pub async fn start_device_enrollment(
         &self,
         nickname_suggestion: &str,
-        invitee_authority_id: AuthorityId,
+        setup_code: String,
     ) -> TerminalResult<DeviceEnrollmentStartInfo> {
-        let start = ceremony_workflows::start_device_enrollment_ceremony(
+        let start = ceremony_workflows::start_device_enrollment_ceremony_from_setup_code(
             self.app_core.raw(),
             nickname_suggestion.to_string(),
-            invitee_authority_id,
+            setup_code,
         )
         .await
         .map_err(TerminalError::from)?;
         Ok(DeviceEnrollmentStartInfo {
             ceremony_id: start.ceremony_id.to_string(),
             enrollment_code: start.enrollment_code,
+            manifest_transfer: start.manifest_transfer,
             pending_epoch: start.pending_epoch,
             device_id: start.device_id.to_string(),
             status_handle: start.status_handle,
             cancel_handle: start.handle,
         })
+    }
+
+    pub async fn persist_completed_enrollment_identity(
+        &self,
+        completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
+    ) -> Result<(), aura_core::AuraError> {
+        self.account_files
+            .persist_completed_enrollment_identity(completed)
+            .await
     }
 
     pub async fn start_device_removal(&self, device_id: &str) -> TerminalResult<CeremonyHandle> {
@@ -665,89 +673,6 @@ impl IoContext {
         )
         .await
         .map_err(TerminalError::from)
-    }
-
-    pub async fn import_device_enrollment_code(&self, code: &str) -> TerminalResult<()> {
-        cfg_if! {
-            if #[cfg(feature = "development")] {
-                if self.demo_mobile_agent.is_some() {
-                    return self.import_invitation_on_mobile(code).await;
-                }
-            }
-        }
-
-        let app_core = self.app_core_raw();
-        let runtime_ready_for_live_accept = {
-            let core = app_core.read().await;
-            core.runtime().is_some() && core.authority().is_some() && self.has_account()
-        };
-        if !runtime_ready_for_live_accept {
-            let shareable = ShareableInvitation::from_code(code).map_err(|e| {
-                TerminalError::structured_operation(
-                    OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
-                    format!("Failed to parse device enrollment code: {e}"),
-                )
-            })?;
-            let AgentInvitationType::DeviceEnrollment {
-                subject_authority,
-                device_id,
-                nickname_suggestion,
-                ..
-            } = shareable.invitation_type
-            else {
-                return Err(TerminalError::Input(
-                    "Code is not a device enrollment invitation".to_string(),
-                ));
-            };
-            let nickname_suggestion =
-                nickname_suggestion.unwrap_or_else(|| "Imported Device".to_string());
-            let runtime_identity = BootstrapRuntimeIdentity::new(subject_authority, device_id);
-            let (authority_id, _context_id) = self
-                .account_files
-                .create_account_with_device_enrollment_runtime_identity(
-                    runtime_identity,
-                    &nickname_suggestion,
-                    code,
-                )
-                .await?;
-            {
-                let mut core = app_core.write().await;
-                core.set_authority(authority_id);
-            }
-            return Ok(());
-        }
-
-        let invitation = import_invitation_details(app_core, code)
-            .await
-            .map_err(|e| {
-                TerminalError::structured_operation(
-                    OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
-                    format!("Failed to import invitation: {e}"),
-                )
-            })?;
-
-        if !matches!(
-            invitation.info().invitation_type,
-            InvitationBridgeType::DeviceEnrollment { .. }
-        ) {
-            return Err(TerminalError::Input(
-                "Code is not a device enrollment invitation".to_string(),
-            ));
-        }
-
-        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
-            app_core,
-            invitation.info(),
-        )
-        .await
-        .map_err(|e| {
-            TerminalError::structured_operation(
-                OpFailureCode::ImportDeviceEnrollmentCode.as_str(),
-                format!("Failed to accept device enrollment invitation: {e}"),
-            )
-        })?;
-
-        Ok(())
     }
 
     // =========================================================================

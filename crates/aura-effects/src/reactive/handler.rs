@@ -36,10 +36,16 @@ pub struct TestTaskSpawner;
 #[derive(Debug, Default)]
 pub struct CountingTestTaskSpawner {
     spawned: AtomicUsize,
+    failure: Arc<tokio::sync::Mutex<Option<aura_core::AuraError>>>,
 }
 
 #[cfg(feature = "test-support")]
 impl CountingTestTaskSpawner {
+    /// First native required-task fault retained by this test supervisor.
+    pub async fn failure(&self) -> Option<aura_core::AuraError> {
+        self.failure.lock().await.clone()
+    }
+
     /// Number of owned tasks allocated through this spawner.
     pub fn spawned_count(&self) -> usize {
         self.spawned.load(Ordering::SeqCst)
@@ -48,6 +54,47 @@ impl CountingTestTaskSpawner {
 
 #[cfg(feature = "test-support")]
 impl aura_core::effects::task::TaskSpawner for CountingTestTaskSpawner {
+    fn spawn_fallible_cancellable(
+        &self,
+        _name: &'static str,
+        fut: futures::future::BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        let failure = self.failure.clone();
+        self.spawn_cancellable(
+            Box::pin(async move {
+                if let Err(error) = fut.await {
+                    let mut first = failure.lock().await;
+                    if first.is_none() {
+                        *first = Some(error);
+                    }
+                }
+            }),
+            token,
+        );
+        Ok(())
+    }
+    fn spawn_local_fallible_cancellable(
+        &self,
+        _name: &'static str,
+        fut: futures::future::LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn aura_core::effects::task::CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        let failure = self.failure.clone();
+        self.spawn_local_cancellable(
+            Box::pin(async move {
+                if let Err(error) = fut.await {
+                    let mut first = failure.lock().await;
+                    if first.is_none() {
+                        *first = Some(error);
+                    }
+                }
+            }),
+            token,
+        );
+        Ok(())
+    }
+
     fn spawn(&self, fut: futures::future::BoxFuture<'static, ()>) {
         self.spawned.fetch_add(1, Ordering::SeqCst);
         <TestTaskSpawner as aura_core::effects::task::TaskSpawner>::spawn(&TestTaskSpawner, fut);

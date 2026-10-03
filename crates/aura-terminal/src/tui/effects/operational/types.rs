@@ -130,6 +130,7 @@ pub enum OpResponse {
     },
     /// Device enrollment ceremony started (Settings → Add device)
     DeviceEnrollmentStarted {
+        manifest_transfer: Option<aura_app::ui::contract::EnrollmentManifestTransferInput>,
         /// Ceremony identifier for polling/cancel
         ceremony_id: String,
         /// Shareable enrollment code to import on the new device

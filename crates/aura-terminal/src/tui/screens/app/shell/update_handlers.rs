@@ -100,6 +100,7 @@ pub(super) async fn process_ui_update_match(
             }
         }
         UiUpdate::DeviceEnrollmentStarted {
+            manifest_transfer,
             ceremony_id,
             nickname_suggestion,
             enrollment_code,
@@ -110,6 +111,7 @@ pub(super) async fn process_ui_update_match(
             tui.with_mut(|state| {
                 state.settings.last_device_enrollment_code = enrollment_code.clone();
                 state.upsert_runtime_fact(RuntimeFact::DeviceEnrollmentCodeReady {
+                    manifest_transfer: manifest_transfer.clone(),
                     device_name: Some(nickname_suggestion.clone()),
                     code_len: Some(enrollment_code.len()),
                     code: Some(enrollment_code.clone()),
@@ -130,7 +132,8 @@ pub(super) async fn process_ui_update_match(
                                 ceremony_id,
                                 nickname_suggestion,
                                 enrollment_code,
-                            ),
+                            )
+                            .with_manifest_transfer(manifest_transfer.clone()),
                         ),
                     );
                 }

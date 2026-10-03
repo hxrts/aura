@@ -103,6 +103,9 @@ pub mod builder;
 // Runtime modules (internal)
 #[cfg(feature = "choreo-backend-telltale-machine")]
 mod runtime;
+/// Outcome of returning an envelope to the bounded runtime ingress queue.
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::subsystems::transport::QueueEnvelopeOutcome;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 mod task_registry;
 #[cfg(feature = "choreo-backend-telltale-machine")]

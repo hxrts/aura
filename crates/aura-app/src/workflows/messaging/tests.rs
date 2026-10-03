@@ -815,6 +815,35 @@ fn test_pair_dm_context_id_commutative() {
 }
 
 #[test]
+fn join_transport_conversion_retains_original_deadline() {
+    use crate::workflows::error::WorkflowError;
+    use std::error::Error;
+    let source = AuraError::from(WorkflowError::TimedOut {
+        operation: "join channel",
+        stage: "transport",
+        timeout_ms: 2000,
+    });
+    let error = JoinChannelError::Transport {
+        channel_id: ChannelId::from_bytes(hash(b"join-transport-deadline")),
+        detail: source.to_string(),
+        source,
+    }
+    .into_aura_error();
+    let mut cause: &(dyn Error + 'static) = &error;
+    loop {
+        if let Some(WorkflowError::TimedOut { timeout_ms, .. }) =
+            cause.downcast_ref::<WorkflowError>()
+        {
+            assert_eq!(*timeout_ms, 2000);
+            break;
+        }
+        cause = cause
+            .source()
+            .expect("original join deadline must remain accessible");
+    }
+}
+
+#[test]
 fn test_next_message_id_changes_for_same_timestamp() {
     let channel_id = ChannelId::from_bytes(hash(b"channel:next-message-id-test"));
     let sender_id = AuthorityId::new_from_entropy([7u8; 32]);
@@ -1233,7 +1262,13 @@ async fn join_channel_succeeds_when_runtime_already_has_self_membership() {
     let channel_id = ChannelId::from_bytes(hash(b"join-channel-existing-runtime-membership"));
     let context_id = ContextId::new_from_entropy([132u8; 32]);
     runtime.set_canonical_channel_created_fact(ChatFact::channel_created_ms(
-        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 1, peer,
+        context_id,
+        channel_id,
+        "shared-parity-lab".to_string(),
+        None,
+        false,
+        1,
+        peer,
     ));
     runtime.set_amp_channel_context(channel_id, context_id);
     runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
@@ -1314,7 +1349,13 @@ async fn join_channel_via_pending_invitation_stabilizes_membership_and_recipient
     let channel_id = ChannelId::from_bytes(hash(b"join-channel-pending-invitation"));
     let context_id = ContextId::new_from_entropy([142u8; 32]);
     runtime.set_canonical_channel_created_fact(ChatFact::channel_created_ms(
-        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 1, peer,
+        context_id,
+        channel_id,
+        "shared-parity-lab".to_string(),
+        None,
+        false,
+        1,
+        peer,
     ));
     runtime.set_amp_channel_context(channel_id, context_id);
     runtime.set_amp_channel_participants(context_id, channel_id, vec![owner, peer]);
@@ -1779,10 +1820,20 @@ async fn test_ensure_channel_visible_after_join_preserves_canonical_name_against
 
     let context_id = ContextId::new_from_entropy([13u8; 32]);
     let channel_id = ChannelId::from_bytes(hash(b"join-visible-existing"));
-    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
-        context_id, channel_id, "canonical".to_string(), None, false, 10,
-        AuthorityId::new_from_entropy([1u8; 32]),
-    )).await.unwrap();
+    reduce_chat_fact_observed(
+        &app_core,
+        &ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "canonical".to_string(),
+            None,
+            false,
+            10,
+            AuthorityId::new_from_entropy([1u8; 32]),
+        ),
+    )
+    .await
+    .unwrap();
 
     ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("#slash-lab"))
         .await
@@ -1804,10 +1855,20 @@ async fn test_ensure_channel_visible_after_join_preserves_existing_name_without_
 
     let context_id = ContextId::new_from_entropy([14u8; 32]);
     let channel_id = ChannelId::from_bytes(hash(b"join-visible-preserve-name"));
-    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
-        context_id, channel_id, "shared-parity-lab".to_string(), None, false, 10,
-        AuthorityId::new_from_entropy([1u8; 32]),
-    )).await.unwrap();
+    reduce_chat_fact_observed(
+        &app_core,
+        &ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            10,
+            AuthorityId::new_from_entropy([1u8; 32]),
+        ),
+    )
+    .await
+    .unwrap();
 
     ensure_channel_visible_after_join(&app_core, channel_id, context_id, None)
         .await
@@ -1935,14 +1996,31 @@ async fn test_ensure_channel_visible_after_join_does_not_rebind_same_name_placeh
     )
     .await
     .expect_err("name match is not creation evidence");
-    assert!(missing.to_string().contains("canonical channel creation fact"));
-    reduce_chat_fact_observed(&app_core, &ChatFact::channel_created_ms(
-        context_id, canonical_id, "shared-parity-lab".to_string(), None,
-        false, 10, AuthorityId::new_from_entropy([4u8; 32]),
-    )).await.unwrap();
+    assert!(missing
+        .to_string()
+        .contains("canonical channel creation fact"));
+    reduce_chat_fact_observed(
+        &app_core,
+        &ChatFact::channel_created_ms(
+            context_id,
+            canonical_id,
+            "shared-parity-lab".to_string(),
+            None,
+            false,
+            10,
+            AuthorityId::new_from_entropy([4u8; 32]),
+        ),
+    )
+    .await
+    .unwrap();
     ensure_channel_visible_after_join(
-        &app_core, canonical_id, context_id, Some("shared-parity-lab"),
-    ).await.expect("creation fact should make join visible");
+        &app_core,
+        canonical_id,
+        context_id,
+        Some("shared-parity-lab"),
+    )
+    .await
+    .expect("creation fact should make join visible");
 
     // OWNERSHIP: test-only-helper. Inspect the canonical channel after replay.
     let chat = observed_chat_snapshot(&app_core).await;
@@ -2794,5 +2872,247 @@ async fn test_update_channel_info_commits_rename_and_topic() {
                     && topic.as_deref() == Some("topic two")
         )),
         "expected a ChannelUpdated fact carrying the new name and topic, got {updates:?}"
+    );
+}
+
+async fn assert_later_canonical_read_failure(read_number: usize, expected_join_calls: usize) {
+    let authority = AuthorityId::new_from_entropy([181; 32]);
+    let context = ContextId::new_from_entropy([182; 32]);
+    let channel_id = ChannelId::from_bytes([183; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+    runtime.set_amp_channel_state_exists(context, channel_id, false);
+    runtime.set_moderation_status(
+        context,
+        channel_id,
+        authority,
+        crate::runtime_bridge::AuthoritativeModerationStatus {
+            is_banned: false,
+            is_muted: false,
+            roster_known: true,
+            is_member: false,
+        },
+    );
+    let mut answers = vec![Ok(false); read_number - 1];
+    answers.push(Err(crate::runtime_bridge::RuntimeBridgeError::with_source(
+        IntentError::ContextNotFound {
+            context_id: context.to_string(),
+        },
+        IntentError::ContextNotFound {
+            context_id: context.to_string(),
+        },
+    )));
+    runtime.queue_amp_channel_state_answers(context, channel_id, answers);
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let error = join_channel(&app_core, AuthoritativeChannelRef::new(channel_id, context))
+        .await
+        .expect_err("a later canonical query failure must terminate join");
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    let mut original_query = None;
+    while let Some(current) = cause {
+        if let Some(original) = current.downcast_ref::<IntentError>() {
+            original_query = Some(original);
+            break;
+        }
+        cause = current.source();
+    }
+    assert!(
+        matches!(
+            original_query,
+            Some(IntentError::ContextNotFound { context_id }) if context_id == &context.to_string()
+        ),
+        "original query error must survive the workflow boundary: {error:?}"
+    );
+    assert_eq!(
+        runtime.remaining_amp_channel_state_answers(context, channel_id),
+        0,
+        "the successful earlier reads and injected later failure must all be exercised"
+    );
+    assert_eq!(
+        runtime.amp_join_call_count(),
+        expected_join_calls,
+        "a failed required read must not permit an additional join attempt"
+    );
+    let chat = get_chat_state(&app_core).await.unwrap();
+    assert!(
+        chat.channel(&channel_id).is_none(),
+        "failed required reads cannot project successful membership"
+    );
+    let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert!(
+        !facts.iter().any(|fact| matches!(fact,
+            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
+                if channel.id.as_deref() == Some(channel_id.to_string().as_str())
+        )),
+        "failed required reads cannot publish membership readiness"
+    );
+}
+
+#[tokio::test]
+async fn join_fails_on_second_canonical_read_before_join_mutation() {
+    assert_later_canonical_read_failure(2, 0).await;
+}
+
+#[tokio::test]
+async fn join_retains_failed_reconciliation_read_after_rejected_join() {
+    assert_later_canonical_read_failure(3, 1).await;
+}
+
+fn injected_amp_io_failure() -> crate::runtime_bridge::RuntimeBridgeError {
+    crate::runtime_bridge::RuntimeBridgeError::with_source(
+        IntentError::storage_error("injected required AMP failure"),
+        std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+    )
+}
+
+fn assert_amp_io_failure_source(error: &AuraError) {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        if let Some(original) = current.downcast_ref::<std::io::Error>() {
+            assert_eq!(original.kind(), std::io::ErrorKind::PermissionDenied);
+            return;
+        }
+        source = current.source();
+    }
+    panic!("original injected IO cause was lost: {error:?}");
+}
+
+async fn amp_failure_app() -> (
+    Arc<crate::runtime_bridge::OfflineRuntimeBridge>,
+    Arc<dyn RuntimeBridge>,
+    Arc<RwLock<AppCore>>,
+) {
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+        AuthorityId::new_from_entropy([0xE1; 32]),
+    ));
+    let bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), bridge.clone()).unwrap(),
+    ));
+    register_signals_only(&app).await;
+    (runtime, bridge, app)
+}
+
+#[tokio::test]
+async fn note_to_self_creation_failure_stops_join_and_preserves_runtime_cause() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    runtime.queue_amp_create_results(vec![Err(injected_amp_io_failure())]);
+    let authority = bridge.authority_id();
+    let error = ensure_runtime_note_to_self_channel(&app, &bridge, authority, 10)
+        .await
+        .unwrap_err();
+    assert_amp_io_failure_source(&error);
+    assert_eq!(runtime.amp_create_call_count(), 1);
+    assert_eq!(runtime.amp_join_call_count(), 0);
+    assert!(get_chat_state(&app)
+        .await
+        .unwrap()
+        .channel(&note_to_self_channel_id(authority))
+        .is_none());
+}
+
+#[tokio::test]
+async fn note_to_self_join_failure_cannot_publish_canonical_channel() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    let authority = bridge.authority_id();
+    let channel = note_to_self_channel_id(authority);
+    runtime.queue_amp_create_results(vec![Ok(channel)]);
+    runtime.queue_amp_join_results(vec![Err(injected_amp_io_failure())]);
+    let error = ensure_runtime_note_to_self_channel(&app, &bridge, authority, 10)
+        .await
+        .unwrap_err();
+    assert_amp_io_failure_source(&error);
+    assert_eq!(runtime.amp_create_call_count(), 1);
+    assert_eq!(runtime.amp_join_call_count(), 1);
+    assert!(get_chat_state(&app)
+        .await
+        .unwrap()
+        .channel(&channel)
+        .is_none());
+}
+
+#[tokio::test]
+async fn direct_chat_creation_failure_stops_join_and_preserves_runtime_cause() {
+    let (runtime, bridge, app) = amp_failure_app().await;
+    let contact = AuthorityId::new_from_entropy([0xE2; 32]);
+    runtime.queue_amp_create_results(vec![Err(injected_amp_io_failure())]);
+    let error = start_direct_chat_with_authority(&app, contact, 10)
+        .await
+        .unwrap_err();
+    assert_amp_io_failure_source(&error);
+    assert_eq!(runtime.amp_create_call_count(), 1);
+    assert_eq!(runtime.amp_join_call_count(), 0);
+    assert!(get_chat_state(&app)
+        .await
+        .unwrap()
+        .channel(&pair_dm_channel_id(bridge.authority_id(), contact))
+        .is_none());
+}
+
+#[tokio::test]
+async fn duplicate_diagnostic_requires_exact_scope_and_independent_canonical_read() {
+    let (runtime, bridge, _) = amp_failure_app().await;
+    let context = ContextId::new_from_entropy([0xE3; 32]);
+    let channel = ChannelId::from_bytes([0xE4; 32]);
+    let wrong_channel = ChannelId::from_bytes([0xE5; 32]);
+    let mismatched = aura_core::effects::amp::AmpChannelError::AlreadyExists {
+        context,
+        channel: wrong_channel,
+    };
+    runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(true)]);
+    assert!(
+        !runtime_amp_duplicate_is_reconciled(&bridge, &mismatched, context, channel)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        runtime.remaining_amp_channel_state_answers(context, channel),
+        1
+    );
+    let duplicate = aura_core::effects::amp::AmpChannelError::AlreadyExists { context, channel };
+    assert!(
+        runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
+            .await
+            .unwrap()
+    );
+    runtime.queue_amp_channel_state_answers(context, channel, vec![Ok(false)]);
+    assert!(
+        !runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
+            .await
+            .unwrap()
+    );
+    runtime.queue_amp_channel_state_answers(
+        context,
+        channel,
+        vec![Err(crate::runtime_bridge::RuntimeBridgeError::with_source(
+            IntentError::ContextNotFound {
+                context_id: context.to_string(),
+            },
+            IntentError::ContextNotFound {
+                context_id: context.to_string(),
+            },
+        ))],
+    );
+    let failure = runtime_amp_duplicate_is_reconciled(&bridge, &duplicate, context, channel)
+        .await
+        .unwrap_err();
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+    let mut found = false;
+    while let Some(error) = source {
+        if matches!(error.downcast_ref::<IntentError>(), Some(IntentError::ContextNotFound { context_id })
+            if context_id == &context.to_string())
+        {
+            found = true;
+            break;
+        }
+        source = error.source();
+    }
+    assert!(
+        found,
+        "required canonical reconciliation cause must remain original"
     );
 }

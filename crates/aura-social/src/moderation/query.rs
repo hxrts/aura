@@ -276,6 +276,218 @@ pub fn is_user_muted(
     status_applies_to_channel(&mutes, authority, channel_id)
 }
 
+/// Required moderation evidence could not be decoded or bounded.
+#[derive(Debug, thiserror::Error)]
+pub enum RequiredModerationQueryError {
+    /// Required fact envelope schema or payload failed.
+    #[error("Moderation fact envelope failed: {0}")]
+    Envelope(#[from] aura_core::types::facts::FactError),
+    /// Canonical binary decoding failed.
+    #[error("Moderation binary payload failed: {0}")]
+    DagCbor(#[source] aura_core::util::serialization::SerializationError),
+    /// Declared JSON decoding failed.
+    #[error("Moderation JSON payload failed: {0}")]
+    Json(#[source] serde_json::Error),
+    /// The payload was stored beneath a different context.
+    #[error("Moderation context mismatch: outer {outer}, payload {payload}")]
+    ContextMismatch {
+        /// Committed wrapper context.
+        outer: ContextId,
+        /// Decoded domain payload context.
+        payload: ContextId,
+    },
+    /// The journal query exceeds a required bound.
+    #[error("Moderation query exceeds {kind:?}: {actual} > {maximum}")]
+    Bound {
+        /// Exhausted query dimension.
+        kind: ModerationQueryBound,
+        /// Observed quantity.
+        actual: usize,
+        /// Required maximum quantity.
+        maximum: usize,
+    },
+}
+
+/// Exhaustive bounded query dimension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModerationQueryBound {
+    /// Journal record inventory.
+    Records,
+    /// Aggregate relevant domain payload bytes.
+    PayloadBytes,
+}
+
+enum ModerationRecordKind {
+    Ban,
+    Unban,
+    Mute,
+    Unmute,
+}
+
+impl From<RequiredModerationQueryError> for aura_core::AuraError {
+    fn from(error: RequiredModerationQueryError) -> Self {
+        let message = error.to_string();
+        match error {
+            codec @ (RequiredModerationQueryError::DagCbor(_)
+            | RequiredModerationQueryError::Json(_)) => Self::Serialization {
+                message,
+                source: Some(std::sync::Arc::new(codec)),
+            },
+            validation @ (RequiredModerationQueryError::Envelope(_)
+            | RequiredModerationQueryError::ContextMismatch { .. }
+            | RequiredModerationQueryError::Bound { .. }) => Self::Invalid {
+                message,
+                source: Some(std::sync::Arc::new(validation)),
+            },
+        }
+    }
+}
+
+fn decode_required_moderation_fact<T: DomainFact + serde::de::DeserializeOwned>(
+    envelope: &aura_core::types::facts::FactEnvelope,
+    outer: ContextId,
+) -> Result<T, RequiredModerationQueryError> {
+    use aura_core::types::facts::{
+        FactEncoding, FactError, FactSchemaCompatibility, MAX_FACT_PAYLOAD_BYTES,
+    };
+    FactSchemaCompatibility::range(1, 1).ensure_supported(envelope.schema_version)?;
+    if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
+        return Err(FactError::PayloadTooLarge {
+            size: envelope.payload.len() as u64,
+            max: MAX_FACT_PAYLOAD_BYTES as u64,
+        }
+        .into());
+    }
+    let fact: T = match envelope.encoding {
+        FactEncoding::DagCbor => aura_core::util::serialization::from_slice(&envelope.payload)
+            .map_err(RequiredModerationQueryError::DagCbor)?,
+        FactEncoding::Json => {
+            serde_json::from_slice(&envelope.payload).map_err(RequiredModerationQueryError::Json)?
+        }
+    };
+    if fact.context_id() != outer {
+        return Err(RequiredModerationQueryError::ContextMismatch {
+            outer,
+            payload: fact.context_id(),
+        });
+    }
+    Ok(fact)
+}
+
+/// Derive required ban/mute decisions after validating all relevant moderation
+/// evidence, including reversals, without converting corrupt facts into absence.
+/// This validates decoding and scoping; journal commit/authentication provenance
+/// remains owned by the runtime caller that supplies the facts.
+///
+/// # Errors
+/// Fails on bounds, unsupported schema, declared-codec failure, or context mismatch.
+pub fn try_is_user_banned_and_muted(
+    facts: &[Fact],
+    context: &ContextId,
+    authority: &AuthorityId,
+    time_ms: u64,
+    channel: Option<&ChannelId>,
+) -> Result<(bool, bool), RequiredModerationQueryError> {
+    const MAX_RECORDS: usize = 65_536;
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+    if facts.len() > MAX_RECORDS {
+        return Err(RequiredModerationQueryError::Bound {
+            kind: ModerationQueryBound::Records,
+            actual: facts.len(),
+            maximum: MAX_RECORDS,
+        });
+    }
+    let mut bytes = 0usize;
+    let mut bans: HashMap<ModerationScopeKey, BanStatus> = HashMap::new();
+    let mut mutes: HashMap<ModerationScopeKey, MuteStatus> = HashMap::new();
+    for fact in facts {
+        let FactContent::Relational(RelationalFact::Generic {
+            context_id,
+            envelope,
+        }) = &fact.content
+        else {
+            continue;
+        };
+        let kind = match envelope.type_id.as_str() {
+            HOME_BAN_FACT_TYPE_ID => ModerationRecordKind::Ban,
+            HOME_UNBAN_FACT_TYPE_ID => ModerationRecordKind::Unban,
+            HOME_MUTE_FACT_TYPE_ID => ModerationRecordKind::Mute,
+            HOME_UNMUTE_FACT_TYPE_ID => ModerationRecordKind::Unmute,
+            _ => continue,
+        };
+        bytes = bytes.checked_add(envelope.payload.len()).ok_or(
+            RequiredModerationQueryError::Bound {
+                kind: ModerationQueryBound::PayloadBytes,
+                actual: usize::MAX,
+                maximum: MAX_BYTES,
+            },
+        )?;
+        if bytes > MAX_BYTES {
+            return Err(RequiredModerationQueryError::Bound {
+                kind: ModerationQueryBound::PayloadBytes,
+                actual: bytes,
+                maximum: MAX_BYTES,
+            });
+        }
+        match kind {
+            ModerationRecordKind::Ban => {
+                let decoded =
+                    decode_required_moderation_fact::<HomeBanFact>(envelope, *context_id)?;
+                if context_id == context {
+                    let status = BanStatus::from_fact(&decoded);
+                    bans.insert(
+                        moderation_scope_key(status.banned_authority, status.channel_id),
+                        status,
+                    );
+                }
+            }
+            ModerationRecordKind::Unban => {
+                let decoded =
+                    decode_required_moderation_fact::<HomeUnbanFact>(envelope, *context_id)?;
+                if context_id == context {
+                    remove_if_newer(
+                        &mut bans,
+                        decoded.unbanned_authority,
+                        decoded.channel_id,
+                        decoded.unbanned_at_ms(),
+                        |status| status.banned_at_ms,
+                    );
+                }
+            }
+            ModerationRecordKind::Mute => {
+                let decoded =
+                    decode_required_moderation_fact::<HomeMuteFact>(envelope, *context_id)?;
+                if context_id == context {
+                    let status = MuteStatus::from_fact(&decoded);
+                    mutes.insert(
+                        moderation_scope_key(status.muted_authority, status.channel_id),
+                        status,
+                    );
+                }
+            }
+            ModerationRecordKind::Unmute => {
+                let decoded =
+                    decode_required_moderation_fact::<HomeUnmuteFact>(envelope, *context_id)?;
+                if context_id == context {
+                    remove_if_newer(
+                        &mut mutes,
+                        decoded.unmuted_authority,
+                        decoded.channel_id,
+                        decoded.unmuted_at_ms(),
+                        |status| status.muted_at_ms,
+                    );
+                }
+            }
+        }
+    }
+    bans.retain(|_, status| !status.is_expired(time_ms));
+    mutes.retain(|_, status| !status.is_expired(time_ms));
+    Ok((
+        status_applies_to_channel(&bans, authority, channel),
+        status_applies_to_channel(&mutes, authority, channel),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +501,88 @@ mod tests {
             TimeStamp::OrderClock(OrderTime([order_index as u8; 32])),
             FactContent::Relational(content),
         )
+    }
+
+    #[test]
+    fn required_moderation_rejects_corrupt_ban_and_reversal_without_absence_repair() {
+        use aura_core::types::facts::FactEncoding;
+        use std::error::Error;
+        let context = ContextId::new_from_entropy([231; 32]);
+        let subject = AuthorityId::new_from_entropy([232; 32]);
+        let ban = HomeBanFact {
+            context_id: context,
+            channel_id: None,
+            banned_authority: subject,
+            actor_authority: AuthorityId::new_from_entropy([233; 32]),
+            reason: "test".into(),
+            banned_at: PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            },
+            expires_at: None,
+        };
+        let original = ban.to_envelope();
+        let wrap = |envelope| {
+            create_test_fact(
+                RelationalFact::Generic {
+                    context_id: context,
+                    envelope,
+                },
+                0,
+            )
+        };
+        let valid = wrap(original.clone());
+        assert_eq!(
+            try_is_user_banned_and_muted(&[valid], &context, &subject, 101, None).unwrap(),
+            (true, false)
+        );
+        let mut json = original.clone();
+        json.encoding = FactEncoding::Json;
+        json.payload = serde_json::to_vec(&ban).unwrap();
+        assert_eq!(
+            try_is_user_banned_and_muted(&[wrap(json)], &context, &subject, 101, None).unwrap(),
+            (true, false)
+        );
+        for type_id in [
+            HOME_BAN_FACT_TYPE_ID,
+            HOME_UNBAN_FACT_TYPE_ID,
+            HOME_MUTE_FACT_TYPE_ID,
+            HOME_UNMUTE_FACT_TYPE_ID,
+        ] {
+            let mut corrupt = original.clone();
+            corrupt.type_id = aura_core::types::facts::FactTypeId::from(type_id);
+            corrupt.encoding = FactEncoding::Json;
+            corrupt.payload = b"not-json".to_vec();
+            let error =
+                try_is_user_banned_and_muted(&[wrap(corrupt)], &context, &subject, 101, None)
+                    .unwrap_err();
+            assert!(matches!(error, RequiredModerationQueryError::Json(_)));
+            assert!(error.source().unwrap().is::<serde_json::Error>());
+        }
+        let mut schema = original.clone();
+        schema.schema_version = 2;
+        assert!(matches!(
+            try_is_user_banned_and_muted(&[wrap(schema)], &context, &subject, 101, None),
+            Err(RequiredModerationQueryError::Envelope(_))
+        ));
+        let wrong = ContextId::new_from_entropy([234; 32]);
+        let mismatch = create_test_fact(
+            RelationalFact::Generic {
+                context_id: wrong,
+                envelope: original.clone(),
+            },
+            0,
+        );
+        assert!(matches!(
+            try_is_user_banned_and_muted(&[mismatch], &context, &subject, 101, None),
+            Err(RequiredModerationQueryError::ContextMismatch { .. })
+        ));
+        let mut mislabeled = original.clone();
+        mislabeled.encoding = FactEncoding::Json;
+        assert!(matches!(
+            try_is_user_banned_and_muted(&[wrap(mislabeled)], &context, &subject, 101, None),
+            Err(RequiredModerationQueryError::Json(_))
+        ));
     }
 
     /// Create a test context ID

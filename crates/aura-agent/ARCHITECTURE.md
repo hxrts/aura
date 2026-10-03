@@ -1,5 +1,7 @@
 # Aura Agent (Layer 6)
 
+AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
+
 ## Purpose
 
 Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
@@ -32,7 +34,22 @@ Production runtime composition and effect system assembly for authority-based id
 | Produces | Service APIs | Session, Auth, Recovery, SyncManager |
 | Produces | `RuntimeSystem`, `LifecycleManager` | Lifecycle management |
 
+The enrollment setup possession bridge uses runtime-owned physical time and
+cryptography and returns sealed possession evidence with typed errors. It does
+not certify user transfer or a durable device binding. Enrollment issuance
+requires the app-owned transfer pin, checks validity before rotation, and uses
+its exact provisional authority/device. Persisted setup replay suppression and
+acceptance-verifier binding remain required before full trust migration is
+complete; replacing the issuance parameter alone does not prove those contracts.
+
 ## Key Modules
+
+The public invitation acceptance facade boxes its private delegated future
+before awaiting it. The caller retains lexical ownership and cancellation;
+acceptance does not create a task merely to control stack allocation.
+`invitation_acceptance_caller_future_is_bounded` enforces a 16 KiB caller
+future budget. The simulator's required AMP lifecycle replay runs on the
+default test stack and exercises this facade through real channel invitations.
 
 - `core/`: Public API (`AgentBuilder`, `AuraAgent`, `AuthorityContext`).
 - `builder/`: Platform-specific preset builders (CLI, iOS, Android, Web).
@@ -40,16 +57,100 @@ Production runtime composition and effect system assembly for authority-based id
 - `handlers/`: Service API implementations (auth, session, recovery, etc.).
 - `reactive/`: Signal-based notification and scheduling.
 
+### Enrollment VM admission owner
+
+Enrollment parent inventory uses a bounded, fallible secure metadata reader.
+Missing records, storage failures, malformed metadata and invalid participant
+policies remain distinct failures. Canonical package presence is checked through
+the fallible secure provider before considering a legacy layout. A present but
+corrupt canonical package cannot fall back; failed presence or byte reads retain
+their native category and cause. Baseline reduction and signature failures
+retain concrete sources. The initiator derives its execution window from the
+original tracker registration rather than the time its task starts.
+
+Required interval callbacks use `spawn_try_interval_until_named` (or its local
+counterpart) and return the concrete `AuraError`. Invalid interval policy fails
+before callback execution. Callback and timer failures terminate the task as
+`TaskFailed`, retain the first cause for `terminal_failure`, and fail group drain.
+`Ok(false)` denotes intentional completion. Owning services must consume that
+retained failure when reporting health; logs alone do not establish service
+health. Aggregate drain includes descendants through the shared admission
+registry and observes actual future drop before registration removal.
+
+Native required-read normalization classifies actual `AuraError` variants and
+typed budget failures through retained source chains. Known storage, validation,
+permission, network, crypto and serialization failures do not become Internal.
+An unavailable or rolled-back clock is a service failure; only the budget's
+observed `DeadlineExceeded` establishes expiry. Diagnostic wording does not
+select the category. The original wrapper and concrete source remain traversable.
+
+`handlers/invitation/enrollment_vm_admission.rs` consumes sealed manifest and
+local setup evidence for request validation and response signing. Ceremony
+control frames verify the independently retained initiator key. Confirmation
+waits on the tracker-owned terminal notifier and signs only a committed owner
+decision; pending state has no timeout category. The caller retains its original
+effect-backed budget. These frames authorize no global transport identity.
+Successful quorum enrollment, revocation continuity, cross-process profile
+ownership and complete native/browser restart coverage remain required.
+
 ## Invariants
+
+- Enrollment issuance retains the exact user-transferred setup statement and
+  digest in a runtime-owned versioned secure record before starting ceremony
+  owners. Response verification requires that retained verifier and checks the
+  physical initiator, subject, ceremony, pending epoch, invitee identity and
+  proof policy. Missing legacy records fail closed; peer-supplied packages
+  cannot replace the expected signer. This record is not a consumed setup nonce
+  receipt or an atomic activation transaction, and does not authenticate the
+  invitee's imported baseline or reverse initiator trust.
 
 Summary:
 
 - All production async work uses structured concurrency with explicit task ownership.
 - External events reach session state only through typed ingress and the current owner.
+- Invitation acceptance preserves concrete validation and contact confirmation
+  failures through agent error conversion. Runtime normalization matches their
+  actual variants and observed settled status into shared native reasons;
+  message text cannot imply acceptance, revocation, expiration, or confirmation.
 - Sibling fact exchange preserves codec, tree-operation, and frame-order causes as typed error categories with their original sources; contact acceptance preconditions and response signing likewise retain typed causes through agent error conversion.
+- The enrollment invitee matches requests against its invitation-owned subject,
+  ceremony, target device and pending epoch before VM injection. Confirmation
+  must establish that exact invitation and epoch. Typed content mismatches and
+  malformed serialization terminate the attempt without retrying them as a
+  transient transport outage; authentication remains a separate ingress contract.
 - Sibling tree ingress verifies each new operation with locally trusted parent-epoch key and threshold metadata, checks its exact parent state, and validates the whole extension before persistence. Missing local trust fails closed even for a first import or a single-signer tree. Enrollment baseline replacement requires a separate authenticated ceremony-scoped verifier chain; an invitation's pending-epoch package or a peer frame is not a trusted parent verifier by itself.
 - A LAN receipt signed under the public key embedded in that same receipt proves payload integrity only. It cannot mint verified authority ingress; the expected authority/device key must come from an independently verified binding. Imported invitation trust distinguishes confirmed invitation-key continuity, an unbound device-key match, and self-certification so a contact relationship alone never certifies a claimed device.
 - Each active session has exactly one local owner at any time.
+- Enrollment setup export belongs to the threshold signing owner. It captures
+  the actual runtime device and a locked signing-context snapshot, verifies its
+  own possession proof, and retains the exact code before returning it. Frontends
+  cannot supply a substitute device ID, key package, epoch or request nonce to
+  this exporter. Retention alone does not consume a request or authenticate a
+  physical-device association; ceremony replay and user-transfer trust are
+  separate contracts.
+- Signing bootstrap is serialized across cloned service handles and restores
+  persisted active signing state. Corrupt epochs, inconsistent policies and
+  partial prior bootstrap records fail without replacing keys. Share decryption
+  reads its existing wrapping key and cannot generate one on a read failure.
+- Signing export, bootstrap, preparation, commit and rollback share a lifecycle
+  lock. Service commit validates the prospective context before persisting the
+  active epoch and publishing memory state; local membership is recomputed rather
+  than retained from an earlier participant set. Historical/active rollback,
+  stale or substituted commit, and replacement of an existing pending package
+  fail. A retained local threshold share must match its authenticated storage
+  envelope, native FROST package, signer index, policy and group before context
+  restoration or service activation.
+- Bootstrap stores a bound pending genesis record before key persistence and
+  marks completion only after verifying the exact signed device creation and its
+  durable tree operation/index entries. The signing context is published after
+  completion, so a failed leaf commit cannot become readiness on retry. A
+  matching pending record can resume with retained keys; legacy storage requires
+  an existing authenticated creation witness and never invents missing lineage.
+- A consumed `OwnedVmSession` releases its runtime binding and fragment claims
+  after terminal VM cleanup as well as explicit early close. Automatic VM reaping
+  must not strand the admitted runtime owner; stale owner capabilities still fail
+  before teardown. The bounded enrollment host and two-runtime exchange tests
+  enforce progress and owner release.
 - Runtime composition assembles existing handlers; it does not create new effects or protocol logic.
 - Runtime telltale integration consumes bridge artifacts but does not redefine bridge schema.
 - Certain ownership/session violations are fatal and unrecoverable.
@@ -235,8 +336,11 @@ Rules:
 - `src/runtime_bridge/` is also the L5/L6/L7 error normalization boundary:
   feature- and service-local failures may stay crate-specific internally, but
   bridge exports must classify frontend-visible failures into stable
-  `IntentError` categories (`ValidationFailed`, `NetworkError`,
-  `StorageError`, `ServiceError`, `InternalError`) with operation context.
+  typed categories with operation context. Native acceptance, enrolled signer
+  adoption, and time calls retain their original causes in `RuntimeBridgeError`.
+  The foreign `IntentError` diagnostic enum remains unchanged and is produced
+  only by an explicit terminal adapter. Remaining bridge methods still require
+  migration to the native source-preserving boundary.
 - Current `Move` traffic uses the shared transport envelope family plus the actor-owned `MoveManager`; social topology may influence admission and selection, but not the schema of the moved envelope itself.
 - Current `Hold` traffic uses selector-based retrieval over one shared custody substrate. `HoldManager` owns held-object copies, reply-block bookkeeping, runtime-local indexes, and provider budgets; only verified witnesses may update `Hold` provider health or admission penalties.
 
@@ -377,6 +481,11 @@ Runtime bridge lookup follows the same strong-ref rule:
   `prestate_hash` bindings end to end; the tracker/runner may not admit
   optional prestate or compatibility wrappers that weaken supersession
   semantics
+- enrollment attempt and retry helpers require effect-backed clock reads,
+  retain clock/sleep sources, and derive child budgets from the owner window.
+  Only actual deadline expiry enters timeout retry; invalid policy and
+  unavailable clocks remain required failures. The `device_enrollment::budget_tests`
+  and `invitation::vm_loop::tests` suites enforce this distinction.
 - enrollment code issuance and ceremony completion have distinct outcomes.
   The runtime ceremony owner records one typed terminal outcome, preserves
   the first result under duplicate or late messages, and makes it available
@@ -474,10 +583,25 @@ Ownership categories follow [docs/122_ownership_model.md](../../docs/122_ownersh
   - `runtime/services/rendezvous_manager.rs` via `RendezvousManager`
   - service-local supervision rooted in `task_registry.rs`
 - `MoveOwned`
+  - `handlers/invitation.rs` via private-field, nonclone
+    `ReservedInvitationIssuance`; reservation commits and sends nothing,
+    consumption validates the physical issuer, and deadline overflow fails
+    before fact preparation
+    The preparation facade heap-pins its delegated stage, retaining lexical
+    ownership and bounding its caller future to 16 KiB in a required regression;
+    handler recreation also runs on the default test thread stack.
+  - `handlers/invitation/enrollment_trust.rs` via private-field
+    `RetainedEnrollmentVerifier` and `VerifiedEnrollmentResponse`; only the
+    explicit setup-transfer path selects the expected verifier, and only
+    successful expected-key verification constructs response evidence
   - `runtime/services/reconfiguration_manager.rs` via `ReconfigurationManager` and `SessionDelegationTransfer`
   - `runtime/session_ingress.rs` via `RuntimeSessionOwner`
   - `runtime/subsystems/vm_fragment.rs` via `VmFragmentRegistry`
 - `CapabilityGated`
+  - enrollment response recording in `runtime/services/ceremony_tracker.rs`
+    and activation in `handlers/device_epoch_rotation.rs` require the opaque
+    response witness; generic local or verified-ingress participant counts
+    cannot accept the enrolling device
   - runtime reconfiguration admission in `runtime/services/reconfiguration_manager.rs`
   - session-owner capability checks in `runtime/session_ingress.rs`
   - runtime-facing readiness/lifecycle publication through sanctioned runtime coordinator paths
@@ -485,6 +609,9 @@ Ownership categories follow [docs/122_ownership_model.md](../../docs/122_ownersh
 ### Capability-Gated Points
 
 - Runtime-owned readiness and lifecycle publication must flow through sanctioned coordinator APIs and capability checks rather than arbitrary handlers.
+- Enrollment verifier restoration validates retained binding and policy before
+  returning a handle. Durable response recovery must reverify the original
+  response; deserializing a receipt cannot construct a response witness.
 - Session and endpoint mutation must validate both current owner record and current owner capability.
 - Runtime helper modules may stage work, but they may not author frontend- or harness-visible semantic truth without the owning capability.
 
@@ -579,3 +706,254 @@ cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
 - [Ownership Model](../../docs/122_ownership_model.md) — `Pure`, `MoveOwned`, `ActorOwned`, `Observed` categories
 - [Testing Guide](../../docs/804_testing_guide.md) — required ownership tests, test strategy
 - [System Internals Guide](../../docs/807_system_internals_guide.md) — instrumentation event families and required fields
+
+Required AMP participant augmentation uses a channel-only persisted invitation reader. Storage listing/retrieval, record decoding, authoritative context validation, and required timestamp failures propagate their concrete sources. Corrupt records are decoded before type filtering; an unknown record cannot imply absent membership. Generic invitation `list_with_storage` remains an observed, best-effort API and must not establish canonical absence or readiness.
+
+## Enrollment trust transfer boundary
+
+Enrollment import admits only the opaque explicit app manifest pin. The runtime verifies the independently selected issuer key, actual local exported setup, exact signed baseline inventory, and package/policy bindings before cache, baseline, or key mutation. Immutable secure records reverify into non-Clone witnesses on recovery. A dedicated admission gate serializes reads/checks/writes within one effects owner; this is not a cross-process storage CAS guarantee. Issuance retains the exact expected signed manifest before publication; acceptance compares against that retained binding. Bootstrap ingress, historical response signing, generation registration, and activation are distinct owned permissions.
+
+See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+### Enrollment activation recovery ownership
+
+Enrollment registers its exact invitation and original bounded roster in secure storage before any finalizer or peer task starts. After signing bootstrap restores the active context, the runtime reconstructs pending registrations and validates their immutable ordered signing configuration and public package generation. Raw persisted responses are reverified under the original setup pin before process-local acceptance witnesses are minted.
+
+An activation lease holds the ceremony decision gate across prepared tree mutation, signing generation activation and terminal settlement. The exact signed AddLeaf operation is durably prepared before application. Recovery checks canonical operation evidence rather than inferring commitment from a matching device leaf. Once preparation exists, cancellation, supersession and timeout cannot take activation ownership. The first secure terminal decision and final accepted inventory precede visible terminal publication.
+
+The issuer reserves its invitation identity and stores the generation owner before writing packages. Generation ownership includes the ceremony, prestate, setup digest and ordered signer inventory. `EnrollmentGenerationReservation` is consumed only after the original registration and expected signed manifest are retained. Its opaque `RegisteredEnrollmentGeneration` carries the canonical invitation used by the initiator launch; callers cannot replace the artifact with another shape having the same IDs.
+
+Failed generation retirement owns both the generation writer and ceremony decision lease, in that order. Required deletion errors retain their sources. The original failed decision survives deletion retries; configuration retains the cleanup inventory until all secrets are removed, and the activation profile is released last. An unissued allocation is retired only after committed invitation facts establish that its reserved invitation was not issued. If an invitation was committed before canonical registration persistence, bootstrap reconstructs that registration from its secure original snapshot and the committed canonical invitation rather than retiring its keys.
+
+Response acceptance uses transcript domain `aura.invitation.device-enrollment-acceptance.v3` and the digest of the independently admitted signed manifest. The issuer loads the expected manifest from its own immutable secure record and revalidates its signature against the retained confirmation verifier; a peer-provided digest or a receipt's self-embedded verifier does not select trust. Legacy responses without a manifest binding remain decodable and cannot authorize activation.
+
+These locks serialize one runtime's profile owners. They do not establish exclusive profile opening across concurrent operating-system processes. Successful multi-device participant acceptance and quorum enrollment remain separate integration requirements; unsigned participant responses are still rejected.
+
+### Owned persistent profile construction
+
+Production construction acquires the actual concrete infrastructure profile owner before secure-storage wrapping keys or persistent writers are assembled. Native synchronous factory acquisition and browser asynchronous preassembly converge on the same strongest private token. Runtime fields and actual secure-storage adapters retain ownership; exposed storage clones extend the lease until their own teardown. Custom trait guards cannot replace this token. Required profile errors retain native sources through builder and preset boundaries. Native shared keyring namespace ownership remains Unsupported rather than silently changing the configured secret backend. Browser historical plaintext secret namespaces fail before new signing state initializes. Canonical multi-record frontend profile handoff recovery remains a separate owner contract.
+
+### Required issuer identity envelopes
+
+Manifest issuance reads encrypted JSON participant-key envelopes from both sanctioned `signing_keys` and `participant_shares` layouts. Required reads validate bounded envelope version, authority, epoch, recipient and nonce, then authenticate the original wrap-key AAD before importing the plaintext package. They do not interpret encrypted JSON as a raw DAG-CBOR key or recover a corrupt selected record by trying another location. Contextual structural errors retain the original codec, storage or decryption cause and exact identity location. The actual bootstrap regression covers both layouts and corruption without granting historical response-signing authority. Observational legacy decoding remains separate.
+
+### Terminal generation recovery regressions
+
+Supersession candidates exclude every recorded terminal outcome, including cancellation and failure, so reissuance preserves the first decision. Exact retired-generation receipts permit idempotent observation after the corresponding generation profile was released; a matching receipt never authorizes deleting a later generation that reuses the epoch. Actual restart/reissue tests exercise both deletion interruption and unissued-allocation recovery. Enrollment negative-control fixtures use independent transferred manifests and real signed scoped controls; malformed peer decisions are tested after admission rather than with unpinned raw invitations.
+
+### Descendant task ownership and drain
+
+Each supervised tree has one admission lock and bounded registry (1,024 live groups, 4,096 active tasks, depth 64). Registry entries are weak; children retain their ancestors and running task guards retain their group, with no parent-to-child ownership cycle. Idle child entries are pruned, and the first structural task failure or panic is retained by every ancestor even after the child disappears. Cancellation closes the entire selected subtree under the same lock used for admission. Post-close or over-limit submissions drop their supplied future without polling, expose typed governance failures through health/drain, and return an already-cancelled owned handle.
+
+Root and group active-task observations, bounded idle waits and forced aborts include all descendants. Task completion drops the owned future before removing its registration or waking ancestor drainers. Native abort uses the owned join handle; browser/local cancellation also has an abortable owner boundary. Abort requests retain active bookkeeping until the actual future is dropped, so requesting abort does not authorize releasing profile ownership or claiming idle. Shutdown success proves descendant drain; timeout/abort/failure remains a typed failed outcome, and synchronous shutdown is only a cancellation/abort request. Dropping a supervisor clone does not cancel a still-live supervisor owner.
+
+Native/local regressions cover descendant IO causes and panic health, dropped child handles, resource-drop-before-idle ordering, shutdown/admission races using the real registry, limits and weak-entry pruning, and unpolled rejected futures. Browser execution of these contracts remains a separate platform gate; local Rust coverage does not claim browser runtime validation.
+
+### Durable enrollment clock ownership
+
+`EnrollmentWindow` is a runtime-private sealed execution owner. Registered issuer windows reuse their original tracked budget; invitee windows derive from independently admitted manifests and original secure admission time. Child windows retain the original parent checkpoint and execution lease. Required observation writes precede VM progression, verified response publication, and returning an operation result. Secure records bind the exact ceremony, device, generation or manifest digest, start, and deadline. Missing or invalid retained state fails closed; reimport cannot allocate a fresh window. The separate checkpoint write gate never re-enters the enrollment decision gate.
+
+`CeremonyTracker` uses this original budget for timeout queries, activation eligibility, and cleanup. Cleanup returns the original typed failure and uses the fallible owned interval API. Task-group terminal failures, including timer errors, produce unhealthy service status and remain available through typed service outcome and shutdown errors.
+
+Enforcement: strongest sealed attempt parameters, private constructors, `capability_boundary` declarations, checkpoint acknowledgment compile-fail coverage, and the Rust-native `async-session-ownership` lint. Its AST checks reject raw/no-op timeout executors, aliases, fresh budget reconstruction, and weaker attempt parameters in production enrollment. Explicit test-only model fixtures remain separate. Tests cover persisted highwater, sticky rollback, missing checkpoint, storage-failure source chains, postoperation publication failure, and cancellation before acknowledgment.
+
+### Required native identity reads
+
+The runtime bridge settings, device inventory, authority inventory, authentication, and nickname/MFA mutation contracts return `RuntimeBridgeError` and retain original tree, storage, and codec causes. Missing account configuration is an explicit optional read; required mutations reject it. Device inventory comes from canonical device leaves, and corrupt leaf metadata fails the required read. A current physical device absent from that tree is not inserted into the inventory. Settings contact counts and an uninitialized in-memory threshold snapshot remain presentation observations and do not establish signing readiness. Legacy account bootstrap and other diagnostic bridge contracts remain separate migration work.
+
+### Enrollment window admission phases
+
+The registered execution token is minted from actual tracker state and retained through checkpoint writes. The immutable `enrollment_window_ever_live_v1` binding precedes registry visibility and prevents deleted clock history from being recreated after live admission. A private pre-live capability can repair only an interrupted original allocation lacking canonical/live evidence. Exact secure allocation, deadline and shared observation/exhaustion identity remain required; checkpoints hold registry allocation continuity through their storage acknowledgment. Terminal outcomes for the same generation remain compatible with retaining historical clock evidence.
+
+### Native account bootstrap failures
+
+Account bootstrap existence and initialization contracts also return native structural errors. A required account read permits creation only on actual absence, preserves IO/codec causes, and validates an existing authority record before reporting initialization success. Authority-record creation precedes final account configuration publication; this sequencing does not assert a cross-record storage transaction.
+
+### Invitee committed confirmation ownership
+
+The invitee verifies the actual issuer-signed `Committed` control frame under
+its independently retained initiator pin and exact admitted manifest. Verification
+mints a private non-serializable confirmation witness; a boolean, invitation
+status, supplied epoch or embedded verifier cannot replace it. Every successful
+invitee VM exit requires this witness. The original admitted window owner
+acknowledges and freezes its durable budget before the immutable secure
+confirmation receipt is published.
+
+Receipt recovery loads the original immutable transfer record, canonical
+invitation and actual signed frame, checks the actual physical device and exact
+manifest/ceremony/generation binding, and cryptographically revalidates them.
+The historical clock path consumes only a secure-receipt-issued input and the
+original acknowledged snapshot. It does not accept a caller-selected verification
+time, allocate a fresh window, or authorize historical signing. Expiration after
+a valid committed receipt does not retroactively revoke that receipt.
+
+An immutable imported-generation owner is retained before import/key writes.
+Generic effect and signing commits reject this owner. The sanctioned signing
+activation consumes the durable reverified confirmation, matches actual retained
+share/public package/canonical provisional configuration, and enforces monotone
+persisted and in-memory epochs before publishing a signing context. A profile
+WAL or serialized completion locator does not mint this capability. Revocation
+and profile migration must continue through their current canonical owners;
+retained ciphertext alone never proves current membership.
+
+Required timeout checkpoints preserve storage and codec causes in `TimeoutBudgetError::CheckpointFailure`. This failure does not represent clock unavailability or elapsed time. Native and semantic classification follows its retained cause; unclassified checkpoint faults remain internal. Serialized diagnostics omit native error sources and grant no checkpoint authority.
+
+### Required moderation evidence
+
+Required moderation status returns native errors retaining actual journal/reactive causes. Ban/mute facts and reversals are strictly validated before status reduction; corrupt evidence cannot become an absent ban/mute. Canonical roster and journal authentication provenance remain owned by the existing runtime fact/materialization path, not inferred from returned booleans.
+
+### Required enrollment task failures
+
+The initiator choreography uses source-bearing one-shot task completion. Owned terminal settlement precedes task failure publication; the retained native failure keeps the original `AgentError` as its standard source and retains any secondary settlement error separately. Required descendant failures are observable through supervisor health and drain, rather than being converted to successful unit task completion.
+
+Required enhanced-time scheduling propagates actual provider query and sleep failures. A failed timer does not constitute deadline expiration or successful wake-up. Native source traversal retains the concrete time-effect error through runtime scheduling and effect-system forwarding.
+
+### Admitted enrollment import publication
+
+The private `runtime::services::enrollment_import` owner requires the independently admitted manifest and immutable imported-generation binding before installation. Under the generation writer, it retains an original-tree digest before baseline replacement and immutably publishes exact issued share, public package, and provisional configuration. Legacy partial installations without this owner fail closed. Replay preserves an existing authenticated baseline prefix and later local operations. An existing committed-import receipt must reverify; committed replay never rewrites the adopted encrypted share or final configuration. These records coordinate publication and cannot authorize activation without the separately signed retained confirmation. Frontend profile handoff WAL, canonical current-membership/revocation checks, and quorum response ownership remain additional obligations.
+
+### Enrollment confirmation membership snapshot
+
+The committed-confirmation producer revalidates the actual local attested operation chain, exact activated epoch and retained participant configuration, and both device leaves before signing. Retained terminal outcomes and rendezvous key possession alone do not authorize a new confirmation after a known removal. The producer holds shared generation custody and the actual PersistentTreeHandler mutation gate through replay, membership checks and Ed25519 signing, excluding sanctioned signing transitions and concurrent local removal/import/replacement. This local custody is not a receiver freshness witness. Historical confirmation recovery verifies the originally admitted decision only; activation after later revocation still requires a fresh authenticated ordered membership checkpoint. Genuine quorum and non-root parent inventory remain required separate evidence.
+
+### Signing material and tree decision lock order
+
+The shared enrollment generation gate precedes service signing transitions and tree decision custody. Generic bootstrap, rotation and rollback acquire generation custody before changing persisted or in-memory material; verified activation already requires the generation owner. Enrollment control signing retains generation custody and the actual tree decision lease through verification and signing. Read-only retained candidate validation grants no transition authority. Local generation/tree custody does not establish receiver freshness or remote no-later-revocation evidence.
+
+### Shared preassembly profile resource
+
+`EffectSystemBuilder::with_profile_owner` accepts only the concrete `aura-effects` profile lease resource. Bootstrap and subsequent runtime assembly may retain clones of that same physical owner; construction validates the selected profile before provider or wrapping-key mutation. Testing and simulation builders reject a production lease. Boxed core leases or caller-provided no-op guards cannot manufacture this provider guarantee. Frontend startup must actually transfer its original owner; this builder contract alone does not establish frontend WAL recovery or current membership authorization.
+
+### Authenticated enrollment committed transition
+
+Version-two enrollment control signatures bind the exact attested operation suffix extending the independently admitted original baseline. Receiver verification derives each parent key and policy from that staged authenticated tree, verifies every transition, and requires both physical devices at the exact pending epoch before minting confirmation evidence. Legacy frames lacking the suffix fail closed. The resulting sealed confirmation retains its authenticated committed tree for owned activation. This proves the original committed checkpoint; later revocation and restart freshness still require independently ordered current checkpoint evidence. Peer-supplied key inventories and raw committed IDs cannot establish this authority.
+
+### Native VM bridge round failures
+
+Host-bridged rounds retain native step, transport-send and receive failures in
+`AuraVmBridgeRoundError`; session ingress forwards them through the source-bearing
+`BridgeRound` variant. Missing peer mappings remain a distinct configuration
+failure. Owners classify transient retry from these native causes, retaining the
+original admitted timeout window and pending-message ownership. Display messages
+and serialized diagnostics cannot supply retry authorization.
+
+The concrete VM queue retains every frame until its exclusive send lease
+acknowledges delivery. The lease crosses awaits without holding a blocking lock.
+Cancellation during delivery marks the retained frame unknown and prevents
+replay; native definitely-unsent errors preserve pending order and retry
+eligibility. Tests cover concurrent owner rejection, enqueue during delivery,
+partial batch progression, and dropping an awaited in-flight future.
+
+### Enrollment refusal and failed readout
+
+The enrollment response verifier retains the independently pinned setup signer
+and canonical issued invitation. Its opaque rejection capability is distinct
+from acceptance evidence. The ceremony tracker consumes that capability under
+the original window and terminal decision gate before signing a failed control.
+The invitee's immutable failure receipt is separate from confirmation/adoption
+receipts and revalidates the pinned control plus frozen original-window ACK.
+Observed invitation status cannot substitute for either proof.
+
+Regression coverage includes real threshold-signed acceptance/refusal domain
+confusion, tampered device bindings, first-terminal-decision conflicts, and two
+actual connected runtimes exchanging refusal and signed failure without
+adoption. Native VM request retries require the exact transport failure and
+original subject destination. VM teardown errors retain both execution and
+close causes, and prohibit retry when cleanup itself fails.
+
+### Imported committed verification keys
+
+An imported committed transition verifies in a private view populated from independently pinned manifest node/epoch verifiers. Verified same-epoch operations retain that key lineage; the exact pending root epoch uses only the public package and canonical provisional policy bound by the independently admitted manifest and invitation. The configured cryptographic threshold must meet the actual tree policy minimum. Conflicting node/epoch pins or unavailable branch keys fail closed. This view never substitutes ambient provisional identity keys or assigns a root package to arbitrary branches, and a historical receipt does not establish absence of later revocation.
+
+### Confirmed enrollment profile publication
+
+The profile handoff owner consumes the independently reverified durable Committed capability. It publishes an immutable prepared descriptor before key activation, an immutable committed descriptor after activation, and then the derived account projection. The descriptor binds the exact physical device, provisional authority, subject, invitation, ceremony, epoch, and manifest digest. Prepared bytes locate and coordinate the original proof; they never authorize subject identity by themselves. Account settings read/modify/write share the runtime profile gate, and production adapters retain their cross-process profile lease. Retrying the same proof preserves committed metadata. Restart identity selection and native/browser lease transfer require a separate preassembly owner that validates original secure evidence; this publication sequence alone does not provide that integration or establish absence of unknown later revocation.
+
+### Required app task supervision
+
+The runtime `TaskSupervisor` admits required native and local futures through checked registration. Rejected admission retains the structural governance cause and drops the unpolled supplied future before returning. An admitted required failure retains its concrete `AuraError` source in root supervision and makes idle/drain fail. The unit-task compatibility surface is unsuitable for required refresh ownership.
+
+### Timeout selection and VM teardown
+
+Enrollment attempts retain their actual VM handle in an owner slot outside the
+timed future. The operation borrows the slot; timer selection can cancel its
+work without dropping the handle required for asynchronous close. Required
+close runs before retry or result return and preserves execution and close
+causes. An actual-runtime regression selects timeout while the operation
+borrows the VM, then verifies owner retirement after close.
+
+### First enrollment decision publication
+
+The retained setup verifier, response receipt, pending signing-generation binding, pending registration, and issued manifest publish through actual immutable secure-provider admission. Owner APIs retain their sealed setup/generation/acceptance/manifest inputs. Existing records are bounded and compared against exact bindings; receipt and manifest reuse reverify original cryptographic evidence and canonical decision rather than requiring identical randomized signature bytes. Mutable secure-store capability flags do not authorize enrollment decisions.
+
+Generic secure-store replacement remains an infrastructure escape surface until provider write protection is enforced for previously immutable locations. Atomic first publication alone does not prove lifetime immutability or authorize cleanup.
+
+### Held generation registration admission
+
+Live pending-registration publication requires the actual held `EnrollmentGenerationReservation`. The private constructor retains its physical effect owner and generation gate. Admission checks the exact effect instance, issuer/invitation/ceremony/prestate/epoch/setup binding, physical participant roster and threshold, and initial nonterminal state. It preserves the original immutable allocated start, timeout and nickname and permits only budget checkpoint continuation. Structural binding failures retain typed `HeldEnrollmentRegistrationError` sources.
+
+Only verified recovery reaches the private storage helper without the live reservation, after rebinding the original allocation, retained setup and signed issued manifest. Required actual-owner negatives reject another effect instance and a previous ceremony's actual state. The typed API rejects callers supplying only registration facts; generic tracker allocation and provider mutation surfaces still require their own ownership enforcement.
+
+### Initial persistent enrollment allocation
+
+Generic `CeremonyRunner::start` and tracker registration cannot allocate persistent device enrollment from plain request facts. The owned enrollment entry accepts the actual held `EnrollmentGenerationReservation`, and immutable allocation publication independently checks that owner before writing. Another effect instance, physical roster/policy, ceremony, epoch, prestate, or terminal state cannot reuse the reservation. Missing ownership returns structural `RequiredOwner` before durable or tracker mutation.
+
+Guardian ceremonies retain their generic registration contract. Nonpersistent tracker models may register enrollment facts for pure state-machine testing; they do not authorize runtime signing activation. Recovery does not re-enter generic registration: it reconstructs original verified durable evidence and preserves original start, deadline and observation history. Declaration attributes point to the typed owner delegates and validation methods, with actual raw-registration refusal tests providing the integration guard.
+
+### Enrollment tree epoch activation fence
+
+The original activation capability owns a version-2 immutable prepared bundle containing the exact admitted prestate/baseline, signed AddLeaf, and original-parent-key-attested RotateEpoch fence. Both signatures are verified against actual retained parent packages before the complete history is published. The actual tree decision lease remains held through cryptographic key activation and terminal commit; copied ids or prepared bytes cannot replace that custody. Recovery reuses the exact saved signatures, preserves later local evidence, and rejects divergence, missing membership, or a different pending epoch. Version-1 preparation with no signed fence decodes for diagnosis but fails closed. AddLeaf alone never establishes a new tree epoch. Multi-device signed commit transport must separately carry/authenticate the exact fence; the legacy leaf-only commit is insufficient for that path.
+
+Sender cancellation reads the required persisted sender record and genuine
+retained issuance. Enrollment cancellation wins the original-window terminal
+CAS before publishing `InvitationCancelled`; a rejected or committed first
+decision cannot be overwritten by a later cancellation. Its move-only negative
+capability authorizes only the matching local cancellation publication, never
+membership or activation. Required storage, codec, capability, flow-budget and
+clock failures preserve their concrete source; observed cache absence cannot
+authorize this path. Updating the regular cancellation status does not replace
+the separately retained enrollment secret payload.
+
+Leaf-only bootstrap histories do not materialize a branch policy or signing-key node. Enrollment verification projects exact node/epoch keys and threshold cardinalities exclusively from the independently admitted signed parent inventory or exact signed pending package policy. The projection satisfies the normal attested-operation verifier without inserting a canonical branch into the journal. Any branch policy already materialized by authenticated operations remains a minimum, and absent nonroot verifier inventory fails closed. A pending root requires authenticated leaves actually attached to node zero, rather than an invented root.
+
+### Original allocation recovery custody
+
+A pre-live device enrollment can reacquire generation custody only from its retained ceremony selector under the actual generation gate. Recovery validates the protected original allocation, independently retained setup verifier, exact pending signing package/configuration digests, physical profile identity, and active epoch before minting a held reservation. An immutable generation-allocation record independently binds the original reserved invitation and ordered signing roster; mutable lifecycle profiles cannot replace that evidence. Caller snapshots cannot supply registration fields or restart the timeout. Admission observes and durably checkpoints the original deadline/high-water budget before exposing a live tracker entry; terminal originals cannot be reopened. Initial mutable clock/profile publication is atomic and preserves an existing record. Retirement and terminal first decisions are immutable evidence and must be reread and checked before subsequent release/publication.
+
+Cancellation preparation consumes required sender-record custody and borrows
+retained issued control; observed invitation values cannot substitute. Both
+retain the exact native runtime owner. Guard-issued preparation and the
+tracker-issued negative terminal token must agree with the publication runtime,
+including when authority and physical device identifiers are equal. A different
+runtime cannot sign through borrowed control or publish its cancellation.
+The required regular sender-record decoder rejects records larger than 1 MiB
+before decoding; oversized and malformed data remain distinct typed failures.
+
+### Enrollment signing roster and authenticated topology
+
+Enrollment keeps the original independently pinned signing quorum separate from the authenticated tree child topology. A signed AddLeaf changes observed child edges before the original signing key attests the RotateEpoch activation fence. Verification retains the exact signed quorum minimum and signer-roster upper bound while deriving topology cardinality solely from authenticated branch and leaf-parent edges. A verification projection does not materialize a canonical branch. A policy already materialized by authenticated tree operations remains an independent minimum; invalid or incompatible canonical policy metadata fails closed and requires an authenticated policy transition rather than a local repair. Missing node-specific verifier inventory cannot be replaced with the epoch root package.
+
+Required sender enrollment custody combines the bounded regular record with its
+separately retained secure original payload. Secure reads, decoding and exact
+immutable metadata comparison must succeed before custody is minted; a redacted
+record alone cannot substitute. Only regular lifecycle status overlays the
+retained original. The regular decoder is bounded to 1 MiB and the retained
+secret decoder to 4 MiB. Cancellation status publication redacts the hydrated
+payload again and preserves the secure original bytes.
+
+### Authenticated enrollment rotation roster
+
+`AuthenticatedEnrollmentRotationPlan` is move-only and non-deserializable. It
+holds actual generation then tree decision custody while checking attested
+history, active epoch, configuration, issuer membership and invitee absence.
+Rotation consumes the plan; raw participant vectors and prestate hashes cannot
+authorize key generation. The reservation retains both guards through original
+registration. Original orphan cleanup has distinct negative custody; live
+recovery additionally validates the current roster and the original window.
+Same-original issuance continuation and full multi-device/nonroot coverage
+remain required work.
+
+Choreography receives own a fixed local `TimeoutBudget` instead of registering
+timer handles. Notification wakes retain that deadline; dropping the receive
+future leaves no timer registry entry. Required read/sleep failures remain typed,
+and successful sleep alone cannot establish deadline expiry.

@@ -695,6 +695,13 @@ fn classification_to_semantic_error(
         CommandTerminalReasonCode::Muted => SemanticFailureCode::Muted,
         CommandTerminalReasonCode::Banned => SemanticFailureCode::Banned,
         CommandTerminalReasonCode::Unavailable => SemanticFailureCode::Unavailable,
+        CommandTerminalReasonCode::CryptoFailure => SemanticFailureCode::CryptoFailure,
+        CommandTerminalReasonCode::SerializationFailure => {
+            SemanticFailureCode::SerializationFailure
+        }
+        CommandTerminalReasonCode::StorageFailure => SemanticFailureCode::StorageFailure,
+        CommandTerminalReasonCode::JournalFailure => SemanticFailureCode::JournalFailure,
+        CommandTerminalReasonCode::ReactiveFailure => SemanticFailureCode::ReactiveFailure,
         CommandTerminalReasonCode::Internal => SemanticFailureCode::InternalError,
     };
     let domain = match status {

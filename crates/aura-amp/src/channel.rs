@@ -57,13 +57,28 @@ where
         let channel = if let Some(id) = params.channel {
             id
         } else {
-            let order = self
-                .effects
-                .order_time()
-                .await
-                .map_err(|e| AmpChannelError::Internal(e.to_string()))?;
+            let order = self.effects.order_time().await.map_err(|error| {
+                AmpChannelError::Effect(aura_core::AuraError::Internal {
+                    message: error.to_string(),
+                    source: Some(std::sync::Arc::new(error)),
+                })
+            })?;
             aura_core::types::identifiers::ChannelId::from_bytes(order.0)
         };
+
+        match get_channel_state(&self.effects, params.context, channel).await {
+            Ok(_) => {
+                return Err(AmpChannelError::AlreadyExists {
+                    context: params.context,
+                    channel,
+                })
+            }
+            Err(error)
+                if crate::journal::ChannelStateUnavailable::find(&error).is_some_and(
+                    |absence| absence.context() == params.context && absence.channel() == channel,
+                ) => {}
+            Err(error) => return Err(AmpChannelError::Effect(error)),
+        }
 
         let config = AmpRuntimeConfig::default();
         let window = params
@@ -333,14 +348,8 @@ fn channel_membership_schema_version() -> u16 {
     1
 }
 
-fn map_err(e: aura_core::AuraError) -> AmpChannelError {
-    match e {
-        aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
-        aura_core::AuraError::Storage { message, .. } => AmpChannelError::Storage(message),
-        aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
-        aura_core::AuraError::Crypto { message, .. } => AmpChannelError::Crypto(message),
-        other => AmpChannelError::Internal(other.to_string()),
-    }
+fn map_err(error: aura_core::AuraError) -> AmpChannelError {
+    AmpChannelError::Effect(error)
 }
 
 async fn persist_channel_membership_event<E: AmpJournalEffects>(

@@ -59,6 +59,30 @@ impl StorageExtendedEffects for AuraEffectSystem {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl SecureStorageEffects for AuraEffectSystem {
+    async fn secure_create_mutable(
+        &self,
+        location: &SecureStorageLocation,
+        data: &[u8],
+        caps: &[SecureStorageCapability],
+    ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, SecureStorageError> {
+        self.crypto
+            .secure_storage()
+            .secure_create_mutable(location, data, caps)
+            .await
+    }
+
+    async fn secure_store_immutable(
+        &self,
+        location: &SecureStorageLocation,
+        data: &[u8],
+        caps: &[SecureStorageCapability],
+    ) -> Result<aura_core::effects::secure::ImmutableSecureStoreOutcome, SecureStorageError> {
+        self.crypto
+            .secure_storage()
+            .secure_store_immutable(location, data, caps)
+            .await
+    }
+
     async fn secure_store(
         &self,
         location: &SecureStorageLocation,

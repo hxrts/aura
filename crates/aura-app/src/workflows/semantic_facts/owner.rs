@@ -97,12 +97,12 @@ pub(super) fn authorize_readiness_publication(
     AuthorizedReadinessPublication::authorize(semantic_readiness_publication_capability(), fact)
 }
 
-pub(in crate::workflows) struct SemanticWorkflowOwner {
+pub(in crate::workflows) struct SemanticWorkflowOwner<Context = SemanticOperationContext> {
     app_core: Arc<RwLock<AppCore>>,
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
-    publication_state: Mutex<Option<SemanticOperationContext>>,
+    publication_state: Mutex<Option<Context>>,
     last_terminal_status: Mutex<Option<WorkflowTerminalStatus>>,
 }
 
