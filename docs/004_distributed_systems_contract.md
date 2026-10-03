@@ -239,7 +239,7 @@ Aura assumes partial synchrony. There exists a bound `Δ_net` on message delay a
 
 Before stabilization, progress may stall. After stabilization, protocols that depend on eventual delivery and bounded delay may resume progress.
 
-Flow budget epochs are logical and receiver-granted (see [Transport and Information Flow](111_transport_and_information_flow.md) §3.1); no clock decides which budget epoch is in force. Where other epochs use time-based rotation, it relies on loosely synchronized clocks. The journal remains the source of truth for observed epoch state.
+Flow budget epochs are logical, using AMP-style generations, windows and spacing (see [Transport and Information Flow](111_transport_and_information_flow.md) §3.1); no clock decides which budget epoch is in force. Where other epochs use time-based rotation, it relies on loosely synchronized clocks. The journal remains the source of truth for observed epoch state.
 
 ## 7. Adversarial Model
 

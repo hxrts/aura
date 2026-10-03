@@ -48,13 +48,18 @@ pub struct Receipt {
 
 This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The `nonce` ensures uniqueness and the `prev` field chains receipts for auditing. The recipient verifies the signature. Receipts support accountability in multi-hop routing.
 
-### 3.1 Budget Epochs and Grants
+### 3.1 Budget Epochs, Generations and Windows
 
-A flow budget epoch is a logical value. No wall clock decides which epoch is in force. For each context and direction, the receiving authority grants budget to the sender by committing a `FlowBudgetGrant { context, sender, epoch, allowance }` fact to their shared relational journal. Grants merge by the highest epoch, so both parties converge on the same epoch through ordinary fact exchange.
+Flow budget accounting reuses the AMP ratchet model ([AMP](112_amp.md) §5–§8) without its key derivation. Every quantity is derived from replicated facts in the shared relational context, so no wall clock decides which budget is in force and every device of an authority converges on the same position.
 
-The sender adopts the highest grant it has observed. Adopting a new epoch resets `spent` for that `(ContextId, peer)` pair, and the effective limit is the minimum of the grant's `allowance` and the limit the sender derives from its Biscuit tokens and local policy. Receipts carry the adopted epoch. The receiver verifies each receipt against the epoch of its own latest grant, so receipts from an earlier epoch are rejected and cannot be replayed into a later one.
+- Epoch: for each context and direction (sender → receiver), the budget epoch advances only through a committed transition fact, reduced deterministically to one canonical epoch, as AMP channel epochs are.
+- Generation: the receipt `nonce` is the sender's budget generation within the epoch. It is derived from reduced journal state rather than a local counter, so `spent` for the epoch is the generation span consumed.
+- Window: a checkpoint fact anchors the epoch's `base_gen`. The receiver accepts a receipt only if its generation lies inside the granted window above `base_gen`. Generations below the window (replays) or above it (sends beyond the allowance) are rejected structurally.
+- Dual window: at an epoch boundary the receiver keeps the previous window open alongside the successor window, as AMP's alternating windows do, so receipts the sender stamped before observing the new epoch are still accepted and nothing in flight is dropped.
+- Replenishment: the receiver commits the successor epoch once `current_gen - base_gen` reaches half the window, AMP's routine spacing rule. A peer that stays within its window therefore keeps sending; a receiver withholds or delays the bump to throttle a peer.
+- Allowance: the window size resolves in priority order from a per-peer override fact, then a context policy fact, then the default (1024), as AMP's skip window does. Adjusting a peer's allowance is committing an override; an adaptive anti-spam policy writes overrides or delays bumps without changing the protocol. The sender's effective limit is the minimum of this window and the limit it derives from its Biscuit tokens and local policy.
 
-The receiver's grant policy decides the allowance and when to issue the next grant. The baseline policy issues the next epoch once the verified receipts in the current epoch reach a fraction of its allowance, so a peer that stays within its allowance keeps sending. Because the allowance and the grant schedule are receiver policy, a receiver can raise, lower or withhold a peer's allowance, and an adaptive anti-spam policy can replace the baseline without changing the grant protocol. Before any grant exists, the sender uses the policy default allowance at the initial epoch.
+Before any checkpoint exists for a direction, both sides use the default window at the initial epoch with `base_gen = 0`.
 
 ## 4. Information Flow Budgets
 
