@@ -152,28 +152,32 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
     let threshold = FrostThreshold::new(2).expect("valid threshold");
     let device_ids = vec![bob_device_id.to_string(), mobile_device_id.to_string()];
 
-    let result = {
-        let core = app_core.read().await;
-        core.initiate_device_threshold_ceremony(threshold, 2, &device_ids)
-            .await
-    };
+    let result = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+        &app_core, threshold, 2, device_ids,
+    )
+    .await
+    .map(|handle| handle.status_handle());
 
     // === Phase 4: Assert on the result ===
     // The ceremony should either succeed with proper transport setup
     // OR fail with a clear, helpful error message
 
     match result {
-        Ok(ceremony_id) => {
+        Ok(status_handle) => {
             // If ceremony starts, check its status
-            println!("Multifactor ceremony started with ID: {ceremony_id}");
+            println!(
+                "Multifactor ceremony started with ID: {}",
+                status_handle.ceremony_id()
+            );
 
             // Wait a bit and check status
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let status = {
-                let core = app_core.read().await;
-                core.get_ceremony_status(&ceremony_id).await
-            };
+            let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                &app_core,
+                &status_handle,
+            )
+            .await;
 
             match status {
                 Ok(s) => {
@@ -369,31 +373,32 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
     let bob_device_id = ids::device_id(bob_device_id_str);
     // mobile_device_id already defined above
 
-    let ceremony_id = {
-        let core = app_core.read().await;
-        let threshold = FrostThreshold::new(2).expect("valid threshold");
-        core.initiate_device_threshold_ceremony(
-            threshold,
-            2,
-            &[bob_device_id.to_string(), mobile_device_id.to_string()],
-        )
-        .await
-        .expect("initiate_device_threshold_ceremony should succeed with shared transport")
-    };
+    let status_handle = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+        &app_core,
+        FrostThreshold::new(2).expect("valid threshold"),
+        2,
+        vec![bob_device_id.to_string(), mobile_device_id.to_string()],
+    )
+    .await
+    .expect("device threshold ceremony should start with shared transport")
+    .status_handle();
 
-    println!("Control test: Multifactor ceremony started with ID: {ceremony_id}");
+    println!(
+        "Control test: Multifactor ceremony started with ID: {}",
+        status_handle.ceremony_id()
+    );
 
     // Wait for completion
     let start = tokio::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        let status = {
-            let core = app_core.read().await;
-            core.get_ceremony_status(&ceremony_id)
-                .await
-                .expect("get_ceremony_status")
-        };
+        let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+            &app_core,
+            &status_handle,
+        )
+        .await
+        .expect("get ceremony status");
 
         if status.has_failed {
             let error_signal = support::read_error_signal(&app_core).await;
