@@ -110,3 +110,4 @@ pub mod strong_command;
 pub mod sync;
 pub mod system;
 pub mod time;
+pub mod user_errors;

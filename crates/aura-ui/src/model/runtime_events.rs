@@ -339,10 +339,14 @@ impl UiController {
 
     pub fn runtime_error_toast(&self, message: impl Into<String>) {
         let message = message.into();
-        // Show an invitation outcome's user-facing sentence, not its error chain.
-        let message =
-            aura_app::ui::workflows::invitation::contact_acceptance_outcome_message(&message)
-                .unwrap_or(message);
+        // Show a user-facing sentence, never an internal error chain.
+        use aura_app::ui::workflows::user_errors::{classify, UserFacingError};
+        let message = match classify(&message) {
+            UserFacingError::Unchanged => message,
+            UserFacingError::Sentence(sentence) => sentence,
+            UserFacingError::SeeDetails(Some(head)) => format!("{head} (see logs for details)"),
+            UserFacingError::SeeDetails(None) => "Something went wrong".to_string(),
+        };
         let mut model = write_model(&self.model);
         set_toast(&mut model, '✗', message);
         drop(model);
