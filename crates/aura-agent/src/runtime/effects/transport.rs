@@ -94,7 +94,12 @@ impl TransportEffects for AuraEffectSystem {
                     details: error.to_string(),
                 })?;
 
-            for plan in batch {
+            // The batch starts with this caller's envelope; later plans are
+            // other queued envelopes. Every plan is attempted and settled so a
+            // failure never strands the rest, and only the caller's own
+            // outcome is returned.
+            let mut own_result = Ok(());
+            for (index, plan) in batch.into_iter().enumerate() {
                 let payload_len = plan.envelope.payload.len();
                 let context = plan.envelope.context;
                 let destination = plan.envelope.destination;
@@ -125,11 +130,19 @@ impl TransportEffects for AuraEffectSystem {
                                 now_ms,
                             )
                             .await;
-                        return Err(error);
+                        if index == 0 {
+                            own_result = Err(error);
+                        } else {
+                            tracing::debug!(
+                                destination = %destination,
+                                error = %error,
+                                "queued move envelope delivery failed"
+                            );
+                        }
                     }
                 }
             }
-            return Ok(());
+            return own_result;
         }
 
         let payload_len = envelope.payload.len();
