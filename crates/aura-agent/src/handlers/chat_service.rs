@@ -405,7 +405,7 @@ impl ChatServiceApi {
         group_id: &ChatGroupId,
     ) -> AgentResult<Vec<aura_chat::ChatFact>> {
         let context_id = Self::context_id_for_group(group_id);
-        let channel_id = Self::channel_id_for_group(group_id);
+        let mapped_channel_id = Self::channel_id_for_group(group_id);
 
         let typed = self
             .effects
@@ -413,7 +413,7 @@ impl ChatServiceApi {
             .await
             .map_err(AgentError::from)?;
 
-        let mut out = Vec::new();
+        let mut in_context = Vec::new();
         for fact in typed {
             let aura_journal::fact::FactContent::Relational(
                 aura_journal::fact::RelationalFact::Generic {
@@ -432,7 +432,29 @@ impl ChatServiceApi {
             let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
                 continue;
             };
+            in_context.push(chat_fact);
+        }
 
+        // Groups created by this service use the mapped channel id; channels
+        // created elsewhere (Note to Self, DMs, app groups) have their own id,
+        // which `list_user_groups` reports by context: use the channel created
+        // in this context then.
+        let channel_id = if in_context.iter().any(|fact| {
+            matches!(fact, aura_chat::ChatFact::ChannelCreated { channel_id, .. } if *channel_id == mapped_channel_id)
+        }) {
+            mapped_channel_id
+        } else {
+            in_context
+                .iter()
+                .find_map(|fact| match fact {
+                    aura_chat::ChatFact::ChannelCreated { channel_id, .. } => Some(*channel_id),
+                    _ => None,
+                })
+                .unwrap_or(mapped_channel_id)
+        };
+
+        let mut out = Vec::new();
+        for chat_fact in in_context {
             // Restrict to the single channel for this group mapping.
             match &chat_fact {
                 aura_chat::ChatFact::ChannelCreated { channel_id: c, .. }
