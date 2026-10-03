@@ -78,8 +78,13 @@ async fn async_main() -> Result<(), AuraError> {
                 CliOutput::new().println(e.unwrap_stdout()).render();
                 std::process::exit(0);
             }
-            // For other errors, show our friendly usage
-            usage_output(true).render();
+            // With no arguments, show the friendly overview; otherwise bpaf's
+            // message names the missing option and the subcommand's usage.
+            if std::env::args().len() <= 1 {
+                usage_output(true).render();
+            } else {
+                eprintln!("{}", e.unwrap_stderr());
+            }
             std::process::exit(1);
         }
     };

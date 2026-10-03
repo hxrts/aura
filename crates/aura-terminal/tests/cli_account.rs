@@ -1,7 +1,16 @@
 //! The `aura` CLI binds to an account created by the terminal app through
 //! `--data-dir` (work/8.md Task 22).
 
-#![allow(missing_docs)]
+#![allow(
+    missing_docs,
+    dead_code,
+    unused,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    clippy::disallowed_types,
+    clippy::all
+)]
 
 mod support;
 

@@ -354,6 +354,7 @@ fn invite_command() -> impl Parser<Commands> {
         })
         .to_options()
         .command("create")
+        .help("Invite a device to join this account")
     };
 
     let accept = {
@@ -363,6 +364,7 @@ fn invite_command() -> impl Parser<Commands> {
         construct!(InvitationAction::Accept { invitation_id })
             .to_options()
             .command("accept")
+            .help("Accept a received invitation")
     };
 
     let decline = {
@@ -372,6 +374,7 @@ fn invite_command() -> impl Parser<Commands> {
         construct!(InvitationAction::Decline { invitation_id })
             .to_options()
             .command("decline")
+            .help("Decline a received invitation")
     };
 
     let cancel = {
@@ -381,6 +384,7 @@ fn invite_command() -> impl Parser<Commands> {
         construct!(InvitationAction::Cancel { invitation_id })
             .to_options()
             .command("cancel")
+            .help("Cancel an invitation you sent")
     };
 
     let list = pure(InvitationAction::List)
