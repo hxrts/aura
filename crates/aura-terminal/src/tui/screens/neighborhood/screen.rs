@@ -394,6 +394,7 @@ pub fn NeighborhoodScreen(
     let active_scope: Arc<std::sync::RwLock<String>> = active_scope_ref.read().clone();
 
     let reactive_members = hooks.use_state(Vec::new);
+    let reactive_member_counts = hooks.use_state(std::collections::HashMap::<String, usize>::new);
     let reactive_budget = hooks.use_state(HomeBudget::default);
     let reactive_channels = hooks.use_state(Vec::new);
     let reactive_contacts = hooks.use_state(Vec::new);
@@ -460,8 +461,15 @@ pub fn NeighborhoodScreen(
         let app_core = app_ctx.app_core.clone();
         let mut reactive_members = reactive_members.clone();
         let mut reactive_budget = reactive_budget.clone();
+        let mut reactive_member_counts = reactive_member_counts.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
+                reactive_member_counts.set(
+                    home_state
+                        .iter()
+                        .map(|(id, home)| (id.to_string(), home.members.len()))
+                        .collect(),
+                );
                 if let Some(current_home) = home_state.current_home() {
                     let members: Vec<HomeMember> =
                         current_home.members.iter().map(convert_member).collect();
@@ -505,9 +513,12 @@ pub fn NeighborhoodScreen(
     let neighborhood_name = reactive_neighborhood_name.read().clone();
     let mut homes = reactive_homes.read().clone();
     let members = reactive_members.read().clone();
-    // The current home's tile counts the same member projection as its detail.
-    if let Some(current) = homes.iter_mut().find(|home| home.is_home) {
-        current.member_count = u8::try_from(members.len()).unwrap_or(u8::MAX);
+    // Every tile counts its home's members from the one homes projection.
+    let member_counts = reactive_member_counts.read().clone();
+    for home in &mut homes {
+        if let Some(count) = member_counts.get(&home.id) {
+            home.member_count = u8::try_from(*count).unwrap_or(u8::MAX);
+        }
     }
     let budget = reactive_budget.read().clone();
     let channels = reactive_channels.read().clone();
