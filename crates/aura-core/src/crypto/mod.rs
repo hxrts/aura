@@ -7,6 +7,7 @@ pub mod kdf;
 pub mod key_derivation;
 pub mod merkle;
 pub mod single_signer;
+pub mod threshold_prf;
 pub mod tree_signing;
 
 // Merkle helpers
