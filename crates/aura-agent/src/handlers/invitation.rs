@@ -1721,6 +1721,10 @@ impl InvitationHandler {
         invitation: Option<&Invitation>,
     ) -> AgentResult<()> {
         let Some(invitation) = invitation else {
+            tracing::info!(
+                invitation_id = %invitation_id,
+                "accept follow-up skipped: invitation not loaded for choreography"
+            );
             return Ok(());
         };
 
@@ -1732,9 +1736,13 @@ impl InvitationHandler {
                 );
             }
             InvitationType::Guardian { .. } => {
+                tracing::info!(invitation_id = %invitation_id, "guardian accept follow-up starting");
                 self
                     .execute_guardian_invitation_guardian(effects.clone(), invitation)
                     .await
+                    .inspect_err(|error| {
+                        tracing::warn!(invitation_id = %invitation_id, error = %error, "guardian accept follow-up failed");
+                    })
                     .map_err(|error| {
                         AgentError::choreography(format!(
                             "guardian invitation accept follow-up failed for {invitation_id}: {error}"
