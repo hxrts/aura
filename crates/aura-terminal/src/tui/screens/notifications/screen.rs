@@ -26,6 +26,7 @@ enum NotificationKind {
     GuardianInvite,
     HomeInvite,
     ChannelInvite,
+    FriendRequest,
     RecoveryApproval,
     SentInvite,
     ContactInviteAccepted,
@@ -41,6 +42,7 @@ impl NotificationKind {
             Self::GuardianInvite => "◆",
             Self::HomeInvite => "■",
             Self::ChannelInvite => "#",
+            Self::FriendRequest => "+",
             Self::RecoveryApproval => "⊗",
             Self::SentInvite => "↗",
             Self::ContactInviteAccepted => "✓",
@@ -56,6 +58,7 @@ impl NotificationKind {
             Self::GuardianInvite => "Guardian request",
             Self::HomeInvite => "Home invite",
             Self::ChannelInvite => "Channel invite",
+            Self::FriendRequest => "Friend request",
             Self::RecoveryApproval => "Approval request",
             Self::SentInvite => "Sent invite",
             Self::ContactInviteAccepted => "Contact invite accepted",
@@ -71,6 +74,7 @@ impl NotificationKind {
             Self::GuardianInvite => Theme::WARNING,
             Self::HomeInvite => Theme::TEXT,
             Self::ChannelInvite => Theme::PRIMARY,
+            Self::FriendRequest => Theme::SUCCESS,
             Self::RecoveryApproval => Theme::SUCCESS,
             Self::SentInvite => Theme::TEXT_MUTED,
             Self::ContactInviteAccepted => Theme::SUCCESS,
@@ -120,6 +124,29 @@ fn amp_transition_policy_label(policy: Option<AmpTransitionPolicySnapshot>) -> &
 }
 
 /// A pending invitation this account sent, offered for copying or revoking.
+/// One notification per contact whose friend request awaits our answer.
+fn friend_request_items(state: &aura_app::ui::types::ContactsState) -> Vec<NotificationItem> {
+    state
+        .all_contacts()
+        .filter(|contact| {
+            contact.relationship_state
+                == aura_app::ui::types::ContactRelationshipState::PendingInbound
+        })
+        .map(|contact| NotificationItem {
+            id: format!(
+                "{}{}",
+                crate::tui::types::FRIEND_REQUEST_NOTIFICATION_PREFIX,
+                contact.id
+            ),
+            title: format!("Friend request from {}", display_contact_name(contact)),
+            subtitle: "a accept, x decline".to_string(),
+            kind: NotificationKind::FriendRequest,
+            timestamp: contact.last_interaction.unwrap_or_default(),
+            from_id: Some(contact.id.to_string()),
+        })
+        .collect()
+}
+
 /// Kind and title for an invitation this authority received.
 fn received_invitation_kind(
     invitation_type: InvitationType,
@@ -303,9 +330,11 @@ pub fn NotificationsScreen(
     let reactive_invites = hooks.use_state(Vec::new);
     let reactive_recovery = hooks.use_state(Vec::new);
     let reactive_contact_names = hooks.use_state(HashMap::<String, String>::new);
+    let reactive_friend_requests = hooks.use_state(Vec::<NotificationItem>::new);
 
     hooks.use_future({
         let mut reactive_contact_names = reactive_contact_names.clone();
+        let mut reactive_friend_requests = reactive_friend_requests.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |state| {
@@ -314,6 +343,7 @@ pub fn NotificationsScreen(
                     .map(|contact| (contact.id.to_string(), display_contact_name(contact)))
                     .collect::<HashMap<_, _>>();
                 reactive_contact_names.set(names);
+                reactive_friend_requests.set(friend_request_items(&state));
             })
             .await;
         }
@@ -391,6 +421,7 @@ pub fn NotificationsScreen(
     });
 
     let mut notifications = reactive_invites.read().clone();
+    notifications.extend(reactive_friend_requests.read().clone());
     notifications.extend(reactive_recovery.read().clone());
     let contact_names = reactive_contact_names.read().clone();
     // The invitation projection has no contact names; label senders here.
@@ -561,6 +592,36 @@ mod tests {
         assert_eq!(item.title, "Contact invite to Bob");
         assert!(item.subtitle.contains("x revoke"));
         assert_eq!(item.timestamp, 42);
+    }
+
+    #[test]
+    fn only_inbound_friend_requests_become_notifications() {
+        use aura_app::ui::types::{Contact, ContactRelationshipState, ContactsState};
+        use aura_core::types::identifiers::AuthorityId;
+        let contact = |seed: u8, state: ContactRelationshipState| Contact {
+            id: AuthorityId::new_from_entropy([seed; 32]),
+            nickname: format!("C{seed}"),
+            nickname_suggestion: None,
+            is_guardian: false,
+            is_member: false,
+            last_interaction: Some(u64::from(seed)),
+            is_online: false,
+            read_receipt_policy: crate::tui::types::ReadReceiptPolicy::default(),
+            relationship_state: state,
+            invitation_code: None,
+        };
+        let state = ContactsState::from_contacts([
+            contact(1, ContactRelationshipState::PendingInbound),
+            contact(2, ContactRelationshipState::PendingOutbound),
+            contact(3, ContactRelationshipState::Contact),
+        ]);
+        let items = friend_request_items(&state);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].kind, NotificationKind::FriendRequest);
+        assert!(items[0]
+            .id
+            .starts_with(crate::tui::types::FRIEND_REQUEST_NOTIFICATION_PREFIX));
+        assert_eq!(items[0].title, "Friend request from C1");
     }
 
     #[test]

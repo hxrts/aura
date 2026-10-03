@@ -1393,6 +1393,21 @@ pub(super) fn handle_dispatch_command_match(
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
             );
+            if let Some(NotificationSelection::FriendRequest(authority)) = &selected {
+                let Some(update_tx) = update_tx_for_events else {
+                    new_state.toast_error("UI update sender is unavailable");
+                    return EventCommandLoopAction::ContinueCommand;
+                };
+                let operation = submit_local_terminal_operation(
+                    app_core_for_events,
+                    tasks_for_events,
+                    update_tx,
+                    OperationId::accept_friend_request(),
+                    SemanticOperationKind::AcceptFriendRequest,
+                );
+                (cb.contacts.on_accept_friend_request)(authority.clone(), operation);
+                return EventCommandLoopAction::ContinueCommand;
+            }
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 if let Some(update_tx) = update_tx_for_dispatch {
                     let accept_kind = semantic_accept_kind_for_invitation(
@@ -1434,6 +1449,21 @@ pub(super) fn handle_dispatch_command_match(
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
             );
+            if let Some(NotificationSelection::FriendRequest(authority)) = &selected {
+                let Some(update_tx) = update_tx_for_events else {
+                    new_state.toast_error("UI update sender is unavailable");
+                    return EventCommandLoopAction::ContinueCommand;
+                };
+                let operation = submit_local_terminal_operation(
+                    app_core_for_events,
+                    tasks_for_events,
+                    update_tx,
+                    OperationId::decline_friend_request(),
+                    SemanticOperationKind::DeclineFriendRequest,
+                );
+                (cb.contacts.on_decline_friend_request)(authority.clone(), operation);
+                return EventCommandLoopAction::ContinueCommand;
+            }
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");

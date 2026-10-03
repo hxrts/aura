@@ -25,6 +25,8 @@ pub(super) enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
+    /// An inbound friend request from the contact with this authority id.
+    FriendRequest(String),
     PassiveRuntimeEvent(String),
 }
 
@@ -244,6 +246,11 @@ pub(super) fn read_selected_notification(
     // Resolve through the row the screen rendered at this index; the screen
     // omits some items (e.g. sent invitations), so positions can differ.
     if let Some(rendered_id) = visible_ids.get(selected_index) {
+        if let Some(authority) =
+            rendered_id.strip_prefix(crate::tui::types::FRIEND_REQUEST_NOTIFICATION_PREFIX)
+        {
+            return Some(NotificationSelection::FriendRequest(authority.to_string()));
+        }
         if let Some((_, selection)) = notifications.iter().find(|(_, selection)| {
             notification_selection_id(selection) == Some(rendered_id.as_str())
         }) {
@@ -260,7 +267,8 @@ fn notification_selection_id(selection: &NotificationSelection) -> Option<&str> 
     match selection {
         NotificationSelection::ReceivedInvitation(id)
         | NotificationSelection::SentInvitation(id)
-        | NotificationSelection::RecoveryRequest(id) => Some(id.as_str()),
+        | NotificationSelection::RecoveryRequest(id)
+        | NotificationSelection::FriendRequest(id) => Some(id.as_str()),
         NotificationSelection::PassiveRuntimeEvent(_) => None,
     }
 }

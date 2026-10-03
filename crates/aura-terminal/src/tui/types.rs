@@ -19,6 +19,7 @@ pub use aura_app::ui::types::format_timestamp;
 pub use chat::{Channel, DeliveryStatus, Message};
 pub use contacts::{
     format_contact_name, Contact, ContactStatus, ReadReceiptPolicy, ReadReceiptPolicyExt,
+    FRIEND_REQUEST_NOTIFICATION_PREFIX,
 };
 pub use invitations::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
 pub use neighborhood::{AccessLevel, HomeBudget, HomeMember, HomeSummary};
