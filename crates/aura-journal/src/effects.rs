@@ -801,6 +801,31 @@ mod tests {
         )
     }
 
+    /// Background sync charges one unit per send. Before the spacing rule a
+    /// (context, peer) budget exhausted for good after 1024 sends (~3 h of
+    /// sync); it must now keep replenishing through epoch advances.
+    #[tokio::test]
+    async fn flow_budget_survives_many_times_its_limit_in_sends() {
+        let handler = test_handler(true);
+        let (ctx, peer) = (context(9), authority(2));
+        let sends = 5 * 1024;
+        for send in 0..sends {
+            handler
+                .charge_flow_budget(&ctx, &peer, FlowCost::new(1))
+                .await
+                .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
+        }
+        let budget = handler
+            .get_flow_budget(&ctx, &peer)
+            .await
+            .expect("budget loads");
+        assert!(budget.epoch.value() >= 9, "epoch advanced: {budget:?}");
+        assert!(
+            budget.spent < budget.limit / 2,
+            "headroom remains: {budget:?}"
+        );
+    }
+
     #[tokio::test]
     async fn rendezvous_receipt_rejects_empty_signature_in_production() {
         let handler = receipt_handler(Some(vec![4; 32]), None, None);
