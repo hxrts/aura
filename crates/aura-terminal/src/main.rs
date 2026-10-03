@@ -58,6 +58,11 @@ fn main() -> Result<(), AuraError> {
         .build()
         .map_err(|error| AuraError::internal(format!("build terminal runtime: {error}")))?
         .block_on(async_main())
+        .or_else(|error| {
+            // Readable message instead of the Debug dump `main` would print.
+            eprintln!("error: {error}");
+            std::process::exit(1)
+        })
 }
 
 async fn async_main() -> Result<(), AuraError> {
@@ -141,11 +146,35 @@ async fn async_main() -> Result<(), AuraError> {
     let loaded_account = try_load_account_from_path(&storage_base_path)
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
+    if let Commands::Init(init) = &command {
+        if init.output.is_absolute() {
+            return Err(AuraError::invalid(format!(
+                "--output must be a relative path; init writes it under the data directory ({})",
+                storage_base_path.display()
+            )));
+        }
+    }
+    let init_seed = match &command {
+        Commands::Init(init) => Some(format!("cli:init:{}", init.output.display())),
+        _ => None,
+    };
     let (authority_id, context_id) = match loaded_account {
         aura_terminal::handlers::tui::AccountLoadResult::Loaded {
             authority, context, ..
         } => (authority, context),
+        // `init` writes new threshold configs; it needs no existing account, so
+        // its effects run under an identity derived from the output directory.
+        aura_terminal::handlers::tui::AccountLoadResult::NotFound if init_seed.is_some() => {
+            let seed = init_seed.unwrap_or_default();
+            (ids::authority_id(&seed), ids::context_id(&seed))
+        }
         aura_terminal::handlers::tui::AccountLoadResult::NotFound => {
+            CliOutput::new()
+                .eprintln(format!(
+                    "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
+                    storage_base_path.display()
+                ))
+                .render();
             let bootstrap_event = BootstrapEvent::new(
                 BootstrapSurface::Terminal,
                 BootstrapEventKind::RuntimeBootstrapRequired,
