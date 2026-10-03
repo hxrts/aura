@@ -157,7 +157,7 @@ fn flow_budget_merge_invariants() {
                 spent: 50,
                 epoch: Epoch::new(3),
             },
-            (150, 50, 3), // A later epoch supersedes the earlier epoch's spend
+            (150, 100, 3),
         ),
     ];
 
@@ -170,7 +170,7 @@ fn flow_budget_merge_invariants() {
         );
         assert_eq!(
             merged.spent, *expected_spent,
-            "Spent should be the later epoch's, or the maximum within one epoch"
+            "Spent should be maximum (join operation)"
         );
         assert_eq!(
             merged.epoch.value(),

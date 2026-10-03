@@ -176,40 +176,42 @@ impl TransportEffects for AuraEffectSystem {
         source: AuthorityId,
         context: ContextId,
     ) -> Result<TransportEnvelope, TransportError> {
+        self.drain_flow_checkpoint_envelopes();
         let self_device_id = self.config.device_id.to_string();
         let inbox = self.transport.inbox();
-        let maybe = {
-            let mut inbox = inbox.write();
-            // In shared transport mode, filter by destination AND source/context
-            inbox
-                .iter()
-                .position(|env| {
-                    let device_match = env
-                        .metadata
-                        .get("aura-destination-device-id")
-                        .is_some_and(|dst| dst == &self_device_id);
+        loop {
+            let maybe = {
+                let mut inbox = inbox.write();
+                // In shared transport mode, filter by destination AND source/context
+                inbox
+                    .iter()
+                    .position(|env| {
+                        let device_match = env
+                            .metadata
+                            .get("aura-destination-device-id")
+                            .is_some_and(|dst| dst == &self_device_id);
 
-                    if env.destination == self.authority_id {
-                        env.source == source
-                            && env.context == context
-                            && match env.metadata.get("aura-destination-device-id") {
-                                Some(dst) => dst == &self_device_id,
-                                None => true,
-                            }
-                    } else {
-                        env.source == source && env.context == context && device_match
-                    }
-                })
-                .map(|pos| inbox.remove(pos))
-        };
+                        if env.destination == self.authority_id {
+                            env.source == source
+                                && env.context == context
+                                && match env.metadata.get("aura-destination-device-id") {
+                                    Some(dst) => dst == &self_device_id,
+                                    None => true,
+                                }
+                        } else {
+                            env.source == source && env.context == context && device_match
+                        }
+                    })
+                    .map(|pos| inbox.remove(pos))
+            };
 
-        match maybe {
-            Some(env) => {
-                validate_inbound_transport_receipt(&env)?;
+            let Some(env) = maybe else {
+                return Err(TransportError::NoMessage);
+            };
+            if self.admit_inbound_envelope(&env)? {
                 self.transport.record_receive();
-                Ok(env)
+                return Ok(env);
             }
-            None => Err(TransportError::NoMessage),
         }
     }
 
@@ -991,31 +993,86 @@ impl AuraEffectSystem {
         &self,
         accept: impl Fn(&TransportEnvelope) -> bool,
     ) -> Result<TransportEnvelope, TransportError> {
-        let self_device_id = self.config.device_id.to_string();
+        self.drain_flow_checkpoint_envelopes();
         let inbox = self.transport.inbox();
-        let maybe = {
-            let mut inbox = inbox.write();
-            // In shared transport mode, filter by destination (this agent's authority ID)
-            inbox
-                .iter()
-                .position(|env| {
-                    let addressed_here = match env.metadata.get("aura-destination-device-id") {
-                        Some(dst) => dst == &self_device_id,
-                        // Device-less envelopes are addressed to the whole authority.
-                        None => env.destination == self.authority_id,
-                    };
-                    addressed_here && accept(env)
-                })
-                .map(|pos| inbox.remove(pos))
-        };
-
-        match maybe {
-            Some(env) => {
-                validate_inbound_transport_receipt(&env)?;
+        loop {
+            let maybe = {
+                let mut inbox = inbox.write();
+                inbox
+                    .iter()
+                    .position(|env| self.addressed_here(env) && accept(env))
+                    .map(|pos| inbox.remove(pos))
+            };
+            let Some(env) = maybe else {
+                return Err(TransportError::NoMessage);
+            };
+            if self.admit_inbound_envelope(&env)? {
                 self.transport.record_receive();
-                Ok(env)
+                return Ok(env);
             }
-            None => Err(TransportError::NoMessage),
+        }
+    }
+
+    fn addressed_here(&self, env: &TransportEnvelope) -> bool {
+        match env.metadata.get("aura-destination-device-id") {
+            Some(dst) => dst == &self.config.device_id.to_string(),
+            // Device-less envelopes are addressed to the whole authority.
+            None => env.destination == self.authority_id,
+        }
+    }
+
+    /// Validate an inbound envelope's receipt and admit it against the
+    /// sender's flow window (docs/111 §3.1). `Ok(false)` means the envelope
+    /// was outside the window and has been dropped without a response.
+    pub(super) fn admit_inbound_envelope(
+        &self,
+        env: &TransportEnvelope,
+    ) -> Result<bool, TransportError> {
+        validate_inbound_transport_receipt(env)?;
+        if let Some(receipt) = env.receipt.as_ref() {
+            let device = env
+                .metadata
+                .get("aura-source-device-id")
+                .map(String::as_str);
+            if let Err(rejection) = self.transport.flow().admit(receipt, device) {
+                tracing::debug!(
+                    source = %env.source,
+                    %rejection,
+                    "dropping inbound envelope outside its flow window"
+                );
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Take every flow checkpoint addressed here and queue it for adoption.
+    fn drain_flow_checkpoint_envelopes(&self) {
+        let checkpoints: Vec<TransportEnvelope> = {
+            let inbox = self.transport.inbox();
+            let mut inbox = inbox.write();
+            let mut taken = Vec::new();
+            let mut index = 0;
+            while index < inbox.len() {
+                let env = &inbox[index];
+                if self.addressed_here(env)
+                    && env.metadata.get("content-type").map(String::as_str)
+                        == Some(crate::runtime::flow_ingress::FLOW_CHECKPOINT_CONTENT_TYPE)
+                {
+                    taken.push(inbox.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            taken
+        };
+        for env in checkpoints {
+            if matches!(self.admit_inbound_envelope(&env), Ok(true)) {
+                self.transport.record_receive();
+                self.transport
+                    .flow()
+                    .record_inbound(env.source, &env.payload);
+            }
         }
     }
 }

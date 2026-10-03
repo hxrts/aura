@@ -1104,6 +1104,15 @@ impl AuraEffectSystem {
         &self,
         envelope: TransportEnvelope,
     ) -> crate::runtime::subsystems::transport::QueueEnvelopeOutcome {
+        // The envelope was already admitted against its flow window when it
+        // was taken; putting it back must not make it look like a replay.
+        if let Some(receipt) = envelope.receipt.as_ref() {
+            let device = envelope
+                .metadata
+                .get("aura-source-device-id")
+                .map(String::as_str);
+            self.transport.flow().allow_readmit(receipt, device);
+        }
         self.queue_runtime_envelope(envelope)
     }
 

@@ -3192,31 +3192,14 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
     }
 }
 
-fn deterministic_test_transport_receipt(envelope: &TransportEnvelope) -> TransportReceipt {
-    TransportReceipt {
-        context: envelope.context,
-        src: envelope.source,
-        dst: envelope.destination,
-        epoch: 1,
-        cost: 1,
-        nonce: 1,
-        prev: [0u8; 32],
-        sig: vec![1u8],
-    }
-}
-
 fn attach_invitation_test_receipt_if_needed(
     effects: &AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    if effects.is_testing()
-        && envelope
-            .receipt
-            .as_ref()
-            .map_or(true, |receipt| receipt.sig.is_empty())
-    {
-        envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
-    }
+    crate::runtime::receipt_model::attach_test_transport_receipt_if_needed(
+        effects.is_testing(),
+        envelope,
+    );
 }
 
 async fn execute_record_receipt(

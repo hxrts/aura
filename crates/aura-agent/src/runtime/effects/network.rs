@@ -144,7 +144,9 @@ impl NetworkCoreEffects for AuraEffectSystem {
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), NetworkError> {
-        let envelope = match TransportEffects::receive_envelope(self).await {
+        let taken = TransportEffects::receive_envelope(self).await;
+        self.flush_flow_checkpoints().await;
+        let envelope = match taken {
             Ok(env) => env,
             Err(TransportError::NoMessage) => return Err(NetworkError::NoMessage),
             Err(e) => {
@@ -454,53 +456,28 @@ impl AuraEffectSystem {
         content_type: &str,
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
-        if self.execution_mode.is_deterministic() {
-            if let Some(shared) = self.transport.shared_transport() {
-                let (peer, device) = resolve_network_peer(self, peer_id).await;
-                let mut metadata = HashMap::new();
-                metadata.insert("content-type".to_string(), content_type.to_string());
-                metadata.insert(
-                    SOURCE_DEVICE_METADATA_KEY.to_string(),
-                    self.device_id().to_string(),
-                );
-                if let Some(device) = device {
-                    metadata.insert("aura-destination-device-id".to_string(), device.to_string());
-                }
-                let context = default_context_id_for_authority(peer);
-                // Charge and bind a receipt as production does, so simulations
-                // exercise flow budgets instead of bypassing them.
-                let mut receipt = self.charge_send_receipt(peer_id, &context, &peer).await?;
-                let mut envelope = TransportEnvelope {
-                    destination: peer,
-                    source: self.authority_id,
-                    context,
-                    payload: message,
-                    metadata,
-                    receipt: None,
-                };
-                self.bind_transport_receipt_to_envelope(&mut receipt, &envelope)
-                    .map_err(|e| NetworkError::SendFailed {
-                        peer_id: Some(peer_id),
-                        reason: e.to_string(),
-                    })?;
-                envelope.receipt = Some(receipt);
-                shared.route_envelope(envelope);
-                return Ok(());
-            }
+        if self.execution_mode.is_deterministic() && self.transport.shared_transport().is_none() {
             self.ensure_mock_network()?;
             return Ok(());
         }
-
         // Sync peers are devices; address the owning authority and that device.
         let (peer, device) = resolve_network_peer(self, peer_id).await;
+        self.send_authority_payload(peer_id, peer, device, content_type, message)
+            .await
+    }
+
+    /// Charge `peer`'s flow budget and send `message` to it (or to one of its
+    /// devices). `peer_id` only labels errors.
+    async fn send_authority_payload(
+        &self,
+        peer_id: uuid::Uuid,
+        peer: AuthorityId,
+        device: Option<aura_core::DeviceId>,
+        content_type: &str,
+        message: Vec<u8>,
+    ) -> Result<(), NetworkError> {
         let mut metadata = HashMap::new();
         metadata.insert("content-type".to_string(), content_type.to_string());
-        metadata.insert(
-            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
-            aura_core::effects::RandomExtendedEffects::random_uuid(self)
-                .await
-                .to_string(),
-        );
         metadata.insert(
             SOURCE_DEVICE_METADATA_KEY.to_string(),
             self.device_id().to_string(),
@@ -509,6 +486,40 @@ impl AuraEffectSystem {
             metadata.insert("aura-destination-device-id".to_string(), device.to_string());
         }
         let context = default_context_id_for_authority(peer);
+        let send_failed = |reason: String| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason,
+        };
+
+        if self.execution_mode.is_deterministic() {
+            let Some(shared) = self.transport.shared_transport() else {
+                self.ensure_mock_network()?;
+                return Ok(());
+            };
+            // Charge and bind a receipt as production does, so simulations
+            // exercise flow budgets instead of bypassing them.
+            let mut receipt = self.charge_send_receipt(peer_id, &context, &peer).await?;
+            let mut envelope = TransportEnvelope {
+                destination: peer,
+                source: self.authority_id,
+                context,
+                payload: message,
+                metadata,
+                receipt: None,
+            };
+            self.bind_transport_receipt_to_envelope(&mut receipt, &envelope)
+                .map_err(|e| send_failed(e.to_string()))?;
+            envelope.receipt = Some(receipt);
+            shared.route_envelope(envelope);
+            return Ok(());
+        }
+
+        metadata.insert(
+            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
+            aura_core::effects::RandomExtendedEffects::random_uuid(self)
+                .await
+                .to_string(),
+        );
         // Production transport requires guard-chain receipt evidence.
         let receipt = self.charge_send_receipt(peer_id, &context, &peer).await?;
         let envelope = TransportEnvelope {
@@ -519,14 +530,58 @@ impl AuraEffectSystem {
             metadata,
             receipt: Some(receipt),
         };
-
         send_guarded_transport_envelope(self, envelope)
             .await
-            .map_err(|e| NetworkError::SendFailed {
-                peer_id: Some(peer_id),
-                reason: e.to_string(),
-            })?;
-        Ok(())
+            .map_err(|e| send_failed(e.to_string()))
+    }
+
+    /// Deliver queued flow checkpoints (docs/111 §3.1): adopt the ones peers
+    /// granted this runtime, and send the ones this runtime granted peers.
+    /// Failures are logged; a lagging sender is offered the checkpoint again.
+    pub(crate) async fn flush_flow_checkpoints(&self) {
+        use aura_core::effects::JournalEffects;
+        let flow = self.transport.flow();
+        for notice in flow.take_inbound() {
+            let adopted = match self.get_flow_budget(&notice.context, &notice.peer).await {
+                Ok(budget) => {
+                    self.update_flow_budget(
+                        &notice.context,
+                        &notice.peer,
+                        &budget.with_checkpoint(&notice.checkpoint),
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            };
+            if let Err(error) = adopted {
+                tracing::debug!(peer = %notice.peer, %error, "flow checkpoint not adopted");
+            }
+        }
+        for notice in flow.take_outbound() {
+            let payload = match aura_core::util::serialization::to_vec(&notice) {
+                Ok(payload) => payload,
+                Err(error) => {
+                    tracing::debug!(%error, "flow checkpoint not encoded");
+                    continue;
+                }
+            };
+            if let Err(error) = self
+                .send_authority_payload(
+                    notice.peer.uuid(),
+                    notice.peer,
+                    notice
+                        .device
+                        .as_deref()
+                        .and_then(|device| uuid::Uuid::parse_str(device).ok())
+                        .map(aura_core::DeviceId::from_uuid),
+                    crate::runtime::flow_ingress::FLOW_CHECKPOINT_CONTENT_TYPE,
+                    payload,
+                )
+                .await
+            {
+                tracing::debug!(peer = %notice.peer, %error, "flow checkpoint not delivered");
+            }
+        }
     }
 
     /// Take the next `content_type` payload from `peer_id`, waiting a bounded time.
@@ -538,10 +593,12 @@ impl AuraEffectSystem {
         // Take only this peer's network frame; other sessions' envelopes stay queued.
         // Wait a bounded time so lockstep peers (sync) can answer before we give up.
         for _ in 0..RECEIVE_FROM_POLLS {
-            match self.take_inbound_envelope(|env| {
+            let taken = self.take_inbound_envelope(|env| {
                 env.metadata.get("content-type").map(String::as_str) == Some(content_type)
                     && network_source_id(env) == peer_id
-            }) {
+            });
+            self.flush_flow_checkpoints().await;
+            match taken {
                 Ok(envelope) => return Ok(envelope.payload),
                 Err(TransportError::NoMessage) => {}
                 Err(e) => {
@@ -632,45 +689,100 @@ mod tests {
         config
     }
 
-    // Background sync sends one charged message per round. Two runtimes must
-    // keep exchanging past many times the flow-budget limit, with every
-    // receipt passing the receiver's inbound check (run 141 exhausted after
-    // 1024 sends; an epoch boundary once produced a rejected zero nonce).
+    fn two_runtimes(
+        seeds: (u8, u8),
+    ) -> (AuthorityId, AuraEffectSystem, AuthorityId, AuraEffectSystem) {
+        let shared = crate::SharedTransport::new();
+        let alice = AuthorityId::new_from_entropy([seeds.0; 32]);
+        let bob = AuthorityId::new_from_entropy([seeds.1; 32]);
+        let build = |name: String, authority, shared| {
+            AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+                &AgentConfig::default(),
+                &name,
+                authority,
+                shared,
+            )
+            .expect("simulation effect system")
+        };
+        let alice_fx = build(format!("flow-alice-{}", seeds.0), alice, shared.clone());
+        let bob_fx = build(format!("flow-bob-{}", seeds.1), bob, shared);
+        (alice, alice_fx, bob, bob_fx)
+    }
+
+    // Background sync sends one charged message per round. With the receiver
+    // granting checkpoints back (docs/111 §3.1), two runtimes keep exchanging
+    // far past one window, every receipt admitted by the receiver (run 141
+    // exhausted after 1024 sends).
     #[tokio::test]
     async fn sync_sends_survive_many_flow_budget_epochs_between_two_runtimes() {
-        let shared = crate::SharedTransport::new();
-        let alice = AuthorityId::new_from_entropy([73u8; 32]);
-        let bob = AuthorityId::new_from_entropy([74u8; 32]);
-        let alice_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
-            &AgentConfig::default(),
-            alice,
-            shared.clone(),
-        );
-        let bob_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
-            &AgentConfig::default(),
-            bob,
-            shared,
-        );
-
+        let (alice, alice_fx, bob, bob_fx) = two_runtimes((73, 74));
         let mut epochs = std::collections::BTreeSet::new();
         for send in 0..5 * 1024u32 {
             alice_fx
                 .send_to_peer(bob.uuid(), send.to_be_bytes().to_vec())
                 .await
                 .unwrap_or_else(|error| panic!("send {send} failed: {error}"));
-            let envelope = bob_fx
-                .take_inbound_envelope(|_| true)
-                .unwrap_or_else(|error| panic!("send {send} not delivered: {error}"));
-            assert_eq!(envelope.payload, send.to_be_bytes().to_vec());
-            let receipt = envelope
-                .receipt
-                .as_ref()
-                .unwrap_or_else(|| panic!("send {send} carried no flow receipt"));
-            epochs.insert(receipt.epoch);
-            super::super::transport::validate_inbound_transport_receipt(&envelope)
-                .unwrap_or_else(|error| panic!("send {send} rejected by receiver: {error}"));
+            let (_, payload) = bob_fx
+                .receive()
+                .await
+                .unwrap_or_else(|error| panic!("send {send} not admitted: {error}"));
+            assert_eq!(payload, send.to_be_bytes().to_vec());
+            // Alice picks up any checkpoint Bob granted.
+            let _ = alice_fx.receive().await;
+            let budget = aura_core::effects::JournalEffects::get_flow_budget(
+                &alice_fx,
+                &default_context_id_for_authority(bob),
+                &bob,
+            )
+            .await
+            .expect("budget");
+            epochs.insert(budget.epoch.value());
         }
-        assert!(epochs.len() >= 9, "budget epochs advanced: {epochs:?}");
+        assert!(epochs.len() >= 9, "Bob granted epochs: {epochs:?}");
+        let _ = alice;
+    }
+
+    // A sender that never receives the receiver's checkpoint stops at its
+    // window instead of sending beyond the allowance.
+    #[tokio::test]
+    async fn a_sender_without_checkpoints_stops_at_its_window() {
+        let (_, alice_fx, bob, _bob_fx) = two_runtimes((75, 76));
+        let window = aura_core::types::flow_window::DEFAULT_FLOW_WINDOW;
+        for send in 0..window {
+            alice_fx
+                .send_to_peer(bob.uuid(), vec![1])
+                .await
+                .unwrap_or_else(|error| panic!("send {send} within window failed: {error}"));
+        }
+        let error = alice_fx
+            .send_to_peer(bob.uuid(), vec![1])
+            .await
+            .expect_err("beyond the window");
+        assert!(error.to_string().contains("flow charge failed"), "{error}");
+    }
+
+    // A replayed envelope is dropped by the receiver without surfacing.
+    #[tokio::test]
+    async fn the_receiver_drops_a_replayed_envelope() {
+        let (_, alice_fx, bob, bob_fx) = two_runtimes((77, 78));
+        alice_fx
+            .send_to_peer(bob.uuid(), b"once".to_vec())
+            .await
+            .expect("send");
+        let envelope = bob_fx
+            .transport
+            .inbox()
+            .read()
+            .first()
+            .cloned()
+            .expect("queued");
+        let (_, payload) = bob_fx.receive().await.expect("first copy admitted");
+        assert_eq!(payload, b"once".to_vec());
+        bob_fx.queue_runtime_envelope(envelope);
+        assert!(matches!(
+            bob_fx.receive().await,
+            Err(NetworkError::NoMessage)
+        ));
     }
 
     // Sync digests are matched against the peer *device* id; the receiver must

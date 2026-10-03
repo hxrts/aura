@@ -5144,6 +5144,55 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
     assert_eq!(settled.status, InvitationStatus::Cancelled);
 });
 
+// Run 119: the inviter's first response never reached the invitee. The
+// invitee's acceptance resend must draw a second, deliverable response.
+large_stack_async_test!(contact_acceptance_completes_when_the_first_response_is_lost, {
+    use super::contact_confirmation::CONTACT_INVITATION_RESPONSE_CONTENT_TYPE;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let pair = contact_pair(58).await;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+    let dropped = AtomicBool::new(false);
+    let respond_and_drop_first = async {
+        loop {
+            let _ = pair
+                .sender_handler
+                .process_contact_invitation_acceptances(pair.sender_effects.clone())
+                .await;
+            if !dropped.load(Ordering::Relaxed)
+                && pair
+                    .receiver_effects
+                    .take_inbound_envelope(|env| {
+                        env.metadata.get("content-type").map(String::as_str)
+                            == Some(CONTACT_INVITATION_RESPONSE_CONTENT_TYPE)
+                    })
+                    .is_ok()
+            {
+                dropped.store(true, Ordering::Relaxed);
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let accept = timeout(
+        Duration::from_secs(60),
+        Box::pin(
+            pair.receiver_handler
+                .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
+        ),
+    );
+    let result = tokio::select! {
+        result = accept => result,
+        () = respond_and_drop_first => unreachable!("the inviter loop never ends"),
+    }
+    .expect("the resend must complete within the confirmation wait")
+    .expect("a resent acceptance draws a deliverable response");
+
+    assert!(dropped.load(Ordering::Relaxed), "the first response was lost");
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
+});
+
 large_stack_async_test!(unanswered_contact_acceptance_fails_typed_and_stays_pending, {
     let pair = contact_pair(54).await;
     let invitation = pair.create_contact_invitation().await;

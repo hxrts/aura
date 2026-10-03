@@ -15,7 +15,8 @@ use aura_core::{
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
-const DEFAULT_FLOW_BUDGET_LIMIT: u64 = 1024;
+/// Initial checkpoint limit before any receiver checkpoint (docs/111 §3.1).
+const DEFAULT_FLOW_BUDGET_LIMIT: u64 = aura_core::types::flow_window::DEFAULT_FLOW_WINDOW;
 
 /// Storage envelope for persisted journal state
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -396,15 +397,9 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         current
             .record_charge(cost)
             .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
-        // The receipt binds to the epoch and spend this charge landed in; the
-        // spacing-rule advance only takes effect for the next charge.
-        let charged = current;
-        if current.advance_if_due() {
-            self.update_flow_budget(context, peer, &current).await?;
-            Ok(charged)
-        } else {
-            self.update_flow_budget(context, peer, &current).await
-        }
+        // `spent` is the receipt generation; only the receiver's checkpoint
+        // (docs/111 §3.1) raises the limit, via `update_flow_budget`.
+        self.update_flow_budget(context, peer, &current).await
     }
 }
 
@@ -808,32 +803,42 @@ mod tests {
         )
     }
 
-    /// Background sync charges one unit per send. Before the spacing rule a
-    /// (context, peer) budget exhausted for good after 1024 sends (~3 h of
-    /// sync); it must now keep replenishing through epoch advances.
+    /// The sender charges monotone generations against the receiver's window
+    /// (docs/111 §3.1): it stops at the window's limit until the receiver's
+    /// checkpoint arrives, then continues without its spend resetting.
     #[tokio::test]
-    async fn flow_budget_survives_many_times_its_limit_in_sends() {
+    async fn flow_budget_stops_at_the_window_until_the_receiver_checkpoint() {
+        use aura_core::types::flow_window::{FlowWindowCheckpoint, DEFAULT_FLOW_WINDOW};
         let handler = test_handler(true);
         let (ctx, peer) = (context(9), authority(2));
-        let sends = 5 * 1024;
-        for send in 0..sends {
+        for send in 1..=DEFAULT_FLOW_WINDOW {
             let charged = handler
                 .charge_flow_budget(&ctx, &peer, FlowCost::new(1))
                 .await
                 .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
-            // Receivers reject a zero receipt nonce, and the nonce is the
-            // charged spend, so a charge never reports an empty epoch.
-            assert!(charged.spent >= 1, "send {send} charged {charged:?}");
+            assert_eq!(charged.spent, send, "the receipt generation is monotone");
         }
-        let budget = handler
-            .get_flow_budget(&ctx, &peer)
+        assert!(handler
+            .charge_flow_budget(&ctx, &peer, FlowCost::new(1))
             .await
-            .expect("budget loads");
-        assert!(budget.epoch.value() >= 9, "epoch advanced: {budget:?}");
-        assert!(
-            budget.spent < budget.limit / 2,
-            "headroom remains: {budget:?}"
-        );
+            .is_err());
+
+        let current = handler.get_flow_budget(&ctx, &peer).await.expect("budget");
+        let checkpoint = FlowWindowCheckpoint {
+            epoch: aura_core::Epoch::new(1),
+            base_gen: DEFAULT_FLOW_WINDOW / 2,
+            window: DEFAULT_FLOW_WINDOW,
+        };
+        handler
+            .update_flow_budget(&ctx, &peer, &current.with_checkpoint(&checkpoint))
+            .await
+            .expect("checkpoint adopted");
+        let charged = handler
+            .charge_flow_budget(&ctx, &peer, FlowCost::new(1))
+            .await
+            .expect("replenished");
+        assert_eq!(charged.spent, DEFAULT_FLOW_WINDOW + 1);
+        assert_eq!(charged.epoch.value(), 1);
     }
 
     #[tokio::test]

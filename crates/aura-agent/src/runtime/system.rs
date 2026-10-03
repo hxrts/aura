@@ -1301,7 +1301,9 @@ async fn handle_inbound_transport_envelope(
         effects.record_peer_reachable(envelope.source, now.ts_ms);
     }
     if matches!(
-        effects.requeue_envelope(envelope),
+        // A fresh network envelope: it is admitted against its flow window when
+        // taken, so it must not go through `requeue_envelope`'s readmit pass.
+        effects.queue_runtime_envelope(envelope),
         crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow
     ) {
         tracing::warn!("dropping LAN envelope because the runtime inbox is at capacity");
@@ -1683,12 +1685,11 @@ mod tests {
         );
     }
 
-    /// Background sync charges one unit per send. Every receipt across many
-    /// spacing-rule epoch advances must still pass the receiver's LAN checks
-    /// (run 141 exhausted after 1024 sends; a zero nonce at an epoch boundary
-    /// would be rejected as a replay).
+    /// Every receipt a sender stamps across a full flow window must pass the
+    /// receiver's LAN checks: generations are monotone and never zero (a zero
+    /// nonce is rejected as a replay).
     #[test]
-    fn lan_ingress_accepts_receipts_across_many_flow_budget_epochs() {
+    fn lan_ingress_accepts_every_receipt_in_a_flow_window() {
         use aura_core::effects::FlowBudgetEffects;
 
         let source = AuthorityId::new_from_entropy([12u8; 32]);
@@ -1701,12 +1702,12 @@ mod tests {
         let effects = runtime.effects();
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
 
-        let mut epochs = std::collections::BTreeSet::new();
-        for send in 0..5 * 1024 {
+        let window = aura_core::types::flow_window::DEFAULT_FLOW_WINDOW;
+        for send in 1..=window {
             let receipt = rt
                 .block_on(effects.charge_flow(&context, &destination, aura_core::FlowCost::new(1)))
                 .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
-            epochs.insert(receipt.epoch.value());
+            assert_eq!(receipt.nonce.value(), send, "monotone generation");
 
             let mut envelope = test_envelope();
             envelope.source = source;
@@ -1733,7 +1734,11 @@ mod tests {
             verify_lan_transport_ingress(envelope)
                 .unwrap_or_else(|error| panic!("send {send} rejected at ingress: {error}"));
         }
-        assert!(epochs.len() >= 9, "budget epochs advanced: {epochs:?}");
+        assert!(
+            rt.block_on(effects.charge_flow(&context, &destination, aura_core::FlowCost::new(1)))
+                .is_err(),
+            "the sender stops at its window without a checkpoint"
+        );
     }
 
     #[test]

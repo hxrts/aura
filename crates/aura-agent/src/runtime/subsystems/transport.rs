@@ -97,6 +97,8 @@ struct TransportSubsystemShared {
     stats: Arc<TransportStatsCounters>,
     /// Last time each peer authority was verified reachable (ms).
     reachable_peers: RwLock<HashMap<AuthorityId, u64>>,
+    /// Receiver-side flow budget windows and checkpoint queues.
+    flow: crate::runtime::flow_ingress::FlowIngress,
 }
 
 pub struct TransportSubsystem {
@@ -118,6 +120,7 @@ impl TransportSubsystem {
                 shared_transport: None,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
+                flow: crate::runtime::flow_ingress::FlowIngress::default(),
             }),
         }
     }
@@ -135,6 +138,7 @@ impl TransportSubsystem {
                 shared_transport: Some(shared),
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
+                flow: crate::runtime::flow_ingress::FlowIngress::default(),
             }),
         }
     }
@@ -154,6 +158,7 @@ impl TransportSubsystem {
                 shared_transport,
                 stats: Arc::new(TransportStatsCounters::default()),
                 reachable_peers: RwLock::new(HashMap::new()),
+                flow: crate::runtime::flow_ingress::FlowIngress::default(),
             }),
         }
     }
@@ -162,6 +167,11 @@ impl TransportSubsystem {
     #[allow(dead_code)] // Retained until runtime construction or diagnostics need the concrete handler directly.
     pub fn handler(&self) -> &aura_effects::transport::RealTransportHandler {
         &self.handler
+    }
+
+    /// Receiver-side flow budget enforcement state (docs/111 §3.1).
+    pub(crate) fn flow(&self) -> &crate::runtime::flow_ingress::FlowIngress {
+        &self.shared.flow
     }
 
     /// Get shared inbox reference

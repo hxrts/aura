@@ -46,6 +46,21 @@ pub(crate) async fn send_guarded_transport_envelope(
     effects: &AuraEffectSystem,
     mut envelope: TransportEnvelope,
 ) -> Result<(), TransportError> {
+    // Each call is a distinct send: the move queue's replay window must only
+    // suppress retransmissions of one send, not a re-answer with identical
+    // content (work/8.md Task 45: a lost contact confirmation's resend was
+    // dropped as a duplicate).
+    if !envelope
+        .metadata
+        .contains_key(crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY)
+    {
+        envelope.metadata.insert(
+            crate::runtime::services::move_manager::MESSAGE_ID_METADATA_KEY.to_string(),
+            aura_core::effects::RandomExtendedEffects::random_uuid(effects)
+                .await
+                .to_string(),
+        );
+    }
     let Some(receipt) = envelope.receipt.take() else {
         if effects.is_testing() {
             return send_raw_transport_envelope(effects, envelope).await;

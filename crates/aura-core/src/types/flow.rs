@@ -272,15 +272,17 @@ impl FlowBudget {
         self.join(other)
     }
 
-    /// Spacing rule (docs/111 §3.1): once half the window is spent, open the
-    /// successor epoch so the allowance replenishes on a logical clock rather
-    /// than exhausting for good. Returns whether the epoch advanced.
-    pub fn advance_if_due(&mut self) -> bool {
-        if self.limit == 0 || self.spent < self.limit / 2 {
-            return false;
-        }
-        self.rotate_epoch(Epoch::new(self.epoch.value().saturating_add(1)));
-        true
+    /// The budget after adopting a receiver checkpoint (docs/111 §3.1):
+    /// `spent` is the sender's monotone generation, so a later epoch only
+    /// raises the absolute `limit` to `base_gen + window`. Stale checkpoints
+    /// change nothing.
+    #[must_use]
+    pub fn with_checkpoint(&self, checkpoint: &super::flow_window::FlowWindowCheckpoint) -> Self {
+        self.join(&Self {
+            limit: checkpoint.limit(),
+            spent: self.spent,
+            epoch: checkpoint.epoch,
+        })
     }
 
     /// Advance to a new epoch, resetting spent if the epoch increases.
@@ -306,16 +308,17 @@ impl Default for FlowBudget {
 
 impl JoinSemilattice for FlowBudget {
     fn join(&self, other: &Self) -> Self {
-        // Spend is per epoch: a later epoch supersedes an earlier one's spend,
-        // and replicas of the same epoch take the larger spend.
-        let spent = match self.epoch.value().cmp(&other.epoch.value()) {
-            std::cmp::Ordering::Greater => self.spent,
-            std::cmp::Ordering::Less => other.spent,
-            std::cmp::Ordering::Equal => self.spent.max(other.spent),
+        // `spent` is a monotone generation (join). The limit belongs to the
+        // epoch's checkpoint: a later epoch's limit supersedes, and replicas of
+        // the same epoch take the more restrictive one (meet).
+        let limit = match self.epoch.value().cmp(&other.epoch.value()) {
+            std::cmp::Ordering::Greater => self.limit,
+            std::cmp::Ordering::Less => other.limit,
+            std::cmp::Ordering::Equal => self.limit.min(other.limit),
         };
         Self {
-            limit: self.limit.min(other.limit), // Meet for limit (more restrictive)
-            spent,
+            limit,
+            spent: self.spent.max(other.spent),
             epoch: if self.epoch.value() >= other.epoch.value() {
                 self.epoch
             } else {
@@ -433,23 +436,28 @@ mod tests {
     // associativity) are in tests/laws/flow_budget_crdt.rs.
 
     #[test]
-    fn spacing_rule_replenishes_instead_of_exhausting() {
+    fn a_receiver_checkpoint_raises_the_limit_without_resetting_spend() {
+        use crate::types::flow_window::FlowWindowCheckpoint;
         let mut budget = FlowBudget::new(4, Epoch::initial());
-        for _ in 0..100 {
+        for _ in 0..4 {
             budget
                 .record_charge(FlowCost::new(1))
-                .expect("spacing keeps headroom");
-            budget.advance_if_due();
+                .expect("within window");
         }
-        assert_eq!(budget.epoch.value(), 50);
+        assert!(budget.record_charge(FlowCost::new(1)).is_err());
 
-        // A replica still in an older epoch does not resurrect its spend.
-        let stale = FlowBudget {
-            limit: 4,
-            spent: 3,
+        let bumped = budget.with_checkpoint(&FlowWindowCheckpoint {
             epoch: Epoch::new(1),
-        };
-        assert_eq!(budget.join(&stale).spent, budget.spent);
+            base_gen: 2,
+            window: 4,
+        });
+        assert_eq!(
+            (bumped.epoch.value(), bumped.limit, bumped.spent),
+            (1, 6, 4)
+        );
+        // A stale checkpoint changes nothing.
+        let stale = bumped.with_checkpoint(&FlowWindowCheckpoint::initial(4));
+        assert_eq!(stale, bumped);
     }
 
     #[test]
