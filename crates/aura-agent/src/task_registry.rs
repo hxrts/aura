@@ -682,8 +682,12 @@ impl TaskGroup {
 
         #[cfg(target_arch = "wasm32")]
         {
-            spawn_local(async move {
-                let outcome = AssertUnwindSafe(async {
+            // The browser runtime has no Tokio task ids; give each task its own
+            // choreography binding scope.
+            spawn_local(
+                crate::runtime::subsystems::choreography::with_choreography_binding_scope(
+                    async move {
+                        let outcome = AssertUnwindSafe(async {
                     tokio::select! {
                         _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                         _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
@@ -695,15 +699,17 @@ impl TaskGroup {
                 .await
                 .unwrap_or(TaskOutcome::Panicked);
 
-                emit_task_completion(
-                    diagnostics.as_ref(),
-                    &group_name,
-                    &task_name_for_wrapper,
-                    task_id,
-                    &outcome,
-                );
-                group.complete_task(task_id, &task_name_for_wrapper, outcome);
-            });
+                        emit_task_completion(
+                            diagnostics.as_ref(),
+                            &group_name,
+                            &task_name_for_wrapper,
+                            task_id,
+                            &outcome,
+                        );
+                        group.complete_task(task_id, &task_name_for_wrapper, outcome);
+                    },
+                ),
+            );
         }
 
         OwnedTaskHandle::new(
@@ -756,8 +762,12 @@ impl TaskGroup {
 
         #[cfg(target_arch = "wasm32")]
         {
-            spawn_local(async move {
-                let outcome = AssertUnwindSafe(async {
+            // The browser runtime has no Tokio task ids; give each task its own
+            // choreography binding scope.
+            spawn_local(
+                crate::runtime::subsystems::choreography::with_choreography_binding_scope(
+                    async move {
+                        let outcome = AssertUnwindSafe(async {
                     tokio::select! {
                         _ = shutdown_cancelled(&mut shutdown_rx) => TaskOutcome::Cancelled,
                         _ = inherited_cancelled(inherited.as_ref()) => TaskOutcome::Cancelled,
@@ -769,15 +779,17 @@ impl TaskGroup {
                 .await
                 .unwrap_or(TaskOutcome::Panicked);
 
-                emit_task_completion(
-                    diagnostics.as_ref(),
-                    &group_name,
-                    &task_name_for_wrapper,
-                    task_id,
-                    &outcome,
-                );
-                group.complete_task(task_id, &task_name_for_wrapper, outcome);
-            });
+                        emit_task_completion(
+                            diagnostics.as_ref(),
+                            &group_name,
+                            &task_name_for_wrapper,
+                            task_id,
+                            &outcome,
+                        );
+                        group.complete_task(task_id, &task_name_for_wrapper, outcome);
+                    },
+                ),
+            );
         }
 
         OwnedTaskHandle::new(

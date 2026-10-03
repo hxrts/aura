@@ -15,8 +15,52 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ExecutionBindingKey {
+    /// An explicit binding scope (see [`with_choreography_binding_scope`]).
+    Scope(u64),
     Task(TaskId),
     Thread(ThreadId),
+}
+
+std::thread_local! {
+    static CURRENT_BINDING_SCOPE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+static NEXT_BINDING_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// A future that runs with its own choreography binding scope.
+///
+/// Sessions bind to the executing Tokio task; where there is no Tokio task
+/// (the single-threaded browser runtime) every future would share one thread
+/// key, so one active session would block all others. The scope is set only
+/// while this future is polled, so interleaved futures keep separate keys.
+pub(crate) struct ChoreographyBindingScope<F> {
+    scope: u64,
+    inner: std::pin::Pin<Box<F>>,
+}
+
+/// Run `fut` in a fresh choreography binding scope.
+pub(crate) fn with_choreography_binding_scope<F: std::future::Future>(
+    fut: F,
+) -> ChoreographyBindingScope<F> {
+    ChoreographyBindingScope {
+        scope: NEXT_BINDING_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        inner: Box::pin(fut),
+    }
+}
+
+impl<F: std::future::Future> std::future::Future for ChoreographyBindingScope<F> {
+    type Output = F::Output;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let scope = self.scope;
+        let previous = CURRENT_BINDING_SCOPE.with(|current| current.replace(Some(scope)));
+        let result = self.inner.as_mut().poll(cx);
+        CURRENT_BINDING_SCOPE.with(|current| current.set(previous));
+        result
+    }
 }
 
 /// Runtime choreography session identity bound to one active protocol execution.
@@ -263,6 +307,9 @@ impl Default for ChoreographySessionState {
 impl ChoreographyState {
     #[allow(clippy::disallowed_methods)] // Fallback for tests/sync callers outside a Tokio task.
     fn current_binding_key() -> ExecutionBindingKey {
+        if let Some(scope) = CURRENT_BINDING_SCOPE.with(std::cell::Cell::get) {
+            return ExecutionBindingKey::Scope(scope);
+        }
         tokio::task::try_id()
             .map(ExecutionBindingKey::Task)
             .unwrap_or_else(|| ExecutionBindingKey::Thread(std::thread::current().id()))
@@ -1049,5 +1096,46 @@ mod tests {
                 .expect_err("duplicate session should be rejected"),
             SessionStartError::SessionAlreadyExists { session_id }
         );
+    }
+
+    #[test]
+    fn interleaved_futures_on_one_thread_bind_separate_sessions() {
+        use std::future::Future;
+        // The browser runtime: no Tokio task, one thread, futures interleave.
+        let role = ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_bytes([4; 16])),
+            AuthorityId::new_from_entropy([0u8; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let state = std::cell::RefCell::new(ChoreographyState::new());
+        let run = |seed: u128| {
+            let state = &state;
+            with_choreography_binding_scope(async move {
+                let session = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(seed));
+                state
+                    .borrow_mut()
+                    .start_session(
+                        session,
+                        None,
+                        ContextId::new_from_entropy([9; 32]),
+                        vec![role],
+                        role,
+                        None,
+                        0,
+                    )
+                    .expect("each future binds its own session");
+                // Let the other future run before reading the binding back.
+                futures::pending!();
+                assert_eq!(state.borrow().current_session_id(), Some(session));
+            })
+        };
+        let mut first = Box::pin(run(71));
+        let mut second = Box::pin(run(72));
+        let waker = futures::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        assert!(first.as_mut().poll(&mut cx).is_pending());
+        assert!(second.as_mut().poll(&mut cx).is_pending());
+        assert!(first.as_mut().poll(&mut cx).is_ready());
+        assert!(second.as_mut().poll(&mut cx).is_ready());
     }
 }

@@ -1372,10 +1372,14 @@ impl InvitationHandler {
             &operation_budget,
             "accept_invitation_choreography",
             INVITATION_ACCEPT_CHOREOGRAPHY_STAGE_TIMEOUT_MS,
-            self.execute_accept_invitation_follow_up(
-                effects.clone(),
-                invitation_id,
-                choreography_invitation.as_ref(),
+            // Its own binding scope, so a session another future keeps open on a
+            // single-threaded (browser) runtime cannot block this one.
+            crate::runtime::subsystems::choreography::with_choreography_binding_scope(
+                self.execute_accept_invitation_follow_up(
+                    effects.clone(),
+                    invitation_id,
+                    choreography_invitation.as_ref(),
+                ),
             ),
         )
         .await?;
