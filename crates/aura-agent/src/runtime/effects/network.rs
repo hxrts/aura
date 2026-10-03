@@ -10,7 +10,7 @@ use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, RandomExtendedEffects,
     TransportEffects, TransportError,
 };
-use aura_core::types::identifiers::AuthorityId;
+use aura_core::types::identifiers::{AuthorityId, ContextId};
 #[cfg(not(target_arch = "wasm32"))]
 use aura_core::{execute_with_timeout_budget, TimeoutBudget, TimeoutRunError};
 #[cfg(not(target_arch = "wasm32"))]
@@ -415,6 +415,37 @@ where
 }
 
 impl AuraEffectSystem {
+    /// Charge one unit of `peer`'s flow budget and return the transport
+    /// receipt for the send; shared by the production and simulation paths.
+    async fn charge_send_receipt(
+        &self,
+        peer_id: uuid::Uuid,
+        context: &ContextId,
+        peer: &AuthorityId,
+    ) -> Result<aura_core::effects::transport::TransportReceipt, NetworkError> {
+        let receipt = aura_core::effects::FlowBudgetEffects::charge_flow(
+            self,
+            context,
+            peer,
+            aura_core::FlowCost::new(1),
+        )
+        .await
+        .map_err(|e| NetworkError::SendFailed {
+            peer_id: Some(peer_id),
+            reason: format!("flow charge failed: {e}"),
+        })?;
+        Ok(aura_core::effects::transport::TransportReceipt {
+            context: receipt.ctx,
+            src: receipt.src,
+            dst: receipt.dst,
+            epoch: receipt.epoch.value(),
+            cost: receipt.cost.value(),
+            nonce: receipt.nonce.value(),
+            prev: receipt.prev.0,
+            sig: receipt.sig.into_bytes(),
+        })
+    }
+
     /// Send `message` to a peer device under `content_type`, addressed by device
     /// and carrying a flow receipt; shared by sync and sibling replication.
     pub(crate) async fn send_device_payload(
@@ -435,14 +466,24 @@ impl AuraEffectSystem {
                 if let Some(device) = device {
                     metadata.insert("aura-destination-device-id".to_string(), device.to_string());
                 }
-                let envelope = TransportEnvelope {
+                let context = default_context_id_for_authority(peer);
+                // Charge and bind a receipt as production does, so simulations
+                // exercise flow budgets instead of bypassing them.
+                let mut receipt = self.charge_send_receipt(peer_id, &context, &peer).await?;
+                let mut envelope = TransportEnvelope {
                     destination: peer,
                     source: self.authority_id,
-                    context: default_context_id_for_authority(peer),
+                    context,
                     payload: message,
                     metadata,
                     receipt: None,
                 };
+                self.bind_transport_receipt_to_envelope(&mut receipt, &envelope)
+                    .map_err(|e| NetworkError::SendFailed {
+                        peer_id: Some(peer_id),
+                        reason: e.to_string(),
+                    })?;
+                envelope.receipt = Some(receipt);
                 shared.route_envelope(envelope);
                 return Ok(());
             }
@@ -469,33 +510,14 @@ impl AuraEffectSystem {
         }
         let context = default_context_id_for_authority(peer);
         // Production transport requires guard-chain receipt evidence.
-        let receipt = aura_core::effects::FlowBudgetEffects::charge_flow(
-            self,
-            &context,
-            &peer,
-            aura_core::FlowCost::new(1),
-        )
-        .await
-        .map_err(|e| NetworkError::SendFailed {
-            peer_id: Some(peer_id),
-            reason: format!("flow charge failed: {e}"),
-        })?;
+        let receipt = self.charge_send_receipt(peer_id, &context, &peer).await?;
         let envelope = TransportEnvelope {
             destination: peer,
             source: self.authority_id,
             context,
             payload: message,
             metadata,
-            receipt: Some(aura_core::effects::transport::TransportReceipt {
-                context: receipt.ctx,
-                src: receipt.src,
-                dst: receipt.dst,
-                epoch: receipt.epoch.value(),
-                cost: receipt.cost.value(),
-                nonce: receipt.nonce.value(),
-                prev: receipt.prev.0,
-                sig: receipt.sig.into_bytes(),
-            }),
+            receipt: Some(receipt),
         };
 
         send_guarded_transport_envelope(self, envelope)
@@ -608,6 +630,47 @@ mod tests {
         let _ = std::fs::create_dir_all(&path);
         config.storage.base_path = path;
         config
+    }
+
+    // Background sync sends one charged message per round. Two runtimes must
+    // keep exchanging past many times the flow-budget limit, with every
+    // receipt passing the receiver's inbound check (run 141 exhausted after
+    // 1024 sends; an epoch boundary once produced a rejected zero nonce).
+    #[tokio::test]
+    async fn sync_sends_survive_many_flow_budget_epochs_between_two_runtimes() {
+        let shared = crate::SharedTransport::new();
+        let alice = AuthorityId::new_from_entropy([73u8; 32]);
+        let bob = AuthorityId::new_from_entropy([74u8; 32]);
+        let alice_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
+            &AgentConfig::default(),
+            alice,
+            shared.clone(),
+        );
+        let bob_fx = crate::testing::simulation_effect_system_with_shared_transport_for_authority(
+            &AgentConfig::default(),
+            bob,
+            shared,
+        );
+
+        let mut epochs = std::collections::BTreeSet::new();
+        for send in 0..5 * 1024u32 {
+            alice_fx
+                .send_to_peer(bob.uuid(), send.to_be_bytes().to_vec())
+                .await
+                .unwrap_or_else(|error| panic!("send {send} failed: {error}"));
+            let envelope = bob_fx
+                .take_inbound_envelope(|_| true)
+                .unwrap_or_else(|error| panic!("send {send} not delivered: {error}"));
+            assert_eq!(envelope.payload, send.to_be_bytes().to_vec());
+            let receipt = envelope
+                .receipt
+                .as_ref()
+                .unwrap_or_else(|| panic!("send {send} carried no flow receipt"));
+            epochs.insert(receipt.epoch);
+            super::super::transport::validate_inbound_transport_receipt(&envelope)
+                .unwrap_or_else(|error| panic!("send {send} rejected by receiver: {error}"));
+        }
+        assert!(epochs.len() >= 9, "budget epochs advanced: {epochs:?}");
     }
 
     // Sync digests are matched against the peer *device* id; the receiver must

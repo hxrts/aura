@@ -560,7 +560,9 @@ fn fallback_direct_route(envelope: &TransportEnvelope) -> Route {
     ))
 }
 
-fn validate_inbound_transport_receipt(envelope: &TransportEnvelope) -> Result<(), TransportError> {
+pub(super) fn validate_inbound_transport_receipt(
+    envelope: &TransportEnvelope,
+) -> Result<(), TransportError> {
     let Some(receipt) = envelope.receipt.as_ref() else {
         return Ok(());
     };
