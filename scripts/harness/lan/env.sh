@@ -14,6 +14,9 @@
 #   AURA_E2E_REMOTE       ssh destination of the other host (e.g. user@192.168.0.32)
 #   AURA_E2E_REMOTE_ROOT  repo checkout on the other host (default: ~/projects/aura)
 #   AURA_E2E_REMOTE_PREFIX  instance-id prefix owned by the other host (default: barbara-)
+#   AURA_E2E_HOST_ADDR    this host's LAN address, substituted for __HOST_ADDR__
+#                         in the configs (default: detected from the primary
+#                         interface)
 
 AURA_E2E_ROOT="${AURA_E2E_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 AURA_E2E_RUN_DIR="${AURA_E2E_RUN_DIR:-$AURA_E2E_ROOT/.tmp/e2e/run}"
@@ -23,5 +26,9 @@ AURA_E2E_RUN_TOKEN="${AURA_E2E_RUN_TOKEN:-lan-e2e-shared-run}"
 AURA_E2E_REMOTE="${AURA_E2E_REMOTE:-}"
 AURA_E2E_REMOTE_ROOT="${AURA_E2E_REMOTE_ROOT:-projects/aura}"
 AURA_E2E_REMOTE_PREFIX="${AURA_E2E_REMOTE_PREFIX:-barbara-}"
+if [[ -z "${AURA_E2E_HOST_ADDR:-}" ]]; then
+  AURA_E2E_HOST_ADDR="$( (ipconfig getifaddr en0 || ipconfig getifaddr en1 || hostname -I 2>/dev/null | awk '{print $1}') 2>/dev/null | head -1)"
+fi
 export AURA_E2E_ROOT AURA_E2E_RUN_DIR AURA_E2E_TOOL_REPL AURA_E2E_AURA_BIN \
-  AURA_E2E_RUN_TOKEN AURA_E2E_REMOTE AURA_E2E_REMOTE_ROOT AURA_E2E_REMOTE_PREFIX
+  AURA_E2E_RUN_TOKEN AURA_E2E_REMOTE AURA_E2E_REMOTE_ROOT AURA_E2E_REMOTE_PREFIX \
+  AURA_E2E_HOST_ADDR

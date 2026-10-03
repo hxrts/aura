@@ -595,6 +595,8 @@ The harness is the single executor for real frontend scenarios. Scripted mode us
 
 Multi-host runs use one harness per host with the same run token. Set `[run] fixed_ports = true` so configured `bind_address` and `lan_discovery.port` values stay literal instead of being namespaced by the run token; peers on different hosts must agree on these ports.
 
+The tracked LAN helpers live in `scripts/harness/lan/`. `configs/harness/lan-host-{a,b}.toml` name each host's LAN address as `__HOST_ADDR__`; `drv.sh start` renders the config with `AURA_E2E_HOST_ADDR` (detected from the primary interface by default), so no address is committed. Build the same commit on both hosts with `build.sh <lane>`, then run `AURA_E2E_REMOTE=user@host scripts/harness/lan/fresh.sh <run-token>` from the first host: it starts both drivers on the token, onboards the standard cast and links contacts; `lib.sh` provides the request helpers used by scenario scripts.
+
 Local TUI instances write plaintext runtime tracing to `runtime.log` under the instance's transient root (passed as `AURA_TUI_RUNTIME_LOG_FILE`, honored only in harness mode, filtered by `RUST_LOG`). `tail_log` reads that file first and falls back to the PTY capture. Treat it as diagnostic output, not semantic evidence.
 
 Shared flows should be authored semantically once, then executed through the harness using either the TUI or browser driver. Do not create a second frontend execution path for MBT or simulator replay. Core shared scenarios should use semantic actions and state-based assertions. Avoid raw selector steps, raw `press_key` steps, and label-based browser clicks except in dedicated low-level driver tests.
