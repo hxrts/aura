@@ -549,3 +549,39 @@ pub async fn mark_channel_viewed(
     let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
     emit_read_receipts(app_core, context_id, channel_id, unread, timestamp_ms).await
 }
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+    use crate::{AppConfig, AppCore};
+    use aura_journal::fact::RelationalFact;
+
+    /// Contacts are unilateral (docs/115 §1.3): removing one commits only this
+    /// authority's own removal fact; nothing is addressed to the peer.
+    #[tokio::test]
+    async fn removing_a_contact_commits_only_a_local_removal_fact() {
+        let own = AuthorityId::new_from_entropy([181u8; 32]);
+        let peer = AuthorityId::new_from_entropy([182u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(own));
+        runtime.record_relational_facts();
+        let bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), bridge).unwrap(),
+        ));
+
+        remove_contact(&app_core, &peer.to_string(), 1)
+            .await
+            .expect("remove contact");
+
+        let facts = runtime.recorded_relational_facts();
+        assert_eq!(facts.len(), 1, "exactly one fact: {facts:?}");
+        let RelationalFact::Generic { envelope, .. } = &facts[0] else {
+            panic!("contact removal is a generic relational fact");
+        };
+        assert!(matches!(
+            ContactFact::from_envelope(envelope),
+            Some(ContactFact::Removed { owner_id, contact_id, .. })
+                if owner_id == own && contact_id == peer
+        ));
+    }
+}
