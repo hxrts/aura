@@ -40,9 +40,21 @@ cfg_if! {
         fn main() {
             aura_app::platform::wasm::initialize();
             apply_harness_mode_document_flags();
+            // `?log=debug`, or a harness-run page (it carries the relay query),
+            // opts into debug tracing for diagnosis.
+            let max_level = if web_sys::window()
+                .and_then(|window| window.location().search().ok())
+                .is_some_and(|search| {
+                    search.contains("log=debug") || search.contains("__aura_harness_relay_addr=")
+                })
+            {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
             let mut tracing_config = tracing_wasm::WASMLayerConfigBuilder::new();
             tracing_config
-                .set_max_level(tracing::Level::INFO)
+                .set_max_level(max_level)
                 .set_report_logs_in_timings(false);
             tracing_wasm::set_as_global_default_with_config(tracing_config.build());
             dioxus::launch(App);
