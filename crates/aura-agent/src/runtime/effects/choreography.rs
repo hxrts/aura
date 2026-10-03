@@ -95,7 +95,9 @@ impl ChoreographicEffects for AuraEffectSystem {
         role: ChoreographicRole,
         message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        let session = current_session_snapshot(self)?;
+        let session = current_session_snapshot(self).inspect_err(|error| {
+            tracing::info!(error = %error, peer = %role.authority_id, "choreography send without a bound session");
+        })?;
         let context_id = session.context_id;
         let current_role = session.current_role;
 
@@ -200,6 +202,10 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         send_guarded_transport_envelope(self, envelope)
             .await
+            .inspect(|()| tracing::info!(peer = %peer, "choreography send delivered to transport"))
+            .inspect_err(
+                |error| tracing::info!(peer = %peer, error = %error, "choreography send failed"),
+            )
             .map_err(|e| ChoreographyError::Transport {
                 source: Box::new(e),
             })?;
