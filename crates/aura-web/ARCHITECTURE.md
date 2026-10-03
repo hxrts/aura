@@ -46,6 +46,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 - Browser bootstrap handoff stays explicit: runtime identity is staged through
   the dedicated `stage_runtime_identity` bridge entrypoint rather than through
   ambient storage or a generic bootstrap trigger.
+- Browser semantic commands report enrollment code issuance and staged import
+  as those events only. Completion is a separate app-owned ceremony-linked
+  operation observed after runtime handoff or restart; browser teardown cannot
+  own or cancel its terminal publication. `ui_state` preserves the operation
+  instance, cancellation, and typed failure domain/code from the shared
+  snapshot.
 - Browser bootstrap storage is explicit and typed: the shell persists selected
   runtime identity, pending bootstrap metadata, and browser-local
   `AccountConfig` metadata separately so preserved-profile restarts can rebind

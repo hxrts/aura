@@ -185,8 +185,12 @@ impl PersistentTreeHandler {
         Ok(ops)
     }
 
-    /// Merge imported operations into the local OpLog, preserving existing order
+    /// Persist an already verified operation batch, preserving existing order
     /// and appending only previously unseen operations.
+    ///
+    /// This storage primitive does not authenticate peer data. Runtime ingress
+    /// must verify every operation against a trusted parent-epoch package and
+    /// stage the complete transition before calling it.
     pub async fn import_ops(&self, imported_ops: &[AttestedOp]) -> Result<(), AuraError> {
         self.ensure_initialized().await?;
 
@@ -239,12 +243,12 @@ impl PersistentTreeHandler {
         Ok(())
     }
 
-    /// Replace the local OpLog with `ops`.
+    /// Replace the local OpLog with an already authenticated baseline.
     ///
     /// Tree ops are stored by hash, not per authority, so a device that ran under
     /// a provisional authority before joining an account still holds that
-    /// authority's ops. Joining adopts the account's tree outright rather than
-    /// merging into it.
+    /// authority's ops. Callers must verify the account baseline and its
+    /// ceremony-scoped trust anchor before discarding provisional history.
     pub async fn replace_ops(&self, ops: &[AttestedOp]) -> Result<(), AuraError> {
         self.ensure_initialized().await?;
         let keys = self

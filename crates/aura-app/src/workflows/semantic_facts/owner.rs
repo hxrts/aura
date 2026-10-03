@@ -146,16 +146,17 @@ impl SemanticWorkflowOwner {
         &self,
         phase: SemanticOperationPhase,
     ) -> Result<(), AuraError> {
+        if matches!(
+            phase,
+            SemanticOperationPhase::Succeeded | SemanticOperationPhase::Failed
+        ) {
+            return Err(AuraError::invalid(
+                "terminal success requires a typed proof and failure requires a typed error",
+            ));
+        }
         let publication = {
             let mut state = self.publication_state.lock().await;
             match phase {
-                SemanticOperationPhase::Succeeded => state.take().map(|context| {
-                    ExactOperationLifecyclePublication::success_from_context(
-                        semantic_lifecycle_publication_capability(),
-                        context,
-                        self.kind,
-                    )
-                }),
                 SemanticOperationPhase::Cancelled => state.take().map(|context| {
                     ExactOperationLifecyclePublication::cancelled_from_context(
                         semantic_lifecycle_publication_capability(),
@@ -173,22 +174,19 @@ impl SemanticWorkflowOwner {
                 }),
             }
         };
-        let terminal_status = matches!(
-            phase,
-            SemanticOperationPhase::Succeeded | SemanticOperationPhase::Cancelled
-        )
-        .then(|| WorkflowTerminalStatus {
-            causality: publication
-                .as_ref()
-                .and_then(ExactOperationLifecyclePublication::causality),
-            status: if phase == SemanticOperationPhase::Cancelled {
-                SemanticOperationStatus::cancelled(self.kind)
-            } else {
-                SemanticOperationStatus::new(self.kind, phase)
-            },
-        });
+        let terminal_status =
+            matches!(phase, SemanticOperationPhase::Cancelled).then(|| WorkflowTerminalStatus {
+                causality: publication
+                    .as_ref()
+                    .and_then(ExactOperationLifecyclePublication::causality),
+                status: SemanticOperationStatus::cancelled(self.kind),
+            });
         if let Some(publication) = publication {
             publish_exact_operation_lifecycle(&self.app_core, publication).await?;
+        } else if self.instance_id.is_some() {
+            return Err(AuraError::invalid(
+                "semantic operation instance has already published a terminal outcome",
+            ));
         } else {
             publish_authoritative_operation_phase_with_instance(
                 &self.app_core,
@@ -234,6 +232,10 @@ impl SemanticWorkflowOwner {
         };
         if let Some(publication) = publication {
             publish_exact_operation_lifecycle(&self.app_core, publication).await?;
+        } else if self.instance_id.is_some() {
+            return Err(AuraError::invalid(
+                "semantic operation instance has already published a terminal outcome",
+            ));
         } else {
             let success_fact = operation_phase_fact(
                 self.operation_id.clone(),
@@ -275,6 +277,10 @@ impl SemanticWorkflowOwner {
         };
         if let Some(publication) = publication {
             publish_exact_operation_lifecycle(&self.app_core, publication).await?;
+        } else if self.instance_id.is_some() {
+            return Err(AuraError::invalid(
+                "semantic operation instance has already published a terminal outcome",
+            ));
         } else {
             publish_authoritative_operation_failure_with_instance(
                 &self.app_core,

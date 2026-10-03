@@ -210,6 +210,15 @@ Converted semantic-owner paths also follow two stricter publication rules:
 - converted ceremony-processing convergence in invitation/device-enrollment
   workflows must fail immediately on runtime processing errors; owner code may
   not log those errors and continue into later polling/count-based success tests
+- device-enrollment code issuance and completion use separate semantic
+  operation instances linked by ceremony ID. The app/runtime hook group owns
+  completion observation and reattachment across frontend remount and runtime
+  restart; terminal publication consumes the runtime's typed outcome exactly
+  once. A frontend-local monitor cannot own this lifecycle.
+- `OperationSnapshot` retains the authoritative operation instance, state,
+  and stable failure domain/code. Cancellation remains distinct from failure,
+  and guardian acceptance cannot publish success until the runtime supplies
+  authenticated post-verification completion evidence.
 - channel-membership readiness facts are owner-published and runtime-revalidated;
   refresh helpers may reconcile or prune existing authoritative facts, but they
   may not mine `observed_chat_snapshot` or renderer-local chat projection state

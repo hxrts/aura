@@ -48,6 +48,83 @@ pub async fn import_invitation_details(
     .map_err(|e| AuraError::from(super::super::error::runtime_call("import invitation", e)))
 }
 
+fn invitation_import_failure(error: &AuraError) -> crate::ui_contract::SemanticOperationError {
+    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
+    let code = match error {
+        AuraError::Invalid { .. } | AuraError::Serialization { .. } => {
+            SemanticFailureCode::InvalidArgument
+        }
+        AuraError::PermissionDenied { .. } | AuraError::Crypto { .. } => {
+            SemanticFailureCode::PermissionDenied
+        }
+        AuraError::NotFound { .. } => SemanticFailureCode::NotFound,
+        AuraError::Network { .. } => SemanticFailureCode::Unavailable,
+        _ => SemanticFailureCode::CommandFailed,
+    };
+    SemanticOperationError::new(SemanticFailureDomain::Invitation, code)
+        .with_detail(error.to_string())
+}
+
+/// Import and verify a code under the app-owned import lifecycle. The caller
+/// passes its already allocated exact instance at the frontend handoff.
+pub async fn import_invitation_details_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    code: &str,
+    instance_id: OperationInstanceId,
+) -> crate::ui_contract::WorkflowTerminalOutcome<InvitationHandle> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::invitation_import(),
+        Some(instance_id),
+        SemanticOperationKind::ImportInvitation,
+    );
+    let result = import_invitation_details_owned(app_core, code, &owner, None).await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+#[aura_macros::semantic_owner(
+    owner = "import_invitation_details_owned",
+    wrapper = "import_invitation_details_with_terminal_status",
+    terminal = "publish_success_with",
+    postcondition = "invitation_imported",
+    proof = crate::workflows::semantic_facts::InvitationImportedProof,
+    authoritative_inputs = "runtime,verified_invitation",
+    depends_on = "runtime_import_verified",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn import_invitation_details_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    code: &str,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<InvitationHandle, AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    match import_invitation_details(app_core, code).await {
+        Ok(invitation) => {
+            owner
+                .publish_success_with(issue_invitation_imported_proof(
+                    invitation.invitation_id().clone(),
+                ))
+                .await?;
+            Ok(invitation)
+        }
+        Err(error) => {
+            owner
+                .publish_failure(invitation_import_failure(&error))
+                .await?;
+            Err(error)
+        }
+    }
+}
+
 pub(in crate::workflows) async fn pending_invitation_info_by_id(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
@@ -107,4 +184,33 @@ pub async fn import_invitation(
     }
 
     refresh_authoritative_invitation_readiness(app_core).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain};
+
+    #[test]
+    fn import_errors_keep_stable_failure_classes() {
+        let cases = [
+            (
+                AuraError::invalid("bad code"),
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                AuraError::permission_denied("untrusted proof"),
+                SemanticFailureCode::PermissionDenied,
+            ),
+            (
+                AuraError::not_found("invitation"),
+                SemanticFailureCode::NotFound,
+            ),
+        ];
+        for (error, code) in cases {
+            let failure = invitation_import_failure(&error);
+            assert_eq!(failure.domain, SemanticFailureDomain::Invitation);
+            assert_eq!(failure.code, code);
+        }
+    }
 }

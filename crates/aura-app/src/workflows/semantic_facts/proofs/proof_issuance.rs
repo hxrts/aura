@@ -86,6 +86,21 @@ semantic_success_proof!(
     } => "device_enrollment_started"
 );
 semantic_success_proof!(
+    pub(in crate::workflows) struct DeviceEnrollmentCompletedProof {
+        ceremony_id: aura_core::CeremonyId
+    } => "device_enrollment_completed"
+);
+semantic_success_proof!(
+    pub(in crate::workflows) struct GuardianInvitationConfirmedProof {
+        invitation_id: aura_core::InvitationId
+    } => "guardian_invitation_confirmed"
+);
+semantic_success_proof!(
+    pub(in crate::workflows) struct InvitationImportedProof {
+        invitation_id: aura_core::InvitationId
+    } => "invitation_imported"
+);
+semantic_success_proof!(
     pub(in crate::workflows) struct DeviceEnrollmentImportedProof {
         invitation_id: aura_core::InvitationId
     } => "device_enrollment_imported"
@@ -239,6 +254,45 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
 ) -> DeviceEnrollmentStartedProof {
     let _ = semantic_postcondition_proof_capability();
     DeviceEnrollmentStartedProof { ceremony_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof",
+    family = "proof_issuer"
+)]
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+pub(in crate::workflows) fn issue_device_enrollment_completed_proof(
+    ceremony_id: aura_core::CeremonyId,
+) -> DeviceEnrollmentCompletedProof {
+    let _ = semantic_postcondition_proof_capability();
+    DeviceEnrollmentCompletedProof { ceremony_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof",
+    family = "proof_issuer"
+)]
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+pub(in crate::workflows) fn issue_guardian_invitation_confirmed_proof(
+    invitation_id: aura_core::InvitationId,
+) -> GuardianInvitationConfirmedProof {
+    let _ = semantic_postcondition_proof_capability();
+    GuardianInvitationConfirmedProof { invitation_id }
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "semantic_postcondition_proof",
+    family = "proof_issuer"
+)]
+#[aura_macros::authoritative_source(kind = "proof_issuer")]
+pub(in crate::workflows) fn issue_invitation_imported_proof(
+    invitation_id: aura_core::InvitationId,
+) -> InvitationImportedProof {
+    let _ = semantic_postcondition_proof_capability();
+    InvitationImportedProof { invitation_id }
 }
 
 #[aura_macros::capability_boundary(

@@ -795,6 +795,24 @@ mod tests {
     }
 
     #[test]
+    fn entering_enrollment_code_does_not_claim_runtime_completion() {
+        let mut model = UiModel::new("authority-local".to_string());
+        let clipboard = MemoryClipboard::default();
+        model.set_screen(ScreenId::Settings);
+        model.settings_section = SettingsSection::Devices;
+        apply_text_keys(&mut model, "i", &clipboard);
+        apply_text_keys(&mut model, "CODE-123", &clipboard);
+        apply_named_key(&mut model, "enter", 1, &clipboard);
+
+        assert!(!model.has_secondary_device());
+        assert_eq!(
+            model.toast.as_ref().map(|toast| toast.message.as_str()),
+            Some("Enrollment code entered; import requires runtime confirmation")
+        );
+        assert!(model.operations.is_empty());
+    }
+
+    #[test]
     fn settings_add_device_wizard_can_copy_generated_code() {
         let mut model = UiModel::new("authority-local".to_string());
         let clipboard = MemoryClipboard::default();

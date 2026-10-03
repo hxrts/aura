@@ -104,22 +104,59 @@ impl InvitationServiceApi {
     fn spawn_guardian_invitation_principal(&self, invitation: &Invitation) {
         let invitation = invitation.clone();
         let handler = self.handler.clone();
+        let service = self.clone();
         let effects = self.effects.clone();
         let tasks = self.tasks.group(format!(
             "invitation_service.guardian_principal.{}",
             invitation.invitation_id
         ));
         let fut = async move {
-            if let Err(error) = handler
+            let result = handler
                 .execute_guardian_invitation_principal(effects, &invitation)
-                .await
-            {
-                tracing::warn!(
+                .await;
+            let ceremony = service.ensure_invitation_ceremony(&invitation).await;
+            match (result, ceremony) {
+                (Ok(()), Ok(Some(ceremony_id))) => {
+                    let participant =
+                        aura_core::threshold::ParticipantIdentity::guardian(invitation.receiver_id);
+                    let settle = async {
+                        service
+                            .ceremony_runner
+                            .record_local_response(&ceremony_id, participant)
+                            .await?;
+                        service
+                            .ceremony_runner
+                            .commit(&ceremony_id, CeremonyCommitMetadata::default())
+                            .await
+                    }
+                    .await;
+                    if let Err(error) = settle {
+                        tracing::warn!(ceremony_id = %ceremony_id, error = %error, "guardian ceremony completion failed");
+                    }
+                }
+                (Err(error), Ok(Some(ceremony_id))) => {
+                    let reason = if matches!(error, AgentError::Timeout(_)) {
+                        aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
+                    } else {
+                        aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
+                    };
+                    if let Err(settle_error) = service
+                        .ceremony_runner
+                        .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
+                        .await
+                    {
+                        tracing::warn!(ceremony_id = %ceremony_id, error = %settle_error, "guardian ceremony failure publication failed");
+                    }
+                }
+                (Err(error), _) => tracing::warn!(
                     invitation_id = %invitation.invitation_id,
-                    receiver = %invitation.receiver_id,
                     error = %error,
                     "guardian principal choreography did not complete"
-                );
+                ),
+                (Ok(()), _) => tracing::warn!(
+                    invitation_id = %invitation.invitation_id,
+                    "guardian choreography completed without registered ceremony"
+                ),
             }
         };
         cfg_if::cfg_if! {
@@ -145,13 +182,32 @@ impl InvitationServiceApi {
             invitation.invitation_id
         ));
         let invitation_id = invitation.invitation_id.clone();
+        let ceremony_id = match &invitation.invitation_type {
+            InvitationType::DeviceEnrollment { ceremony_id, .. } => ceremony_id.clone(),
+            _ => return,
+        };
         let sender_id = invitation.sender_id;
         let receiver_id = invitation.receiver_id;
         let fut = async move {
             if let Err(error) = handler
-                .execute_device_enrollment_initiator(effects, &invitation, ceremony_runner)
+                .execute_device_enrollment_initiator(effects, &invitation, ceremony_runner.clone())
                 .await
             {
+                let reason = if matches!(error, AgentError::Timeout(_)) {
+                    aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
+                } else {
+                    aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
+                };
+                if let Err(settle_error) = ceremony_runner
+                    .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
+                    .await
+                {
+                    tracing::warn!(
+                        ceremony_id = %ceremony_id,
+                        error = %settle_error,
+                        "device enrollment terminal outcome publication failed"
+                    );
+                }
                 tracing::error!(
                     invitation_id = %invitation_id,
                     sender_id = %sender_id,
@@ -699,8 +755,10 @@ impl InvitationServiceApi {
                     .execute_device_enrollment_invitee(self.effects.clone(), &invitation)
                     .await?;
             }
-            if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
-                self.spawn_invitation_acceptance_ceremony_progress(ceremony_id, &invitation);
+            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
+                    self.spawn_invitation_acceptance_ceremony_progress(ceremony_id, &invitation);
+                }
             }
         }
 
@@ -725,11 +783,33 @@ impl InvitationServiceApi {
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
         {
+            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
+                &invitation.invitation_type
+            {
+                // A validated local decline has no authority to settle the
+                // initiator's tracker until its signed response is verified
+                // there. Settle an invitee-local tracker only if one exists.
+                if self.ceremony_runner.status(ceremony_id).await.is_ok() {
+                    self.ceremony_runner
+                        .fail_with_reason(
+                            ceremony_id,
+                            aura_app::runtime_bridge::CeremonyFailureReason::Rejected,
+                            Some("Invitation declined".to_string()),
+                        )
+                        .await
+                        .map_err(|error| AgentError::runtime(error.to_string()))?;
+                }
+                return Ok(result);
+            }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
-                let _ = self
-                    .ceremony_runner
-                    .abort(&ceremony_id, Some("Invitation declined".to_string()))
-                    .await;
+                self.ceremony_runner
+                    .fail_with_reason(
+                        &ceremony_id,
+                        aura_app::runtime_bridge::CeremonyFailureReason::Rejected,
+                        Some("Invitation declined".to_string()),
+                    )
+                    .await
+                    .map_err(|error| AgentError::runtime(error.to_string()))?;
             }
         }
 
@@ -744,6 +824,27 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the cancellation
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        if let Some(invitation) = self
+            .handler
+            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
+            .await
+        {
+            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
+                &invitation.invitation_type
+            {
+                if self
+                    .ceremony_runner
+                    .terminal_outcome(ceremony_id)
+                    .await
+                    .map_err(|error| AgentError::runtime(error.to_string()))?
+                    .is_some()
+                {
+                    return Err(AgentError::invalid(
+                        "device enrollment ceremony is already complete",
+                    ));
+                }
+            }
+        }
         let result = self
             .handler
             .cancel_invitation(self.effects.clone(), invitation_id)
@@ -754,11 +855,28 @@ impl InvitationServiceApi {
             .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
         {
+            if let InvitationType::DeviceEnrollment { ceremony_id, .. } =
+                &invitation.invitation_type
+            {
+                self.ceremony_runner
+                    .fail_with_reason(
+                        ceremony_id,
+                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+                        Some("Invitation canceled".to_string()),
+                    )
+                    .await
+                    .map_err(|error| AgentError::runtime(error.to_string()))?;
+                return Ok(result);
+            }
             if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
-                let _ = self
-                    .ceremony_runner
-                    .abort(&ceremony_id, Some("Invitation canceled".to_string()))
-                    .await;
+                self.ceremony_runner
+                    .fail_with_reason(
+                        &ceremony_id,
+                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+                        Some("Invitation canceled".to_string()),
+                    )
+                    .await
+                    .map_err(|error| AgentError::runtime(error.to_string()))?;
             }
         }
 

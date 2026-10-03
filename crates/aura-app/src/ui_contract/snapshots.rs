@@ -45,6 +45,8 @@ pub struct OperationSnapshot {
     pub id: OperationId,
     pub instance_id: OperationInstanceId,
     pub state: OperationState,
+    #[serde(default)]
+    pub failure: Option<super::SemanticOperationError>,
 }
 
 /// Health of a frontend-owned observer for one registered runtime signal.
@@ -939,6 +941,26 @@ impl UiSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operation_snapshot_round_trips_stable_failure_domain_and_code() {
+        let operation = OperationSnapshot {
+            id: OperationId::device_enrollment_completion_for(&aura_core::CeremonyId::new(
+                "ceremony",
+            )),
+            instance_id: OperationInstanceId("device-enrollment-completion-ceremony".to_string()),
+            state: OperationState::Failed,
+            failure: Some(super::super::SemanticOperationError::new(
+                super::super::SemanticFailureDomain::Ceremony,
+                super::super::SemanticFailureCode::CeremonyRejected,
+            )),
+        };
+        let encoded = serde_json::to_string(&operation).expect("encode operation");
+        assert!(encoded.contains("\"domain\":\"ceremony\""));
+        assert!(encoded.contains("\"code\":\"ceremony_rejected\""));
+        let decoded: OperationSnapshot = serde_json::from_str(&encoded).expect("decode operation");
+        assert_eq!(decoded, operation);
+    }
 
     #[test]
     fn subscription_health_exports_typed_failure_and_rejects_duplicate_observers() {

@@ -27,6 +27,7 @@ pub(in crate::app) enum NotificationRuntimeAction {
     #[default]
     None,
     ReceivedInvitation,
+    ReceivedGuardianInvitation,
     PendingChannelInvitation,
     SentInvitation,
     RecoveryApproval,
@@ -77,7 +78,7 @@ fn build_notifications_runtime_view(
                         .home_name
                         .clone()
                         .unwrap_or_else(|| invitation.from_id.to_string()),
-                    NotificationRuntimeAction::ReceivedInvitation,
+                    NotificationRuntimeAction::ReceivedGuardianInvitation,
                 ),
                 (
                     aura_app::ui::types::InvitationDirection::Received,
@@ -531,6 +532,45 @@ mod tests {
     use aura_app::ui::types::Contact;
     use aura_app::views::ReadReceiptPolicy;
     use aura_core::types::identifiers::AuthorityId;
+
+    #[test]
+    fn guardian_request_has_distinct_accept_action() {
+        use aura_app::ui::types::{
+            Invitation, InvitationDirection, InvitationStatus, InvitationType,
+        };
+        let sender = AuthorityId::new_from_entropy([31; 32]);
+        let invitations = InvitationsState::from_parts(
+            vec![Invitation {
+                id: "guardian-invite".to_string(),
+                invitation_type: InvitationType::Guardian,
+                status: InvitationStatus::Pending,
+                direction: InvitationDirection::Received,
+                from_id: sender,
+                from_name: "Alex".to_string(),
+                to_id: None,
+                to_name: None,
+                created_at: 1,
+                expires_at: None,
+                message: None,
+                home_id: None,
+                home_name: None,
+            }],
+            Vec::new(),
+            Vec::new(),
+        );
+        let runtime = build_notifications_runtime_view(
+            invitations,
+            RecoveryState::default(),
+            ContactsState::default(),
+            None,
+            &[],
+        );
+        assert_eq!(runtime.items.len(), 1);
+        assert_eq!(
+            runtime.items[0].action,
+            NotificationRuntimeAction::ReceivedGuardianInvitation
+        );
+    }
 
     #[test]
     fn build_notifications_runtime_view_surfaces_contact_acceptance_events() {

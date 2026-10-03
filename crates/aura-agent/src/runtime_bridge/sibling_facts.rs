@@ -184,8 +184,9 @@ pub(crate) async fn exchange_facts_with_sibling(
     else {
         return Err(protocol_error("tree ops"));
     };
-    // Only ops that extend this tree (and verify, for threshold trees) apply;
-    // a provisional op a joining device made for itself never does.
+    // The runtime checks every new operation against its locally trusted
+    // parent-epoch verifier before persisting any part of this exchange.
+    // Peer frames cannot provide or replace that verifier.
     effects
         .import_verified_tree_ops(&peer_tree_ops)
         .await

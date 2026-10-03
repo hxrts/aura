@@ -25,8 +25,7 @@ use crate::readiness_owner;
 use crate::task_owner::spawn_ui;
 use aura_app::ui::contract::{
     list_item_dom_id, ConfirmationState, ControlId, FieldId, ListId, ListItemSnapshot,
-    ListSnapshot, MessageSnapshot, ModalId, OperationId, OperationInstanceId, OperationSnapshot,
-    OperationState, SelectionSnapshot, UiSnapshot,
+    ListSnapshot, MessageSnapshot, ModalId, OperationState, SelectionSnapshot, UiSnapshot,
 };
 use aura_app::ui::signals::{
     NetworkStatus, AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL,
@@ -505,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn add_device_confirm_display_is_driven_by_typed_status_fields() {
+    fn add_device_confirm_display_waits_for_authoritative_completion() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let modal_path = repo_root.join("crates/aura-ui/src/app/modal.rs");
         let source = std::fs::read_to_string(&modal_path)
@@ -524,8 +523,8 @@ mod tests {
         assert!(branch.contains("state.total_count.max(1)"));
         assert!(branch.contains("state.threshold.max(1)"));
         assert!(branch.contains("if let Some(error) = &state.error_message"));
-        assert!(branch.contains("else if state.has_failed"));
-        assert!(branch.contains("else if state.is_complete"));
+        assert!(branch.contains("model.device_enrollment_completion_state("));
+        assert!(!branch.contains("else if state.is_complete"));
         assert!(!branch.contains("time_workflows::sleep_ms"));
     }
 

@@ -7,8 +7,8 @@ mod settings;
 mod sync;
 
 pub use ceremony::{
-    BootstrapCandidateInfo, BootstrapCandidateOrigin, CeremonyKind, CeremonyStatus,
-    DeviceEnrollmentStart, KeyRotationCeremonyStatus,
+    BootstrapCandidateInfo, BootstrapCandidateOrigin, CeremonyFailureReason, CeremonyKind,
+    CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, KeyRotationCeremonyStatus,
 };
 pub use invitation::{
     AuthoritativeChannelBinding, AuthoritativeModerationStatus, InvitationBridgeStatus,

@@ -10,14 +10,17 @@ use async_lock::RwLock;
 
 use super::error::{ceremony_op, WorkflowError};
 use crate::core::IntentError;
-use crate::runtime_bridge::KeyRotationCeremonyStatus;
+use crate::runtime_bridge::{
+    CeremonyFailureReason, CeremonyTerminalOutcome, KeyRotationCeremonyStatus,
+};
 use crate::ui_contract::{
     OperationId, OperationInstanceId, SemanticFailureCode, SemanticFailureDomain,
     SemanticOperationError, SemanticOperationKind, SemanticOperationPhase,
 };
 use crate::workflows::runtime::{timeout_runtime_call, workflow_retry_policy};
 use crate::workflows::semantic_facts::{
-    issue_device_enrollment_started_proof, SemanticWorkflowOwner,
+    issue_device_enrollment_completed_proof, issue_device_enrollment_started_proof,
+    SemanticWorkflowOwner,
 };
 use crate::AppCore;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId};
@@ -27,6 +30,7 @@ use std::future::Future;
 use std::time::Duration;
 
 const DEVICE_ENROLLMENT_START_TIMEOUT: Duration = Duration::from_millis(30_000);
+const DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 const DEVICE_REMOVAL_START_TIMEOUT: Duration = Duration::from_millis(20_000);
 
 fn ceremony_start_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration {
@@ -473,6 +477,153 @@ pub async fn start_device_enrollment_ceremony_with_terminal_status(
         terminal: owner.terminal_status().await,
     }
 }
+
+fn device_enrollment_completion_failure(reason: CeremonyFailureReason) -> SemanticOperationError {
+    let code = match reason {
+        CeremonyFailureReason::Rejected => SemanticFailureCode::CeremonyRejected,
+        CeremonyFailureReason::Cancelled => {
+            unreachable!("cancellation is a distinct terminal phase")
+        }
+        CeremonyFailureReason::TimedOut => SemanticFailureCode::OperationTimedOut,
+        CeremonyFailureReason::ChoreographyFailed => {
+            SemanticFailureCode::CeremonyChoreographyFailed
+        }
+        CeremonyFailureReason::RuntimeFailed => SemanticFailureCode::CeremonyRuntimeFailed,
+        CeremonyFailureReason::Superseded => SemanticFailureCode::CeremonySuperseded,
+    };
+    SemanticOperationError::new(SemanticFailureDomain::Ceremony, code)
+}
+
+/// Publish a separately tracked enrollment completion from the runtime owner's
+/// terminal outcome. A pending runtime result never becomes UI success.
+pub async fn observe_device_enrollment_completion_with_terminal_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: &CeremonyId,
+    instance_id: OperationInstanceId,
+) -> crate::ui_contract::WorkflowTerminalOutcome<Option<CeremonyTerminalOutcome>> {
+    let owner = SemanticWorkflowOwner::new(
+        app_core,
+        OperationId::device_enrollment_completion_for(ceremony_id),
+        Some(instance_id),
+        SemanticOperationKind::CompleteDeviceEnrollment,
+    );
+    let result =
+        observe_device_enrollment_completion_owned(app_core, ceremony_id, &owner, None).await;
+    crate::ui_contract::WorkflowTerminalOutcome {
+        result,
+        terminal: owner.terminal_status().await,
+    }
+}
+
+#[aura_macros::semantic_owner(
+    owner = "observe_device_enrollment_completion_owned",
+    wrapper = "observe_device_enrollment_completion_with_terminal_status",
+    terminal = "publish_success_with",
+    postcondition = "device_enrollment_completed",
+    proof = crate::workflows::semantic_facts::DeviceEnrollmentCompletedProof,
+    authoritative_inputs = "runtime,ceremony_terminal_outcome",
+    depends_on = "runtime_ceremony_terminal",
+    child_ops = "",
+    category = "move_owned"
+)]
+async fn observe_device_enrollment_completion_owned(
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: &CeremonyId,
+    owner: &SemanticWorkflowOwner,
+    _operation_context: Option<
+        &mut OperationContext<OperationId, OperationInstanceId, TraceContext>,
+    >,
+) -> Result<Option<CeremonyTerminalOutcome>, AuraError> {
+    owner
+        .publish_phase(SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
+    };
+    let outcome = timeout_runtime_call(
+        &runtime,
+        "observe_device_enrollment_completion",
+        "get_ceremony_terminal_outcome",
+        DEVICE_ENROLLMENT_TERMINAL_QUERY_TIMEOUT,
+        || runtime.get_ceremony_terminal_outcome(ceremony_id),
+    )
+    .await?
+    .map_err(|error| ceremony_op("get device enrollment completion", error))?;
+    match outcome {
+        None => Ok(None),
+        Some(CeremonyTerminalOutcome::Committed) => {
+            owner
+                .publish_success_with(issue_device_enrollment_completed_proof(ceremony_id.clone()))
+                .await?;
+            Ok(outcome)
+        }
+        Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Cancelled)) => {
+            owner
+                .publish_phase(SemanticOperationPhase::Cancelled)
+                .await?;
+            Ok(outcome)
+        }
+        Some(CeremonyTerminalOutcome::Failed(reason)) => {
+            owner
+                .publish_failure(device_enrollment_completion_failure(reason))
+                .await?;
+            Ok(outcome)
+        }
+    }
+}
+
+/// Reconcile every runtime-retained enrollment with the app-owned semantic
+/// lifecycle. This is called by the runtime hook group on attach and retry.
+pub(crate) async fn refresh_device_enrollment_completions(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime()
+            .cloned()
+            .ok_or_else(|| AuraError::from(WorkflowError::RuntimeUnavailable))?
+    };
+    let ceremonies = runtime
+        .list_device_enrollment_ceremonies()
+        .await
+        .map_err(|error| ceremony_op("list device enrollment ceremonies", error))?;
+    for ceremony_id in ceremonies {
+        let instance_id =
+            OperationInstanceId(format!("device-enrollment-completion-{ceremony_id}"));
+        let already_terminal = {
+            let core = app_core.read().await;
+            core.authoritative_semantic_facts().iter().any(|fact| {
+                matches!(fact,
+                    crate::ui_contract::AuthoritativeSemanticFact::OperationStatus {
+                        operation_id,
+                        instance_id: Some(existing_instance),
+                        status,
+                        ..
+                    } if operation_id == &OperationId::device_enrollment_completion_for(&ceremony_id)
+                        && existing_instance == &instance_id
+                        && matches!(status.phase,
+                            SemanticOperationPhase::Succeeded
+                                | SemanticOperationPhase::Failed
+                                | SemanticOperationPhase::Cancelled))
+            })
+        };
+        if already_terminal {
+            continue;
+        }
+        observe_device_enrollment_completion_with_terminal_status(
+            app_core,
+            &ceremony_id,
+            instance_id,
+        )
+        .await
+        .result?;
+    }
+    Ok(())
+}
+
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
@@ -745,6 +896,37 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_enrollment_terminal_failures_keep_stable_codes() {
+        let cases = [
+            (
+                CeremonyFailureReason::Rejected,
+                SemanticFailureCode::CeremonyRejected,
+            ),
+            (
+                CeremonyFailureReason::TimedOut,
+                SemanticFailureCode::OperationTimedOut,
+            ),
+            (
+                CeremonyFailureReason::ChoreographyFailed,
+                SemanticFailureCode::CeremonyChoreographyFailed,
+            ),
+            (
+                CeremonyFailureReason::RuntimeFailed,
+                SemanticFailureCode::CeremonyRuntimeFailed,
+            ),
+            (
+                CeremonyFailureReason::Superseded,
+                SemanticFailureCode::CeremonySuperseded,
+            ),
+        ];
+        for (reason, code) in cases {
+            let failure = device_enrollment_completion_failure(reason);
+            assert_eq!(failure.domain, SemanticFailureDomain::Ceremony);
+            assert_eq!(failure.code, code);
+        }
+    }
 
     #[test]
     fn ceremony_monitor_policy_scales_by_kind() {

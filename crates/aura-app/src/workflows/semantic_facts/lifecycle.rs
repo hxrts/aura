@@ -2,7 +2,7 @@
 
 use super::owner::authorize_readiness_publication;
 use super::publication::{
-    publish_authoritative_semantic_fact, update_authoritative_semantic_facts,
+    publish_authoritative_semantic_fact, update_authoritative_semantic_facts_checked,
 };
 use super::{semantic_lifecycle_publication_capability, SemanticOperationContext};
 use crate::ui_contract::{
@@ -17,7 +17,7 @@ use aura_core::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::workflows) struct ExactOperationLifecyclePublication {
+pub(super) struct ExactOperationLifecyclePublication {
     operation_id: OperationId,
     instance_id: OperationInstanceId,
     kind: SemanticOperationKind,
@@ -47,21 +47,23 @@ enum ExactLifecyclePublication {
 }
 
 impl ExactOperationLifecyclePublication {
-    pub(in crate::workflows) fn causality(&self) -> Option<SemanticOperationCausality> {
+    pub(super) fn causality(&self) -> Option<SemanticOperationCausality> {
         self.causality
     }
 
-    pub(in crate::workflows) fn phase(
+    pub(super) fn phase(
         capability: &LifecyclePublicationCapability,
         operation_id: OperationId,
         instance_id: OperationInstanceId,
         kind: SemanticOperationKind,
         phase: SemanticOperationPhase,
     ) -> Self {
-        assert_ne!(
-            phase,
-            SemanticOperationPhase::Failed,
-            "failed terminal publication requires explicit failure payload"
+        assert!(
+            !matches!(
+                phase,
+                SemanticOperationPhase::Failed | SemanticOperationPhase::Succeeded
+            ),
+            "terminal publication requires typed proof or failure payload"
         );
         let mut context = issue_operation_context(
             &super::owner::SEMANTIC_OPERATION_CONTEXT_CAPABILITY,
@@ -82,11 +84,6 @@ impl ExactOperationLifecyclePublication {
                     .begin_terminal::<(), SemanticOperationError>(capability)
                     .cancel(),
             ),
-            SemanticOperationPhase::Succeeded => ExactLifecyclePublication::Terminal(
-                context
-                    .begin_terminal::<(), SemanticOperationError>(capability)
-                    .succeed(()),
-            ),
             phase => {
                 ExactLifecyclePublication::Progress(context.publish_progress(capability, phase))
             }
@@ -100,16 +97,18 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn phase_from_context(
+    pub(super) fn phase_from_context(
         capability: &LifecyclePublicationCapability,
         context: &mut SemanticOperationContext,
         kind: SemanticOperationKind,
         phase: SemanticOperationPhase,
     ) -> Self {
-        assert_ne!(
-            phase,
-            SemanticOperationPhase::Failed,
-            "failed terminal publication requires explicit failure payload"
+        assert!(
+            !matches!(
+                phase,
+                SemanticOperationPhase::Failed | SemanticOperationPhase::Succeeded
+            ),
+            "terminal publication requires typed proof or failure payload"
         );
         let operation_id = context.operation_id().clone();
         let instance_id = context.instance_id().clone();
@@ -134,7 +133,7 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn failure(
+    pub(super) fn failure(
         capability: &LifecyclePublicationCapability,
         operation_id: OperationId,
         instance_id: OperationInstanceId,
@@ -164,7 +163,7 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn success_from_context(
+    pub(super) fn success_from_context(
         capability: &LifecyclePublicationCapability,
         context: SemanticOperationContext,
         kind: SemanticOperationKind,
@@ -188,7 +187,7 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn cancelled_from_context(
+    pub(super) fn cancelled_from_context(
         capability: &LifecyclePublicationCapability,
         context: SemanticOperationContext,
         kind: SemanticOperationKind,
@@ -212,7 +211,7 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn failure_from_context(
+    pub(super) fn failure_from_context(
         capability: &LifecyclePublicationCapability,
         context: SemanticOperationContext,
         kind: SemanticOperationKind,
@@ -237,7 +236,7 @@ impl ExactOperationLifecyclePublication {
         }
     }
 
-    pub(in crate::workflows) fn into_fact(self) -> AuthoritativeSemanticFact {
+    pub(super) fn into_fact(self) -> AuthoritativeSemanticFact {
         let status = match self.publication {
             ExactLifecyclePublication::Progress(publication) => {
                 let (
@@ -291,7 +290,7 @@ impl ExactOperationLifecyclePublication {
     }
 }
 
-pub(in crate::workflows) fn operation_phase_fact(
+pub(super) fn operation_phase_fact(
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
@@ -315,7 +314,7 @@ pub(in crate::workflows) fn operation_phase_fact(
     }
 }
 
-pub(in crate::workflows) fn operation_failure_fact(
+pub(super) fn operation_failure_fact(
     operation_id: OperationId,
     instance_id: Option<OperationInstanceId>,
     kind: SemanticOperationKind,
@@ -339,19 +338,33 @@ pub(in crate::workflows) fn operation_failure_fact(
     }
 }
 
-pub(in crate::workflows) async fn publish_exact_operation_lifecycle(
+pub(super) async fn publish_exact_operation_lifecycle(
     app_core: &std::sync::Arc<async_lock::RwLock<crate::AppCore>>,
     publication: ExactOperationLifecyclePublication,
 ) -> Result<(), AuraError> {
     let fact = publication.into_fact();
-    update_authoritative_semantic_facts(app_core, |facts| {
+    update_authoritative_semantic_facts_checked(app_core, |facts| {
+        if facts.iter().any(|existing| {
+            existing.key() == fact.key()
+                && matches!(existing,
+                    AuthoritativeSemanticFact::OperationStatus { status, .. }
+                    if matches!(status.phase,
+                        SemanticOperationPhase::Succeeded
+                            | SemanticOperationPhase::Failed
+                            | SemanticOperationPhase::Cancelled))
+        }) {
+            return Err(AuraError::invalid(
+                "semantic operation instance already has a terminal outcome",
+            ));
+        }
         facts.retain(|existing| existing.key() != fact.key());
         facts.push(fact);
+        Ok(())
     })
     .await
 }
 
-pub(in crate::workflows) async fn publish_authoritative_operation_phase_with_instance(
+pub(super) async fn publish_authoritative_operation_phase_with_instance(
     app_core: &std::sync::Arc<async_lock::RwLock<crate::AppCore>>,
     capability: &LifecyclePublicationCapability,
     operation_id: OperationId,
@@ -380,7 +393,7 @@ pub(in crate::workflows) async fn publish_authoritative_operation_phase_with_ins
     }
 }
 
-pub(in crate::workflows) async fn publish_authoritative_operation_failure_with_instance(
+pub(super) async fn publish_authoritative_operation_failure_with_instance(
     app_core: &std::sync::Arc<async_lock::RwLock<crate::AppCore>>,
     capability: &LifecyclePublicationCapability,
     operation_id: OperationId,

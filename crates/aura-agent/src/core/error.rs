@@ -2,7 +2,7 @@
 //!
 //! Unified error handling for the agent runtime.
 
-use aura_core::AuraError;
+use aura_core::{key_resolution::KeyResolutionError, AuraError, AuthorityId, DeviceId};
 
 /// Agent-specific error types
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +30,18 @@ pub enum AgentError {
     /// Timeout error
     #[error("Agent timeout error: {0}")]
     Timeout(String),
+
+    /// A known authority is not yet bound to the claimed sender device key.
+    #[error("known sender {authority} has unresolved device binding for {device}: {source}")]
+    UnresolvedDeviceBinding {
+        /// Claimed sender authority.
+        authority: AuthorityId,
+        /// Claimed sender device.
+        device: DeviceId,
+        /// Trusted-key lookup failure that prevented binding.
+        #[source]
+        source: KeyResolutionError,
+    },
 
     /// Underlying Aura error
     #[error("Aura error: {0}")]

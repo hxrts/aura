@@ -25,15 +25,17 @@
 
 use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
-use crate::runtime::TaskGroup;
+use crate::runtime::{AuraEffectSystem, TaskGroup};
 use async_trait::async_trait;
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
+pub use aura_app::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
 use aura_core::domain::status::{
     CeremonyResponse, CeremonyState as StatusCeremonyState, CeremonyStatus, ParticipantResponse,
     SupersessionReason as StatusSupersessionReason,
 };
+use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::query::ConsensusId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
@@ -43,7 +45,21 @@ use aura_core::{DeviceId, Hash32};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
+
+const ENROLLMENT_INDEX_KEY: &str = "ceremony-enrollment-index-v1";
+
+fn enrollment_record_key(id: &CeremonyId) -> String {
+    format!("ceremony-enrollment-v1:{id}")
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StoredEnrollmentOutcome {
+    ceremony_id: CeremonyId,
+    started_at_ms: u64,
+    timeout_ms: u64,
+    outcome: Option<CeremonyTerminalOutcome>,
+}
 
 /// Tracks state of guardian ceremonies
 #[derive(Clone)]
@@ -59,6 +75,8 @@ struct CeremonyTrackerShared {
     lifecycle: RwLock<ServiceHealth>,
     /// Owned cleanup tasks for ceremony timeout maintenance.
     cleanup_tasks: RwLock<Option<TaskGroup>>,
+    persistence: Option<Arc<AuraEffectSystem>>,
+    persistence_guard: Mutex<()>,
 }
 
 #[derive(Debug, Default)]
@@ -110,6 +128,27 @@ impl CeremonyTrackerState {
                 return Err(super::invariant::InvariantViolation::new(
                     "CeremonyTracker",
                     format!("ceremony {} cannot be committed and failed", ceremony_id),
+                ));
+            }
+            if state.terminal_outcome
+                != (if state.is_committed {
+                    Some(CeremonyTerminalOutcome::Committed)
+                } else if state.has_failed {
+                    Some(CeremonyTerminalOutcome::Failed(
+                        state
+                            .failure_reason
+                            .unwrap_or(CeremonyFailureReason::RuntimeFailed),
+                    ))
+                } else {
+                    None
+                })
+            {
+                return Err(super::invariant::InvariantViolation::new(
+                    "CeremonyTracker",
+                    format!(
+                        "ceremony {} terminal outcome does not match state",
+                        ceremony_id
+                    ),
                 ));
             }
             if state.is_superseded && state.is_committed {
@@ -197,6 +236,12 @@ pub struct TrackedCeremony {
 
     /// Optional error message if failed
     pub error_message: Option<String>,
+
+    /// Stable terminal result; set once by the ceremony owner.
+    pub terminal_outcome: Option<CeremonyTerminalOutcome>,
+
+    /// Stable failure classification, separate from diagnostic text.
+    pub failure_reason: Option<CeremonyFailureReason>,
 
     /// Timeout duration (30 seconds default)
     pub timeout: Duration,
@@ -337,14 +382,133 @@ impl CeremonyTracker {
     /// # Arguments
     /// * `time` - Time effects for deterministic simulation support
     pub fn new(time: Arc<dyn PhysicalTimeEffects>) -> Self {
+        Self::new_with_optional_storage(time, None)
+    }
+
+    /// Create a production tracker whose enrollment results survive runtime restarts.
+    pub fn new_with_storage(
+        time: Arc<dyn PhysicalTimeEffects>,
+        effects: Arc<AuraEffectSystem>,
+    ) -> Self {
+        Self::new_with_optional_storage(time, Some(effects))
+    }
+
+    fn new_with_optional_storage(
+        time: Arc<dyn PhysicalTimeEffects>,
+        persistence: Option<Arc<AuraEffectSystem>>,
+    ) -> Self {
         Self {
             time,
             shared: Arc::new(CeremonyTrackerShared {
                 state: RwLock::new(CeremonyTrackerState::default()),
                 lifecycle: RwLock::new(ServiceHealth::NotStarted),
                 cleanup_tasks: RwLock::new(None),
+                persistence,
+                persistence_guard: Mutex::new(()),
             }),
         }
+    }
+
+    async fn persist_enrollment(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
+        let Some(effects) = &self.shared.persistence else {
+            return Ok(());
+        };
+        let state = self.get(ceremony_id).await?;
+        if state.kind != CeremonyKind::DeviceEnrollment {
+            return Ok(());
+        }
+        let record = StoredEnrollmentOutcome {
+            ceremony_id: ceremony_id.clone(),
+            started_at_ms: state.started_at.ts_ms,
+            timeout_ms: u64::try_from(state.timeout.as_millis()).unwrap_or(u64::MAX),
+            outcome: state.terminal_outcome,
+        };
+        let _guard = self.shared.persistence_guard.lock().await;
+        let mut ids: Vec<CeremonyId> = effects
+            .retrieve(ENROLLMENT_INDEX_KEY)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("load enrollment index: {error}"))
+            })?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .map_err(|error| {
+                IntentError::internal_error(format!("decode enrollment index: {error}"))
+            })?
+            .unwrap_or_default();
+        if !ids.contains(ceremony_id) {
+            ids.push(ceremony_id.clone());
+        }
+        effects
+            .store(
+                &enrollment_record_key(ceremony_id),
+                serde_json::to_vec(&record)
+                    .map_err(|error| IntentError::internal_error(error.to_string()))?,
+            )
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("store enrollment outcome: {error}"))
+            })?;
+        effects
+            .store(
+                ENROLLMENT_INDEX_KEY,
+                serde_json::to_vec(&ids)
+                    .map_err(|error| IntentError::internal_error(error.to_string()))?,
+            )
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("store enrollment index: {error}"))
+            })
+    }
+
+    /// Enumerate enrollment results retained in durable runtime storage.
+    pub async fn list_device_enrollment_ceremonies(&self) -> Result<Vec<CeremonyId>, IntentError> {
+        let Some(effects) = &self.shared.persistence else {
+            return Ok(self
+                .shared
+                .state
+                .read()
+                .await
+                .ceremonies
+                .values()
+                .filter(|ceremony| ceremony.kind == CeremonyKind::DeviceEnrollment)
+                .map(|ceremony| ceremony.ceremony_id.clone())
+                .collect());
+        };
+        let bytes = effects
+            .retrieve(ENROLLMENT_INDEX_KEY)
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("load enrollment index: {error}"))
+            })?;
+        bytes
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .map_err(|error| {
+                IntentError::internal_error(format!("decode enrollment index: {error}"))
+            })
+            .map(|ids| ids.unwrap_or_default())
+    }
+
+    async fn stored_enrollment_outcome(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<Option<StoredEnrollmentOutcome>, IntentError> {
+        let Some(effects) = &self.shared.persistence else {
+            return Ok(None);
+        };
+        let bytes = effects
+            .retrieve(&enrollment_record_key(ceremony_id))
+            .await
+            .map_err(|error| {
+                IntentError::internal_error(format!("load enrollment outcome: {error}"))
+            })?;
+        bytes
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()
+            .map_err(|error| {
+                IntentError::internal_error(format!("decode enrollment outcome: {error}"))
+            })
     }
 
     fn spawn_timeout_cleanup_task(
@@ -355,7 +519,28 @@ impl CeremonyTracker {
         const CLEANUP_INTERVAL: Duration = Duration::from_secs(1);
 
         let tracker = self.clone();
+        #[cfg(not(target_arch = "wasm32"))]
         let _cleanup_task_handle = tasks.spawn_interval_until_named(
+            "ceremony.timeout_cleanup",
+            time_effects.clone(),
+            CLEANUP_INTERVAL,
+            move || {
+                let tracker = tracker.clone();
+                async move {
+                    let cleaned = tracker.cleanup_timed_out().await;
+                    if cleaned > 0 {
+                        tracing::debug!(
+                            event = "runtime.service.ceremony.cleanup",
+                            cleaned,
+                            "Cleaned timed-out ceremonies"
+                        );
+                    }
+                    true
+                }
+            },
+        );
+        #[cfg(target_arch = "wasm32")]
+        let _cleanup_task_handle = tasks.spawn_local_interval_until_named(
             "ceremony.timeout_cleanup",
             time_effects,
             CLEANUP_INTERVAL,
@@ -425,6 +610,8 @@ impl CeremonyTracker {
             supersedes: Vec::new(),
             agreement_mode: Self::initial_mode_for_kind(kind),
             error_message: None,
+            terminal_outcome: None,
+            failure_reason: None,
             timeout: Self::timeout_for_kind(kind),
             prestate_hash,
             committed_at: None,
@@ -448,6 +635,7 @@ impl CeremonyTracker {
         .await;
 
         if result.is_ok() {
+            self.persist_enrollment(&ceremony_id).await?;
             tracing::info!(
                 ceremony_id = %ceremony_id,
                 threshold_k,
@@ -508,6 +696,13 @@ impl CeremonyTracker {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
+                if state.terminal_outcome.is_some() {
+                    return Err(IntentError::validation_failed(format!(
+                        "Ceremony {} already has a terminal outcome",
+                        ceremony_id
+                    )));
+                }
+
                 // Check if participant is part of this ceremony
                 if !state.participants.contains(&participant) {
                     return Err(IntentError::validation_failed(format!(
@@ -556,6 +751,8 @@ impl CeremonyTracker {
         committed_at: Option<PhysicalTime>,
         consensus_id: Option<ConsensusId>,
     ) -> Result<(), IntentError> {
+        self.complete(ceremony_id, CeremonyTerminalOutcome::Committed)
+            .await?;
         with_state_mut_validated(
             &self.shared.state,
             |tracker| {
@@ -563,18 +760,6 @@ impl CeremonyTracker {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
-                if state.is_committed {
-                    if let Some(committed_at) = committed_at {
-                        state.committed_at = Some(committed_at);
-                    }
-                    if let Some(consensus_id) = consensus_id {
-                        state.committed_consensus_id = Some(consensus_id);
-                    }
-                    return Ok(());
-                }
-
-                state.is_committed = true;
-                state.agreement_mode = AgreementMode::ConsensusFinalized;
                 if let Some(committed_at) = committed_at {
                     state.committed_at = Some(committed_at);
                 }
@@ -600,32 +785,104 @@ impl CeremonyTracker {
     ///
     /// This is only called after threshold is reached and `commit_key_rotation` succeeds.
     pub async fn mark_committed(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
-        with_state_mut_validated(
+        self.complete(ceremony_id, CeremonyTerminalOutcome::Committed)
+            .await
+            .map(|_| ())
+    }
+
+    /// Set the sole terminal outcome. Repeating the same outcome is idempotent;
+    /// a conflicting outcome is rejected without mutating the original result.
+    pub async fn complete(
+        &self,
+        ceremony_id: &CeremonyId,
+        outcome: CeremonyTerminalOutcome,
+    ) -> Result<CeremonyTerminalOutcome, IntentError> {
+        let result = with_state_mut_validated(
             &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
                 })?;
-
-                if state.is_committed {
-                    return Ok(());
+                if let Some(existing) = state.terminal_outcome {
+                    return if existing == outcome {
+                        Ok(existing)
+                    } else {
+                        Err(IntentError::validation_failed(format!(
+                            "Ceremony {} already completed with {:?}",
+                            ceremony_id, existing
+                        )))
+                    };
                 }
-
-                state.is_committed = true;
-                state.agreement_mode = AgreementMode::ConsensusFinalized;
-
-                tracing::info!(
-                    ceremony_id = %ceremony_id,
-                    accepted = state.accepted_participants.len(),
-                    threshold = state.threshold_k,
-                    "Ceremony committed"
-                );
-
-                Ok(())
+                match outcome {
+                    CeremonyTerminalOutcome::Committed => {
+                        if state.accepted_participants.len() < state.threshold_k as usize {
+                            return Err(IntentError::validation_failed(format!(
+                                "Ceremony {} cannot commit before threshold",
+                                ceremony_id
+                            )));
+                        }
+                        state.is_committed = true;
+                        state.agreement_mode = AgreementMode::ConsensusFinalized;
+                    }
+                    CeremonyTerminalOutcome::Failed(reason) => {
+                        state.has_failed = true;
+                        state.failure_reason = Some(reason);
+                    }
+                }
+                state.terminal_outcome = Some(outcome);
+                Ok(outcome)
             },
             |tracker| tracker.validate(),
         )
-        .await
+        .await?;
+        self.persist_enrollment(ceremony_id).await?;
+        Ok(result)
+    }
+
+    /// The ceremony result, if an owner has completed it.
+    pub async fn terminal_outcome(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<Option<CeremonyTerminalOutcome>, IntentError> {
+        if let Ok(state) = self.get(ceremony_id).await {
+            return Ok(state.terminal_outcome);
+        }
+        let Some(mut stored) = self.stored_enrollment_outcome(ceremony_id).await? else {
+            return Err(IntentError::validation_failed(format!(
+                "Ceremony {} not found",
+                ceremony_id
+            )));
+        };
+        if stored.outcome.is_none() {
+            let now_ms = self
+                .time
+                .physical_time()
+                .await
+                .map_err(|error| {
+                    IntentError::internal_error(format!("read ceremony time: {error}"))
+                })?
+                .ts_ms;
+            if now_ms.saturating_sub(stored.started_at_ms) >= stored.timeout_ms {
+                stored.outcome = Some(CeremonyTerminalOutcome::Failed(
+                    CeremonyFailureReason::TimedOut,
+                ));
+                if let Some(effects) = &self.shared.persistence {
+                    effects
+                        .store(
+                            &enrollment_record_key(ceremony_id),
+                            serde_json::to_vec(&stored)
+                                .map_err(|error| IntentError::internal_error(error.to_string()))?,
+                        )
+                        .await
+                        .map_err(|error| {
+                            IntentError::internal_error(format!(
+                                "store timed out enrollment: {error}"
+                            ))
+                        })?;
+                }
+            }
+        }
+        Ok(stored.outcome)
     }
 
     /// Check if ceremony is complete (committed)
@@ -666,33 +923,32 @@ impl CeremonyTracker {
         ceremony_id: &CeremonyId,
         error_message: Option<String>,
     ) -> Result<(), IntentError> {
+        self.fail_with_reason(
+            ceremony_id,
+            CeremonyFailureReason::RuntimeFailed,
+            error_message,
+        )
+        .await
+    }
+
+    /// Fail a ceremony with a stable classification and optional diagnostic.
+    pub async fn fail_with_reason(
+        &self,
+        ceremony_id: &CeremonyId,
+        reason: CeremonyFailureReason,
+        error_message: Option<String>,
+    ) -> Result<(), IntentError> {
+        self.complete(ceremony_id, CeremonyTerminalOutcome::Failed(reason))
+            .await?;
         with_state_mut_validated(
             &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
                 })?;
-
-                // Committed ceremonies are terminal-success states and must never
-                // transition into failed, otherwise invariants and downstream flows break.
-                if state.is_committed {
-                    tracing::warn!(
-                        ceremony_id = %ceremony_id,
-                        error = ?error_message,
-                        "Ignoring failure for already committed ceremony"
-                    );
-                    return Ok(());
+                if state.error_message.is_none() {
+                    state.error_message = error_message;
                 }
-
-                state.has_failed = true;
-                state.error_message = error_message.clone();
-
-                tracing::warn!(
-                    ceremony_id = %ceremony_id,
-                    error = ?error_message,
-                    "Ceremony marked as failed"
-                );
-
                 Ok(())
             },
             |tracker| tracker.validate(),
@@ -750,7 +1006,7 @@ impl CeremonyTracker {
             }
         };
 
-        with_state_mut_validated(
+        let removed = with_state_mut_validated(
             &self.shared.state,
             |tracker| {
                 let mut removed = Vec::new();
@@ -770,6 +1026,10 @@ impl CeremonyTracker {
                     if let Some(state) = tracker.ceremonies.get_mut(id) {
                         state.has_failed = true;
                         state.error_message = Some("Ceremony timed out".to_string());
+                        state.failure_reason = Some(CeremonyFailureReason::TimedOut);
+                        state.terminal_outcome = Some(CeremonyTerminalOutcome::Failed(
+                            CeremonyFailureReason::TimedOut,
+                        ));
                     }
                     tracing::warn!(
                         ceremony_id = %id,
@@ -777,11 +1037,17 @@ impl CeremonyTracker {
                     );
                 }
 
-                removed.len()
+                removed
             },
             |tracker| tracker.validate(),
         )
-        .await
+        .await;
+        for id in &removed {
+            if let Err(error) = self.persist_enrollment(id).await {
+                tracing::error!(ceremony_id = %id, error = %error, "timed-out enrollment persistence failed");
+            }
+        }
+        removed.len()
     }
 
     // =========================================================================
@@ -815,7 +1081,7 @@ impl CeremonyTracker {
             timestamp_ms,
         );
 
-        with_state_mut_validated(
+        let record = with_state_mut_validated(
             &self.shared.state,
             |tracker| {
                 // Verify old ceremony exists
@@ -844,10 +1110,21 @@ impl CeremonyTracker {
                     return Ok(record.clone());
                 }
 
+                if old_state.terminal_outcome.is_some() {
+                    return Err(IntentError::validation_failed(format!(
+                        "Cannot supersede completed ceremony {}",
+                        old_ceremony_id
+                    )));
+                }
+
                 // Mark old ceremony as superseded
                 old_state.is_superseded = true;
                 old_state.superseded_by = Some(new_ceremony_id.clone());
                 old_state.has_failed = true;
+                old_state.failure_reason = Some(CeremonyFailureReason::Superseded);
+                old_state.terminal_outcome = Some(CeremonyTerminalOutcome::Failed(
+                    CeremonyFailureReason::Superseded,
+                ));
                 old_state.error_message = Some(format!("Superseded: {}", reason.description()));
 
                 // Update new ceremony if it exists (may be registered separately)
@@ -869,7 +1146,9 @@ impl CeremonyTracker {
             },
             |tracker| tracker.validate(),
         )
-        .await
+        .await?;
+        self.persist_enrollment(old_ceremony_id).await?;
+        Ok(record)
     }
 
     /// Check for ceremonies that would be superseded by a new ceremony.
@@ -1330,7 +1609,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mark_failed_ignores_committed_ceremony() {
+    async fn test_mark_failed_rejects_committed_ceremony() {
         let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-committed");
@@ -1357,15 +1636,79 @@ mod tests {
             .await
             .unwrap();
         tracker.mark_committed(&ceremony_id).await.unwrap();
-        tracker
+        let conflict = tracker
             .mark_failed(&ceremony_id, Some("should be ignored".to_string()))
             .await
-            .unwrap();
+            .expect_err("a committed ceremony cannot fail later");
+        assert!(conflict.to_string().contains("already completed"));
 
         let state = tracker.get(&ceremony_id).await.unwrap();
         assert!(state.is_committed);
         assert!(!state.has_failed);
         assert_eq!(state.error_message, None);
+    }
+
+    #[tokio::test]
+    async fn terminal_result_is_set_once_and_preserves_first_failure() {
+        let tracker = CeremonyTracker::new(test_time());
+        let ceremony_id = test_ceremony_id("single-terminal");
+        let participant = AuthorityId::new_from_entropy([71; 32]);
+        tracker
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::Invitation,
+                participant,
+                1,
+                1,
+                vec![ParticipantIdentity::guardian(participant)],
+                0,
+                None,
+                None,
+                Hash32([17; 32]),
+            )
+            .await
+            .unwrap();
+
+        tracker
+            .fail_with_reason(
+                &ceremony_id,
+                CeremonyFailureReason::Rejected,
+                Some("participant refused".to_string()),
+            )
+            .await
+            .unwrap();
+        tracker
+            .fail_with_reason(
+                &ceremony_id,
+                CeremonyFailureReason::Rejected,
+                Some("later diagnostic".to_string()),
+            )
+            .await
+            .unwrap();
+        assert!(tracker.mark_committed(&ceremony_id).await.is_err());
+        assert!(tracker
+            .fail_with_reason(&ceremony_id, CeremonyFailureReason::TimedOut, None)
+            .await
+            .is_err());
+        assert!(tracker
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(participant))
+            .await
+            .is_err());
+        assert_eq!(
+            tracker.terminal_outcome(&ceremony_id).await.unwrap(),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Rejected
+            ))
+        );
+        assert_eq!(
+            tracker
+                .get(&ceremony_id)
+                .await
+                .unwrap()
+                .error_message
+                .as_deref(),
+            Some("participant refused")
+        );
     }
 
     #[tokio::test]
@@ -1410,6 +1753,125 @@ mod tests {
         let state = tracker.get(&ceremony_id).await.unwrap();
         assert!(state.is_committed);
         assert!(!state.has_failed);
+    }
+
+    #[tokio::test]
+    async fn unanswered_ceremony_times_out_once() {
+        let clock = aura_testkit::time::ControllableTimeSource::new(1_000);
+        let tracker = CeremonyTracker::new(Arc::new(clock.clone()));
+        let ceremony_id = test_ceremony_id("unanswered-terminal");
+        let participant = AuthorityId::new_from_entropy([72; 32]);
+        tracker
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::Invitation,
+                participant,
+                1,
+                1,
+                vec![ParticipantIdentity::guardian(participant)],
+                0,
+                None,
+                None,
+                Hash32([18; 32]),
+            )
+            .await
+            .unwrap();
+        clock.advance_time(600_001);
+        assert_eq!(tracker.cleanup_timed_out().await, 1);
+        assert_eq!(tracker.cleanup_timed_out().await, 0);
+        assert_eq!(
+            tracker.terminal_outcome(&ceremony_id).await.unwrap(),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::TimedOut
+            ))
+        );
+        assert!(tracker.mark_committed(&ceremony_id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn enrollment_terminal_outcome_replays_after_tracker_restart() {
+        let effects =
+            crate::testing::simulation_effect_system_arc(&crate::core::AgentConfig::default());
+        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let first = CeremonyTracker::new_with_storage(time.clone(), effects.clone());
+        let ceremony_id = test_ceremony_id("durable-enrollment");
+        let authority = AuthorityId::new_from_entropy([73; 32]);
+        let device = DeviceId::new_from_entropy([74; 32]);
+        first
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::DeviceEnrollment,
+                authority,
+                1,
+                1,
+                vec![ParticipantIdentity::device(device)],
+                1,
+                Some(device),
+                None,
+                Hash32([19; 32]),
+            )
+            .await
+            .unwrap();
+        first
+            .fail_with_reason(
+                &ceremony_id,
+                CeremonyFailureReason::Cancelled,
+                Some("sender cancelled".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let restarted = CeremonyTracker::new_with_storage(time, effects);
+        assert!(restarted
+            .list_device_enrollment_ceremonies()
+            .await
+            .unwrap()
+            .contains(&ceremony_id));
+        assert_eq!(
+            restarted.terminal_outcome(&ceremony_id).await.unwrap(),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn pending_enrollment_recovery_times_out_on_fake_clock() {
+        let effects =
+            crate::testing::simulation_effect_system_arc(&crate::core::AgentConfig::default());
+        let clock = aura_testkit::time::ControllableTimeSource::new(5_000);
+        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(clock.clone());
+        let first = CeremonyTracker::new_with_storage(time.clone(), effects.clone());
+        let ceremony_id = test_ceremony_id("restarted-pending-enrollment");
+        let authority = AuthorityId::new_from_entropy([75; 32]);
+        let device = DeviceId::new_from_entropy([76; 32]);
+        first
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::DeviceEnrollment,
+                authority,
+                1,
+                1,
+                vec![ParticipantIdentity::device(device)],
+                1,
+                Some(device),
+                None,
+                Hash32([20; 32]),
+            )
+            .await
+            .unwrap();
+        let restarted = CeremonyTracker::new_with_storage(time, effects);
+        assert_eq!(
+            restarted.terminal_outcome(&ceremony_id).await.unwrap(),
+            None
+        );
+        clock.advance_time(600_001);
+        assert_eq!(
+            restarted.terminal_outcome(&ceremony_id).await.unwrap(),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::TimedOut
+            ))
+        );
     }
 
     #[tokio::test]
@@ -1591,6 +2053,8 @@ mod tests {
                     supersedes: Vec::new(),
                     agreement_mode: AgreementMode::CoordinatorSoftSafe,
                     error_message: None,
+                    terminal_outcome: None,
+                    failure_reason: None,
                     timeout: Duration::from_secs(30),
                     prestate_hash: Hash32([0; 32]),
                     committed_at: None,
@@ -1633,6 +2097,8 @@ mod tests {
                         supersedes: Vec::new(),
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
+                        terminal_outcome: None,
+                        failure_reason: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,
@@ -1688,6 +2154,8 @@ mod tests {
                         supersedes: Vec::new(),
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
+                        terminal_outcome: None,
+                        failure_reason: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,
@@ -1738,6 +2206,8 @@ mod tests {
                         supersedes: Vec::new(),
                         agreement_mode: AgreementMode::CoordinatorSoftSafe,
                         error_message: None,
+                        terminal_outcome: None,
+                        failure_reason: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,
@@ -1799,6 +2269,8 @@ mod tests {
                         supersedes: Vec::new(),
                         agreement_mode: AgreementMode::ConsensusFinalized,
                         error_message: None,
+                        terminal_outcome: Some(CeremonyTerminalOutcome::Committed),
+                        failure_reason: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,
@@ -1860,6 +2332,14 @@ mod tests {
                             AgreementMode::CoordinatorSoftSafe
                         },
                         error_message: if has_failed { Some("test".to_string()) } else { None },
+                        terminal_outcome: if is_committed {
+                            Some(CeremonyTerminalOutcome::Committed)
+                        } else if has_failed {
+                            Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::RuntimeFailed))
+                        } else {
+                            None
+                        },
+                        failure_reason: has_failed.then_some(CeremonyFailureReason::RuntimeFailed),
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,
@@ -1923,6 +2403,14 @@ mod tests {
                             AgreementMode::CoordinatorSoftSafe
                         },
                         error_message: None,
+                        terminal_outcome: if is_committed {
+                            Some(CeremonyTerminalOutcome::Committed)
+                        } else if is_superseded {
+                            Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Superseded))
+                        } else {
+                            None
+                        },
+                        failure_reason: is_superseded.then_some(CeremonyFailureReason::Superseded),
                         timeout: Duration::from_secs(30),
                         prestate_hash: Hash32([0; 32]),
                         committed_at: None,

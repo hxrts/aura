@@ -4,7 +4,7 @@
 //! runtime. The runner is the orchestration facade; ceremony-specific logic
 //! lives in feature crates and emits facts through the journal.
 
-use super::ceremony_tracker::CeremonyTracker;
+use super::ceremony_tracker::{CeremonyFailureReason, CeremonyTerminalOutcome, CeremonyTracker};
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
@@ -119,6 +119,35 @@ impl CeremonyRunner {
     ) -> Result<(), IntentError> {
         self.tracker
             .mark_committed_with_metadata(ceremony_id, metadata.committed_at, metadata.consensus_id)
+            .await
+    }
+
+    /// Complete the ceremony exactly once with an authoritative result.
+    pub async fn complete(
+        &self,
+        ceremony_id: &CeremonyId,
+        outcome: CeremonyTerminalOutcome,
+    ) -> Result<CeremonyTerminalOutcome, IntentError> {
+        self.tracker.complete(ceremony_id, outcome).await
+    }
+
+    /// Return the result published by the ceremony owner, if terminal.
+    pub async fn terminal_outcome(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<Option<CeremonyTerminalOutcome>, IntentError> {
+        self.tracker.terminal_outcome(ceremony_id).await
+    }
+
+    /// Fail with a stable category and retain diagnostic text separately.
+    pub async fn fail_with_reason(
+        &self,
+        ceremony_id: &CeremonyId,
+        reason: CeremonyFailureReason,
+        detail: Option<String>,
+    ) -> Result<(), IntentError> {
+        self.tracker
+            .fail_with_reason(ceremony_id, reason, detail)
             .await
     }
 

@@ -411,6 +411,17 @@ For parity-critical operation families, "correct by construction" means:
 - best-effort work uses one explicit helper family that cannot publish or delay primary terminal state
 - semantic owners do not spawn except through declared child-operation APIs
 - parity-critical results are not ignored or downgraded to logging-only paths
+- an issued code and the ceremony it starts have distinct terminal owners and
+  operation instances linked by ceremony ID; code issuance cannot publish
+  completion success
+- a ceremony owner accepts one typed terminal outcome and preserves the first
+  result under duplicate, late, or replayed responses
+- frontend operation snapshots retain the authoritative failure domain/code and
+  cancellation state; local wizard progress does not publish ceremony success
+- a frontend may return an import submission handle before it knows an
+  invitation's type, but it hands the generic import owner to the app before
+  the first awaited verification/cache step. Only a verified import result
+  allocates the separate typed contact, guardian, or channel accept owner
 
 ## Enforcement Ratchet
 

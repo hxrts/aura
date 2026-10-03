@@ -31,6 +31,9 @@ Coordinate multi-party protocols and guard-chain enforcement. This crate provide
 - No production effect implementations live in Layer 4.
 - Peer-originated data must cross the guard-owned verified ingress typestate
   boundary before it is eligible for state mutation.
+- `PersistentTreeHandler` is a storage primitive: callers must authenticate
+  parent-epoch verifiers and validate a complete tree-op batch before calling
+  its import or replacement methods.
 - Guard chain is enforced on every send.
 - Journal facts and budgets are coupled atomically before transport.
 

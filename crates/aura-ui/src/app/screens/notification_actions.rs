@@ -62,15 +62,23 @@ pub(in crate::app) fn accept_invitation_action(
     controller: Arc<UiController>,
     render_tick: Signal<u64>,
     invitation_id: String,
+    guardian: bool,
 ) {
     let app_core = controller.app_core().clone();
     let mut tick = render_tick;
     spawn_ui(async move {
-        let operation = UiWorkflowHandoffOwner::submit(
-            controller.clone(),
-            OperationId::invitation_accept_contact(),
-            SemanticOperationKind::AcceptContactInvitation,
-        );
+        let (operation_id, kind) = if guardian {
+            (
+                OperationId::accept_guardian_invitation(),
+                SemanticOperationKind::AcceptGuardianInvitation,
+            )
+        } else {
+            (
+                OperationId::invitation_accept_contact(),
+                SemanticOperationKind::AcceptContactInvitation,
+            )
+        };
+        let operation = UiWorkflowHandoffOwner::submit(controller.clone(), operation_id, kind);
         let instance_id = operation.workflow_instance_id();
         let transfer =
             operation.handoff_to_app_workflow(UiOperationTransferScope::AcceptInvitation);
@@ -355,7 +363,9 @@ pub(in crate::app) fn NotificationActionBar(
     render_tick: Signal<u64>,
 ) -> Element {
     match action {
-        NotificationRuntimeAction::ReceivedInvitation => {
+        NotificationRuntimeAction::ReceivedInvitation
+        | NotificationRuntimeAction::ReceivedGuardianInvitation => {
+            let guardian = action == NotificationRuntimeAction::ReceivedGuardianInvitation;
             let accept_controller = controller.clone();
             let accept_id = item_id.clone();
             let decline_id = item_id;
@@ -368,6 +378,7 @@ pub(in crate::app) fn NotificationActionBar(
                             accept_controller.clone(),
                             render_tick,
                             accept_id.clone(),
+                            guardian,
                         );
                     },
                 }

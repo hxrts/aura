@@ -263,17 +263,11 @@ pub(super) fn handle_modal_enter(
                 set_toast(model, '✗', "Enrollment code is required");
                 return;
             }
-            model.demo.has_secondary_device = true;
-            if model.secondary_device_name().is_none() {
-                let fallback = match model.active_modal.as_ref() {
-                    Some(ActiveModal::AddDevice(state)) if !state.device_name.trim().is_empty() => {
-                        state.device_name.clone()
-                    }
-                    _ => "Mobile".to_string(),
-                };
-                model.set_secondary_device_name(Some(fallback));
-            }
-            set_toast(model, '✓', "Device enrollment complete");
+            set_toast(
+                model,
+                'ℹ',
+                "Enrollment code entered; import requires runtime confirmation",
+            );
             dismiss_modal(model);
         }
         ModalState::SelectDeviceToRemove => {

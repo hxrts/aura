@@ -22,12 +22,28 @@ pub async fn update_authoritative_semantic_facts<F>(
 where
     F: FnOnce(&mut Vec<AuthoritativeSemanticFact>),
 {
+    update_authoritative_semantic_facts_checked(app_core, |facts| {
+        update(facts);
+        Ok(())
+    })
+    .await
+}
+
+/// Apply a checked update while holding the same serialization gate used for
+/// authoritative semantic facts. A rejected update is never published.
+pub(in crate::workflows) async fn update_authoritative_semantic_facts_checked<F>(
+    app_core: &Arc<RwLock<AppCore>>,
+    update: F,
+) -> Result<(), AuraError>
+where
+    F: FnOnce(&mut Vec<AuthoritativeSemanticFact>) -> Result<(), AuraError>,
+{
     let _guard = AUTHORITATIVE_SEMANTIC_FACTS_UPDATE_GATE.lock().await;
     let (previous_facts, updated_facts, changed) = {
         let mut core = app_core.write().await;
         let previous_facts = core.authoritative_semantic_facts();
         let mut updated_facts = previous_facts.clone();
-        update(&mut updated_facts);
+        update(&mut updated_facts)?;
         let changed = updated_facts != previous_facts;
         if changed {
             core.set_authoritative_semantic_facts(updated_facts.clone());

@@ -1681,6 +1681,61 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
         );
         joiner.replace_tree_ops(&baseline).await.expect("adopt baseline");
         let all_ops = effects.export_tree_ops().await.expect("initiator ops");
+        // A tree frame cannot supply its own trust anchor. The fixture's
+        // secure-store copy stands in for an independently authenticated
+        // enrollment handoff of the parent's verifier and policy.
+        let missing = joiner.import_verified_tree_ops(&all_ops).await;
+        assert!(missing.is_err(), "an empty verifier store must fail closed");
+        let parent_key = aura_core::effects::SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            authority.to_string(),
+            "0",
+        );
+        let parent_policy = aura_core::effects::SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            authority.to_string(),
+            "0",
+        );
+        for location in [&parent_key, &parent_policy] {
+            let package = aura_core::effects::SecureStorageEffects::secure_retrieve(
+                effects.as_ref(),
+                location,
+                &[aura_core::effects::SecureStorageCapability::Read],
+            )
+            .await
+            .expect("initiator parent verifier");
+            aura_core::effects::SecureStorageEffects::secure_store(
+                joiner.as_ref(),
+                location,
+                &package,
+                &[
+                    aura_core::effects::SecureStorageCapability::Read,
+                    aura_core::effects::SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .expect("authenticated parent verifier fixture");
+        }
+        let mut forged = all_ops.clone();
+        forged.last_mut().expect("enrollment extension").agg_sig[0] ^= 0x01;
+        assert!(
+            joiner.import_verified_tree_ops(&forged).await.is_err(),
+            "forged extending operation must fail with a trusted parent verifier"
+        );
+        assert_eq!(joiner.export_tree_ops().await.expect("after forgery"), baseline);
+        let resulting_state = aura_journal::commitment_tree::reduce(&all_ops)
+            .expect("initiator tree should reduce");
+        let mut forged_tail = all_ops.last().expect("enrollment extension").clone();
+        forged_tail.op.parent_epoch = resulting_state.epoch;
+        forged_tail.op.parent_commitment = resulting_state.root_commitment;
+        let mut mixed_batch = all_ops.clone();
+        mixed_batch.push(forged_tail);
+        assert!(joiner.import_verified_tree_ops(&mixed_batch).await.is_err());
+        assert_eq!(
+            joiner.export_tree_ops().await.expect("after mixed batch"),
+            baseline,
+            "a bad later operation must not partially persist a valid prefix"
+        );
         assert!(joiner.import_verified_tree_ops(&all_ops).await.expect("import") > 0);
         let joiner_tree = aura_protocol::effects::TreeEffects::get_current_state(joiner.as_ref())
             .await
@@ -1703,10 +1758,7 @@ fn sole_device_enrollment_commits_after_new_device_accepts() {
             .expect("provisional bootstrap");
         let before = effects.export_tree_ops().await.expect("before");
         let provisional_ops = provisional.export_tree_ops().await.expect("provisional ops");
-        assert_eq!(
-            effects.import_verified_tree_ops(&provisional_ops).await.expect("import"),
-            0
-        );
+        assert!(effects.import_verified_tree_ops(&provisional_ops).await.is_err());
         assert_eq!(effects.export_tree_ops().await.expect("after"), before);
     });
 }

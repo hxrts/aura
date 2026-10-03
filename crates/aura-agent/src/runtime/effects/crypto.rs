@@ -1,6 +1,8 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
-use aura_core::crypto::single_signer::{SigningMode, SingleSignerKeyPackage};
+use aura_core::crypto::single_signer::{
+    SigningMode, SingleSignerKeyPackage, SingleSignerPublicKeyPackage,
+};
 use aura_core::crypto::tree_signing;
 use aura_core::effects::crypto::{
     FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext, KeyGenerationMethod,
@@ -34,6 +36,82 @@ struct ParticipantKeyPackageEnvelope {
 }
 
 impl AuraEffectSystem {
+    /// Resolve the parent epoch verifier from local secure storage. Peer tree
+    /// frames and invitation payloads are never a source for this key.
+    pub(super) async fn trusted_tree_parent_verifier(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+    ) -> Result<(aura_core::tree::BranchSigningKey, u16), AuraError> {
+        let metadata = self
+            .get_threshold_config_metadata(authority, epoch)
+            .await
+            .ok_or_else(|| AuraError::crypto("Missing trusted parent-epoch threshold metadata"))?;
+        if metadata.threshold_k == 0 || metadata.threshold_k > metadata.total_n {
+            return Err(AuraError::crypto("Invalid trusted parent-epoch threshold"));
+        }
+        let caps = [SecureStorageCapability::Read];
+        let package = match metadata.mode {
+            SigningMode::SingleSigner => {
+                if metadata.threshold_k != 1 || metadata.total_n != 1 {
+                    return Err(AuraError::crypto(
+                        "Invalid single-signer parent-epoch policy",
+                    ));
+                }
+                match self
+                    .crypto
+                    .secure_storage()
+                    .secure_retrieve(&Self::solo_public_key_location(authority, epoch), &caps)
+                    .await
+                {
+                    Ok(package) => package,
+                    Err(_) => self
+                        .crypto
+                        .secure_storage()
+                        .secure_retrieve(
+                            &Self::threshold_public_key_location(authority, epoch),
+                            &caps,
+                        )
+                        .await
+                        .map_err(|error| {
+                            AuraError::crypto(format!(
+                                "Missing trusted parent-epoch public key: {error}"
+                            ))
+                        })?,
+                }
+            }
+            SigningMode::Threshold => self
+                .crypto
+                .secure_storage()
+                .secure_retrieve(
+                    &Self::threshold_public_key_location(authority, epoch),
+                    &caps,
+                )
+                .await
+                .map_err(|error| {
+                    AuraError::crypto(format!("Missing trusted parent-epoch public key: {error}"))
+                })?,
+        };
+        let group_key: [u8; 32] = match metadata.mode {
+            SigningMode::SingleSigner => SingleSignerPublicKeyPackage::from_bytes(&package)
+                .map_err(|error| {
+                    AuraError::crypto(format!("Invalid trusted single-signer package: {error}"))
+                })?
+                .verifying_key()
+                .try_into()
+                .map_err(|_| AuraError::crypto("Invalid trusted single-signer key length"))?,
+            SigningMode::Threshold => tree_signing::public_key_package_from_bytes(&package)?
+                .group_public_key
+                .as_slice()
+                .try_into()
+                .map_err(|_| AuraError::crypto("Invalid trusted threshold key length"))?,
+        };
+        Ok((
+            aura_core::tree::BranchSigningKey::new(group_key, aura_core::Epoch::new(epoch)),
+            metadata.threshold_k,
+        ))
+    }
+
     fn participant_share_location(
         authority: &AuthorityId,
         epoch: u64,

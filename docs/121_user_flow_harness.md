@@ -60,6 +60,17 @@ Shared commands are typed `IntentAction` requests (account creation, device enro
 - Each command returns a typed response with submission metadata and an optional operation handle.
 - Post-action waits require a strictly newer authoritative projection or another declared barrier.
 - Unsupported semantic commands fail closed. No silent fallback to renderer-specific behavior.
+- Enrollment code issuance and enrollment completion are separate operation
+  instances. A code-ready response confirms only issuance. Wait for the
+  ceremony-linked completion instance and its authoritative terminal state
+  before asserting that another device joined.
+- `OperationSnapshot` exports the instance ID, state, and stable failure
+  domain/code on both frontends. A cancelled operation remains distinguishable
+  from a failure. Shared waits use those fields and the active observation
+  generation; local wizard state, a toast, a click, or a changed count cannot
+  substitute for a terminal result.
+- A staged browser import or bootstrap handoff reports staging. The follow-up
+  operation settles only after the runtime ceremony outcome is observed.
 
 See [Testing Guide](804_testing_guide.md) for semantic command usage.
 

@@ -1374,6 +1374,9 @@ pub(super) fn handle_dispatch_command_match(
                         SemanticOperationKind::AcceptPendingChannelInvitation => {
                             OperationId::invitation_accept_channel()
                         }
+                        SemanticOperationKind::AcceptGuardianInvitation => {
+                            OperationId::accept_guardian_invitation()
+                        }
                         _ => OperationId::invitation_accept_contact(),
                     };
                     let operation = submit_workflow_handoff_operation(
@@ -1447,7 +1450,7 @@ pub(super) fn handle_dispatch_command_match(
             };
             let kind = match invitation_type {
                 InvitationKind::Contact => SemanticOperationKind::CreateContactInvitation,
-                InvitationKind::Guardian => SemanticOperationKind::CreateContactInvitation,
+                InvitationKind::Guardian => SemanticOperationKind::CreateGuardianInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
             let operation = submit_local_terminal_operation(
@@ -1477,8 +1480,8 @@ pub(super) fn handle_dispatch_command_match(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,
-                OperationId::invitation_accept_contact(),
-                SemanticOperationKind::AcceptContactInvitation,
+                OperationId::invitation_import(),
+                SemanticOperationKind::ImportInvitation,
             );
             new_state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
             (cb.invitations.on_import)(code, operation);

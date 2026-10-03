@@ -8,6 +8,7 @@ use crate::tui::channel_selection::authoritative_committed_selection;
 use crate::tui::components::copy_to_clipboard;
 use crate::tui::screens::app::shell::dispatch::{
     format_ui_operation_failure, set_authoritative_operation_state_sanctioned,
+    set_authoritative_operation_status_sanctioned,
 };
 
 pub(super) async fn process_ui_update_match(
@@ -151,45 +152,26 @@ pub(super) async fn process_ui_update_match(
         } => {
             let mut toast: Option<(String, crate::tui::state::ToastLevel)> = None;
             let mut dismiss_ceremony_started_toast = false;
-            let mut handled_device_enrollment_modal = false;
             tui.with_mut(|state| {
                                 let mut dismiss_modal = false;
 
                                 state.modal_queue.update_active(|modal| {
                                     if let crate::tui::state::QueuedModal::SettingsDeviceEnrollment(ref mut s) = modal {
-                                        handled_device_enrollment_modal = true;
                                         if s.ceremony.ceremony_id.as_deref() == Some(ceremony_id.as_str()) {
                                             s.update_from_status(
                                                 accepted_count,
                                                 total_count,
                                                 threshold,
-                                                is_complete,
-                                                has_failed,
+                                                false,
+                                                false,
                                                 error_message.clone(),
                                                 pending_epoch,
                                                 agreement_mode,
                                                 reversion_risk,
                                             );
 
-                                            if has_failed {
-                                                toast = Some((
-                                                    error_message
-                                                        .clone()
-                                                        .unwrap_or_else(|| "Device enrollment failed".to_string()),
-                                                    crate::tui::state::ToastLevel::Error,
-                                                ));
-                                            } else if is_complete {
-                                                dismiss_modal = true;
-                                                toast = Some((
-                                                    "Device enrollment complete".to_string(),
-                                                    crate::tui::state::ToastLevel::Success,
-                                                ));
-                                                let app_core = app_core.raw().clone();
-                                                let tasks = tasks_for_updates.clone();
-                                                tasks.spawn(async move {
-                                                    let _ = refresh_settings_from_runtime(&app_core).await;
-                                                });
-                                            }
+                                            // Enrollment terminality is published by the app
+                                            // completion owner, not inferred from local counts.
                                         }
                                     } else if let crate::tui::state::QueuedModal::GuardianSetup(ref mut s) = modal {
                                         if matches!(
@@ -223,7 +205,7 @@ pub(super) async fn process_ui_update_match(
 
                                             s.update_responses_from_accepted(&accepted_guardians);
 
-                                            if has_failed {
+                                            if has_failed && !matches!(kind, aura_app::ui::types::CeremonyKind::DeviceEnrollment) {
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Guardian ceremony failed".to_string());
@@ -232,7 +214,7 @@ pub(super) async fn process_ui_update_match(
 
                                                 toast = Some((msg, crate::tui::state::ToastLevel::Error));
                                                 dismiss_ceremony_started_toast = true;
-                                            } else if is_complete {
+                                            } else if is_complete && !matches!(kind, aura_app::ui::types::CeremonyKind::DeviceEnrollment) {
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     match kind {
@@ -240,7 +222,7 @@ pub(super) async fn process_ui_update_match(
                                                             "Guardian ceremony complete! {threshold}-of-{total_count} committed"
                                                         ),
                                                         aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
-                                                            "Device enrollment complete".to_string()
+                                                            "Device enrollment awaiting authoritative outcome".to_string()
                                                         }
                                                         aura_app::ui::types::CeremonyKind::DeviceRemoval => {
                                                             "Device removal complete".to_string()
@@ -339,28 +321,6 @@ pub(super) async fn process_ui_update_match(
                                     state.toast_queue.dismiss();
                                 }
                             });
-
-            if !handled_device_enrollment_modal
-                && matches!(kind, aura_app::ui::types::CeremonyKind::DeviceEnrollment)
-                && (is_complete || has_failed)
-            {
-                let app_core = app_core.raw().clone();
-                let tasks = tasks_for_updates.clone();
-                tasks.spawn(async move {
-                    let _ = refresh_settings_from_runtime(&app_core).await;
-                });
-                if is_complete {
-                    toast = Some((
-                        "Device enrollment complete".to_string(),
-                        crate::tui::state::ToastLevel::Success,
-                    ));
-                } else if has_failed {
-                    toast = Some((
-                        error_message.unwrap_or_else(|| "Device enrollment failed".to_string()),
-                        crate::tui::state::ToastLevel::Error,
-                    ));
-                }
-            }
 
             if let Some((msg, level)) = toast {
                 enqueue_toast!(msg, level);
@@ -822,21 +782,30 @@ pub(super) async fn process_ui_update_match(
             let failure_already_reported = tui
                 .read_clone()
                 .operation_already_failed(&operation_id, instance_id.as_ref());
-            let next_state = match status.phase {
-                aura_app::ui_contract::SemanticOperationPhase::Failed => OperationState::Failed,
-                aura_app::ui_contract::SemanticOperationPhase::Cancelled => OperationState::Failed,
-                aura_app::ui_contract::SemanticOperationPhase::Succeeded => {
-                    OperationState::Succeeded
-                }
-                _ => OperationState::Submitting,
-            };
+            let enrollment_completion =
+                status.kind == SemanticOperationKind::CompleteDeviceEnrollment;
+            let completion_terminal_already_seen = enrollment_completion
+                && tui
+                    .read_clone()
+                    .exported_operation_snapshots()
+                    .iter()
+                    .any(|operation| {
+                        operation.id == operation_id
+                            && instance_id.as_ref() == Some(&operation.instance_id)
+                            && matches!(
+                                operation.state,
+                                OperationState::Succeeded
+                                    | OperationState::Failed
+                                    | OperationState::Cancelled
+                            )
+                    });
             tui.with_mut(|state| {
-                set_authoritative_operation_state_sanctioned(
+                set_authoritative_operation_status_sanctioned(
                     state,
                     operation_id,
                     instance_id,
                     causality,
-                    next_state,
+                    &status,
                 );
             });
             if let Some(message) = failure_message.filter(|_| !failure_already_reported) {
@@ -844,6 +813,36 @@ pub(super) async fn process_ui_update_match(
                     state.toast_queue.clear();
                 });
                 enqueue_toast!(message, crate::tui::state::ToastLevel::Error);
+            }
+            if enrollment_completion && !completion_terminal_already_seen {
+                match status.phase {
+                    aura_app::ui_contract::SemanticOperationPhase::Succeeded => {
+                        tui.with_mut(|state| {
+                            if matches!(
+                                state.modal_queue.current(),
+                                Some(crate::tui::state::QueuedModal::SettingsDeviceEnrollment(_))
+                            ) {
+                                state.modal_queue.dismiss();
+                            }
+                        });
+                        enqueue_toast!(
+                            "Device enrollment complete".to_string(),
+                            crate::tui::state::ToastLevel::Success
+                        );
+                        let app_core = app_core.raw().clone();
+                        let tasks = tasks_for_updates.clone();
+                        tasks.spawn(async move {
+                            let _ = refresh_settings_from_runtime(&app_core).await;
+                        });
+                    }
+                    aura_app::ui_contract::SemanticOperationPhase::Cancelled => {
+                        enqueue_toast!(
+                            "Device enrollment cancelled".to_string(),
+                            crate::tui::state::ToastLevel::Info
+                        );
+                    }
+                    _ => {}
+                }
             }
             let export_state = tui.read_clone();
             let app_snapshot = match authoritative_app_snapshot_with_retry(

@@ -76,6 +76,28 @@ pub(crate) fn verify_transport_receipt_for_envelope(
     verify_blob(TRANSPORT_SCOPE, &receipt.sig, &transcript)
 }
 
+/// Verify a transport receipt against an independently trusted signer key.
+///
+/// `verify_transport_receipt_for_envelope` proves only integrity under the key
+/// embedded in the receipt. An authority or device identity may be promoted
+/// only after the caller resolves its expected key from trusted local state.
+#[allow(dead_code)] // Awaiting the authenticated peer-key handoff at LAN ingress.
+pub(crate) fn verify_transport_receipt_for_envelope_with_key(
+    receipt: &TransportReceipt,
+    envelope: &TransportEnvelope,
+    expected_key: &[u8; PUBLIC_KEY_BYTES],
+) -> Result<(), TransportError> {
+    verify_transport_receipt_for_envelope(receipt, envelope)?;
+    let key_start = RECEIPT_SIGNATURE_MAGIC.len() + 1;
+    let key_end = key_start + PUBLIC_KEY_BYTES;
+    if &receipt.sig[key_start..key_end] != expected_key {
+        return Err(TransportError::ReceiptValidationFailed {
+            reason: "receipt signer does not match trusted peer key".to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn sign_blob(
     scope: u8,
     signing_key: &Ed25519SigningKey,
@@ -252,6 +274,39 @@ mod tests {
             .unwrap();
 
         assert!(verify_transport_receipt_for_envelope(&receipt, &envelope).is_ok());
+    }
+
+    #[test]
+    fn self_signed_receipt_cannot_impersonate_a_trusted_peer() {
+        let envelope = envelope();
+        let mut receipt = receipt_for(&envelope);
+        let attacker = Ed25519SigningKey::from_bytes([7u8; 32]);
+        sign_transport_receipt_for_envelope(&mut receipt, &envelope, &attacker).unwrap();
+        let trusted_key = test_receipt_signing_key().verifying_key().unwrap();
+
+        assert!(verify_transport_receipt_for_envelope(&receipt, &envelope).is_ok());
+        assert!(verify_transport_receipt_for_envelope_with_key(
+            &receipt,
+            &envelope,
+            trusted_key.as_bytes().try_into().unwrap(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn trusted_receipt_signer_verifies() {
+        let envelope = envelope();
+        let mut receipt = receipt_for(&envelope);
+        let signer = test_receipt_signing_key();
+        sign_transport_receipt_for_envelope(&mut receipt, &envelope, &signer).unwrap();
+        let trusted_key = signer.verifying_key().unwrap();
+
+        verify_transport_receipt_for_envelope_with_key(
+            &receipt,
+            &envelope,
+            trusted_key.as_bytes().try_into().unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]

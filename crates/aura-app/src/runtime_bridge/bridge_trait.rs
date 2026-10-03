@@ -3,9 +3,9 @@
 use super::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
-    CeremonyStatus, DeviceEnrollmentStart, DiscoveryTriggerOutcome, InvitationInfo,
-    InvitationMutationOutcome, KeyRotationCeremonyStatus, RendezvousStatus, RuntimeStatus,
-    SettingsBridgeState, SyncStatus,
+    CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, DiscoveryTriggerOutcome,
+    InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus, RendezvousStatus,
+    RuntimeStatus, SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
 use crate::ui_contract::AmpChannelTransitionSnapshot;
@@ -20,6 +20,7 @@ use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId};
 use aura_core::types::{Epoch, FrostThreshold};
+use aura_core::InvitationId;
 use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::{FactOptions, RelationalFact};
 use std::sync::Arc;
@@ -599,6 +600,33 @@ pub trait RuntimeBridge: Send + Sync {
         ceremony_id: &CeremonyId,
     ) -> Result<CeremonyStatus, IntentError>;
 
+    /// Return the runtime owner's terminal result, if this ceremony has settled.
+    async fn get_ceremony_terminal_outcome(
+        &self,
+        _ceremony_id: &CeremonyId,
+    ) -> Result<Option<CeremonyTerminalOutcome>, IntentError> {
+        Err(IntentError::no_agent(
+            "ceremony terminal outcome is unavailable from this runtime",
+        ))
+    }
+
+    /// Enumerate enrollment ceremonies retained by the runtime, including
+    /// terminal ceremonies that need replay after an app restart.
+    async fn list_device_enrollment_ceremonies(&self) -> Result<Vec<CeremonyId>, IntentError> {
+        Ok(Vec::new())
+    }
+
+    /// Return guardian binding completion only after verified post-acceptance
+    /// evidence has been committed by the runtime ceremony owner.
+    async fn get_guardian_invitation_terminal_outcome(
+        &self,
+        _invitation_id: &InvitationId,
+    ) -> Result<Option<CeremonyTerminalOutcome>, IntentError> {
+        Err(IntentError::no_agent(
+            "guardian invitation completion evidence is unavailable from this runtime",
+        ))
+    }
+
     /// Get status of a key rotation ceremony (generic form).
     async fn get_key_rotation_ceremony_status(
         &self,
@@ -798,6 +826,12 @@ pub trait RuntimeBridge: Send + Sync {
     /// delegate to the runtime's sleep primitive; simulation implementations can
     /// use virtual time.
     async fn sleep_ms(&self, ms: u64);
+
+    /// Wait between long-lived app hook refreshes. Offline runtimes may park
+    /// until cancellation because they have no external ceremony progress.
+    async fn wait_for_background_refresh(&self, ms: u64) {
+        self.sleep_ms(ms).await;
+    }
 
     /// Get overall runtime status.
     async fn get_status(&self) -> Result<RuntimeStatus, IntentError> {

@@ -131,7 +131,11 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   changed-files ratchets in `just ci-annotation-ratchet`;
   the same lane also enforces the ignored-test-count ratchet, so new
   `#[ignore]` coverage must carry an intentional inventory update;
-  prefer adding the declaration-layer attribute over adding a shell allowlist
+  prefer adding the declaration-layer attribute over adding a shell allowlist.
+  A public `*_with_terminal_status` handoff may delegate to a private
+  `#[semantic_owner]` function when the attribute names that exact public
+  wrapper; both the changed-files ratchet and Rust-native ownership lint
+  verify this declared relationship
 - **Frontend handoff boundary**: direct `LocalTerminalOperationOwner::submit`
   and `WorkflowHandoffOperationOwner::submit` allocation stays inside the
   sanctioned terminal/browser submission boundaries; callback factories and

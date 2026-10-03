@@ -407,8 +407,17 @@ pub fn run_ownership_annotation_ratchet(args: &[String]) -> Result<()> {
             if window.len() > 16 {
                 window.remove(0);
             }
+            let declared_wrapper = if mode == "semantic-owner"
+                && added.contains("_with_terminal_status(")
+            {
+                let source = read(repo_root.join(&current_file))?;
+                semantic_owner_wrapper_declared_in_source(&source, added)?
+            } else {
+                false
+            };
             if candidate_requires_attr(mode, &current_file, added)
                 && !window.iter().any(|entry| entry.contains(required_attr))
+                && !declared_wrapper
             {
                 violations.push(format!(
                     "{current_file}: added boundary appears to require {required_attr} near {added}"
@@ -436,6 +445,20 @@ pub fn run_ownership_annotation_ratchet(args: &[String]) -> Result<()> {
         println!("ownership-annotation-ratchet({mode}): clean (0 named exclusions)");
     }
     Ok(())
+}
+
+fn semantic_owner_wrapper_declared_in_source(source: &str, added: &str) -> Result<bool> {
+    let function = Regex::new(r"\basync\s+fn\s+([A-Za-z0-9_]+_with_terminal_status)\(")?
+        .captures(added)
+        .and_then(|captures| captures.get(1).map(|name| name.as_str().to_string()));
+    let Some(function) = function else {
+        return Ok(false);
+    };
+    let declaration = Regex::new(&format!(
+        r#"(?ms)^\s*#\[aura_macros::semantic_owner\([^)]*\bwrapper\s*=\s*"{}""#,
+        regex::escape(&function)
+    ))?;
+    Ok(declaration.is_match(source))
 }
 
 pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
@@ -8753,4 +8776,39 @@ pub fn run_shared_flow_policy() -> Result<()> {
     run_tui_selection_contract()?;
     println!("shared flow policy: clean");
     Ok(())
+}
+
+#[cfg(test)]
+mod ownership_ratchet_tests {
+    use super::semantic_owner_wrapper_declared_in_source;
+
+    #[test]
+    fn semantic_owner_wrapper_requires_its_exact_declaration() {
+        let wrapper = "pub async fn import_invitation_details_with_terminal_status(";
+        let declared = r#"
+            pub async fn import_invitation_details_with_terminal_status() {}
+            #[aura_macros::semantic_owner(
+                owner = "import_invitation_details_owned",
+                wrapper = "import_invitation_details_with_terminal_status",
+                terminal = "publish_success_with",
+                category = "move_owned"
+            )]
+            async fn import_invitation_details_owned() {}
+        "#;
+        assert!(semantic_owner_wrapper_declared_in_source(declared, wrapper).unwrap());
+        assert!(!semantic_owner_wrapper_declared_in_source(
+            declared.replace(
+                "wrapper = \"import_invitation_details_with_terminal_status\"",
+                "wrapper = \"another_with_terminal_status\""
+            )
+            .as_str(),
+            wrapper
+        )
+        .unwrap());
+        assert!(!semantic_owner_wrapper_declared_in_source(
+            "// #[aura_macros::semantic_owner(wrapper = \"import_invitation_details_with_terminal_status\")]",
+            wrapper
+        )
+        .unwrap());
+    }
 }

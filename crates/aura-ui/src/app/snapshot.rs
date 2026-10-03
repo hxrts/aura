@@ -22,21 +22,6 @@ fn upsert_snapshot_list(
     }
 }
 
-fn upsert_snapshot_operation(
-    snapshot: &mut UiSnapshot,
-    operation_id: OperationId,
-    state: OperationState,
-) {
-    snapshot
-        .operations
-        .retain(|operation| operation.id != operation_id);
-    snapshot.operations.push(OperationSnapshot {
-        id: operation_id,
-        instance_id: OperationInstanceId("synthetic-operation".to_string()),
-        state,
-    });
-}
-
 pub(in crate::app) fn runtime_semantic_snapshot(
     model: &UiModel,
     neighborhood_runtime: &NeighborhoodRuntimeView,
@@ -67,26 +52,6 @@ pub(in crate::app) fn runtime_semantic_snapshot(
             notifications_loaded: notifications_runtime.loaded,
         },
     );
-
-    if let Some(add_device_state) = model.add_device_modal() {
-        let operation_state = match add_device_state.step {
-            AddDeviceWizardStep::Name => OperationState::Idle,
-            AddDeviceWizardStep::ShareCode | AddDeviceWizardStep::Confirm => {
-                if add_device_state.has_failed {
-                    OperationState::Failed
-                } else if add_device_state.is_complete {
-                    OperationState::Succeeded
-                } else {
-                    OperationState::Submitting
-                }
-            }
-        };
-        upsert_snapshot_operation(
-            &mut snapshot,
-            OperationId::device_enrollment(),
-            operation_state,
-        );
-    }
 
     let selected_home_id = model
         .selected_home_id()
@@ -288,6 +253,25 @@ mod projection_source_tests {
     };
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::{Arc, OnceLock};
+
+    #[test]
+    fn add_device_wizard_cannot_publish_synthetic_completion() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.active_modal = Some(ActiveModal::AddDevice(crate::model::AddDeviceModalState {
+            step: AddDeviceWizardStep::Confirm,
+            is_complete: true,
+            ..crate::model::AddDeviceModalState::default()
+        }));
+        let snapshot = runtime_semantic_snapshot(
+            &model,
+            &NeighborhoodRuntimeView::default(),
+            &ChatRuntimeView::default(),
+            &ContactsRuntimeView::default(),
+            &SettingsRuntimeView::default(),
+            &NotificationsRuntimeView::default(),
+        );
+        assert!(snapshot.operations.is_empty());
+    }
 
     #[test]
     fn published_home_list_carries_its_app_graph_source_revision() {

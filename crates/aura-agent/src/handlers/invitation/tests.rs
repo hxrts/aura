@@ -1042,12 +1042,14 @@ async fn importing_channel_invitation_without_context_rejects_before_persist() {
     assert!(persisted.is_none());
 }
 
-#[tokio::test]
-async fn accepting_guardian_invitation_surfaces_choreography_failure() {
+large_stack_async_test!(accepting_guardian_invitation_surfaces_choreography_failure, {
     let authority_context = create_test_authority(103);
     let effects = effects_for(&authority_context);
+    let receiver_id = authority_context.authority_id();
     let handler = InvitationHandler::new(authority_context).unwrap();
     let sender_id = AuthorityId::new_from_entropy([104u8; 32]);
+    let sender_effects = effects_for(&create_test_authority(104));
+    bootstrap_test_signing_authority(&sender_effects, sender_id).await;
     let shareable = ShareableInvitation {
         version: ShareableInvitation::CURRENT_VERSION,
         invitation_id: InvitationId::new("inv-guardian-missing-ceremony"),
@@ -1059,9 +1061,29 @@ async fn accepting_guardian_invitation_surfaces_choreography_failure() {
         expires_at: None,
         message: None,
     };
-    let code = shareable
-        .to_code()
-        .expect("shareable invitation should serialize");
+    let invitation = Invitation {
+        invitation_id: shareable.invitation_id.clone(),
+        context_id: default_context_id_for_authority(sender_id),
+        sender_id,
+        receiver_id,
+        invitation_type: shareable.invitation_type.clone(),
+        status: InvitationStatus::Pending,
+        created_at: 0,
+        expires_at: None,
+        message: None,
+        receiver_nickname: None,
+    };
+    let code = crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
+        sender_effects.as_ref(),
+        &invitation,
+        &ShareableInvitationTransportMetadata {
+            sender_device_id: Some(sender_effects.device_id()),
+            ..ShareableInvitationTransportMetadata::default()
+        },
+        false,
+    )
+    .await
+    .expect("guardian invitation code must carry sender proof");
     let imported = handler
         .import_invitation_code(effects.as_ref(), &code)
         .await
@@ -1076,11 +1098,8 @@ async fn accepting_guardian_invitation_surfaces_choreography_failure() {
     .expect_err("guardian choreography failure should surface");
     // With no principal online the signed acceptance cannot be delivered;
     // the failure must still surface to the caller.
-    assert!(
-        error.to_string().contains("accept_invitation_choreography"),
-        "unexpected error: {error}"
-    );
-}
+    assert!(matches!(&error, AgentError::Timeout(_)), "unexpected error: {error}");
+});
 
 #[tokio::test]
 async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occurs() {
@@ -4257,11 +4276,14 @@ async fn production_import_rejects_self_certified_key_for_known_sender() {
         .import_invitation_code(effects.as_ref(), &code)
         .await
         .expect_err("known sender must not be accepted with self-certified proof key");
-    assert!(
-        err.to_string()
-            .contains("known sender invitation requires trusted sender key resolution"),
-        "unexpected known-sender trust error: {err}"
-    );
+    assert!(matches!(
+        err,
+        AgentError::UnresolvedDeviceBinding {
+            authority,
+            device,
+            source: aura_core::key_resolution::KeyResolutionError::Unknown { .. },
+        } if authority == sender_id && device == receiver.device_id()
+    ));
 }
 
 #[tokio::test]
@@ -4952,6 +4974,7 @@ async fn guardian_acceptance_records_verified_recovery_key() {
         invitation: &invitation,
         guardian: guardian.authority_id(),
         recovery_public_key: &public_key,
+        invitation_sender_proof_key: &[7; 32],
     };
     let signature =
         aura_signature::sign_ed25519_transcript(guardian_effects.as_ref(), &transcript, &private_key)
@@ -4961,6 +4984,7 @@ async fn guardian_acceptance_records_verified_recovery_key() {
         invitation_id: invitation.invitation_id.clone(),
         signature,
         recovery_public_key: public_key.clone(),
+        invitation_sender_proof_key: vec![7; 32],
     };
 
     // A substituted key is rejected and nothing is stored.
@@ -5034,6 +5058,24 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
     invitation.invitation_type = InvitationType::Guardian {
         subject_authority: principal_id,
     };
+    invitation.expires_at = None;
+
+    bootstrap_test_signing_authority(&principal_effects, principal_id).await;
+    let code = crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
+        principal_effects.as_ref(),
+        &invitation,
+        &ShareableInvitationTransportMetadata {
+            sender_device_id: Some(principal_device),
+            ..ShareableInvitationTransportMetadata::default()
+        },
+        false,
+    )
+    .await
+    .expect("guardian invitation must carry sender proof");
+    guardian_handler
+        .import_invitation_code(&guardian_effects, &code)
+        .await
+        .expect("guardian imports authenticated invitation");
 
     let (principal_result, guardian_result) = tokio::join!(
         principal_handler.execute_guardian_invitation_principal(principal_effects.clone(), &invitation),
@@ -5051,6 +5093,14 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
     assert!(
         principal_effects.retrieve(&key_path).await.unwrap().is_some(),
         "principal records the guardian recovery key"
+    );
+    assert!(
+        guardian_effects
+            .retrieve(&super::guardian_confirmation_storage_key(&invitation.invitation_id))
+            .await
+            .unwrap()
+            .is_some(),
+        "guardian records the signed post-verification confirmation"
     );
 }
 

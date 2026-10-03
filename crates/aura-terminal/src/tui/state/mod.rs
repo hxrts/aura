@@ -56,8 +56,8 @@ use aura_app::ui::contract::{
     RuntimeEventKind, RuntimeEventSnapshot,
 };
 use aura_app::ui_contract::{
-    ProjectionRevision, RuntimeFact, SemanticOperationCausality, SubscriptionFailureCode,
-    SubscriptionHealthState,
+    ProjectionRevision, RuntimeFact, SemanticOperationCausality, SemanticOperationError,
+    SubscriptionFailureCode, SubscriptionHealthState,
 };
 use operations::OperationTracker;
 use std::collections::HashMap;
@@ -266,6 +266,23 @@ impl TuiState {
     ) {
         self.operation_states
             .set_authoritative_state(operation_id, instance_id, causality, state);
+    }
+
+    pub(crate) fn set_authoritative_operation_state_with_failure(
+        &mut self,
+        operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
+        causality: Option<SemanticOperationCausality>,
+        state: OperationState,
+        failure: Option<SemanticOperationError>,
+    ) {
+        self.operation_states.set_authoritative_state_with_failure(
+            operation_id,
+            instance_id,
+            causality,
+            state,
+            failure,
+        );
     }
 
     #[must_use]

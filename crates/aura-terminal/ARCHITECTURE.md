@@ -55,6 +55,11 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 - Shared channel projection must be recomputed by one owned coordinator from authoritative `CHAT`, `SETTINGS`, and neighborhood-scope inputs. A newer `CHAT_SIGNAL` snapshot removes channels absent from it, including selected DM-like channels; shell rendering must not restore entities from a prior snapshot.
 - Channel-targeting flows must consume either a committed selection token carried forward from authoritative UI focus or a typed workflow-returned `ChannelBindingWitness`. The shell may not re-resolve or repair targets from channel names, last visible messages, or other heuristic UI state.
 - Converted ceremony-monitoring paths must consume typed upstream lifecycle terminality and surface timeout or rollback-incomplete outcomes explicitly; the TUI may not silently discard those terminal states.
+- The TUI exports separate enrollment code-issuance and completion instances
+  with the app-owned terminal state, cancellation, and typed failure domain/code.
+  Its event loop may submit a guardian action only under the guardian operation
+  kind after the invitation type is verified; it may not infer completion from
+  a changed device count or a successful local import.
 - Relative-time display clocks are local observed-only maintenance for formatting. They may refresh labels such as "2m ago", but they must not gate, infer, or repair parity-critical ceremony or readiness state.
 - Slash-command outcome metadata must consume the upstream typed strong-command
   completion/degraded classification from `aura-app`; `aura-terminal` may

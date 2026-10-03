@@ -3,6 +3,23 @@
 use super::*;
 use thiserror::Error;
 
+#[derive(Debug, Error)]
+enum GuardianInvitationCompletionError {
+    #[error("guardian invitation {invitation_id} cancelled")]
+    Cancelled { invitation_id: InvitationId },
+    #[error("guardian invitation {invitation_id} ended: {reason:?}")]
+    Failed {
+        invitation_id: InvitationId,
+        reason: crate::runtime_bridge::CeremonyFailureReason,
+    },
+    #[error("guardian invitation {invitation_id} confirmation timed out")]
+    TimedOut { invitation_id: InvitationId },
+}
+
+fn guardian_completion_error(error: GuardianInvitationCompletionError) -> AuraError {
+    AuraError::from(Box::new(error) as Box<dyn std::error::Error + Send + Sync>)
+}
+
 fn emit_contact_accept_probe(stage: &str) {
     let _ = stage;
 }
@@ -173,6 +190,8 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
             },
         )
         .await;
+    } else if owner.kind() == SemanticOperationKind::AcceptGuardianInvitation {
+        return await_guardian_invitation_completion(&runtime, invitation_id, owner).await;
     } else if let Some((channel_id, context_hint, channel_name_hint)) = pending_runtime_invitation
         .as_ref()
         .and_then(|invitation| match &invitation.invitation_type {
@@ -273,6 +292,95 @@ pub(in crate::workflows) async fn accept_invitation_id_owned(
     Ok(())
 }
 
+async fn await_guardian_invitation_completion(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    invitation_id: &InvitationId,
+    owner: &SemanticWorkflowOwner,
+) -> Result<(), AuraError> {
+    use crate::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
+    use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
+
+    // Local invitation acceptance only starts the guardian choreography.
+    // The principal's verified binding acknowledgment is the success proof.
+    for _ in 0..60 {
+        let outcome = match runtime
+            .get_guardian_invitation_terminal_outcome(invitation_id)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                owner
+                    .publish_failure(SemanticOperationError::new(
+                        SemanticFailureDomain::Ceremony,
+                        SemanticFailureCode::CeremonyRuntimeFailed,
+                    ))
+                    .await?;
+                return Err(AuraError::from(
+                    Box::new(error) as Box<dyn std::error::Error + Send + Sync>
+                ));
+            }
+        };
+        match outcome {
+            Some(CeremonyTerminalOutcome::Committed) => {
+                owner
+                    .publish_success_with(issue_guardian_invitation_confirmed_proof(
+                        invitation_id.clone(),
+                    ))
+                    .await?;
+                return Ok(());
+            }
+            Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Cancelled)) => {
+                owner
+                    .publish_phase(SemanticOperationPhase::Cancelled)
+                    .await?;
+                return Err(guardian_completion_error(
+                    GuardianInvitationCompletionError::Cancelled {
+                        invitation_id: invitation_id.clone(),
+                    },
+                ));
+            }
+            Some(CeremonyTerminalOutcome::Failed(reason)) => {
+                let code = match reason {
+                    CeremonyFailureReason::Rejected => SemanticFailureCode::CeremonyRejected,
+                    CeremonyFailureReason::Cancelled => unreachable!("handled above"),
+                    CeremonyFailureReason::TimedOut => SemanticFailureCode::OperationTimedOut,
+                    CeremonyFailureReason::ChoreographyFailed => {
+                        SemanticFailureCode::CeremonyChoreographyFailed
+                    }
+                    CeremonyFailureReason::RuntimeFailed => {
+                        SemanticFailureCode::CeremonyRuntimeFailed
+                    }
+                    CeremonyFailureReason::Superseded => SemanticFailureCode::CeremonySuperseded,
+                };
+                owner
+                    .publish_failure(SemanticOperationError::new(
+                        SemanticFailureDomain::Ceremony,
+                        code,
+                    ))
+                    .await?;
+                return Err(guardian_completion_error(
+                    GuardianInvitationCompletionError::Failed {
+                        invitation_id: invitation_id.clone(),
+                        reason,
+                    },
+                ));
+            }
+            None => runtime.sleep_ms(1_000).await,
+        }
+    }
+    owner
+        .publish_failure(SemanticOperationError::new(
+            SemanticFailureDomain::Ceremony,
+            SemanticFailureCode::OperationTimedOut,
+        ))
+        .await?;
+    Err(guardian_completion_error(
+        GuardianInvitationCompletionError::TimedOut {
+            invitation_id: invitation_id.clone(),
+        },
+    ))
+}
+
 pub async fn accept_invitation_with_instance(
     app_core: &Arc<RwLock<AppCore>>,
     invitation: InvitationHandle,
@@ -294,6 +402,21 @@ pub async fn accept_invitation_with_instance(
                 None
             }
         };
+    let (operation_id, operation_kind) = accept_operation_for_evidence(
+        pending_runtime_invitation.as_ref(),
+        accepted_invitation.as_ref(),
+    );
+    let owner =
+        SemanticWorkflowOwner::new(app_core, operation_id, instance_id.clone(), operation_kind);
+    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
+        .await?;
+    accept_invitation_id_owned(app_core, &invitation_id, &owner, None).await
+}
+
+fn accept_operation_for_evidence(
+    pending_runtime_invitation: Option<&InvitationInfo>,
+    accepted_invitation: Option<&crate::views::invitations::Invitation>,
+) -> (OperationId, SemanticOperationKind) {
     let operation_kind = if pending_runtime_invitation
         .as_ref()
         .is_some_and(|invitation| {
@@ -306,6 +429,19 @@ pub async fn accept_invitation_with_instance(
             invitation.invitation_type == crate::views::invitations::InvitationType::Contact
         }) {
         SemanticOperationKind::AcceptContactInvitation
+    } else if pending_runtime_invitation
+        .as_ref()
+        .is_some_and(|invitation| {
+            matches!(
+                invitation.invitation_type,
+                InvitationBridgeType::Guardian { .. }
+            )
+        })
+        || accepted_invitation.as_ref().is_some_and(|invitation| {
+            invitation.invitation_type == crate::views::invitations::InvitationType::Guardian
+        })
+    {
+        SemanticOperationKind::AcceptGuardianInvitation
     } else {
         SemanticOperationKind::AcceptPendingChannelInvitation
     };
@@ -313,13 +449,45 @@ pub async fn accept_invitation_with_instance(
         SemanticOperationKind::AcceptPendingChannelInvitation => {
             OperationId::invitation_accept_channel()
         }
+        SemanticOperationKind::AcceptGuardianInvitation => {
+            OperationId::accept_guardian_invitation()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
-    let owner =
-        SemanticWorkflowOwner::new(app_core, operation_id, instance_id.clone(), operation_kind);
-    publish_invitation_owner_status(&owner, None, SemanticOperationPhase::WorkflowDispatched)
-        .await?;
-    accept_invitation_id_owned(app_core, &invitation_id, &owner, None).await
+    (operation_id, operation_kind)
+}
+
+/// Resolve the frontend handoff identity from runtime or canonical imported
+/// invitation evidence before allocating an operation instance.
+pub async fn resolve_invitation_accept_operation(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &InvitationId,
+) -> Result<(OperationId, SemanticOperationKind), AuraError> {
+    let accepted_invitation = list_invitations(app_core)
+        .await
+        .invitation(invitation_id.as_str())
+        .cloned();
+    let runtime = require_runtime(app_core).await?;
+    let pending_runtime_invitation = pending_invitation_by_id_with_timeout(&runtime, invitation_id)
+        .await
+        .map_err(|error| AuraError::agent(error.to_string()))?;
+    if pending_runtime_invitation.is_none() && accepted_invitation.is_none() {
+        return Err(AuraError::invalid(
+            "invitation has no authoritative accept evidence",
+        ));
+    }
+    Ok(accept_operation_for_evidence(
+        pending_runtime_invitation.as_ref(),
+        accepted_invitation.as_ref(),
+    ))
+}
+
+/// Choose the accept lifecycle only after import has produced a validated,
+/// move-owned invitation handle.
+pub fn accept_operation_for_imported_invitation(
+    invitation: &InvitationHandle,
+) -> (OperationId, SemanticOperationKind) {
+    accept_operation_for_evidence(Some(invitation.info()), None)
 }
 
 pub async fn accept_imported_invitation(
@@ -367,11 +535,17 @@ pub(in crate::workflows) async fn accept_imported_invitation_owned(
                 .await?;
         }
         None => {
-            owner
-                .publish_success_with(issue_invitation_accepted_or_materialized_proof(
-                    invitation.invitation_id.clone(),
-                ))
-                .await?;
+            if owner.kind() == SemanticOperationKind::AcceptGuardianInvitation {
+                let runtime = require_runtime(app_core).await?;
+                await_guardian_invitation_completion(&runtime, &invitation.invitation_id, owner)
+                    .await?;
+            } else {
+                owner
+                    .publish_success_with(issue_invitation_accepted_or_materialized_proof(
+                        invitation.invitation_id.clone(),
+                    ))
+                    .await?;
+            }
         }
     }
     Ok(())
@@ -586,6 +760,9 @@ pub async fn accept_imported_invitation_with_instance(
         SemanticOperationKind::AcceptPendingChannelInvitation => {
             OperationId::invitation_accept_channel()
         }
+        SemanticOperationKind::AcceptGuardianInvitation => {
+            OperationId::accept_guardian_invitation()
+        }
         _ => OperationId::invitation_accept_contact(),
     };
     let owner =
@@ -605,6 +782,9 @@ pub async fn accept_imported_invitation_with_terminal_status(
     let operation_id = match operation_kind {
         SemanticOperationKind::AcceptPendingChannelInvitation => {
             OperationId::invitation_accept_channel()
+        }
+        SemanticOperationKind::AcceptGuardianInvitation => {
+            OperationId::accept_guardian_invitation()
         }
         _ => OperationId::invitation_accept_contact(),
     };
@@ -668,6 +848,9 @@ pub async fn accept_invitation_by_str_with_terminal_status(
     let operation_id = match kind {
         SemanticOperationKind::AcceptPendingChannelInvitation => {
             OperationId::invitation_accept_channel()
+        }
+        SemanticOperationKind::AcceptGuardianInvitation => {
+            OperationId::accept_guardian_invitation()
         }
         _ => OperationId::invitation_accept_contact(),
     };
@@ -1563,4 +1746,47 @@ async fn materialize_accepted_channel(
         ))
     })?;
     crate::workflows::observed_projection::reduce_chat_fact_observed(app_core, &fact).await
+}
+
+#[cfg(test)]
+mod guardian_operation_tests {
+    use super::*;
+
+    #[test]
+    fn guardian_invitation_has_a_distinct_accept_owner() {
+        let sender = AuthorityId::new_from_entropy([31; 32]);
+        let receiver = AuthorityId::new_from_entropy([32; 32]);
+        let guardian = InvitationInfo {
+            invitation_id: InvitationId::new("guardian-operation"),
+            sender_id: sender,
+            receiver_id: receiver,
+            invitation_type: InvitationBridgeType::Guardian {
+                subject_authority: sender,
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+            receiver_nickname: None,
+        };
+        assert_eq!(
+            accept_operation_for_evidence(Some(&guardian), None),
+            (
+                OperationId::accept_guardian_invitation(),
+                SemanticOperationKind::AcceptGuardianInvitation,
+            )
+        );
+        assert_eq!(
+            semantic_kind_for_bridge_invitation(&guardian),
+            SemanticOperationKind::AcceptGuardianInvitation
+        );
+        let imported = InvitationHandle::new(guardian);
+        assert_eq!(
+            accept_operation_for_imported_invitation(&imported),
+            (
+                OperationId::accept_guardian_invitation(),
+                SemanticOperationKind::AcceptGuardianInvitation,
+            )
+        );
+    }
 }

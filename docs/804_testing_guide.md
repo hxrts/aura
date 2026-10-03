@@ -86,6 +86,16 @@ Browser `ui_state` remains observation-only and must not perform implicit naviga
 
 Browser semantic observation must fail closed when the published snapshot is unavailable. It must not silently repair by reading a live controller or model snapshot behind the harness bridge. Channel-binding responses must either carry authoritative context materialization or fail explicitly. Selected ids or labels alone are not semantic bindings.
 
+For enrollment, assert code issuance and ceremony completion as separate
+operation instances linked by ceremony ID. Browser `stage_runtime_identity`
+and the page-owned semantic queue may submit or stage work, but neither owns
+completion publication. A test that remounts the UI or reboots the browser
+must reattach to the app/runtime-owned completion result and compare its typed
+state and failure domain/code in `ui_state` on both frontends. Exercise refusal,
+timeout, cancellation, duplicate terminal delivery, and restart with an
+authoritative ceremony result; local wizard completion and device counts are
+diagnostics only.
+
 Channel list item ids and selected-channel snapshot ids must stay keyed by canonical channel ids when the runtime projection already provides them. Harness and browser code should not round-trip through display labels on those paths. Diagnostic tool and query surfaces should say `diagnostic_*` at the API boundary when they are derived from screen or DOM capture rather than authoritative semantic state. Onboarding must publish through the same semantic snapshot path as the rest of the UI.
 
 Placeholder IDs, override-backed exports, and heuristic success or event synthesis are not acceptable correctness paths.

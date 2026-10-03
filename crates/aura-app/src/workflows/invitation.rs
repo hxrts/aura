@@ -42,9 +42,10 @@ use crate::workflows::runtime_error_classification::{
 #[cfg(feature = "signals")]
 use crate::workflows::semantic_facts::prove_channel_membership_ready;
 use crate::workflows::semantic_facts::{
-    issue_device_enrollment_imported_proof, issue_invitation_accepted_or_materialized_proof,
-    issue_invitation_created_proof, issue_invitation_declined_proof,
-    issue_invitation_exported_proof, issue_invitation_revoked_proof,
+    issue_device_enrollment_imported_proof, issue_guardian_invitation_confirmed_proof,
+    issue_invitation_accepted_or_materialized_proof, issue_invitation_created_proof,
+    issue_invitation_declined_proof, issue_invitation_exported_proof,
+    issue_invitation_imported_proof, issue_invitation_revoked_proof,
     issue_pending_invitation_consumed_proof, publish_authoritative_semantic_fact,
     replace_authoritative_semantic_facts_of_kind, semantic_readiness_publication_capability,
     update_authoritative_semantic_facts, SemanticWorkflowOwner,
@@ -61,9 +62,10 @@ pub use accept::{
     accept_imported_invitation, accept_imported_invitation_with_instance,
     accept_imported_invitation_with_terminal_status, accept_invitation, accept_invitation_by_str,
     accept_invitation_by_str_with_instance, accept_invitation_by_str_with_terminal_status,
-    accept_invitation_with_instance, cancel_invitation, cancel_invitation_by_str,
-    cancel_invitation_by_str_with_terminal_status, decline_invitation, decline_invitation_by_str,
-    decline_invitation_by_str_with_terminal_status,
+    accept_invitation_with_instance, accept_operation_for_imported_invitation, cancel_invitation,
+    cancel_invitation_by_str, cancel_invitation_by_str_with_terminal_status, decline_invitation,
+    decline_invitation_by_str, decline_invitation_by_str_with_terminal_status,
+    resolve_invitation_accept_operation,
 };
 #[allow(unused_imports)]
 pub(in crate::workflows) use accept::{
@@ -99,7 +101,8 @@ pub use export::{
 pub use followups::run_post_contact_accept_followups;
 pub(in crate::workflows) use import::pending_invitation_info_by_id;
 pub use import::{
-    import_invitation, import_invitation_details, list_invitations, list_pending_invitations,
+    import_invitation, import_invitation_details, import_invitation_details_with_terminal_status,
+    list_invitations, list_pending_invitations,
 };
 #[cfg(feature = "signals")]
 pub(in crate::workflows) use pending_accept::run_post_channel_accept_followups;
@@ -294,9 +297,11 @@ fn semantic_kind_for_bridge_invitation(
         crate::runtime_bridge::InvitationBridgeType::Contact { .. } => {
             SemanticOperationKind::AcceptContactInvitation
         }
-        crate::runtime_bridge::InvitationBridgeType::Channel { .. }
-        | crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {
+        crate::runtime_bridge::InvitationBridgeType::Channel { .. } => {
             SemanticOperationKind::AcceptPendingChannelInvitation
+        }
+        crate::runtime_bridge::InvitationBridgeType::Guardian { .. } => {
+            SemanticOperationKind::AcceptGuardianInvitation
         }
         crate::runtime_bridge::InvitationBridgeType::DeviceEnrollment { .. } => {
             SemanticOperationKind::ImportDeviceEnrollmentCode

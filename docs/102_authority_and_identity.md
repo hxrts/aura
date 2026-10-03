@@ -282,6 +282,8 @@ pub fn check_attested_op<S: TreeStateView>(
 
 Check verifies the operation cryptographically. It ensures the signing key exists for the target node. It validates that the operation epoch and parent commitment match state.
 
+An imported operation is admissible only when its parent-epoch verifying key and threshold policy have authenticated provenance independent of the operation being imported. A device with no local parent key must first receive an authenticated enrollment baseline and its verifier chain. Import validates each operation against the previous reduced state and rejects the complete uncommitted batch if any signature, parent binding, or transition is invalid. Duplicate operations may be treated idempotently; peer-supplied keys cannot establish the trust anchor.
+
 ### 8.3 TreeStateView Trait
 
 ```rust

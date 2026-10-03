@@ -10,10 +10,11 @@ mod publication;
 #[cfg(test)]
 use crate::ui_contract::{
     AuthoritativeSemanticFact, OperationId, OperationInstanceId, SemanticOperationCausality,
-    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus, WorkflowTerminalStatus,
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
+    WorkflowTerminalStatus,
 };
 #[allow(unused_imports)]
-pub(in crate::workflows) use lifecycle::{
+use lifecycle::{
     operation_phase_fact, publish_authoritative_operation_failure_with_instance,
     publish_authoritative_operation_phase_with_instance, publish_exact_operation_lifecycle,
     ExactOperationLifecyclePublication,
@@ -28,15 +29,18 @@ pub(in crate::workflows) use owner::{
 pub(in crate::workflows) use proofs::{
     authoritative_semantic_facts_snapshot, issue_account_created_proof,
     issue_channel_invitation_created_proof, issue_channel_membership_ready_proof,
-    issue_device_enrollment_imported_proof, issue_device_enrollment_started_proof,
+    issue_device_enrollment_completed_proof, issue_device_enrollment_imported_proof,
+    issue_device_enrollment_started_proof, issue_guardian_invitation_confirmed_proof,
     issue_home_created_proof, issue_invitation_accepted_or_materialized_proof,
     issue_invitation_created_proof, issue_invitation_declined_proof,
-    issue_invitation_exported_proof, issue_invitation_revoked_proof, issue_message_committed_proof,
+    issue_invitation_exported_proof, issue_invitation_imported_proof,
+    issue_invitation_revoked_proof, issue_message_committed_proof,
     issue_pending_invitation_consumed_proof, prove_channel_membership_ready, prove_home_created,
     AccountCreatedProof, ChannelInvitationCreatedProof, ChannelMembershipReadyProof,
-    DeviceEnrollmentImportedProof, DeviceEnrollmentStartedProof, HomeCreatedProof,
-    InvitationAcceptedOrMaterializedProof, InvitationCreatedProof, InvitationDeclinedProof,
-    InvitationExportedProof, InvitationRevokedProof, MessageCommittedProof,
+    DeviceEnrollmentCompletedProof, DeviceEnrollmentImportedProof, DeviceEnrollmentStartedProof,
+    GuardianInvitationConfirmedProof, HomeCreatedProof, InvitationAcceptedOrMaterializedProof,
+    InvitationCreatedProof, InvitationDeclinedProof, InvitationExportedProof,
+    InvitationImportedProof, InvitationRevokedProof, MessageCommittedProof,
     PendingInvitationConsumedProof,
 };
 #[allow(unused_imports)]
@@ -270,12 +274,16 @@ mod tests {
 
         publish_exact_operation_lifecycle(
             &app_core,
-            ExactOperationLifecyclePublication::phase(
+            ExactOperationLifecyclePublication::success_from_context(
                 semantic_lifecycle_publication_capability(),
-                OperationId::invitation_accept_channel(),
-                OperationInstanceId("tui-op-invitation_accept-3".to_string()),
+                issue_semantic_operation_context(
+                    OperationId::invitation_accept_channel(),
+                    Some(OperationInstanceId(
+                        "tui-op-invitation_accept-3".to_string(),
+                    )),
+                )
+                .unwrap(),
                 SemanticOperationKind::AcceptPendingChannelInvitation,
-                SemanticOperationPhase::Succeeded,
             ),
         )
         .await
@@ -287,12 +295,84 @@ mod tests {
             instance_id: Some(OperationInstanceId(
                 "tui-op-invitation_accept-3".to_string()
             )),
-            causality: None,
+            causality: Some(SemanticOperationCausality {
+                owner_epoch: OwnerEpoch::new(0),
+                publication_sequence: PublicationSequence::new(0),
+            }),
             status: SemanticOperationStatus::new(
                 SemanticOperationKind::AcceptPendingChannelInvitation,
                 SemanticOperationPhase::Succeeded,
             ),
         }));
+    }
+
+    #[tokio::test]
+    async fn exact_operation_instance_rejects_a_second_terminal_outcome() {
+        let app_core = runtime_backed_test_app_core();
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let operation_id = OperationId::device_enrollment_completion_for(
+            &aura_core::CeremonyId::new("ceremony-1"),
+        );
+        let instance_id = OperationInstanceId("enrollment-ceremony-1".to_string());
+        publish_exact_operation_lifecycle(
+            &app_core,
+            ExactOperationLifecyclePublication::success_from_context(
+                semantic_lifecycle_publication_capability(),
+                issue_semantic_operation_context(operation_id.clone(), Some(instance_id.clone()))
+                    .unwrap(),
+                SemanticOperationKind::CompleteDeviceEnrollment,
+            ),
+        )
+        .await
+        .unwrap();
+        let error = publish_exact_operation_lifecycle(
+            &app_core,
+            ExactOperationLifecyclePublication::failure(
+                semantic_lifecycle_publication_capability(),
+                operation_id.clone(),
+                instance_id.clone(),
+                SemanticOperationKind::CompleteDeviceEnrollment,
+                SemanticOperationError::new(
+                    crate::ui_contract::SemanticFailureDomain::Ceremony,
+                    crate::ui_contract::SemanticFailureCode::CeremonyRejected,
+                ),
+            ),
+        )
+        .await
+        .expect_err("a second terminal publication must be rejected");
+        assert!(error.to_string().contains("already has a terminal outcome"));
+        let facts = app_core.read().await.authoritative_semantic_facts();
+        assert!(facts.iter().any(|fact| matches!(fact,
+            AuthoritativeSemanticFact::OperationStatus {
+                operation_id: id,
+                instance_id: Some(instance),
+                status,
+                ..
+            } if id == &operation_id
+                && instance == &instance_id
+                && status.phase == SemanticOperationPhase::Succeeded)));
+    }
+
+    #[tokio::test]
+    async fn semantic_owner_cannot_publish_success_as_an_unproved_phase() {
+        let app_core = runtime_backed_test_app_core();
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+        let owner = SemanticWorkflowOwner::new(
+            &app_core,
+            OperationId::device_enrollment_completion_for(&aura_core::CeremonyId::new(
+                "unproved-success",
+            )),
+            Some(OperationInstanceId("unproved-success".to_string())),
+            SemanticOperationKind::CompleteDeviceEnrollment,
+        );
+        let error = owner
+            .publish_phase(SemanticOperationPhase::Succeeded)
+            .await
+            .expect_err("success needs a postcondition proof");
+        assert!(error.to_string().contains("typed proof"));
+        assert!(owner.terminal_status().await.is_none());
     }
 
     #[tokio::test]

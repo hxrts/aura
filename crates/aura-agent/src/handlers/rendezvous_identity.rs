@@ -44,6 +44,27 @@ pub(crate) async fn retrieve_identity_keys<E: SecureStorageEffects + ?Sized>(
     None
 }
 
+/// Find the retained local signing key that matches the key in an issued
+/// invitation. A current-epoch lookup alone can sign a confirmation with a
+/// rotated key that the invitee correctly refuses.
+pub(crate) async fn retrieve_identity_keys_matching_public<E: SecureStorageEffects + ?Sized>(
+    effects: &E,
+    authority: &AuthorityId,
+    expected_public: &[u8],
+) -> Option<([u8; 32], [u8; 32])> {
+    if expected_public.len() != 32 {
+        return None;
+    }
+    for epoch in (0..=current_epoch(effects, authority).await.max(1)).rev() {
+        if let Some(keys) = retrieve_identity_keys_for_epoch(effects, authority, epoch).await {
+            if keys.1.as_slice() == expected_public {
+                return Some(keys);
+            }
+        }
+    }
+    None
+}
+
 async fn current_epoch<E: SecureStorageEffects + ?Sized>(
     effects: &E,
     authority: &AuthorityId,
@@ -80,7 +101,9 @@ async fn retrieve_identity_keys_for_epoch<E: SecureStorageEffects + ?Sized>(
     let caps = [SecureStorageCapability::Read];
 
     for location in locations {
-        let stored = effects.secure_retrieve(&location, &caps).await.ok()?;
+        let Ok(stored) = effects.secure_retrieve(&location, &caps).await else {
+            continue;
+        };
         if let Some(keys) = decode_single_signer_package(&stored) {
             return Some(keys);
         }
@@ -156,4 +179,58 @@ async fn decrypt_participant_key_package<E: SecureStorageEffects + ?Sized>(
             },
         )
         .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use aura_core::effects::CryptoCoreEffects;
+
+    #[tokio::test]
+    async fn issued_invitation_key_survives_identity_rotation() {
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let authority = AuthorityId::new_from_entropy([91; 32]);
+        let mut public_keys = Vec::new();
+        for epoch in [1_u64, 2] {
+            let (private, public) = effects.ed25519_generate_keypair().await.unwrap();
+            let package = SingleSignerKeyPackage::new(private, public.clone());
+            let bytes = package
+                .export_for_secure_storage(SecretExportContext::secure_storage(
+                    "aura-agent::handlers::rendezvous_identity::tests",
+                ))
+                .unwrap();
+            let location = SecureStorageLocation::with_sub_key(
+                "signing_keys",
+                format!("{}:{}", authority, epoch),
+                "1",
+            );
+            effects
+                .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+                .await
+                .unwrap();
+            public_keys.push(public);
+        }
+        effects
+            .secure_store(
+                &SecureStorageLocation::new("epoch_state", authority.to_string()),
+                &2_u64.to_le_bytes(),
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .unwrap();
+
+        let (_, current) = retrieve_identity_keys(&*effects, &authority).await.unwrap();
+        assert_eq!(current.as_slice(), public_keys[1]);
+        let (_, issued) =
+            retrieve_identity_keys_matching_public(&*effects, &authority, &public_keys[0])
+                .await
+                .unwrap();
+        assert_eq!(issued.as_slice(), public_keys[0]);
+        assert!(
+            retrieve_identity_keys_matching_public(&*effects, &authority, &[0; 32])
+                .await
+                .is_none()
+        );
+    }
 }

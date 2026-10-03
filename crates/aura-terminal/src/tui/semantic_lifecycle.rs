@@ -588,6 +588,19 @@ impl WorkflowHandoffOperationOwner {
     }
 }
 
+/// Allocate an accept owner only after the app has verified and classified an
+/// imported invitation. Callback factories use this sanctioned handoff helper
+/// because the classification is asynchronous and unavailable at dispatch.
+pub(crate) fn submit_verified_import_accept(
+    app_core: Arc<RwLock<AppCore>>,
+    tasks: Arc<UiTaskOwner>,
+    tx: UiUpdateSender,
+    operation_id: OperationId,
+    kind: SemanticOperationKind,
+) -> WorkflowHandoffOperationOwner {
+    WorkflowHandoffOperationOwner::submit(app_core, tasks, tx, operation_id, kind)
+}
+
 impl CeremonySubmissionOwner {
     pub(crate) fn submit(
         app_core: Arc<RwLock<AppCore>>,

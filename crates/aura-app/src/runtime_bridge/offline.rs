@@ -51,6 +51,8 @@ pub struct OfflineRuntimeBridge {
     #[cfg(test)]
     process_ceremony_result: OfflineProcessCeremonyResult,
     #[cfg(test)]
+    enrollment_outcomes: Arc<Mutex<HashMap<CeremonyId, Option<super::CeremonyTerminalOutcome>>>>,
+    #[cfg(test)]
     recorded_relational_facts: Arc<Mutex<Option<Vec<RelationalFact>>>>,
 }
 
@@ -80,6 +82,8 @@ impl OfflineRuntimeBridge {
             accept_invitation_result: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             process_ceremony_result: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            enrollment_outcomes: Arc::new(Mutex::new(HashMap::new())),
             #[cfg(test)]
             recorded_relational_facts: Arc::new(Mutex::new(None)),
         }
@@ -261,6 +265,19 @@ impl OfflineRuntimeBridge {
             .try_lock()
             .unwrap_or_else(|| panic!("process ceremony result mutex already locked"));
         *guard = Some(result);
+    }
+
+    #[cfg(test)]
+    /// Retain one runtime-owned enrollment result across app hook attachments.
+    pub fn set_enrollment_outcome(
+        &self,
+        ceremony_id: CeremonyId,
+        outcome: Option<super::CeremonyTerminalOutcome>,
+    ) {
+        self.enrollment_outcomes
+            .try_lock()
+            .unwrap_or_else(|| panic!("enrollment outcomes mutex already locked"))
+            .insert(ceremony_id, outcome);
     }
 }
 
@@ -792,6 +809,30 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
+    #[cfg(test)]
+    async fn get_ceremony_terminal_outcome(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<Option<super::CeremonyTerminalOutcome>, IntentError> {
+        self.enrollment_outcomes
+            .lock()
+            .await
+            .get(ceremony_id)
+            .copied()
+            .ok_or_else(|| IntentError::no_agent("enrollment ceremony is unknown"))
+    }
+
+    #[cfg(test)]
+    async fn list_device_enrollment_ceremonies(&self) -> Result<Vec<CeremonyId>, IntentError> {
+        Ok(self
+            .enrollment_outcomes
+            .lock()
+            .await
+            .keys()
+            .cloned()
+            .collect())
+    }
+
     async fn get_key_rotation_ceremony_status(
         &self,
         _ceremony_id: &CeremonyId,
@@ -998,5 +1039,9 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         // correctness must not run against OfflineRuntimeBridge.
         let _ = ms;
         crate::workflows::runtime::cooperative_yield().await;
+    }
+
+    async fn wait_for_background_refresh(&self, _ms: u64) {
+        futures::future::pending::<()>().await;
     }
 }

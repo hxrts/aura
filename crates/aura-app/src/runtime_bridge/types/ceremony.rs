@@ -26,6 +26,24 @@ pub enum CeremonyKind {
     OtaActivation,
 }
 
+/// Stable reason a runtime-owned ceremony reached a failed terminal state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CeremonyFailureReason {
+    Rejected,
+    Cancelled,
+    TimedOut,
+    ChoreographyFailed,
+    RuntimeFailed,
+    Superseded,
+}
+
+/// Terminal result established by the runtime ceremony owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum CeremonyTerminalOutcome {
+    Committed,
+    Failed(CeremonyFailureReason),
+}
+
 /// Result of starting a device enrollment ceremony.
 #[derive(Debug, Clone)]
 pub struct DeviceEnrollmentStart {

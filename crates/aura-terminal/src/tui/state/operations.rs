@@ -1,5 +1,5 @@
 use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot, OperationState};
-use aura_app::ui_contract::SemanticOperationCausality;
+use aura_app::ui_contract::{SemanticOperationCausality, SemanticOperationError};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -7,6 +7,7 @@ struct TrackedOperation {
     instance_id: OperationInstanceId,
     causality: Option<SemanticOperationCausality>,
     state: OperationState,
+    failure: Option<SemanticOperationError>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -65,6 +66,7 @@ impl OperationTracker {
                     instance_id,
                     causality: None,
                     state,
+                    failure: None,
                 },
             );
             return;
@@ -72,6 +74,7 @@ impl OperationTracker {
 
         if let Some(entry) = self.entries.get_mut(&operation_id) {
             entry.state = state;
+            entry.failure = None;
         }
     }
 
@@ -81,6 +84,23 @@ impl OperationTracker {
         instance_id: Option<OperationInstanceId>,
         causality: Option<SemanticOperationCausality>,
         state: OperationState,
+    ) {
+        self.set_authoritative_state_with_failure(
+            operation_id,
+            instance_id,
+            causality,
+            state,
+            None,
+        );
+    }
+
+    pub(super) fn set_authoritative_state_with_failure(
+        &mut self,
+        operation_id: OperationId,
+        instance_id: Option<OperationInstanceId>,
+        causality: Option<SemanticOperationCausality>,
+        state: OperationState,
+        failure: Option<SemanticOperationError>,
     ) {
         if let Some(instance_id) = instance_id {
             match self.entries.get_mut(&operation_id) {
@@ -93,6 +113,7 @@ impl OperationTracker {
                     }
                     entry.causality = causality;
                     entry.state = state;
+                    entry.failure = failure;
                     return;
                 }
                 Some(entry) if Self::incoming_causality_is_older(entry.causality, causality) => {
@@ -110,6 +131,7 @@ impl OperationTracker {
                             instance_id,
                             causality,
                             state,
+                            failure,
                         },
                     );
                     return;
@@ -120,15 +142,22 @@ impl OperationTracker {
             Self::terminal_transition_requires_new_instance(entry.state, state)
         });
         if needs_new_instance {
-            self.set_state(operation_id, state);
+            self.set_state(operation_id.clone(), state);
+            if let Some(entry) = self.entries.get_mut(&operation_id) {
+                entry.failure = failure;
+            }
             return;
         }
         if let Some(entry) = self.entries.get_mut(&operation_id) {
             entry.causality = causality;
             entry.state = state;
+            entry.failure = failure;
             return;
         }
-        self.set_state(operation_id, state);
+        self.set_state(operation_id.clone(), state);
+        if let Some(entry) = self.entries.get_mut(&operation_id) {
+            entry.failure = failure;
+        }
     }
 
     /// Whether this operation instance is already recorded as failed, so a
@@ -155,6 +184,7 @@ impl OperationTracker {
                 id: id.clone(),
                 instance_id: tracked.instance_id.clone(),
                 state: tracked.state,
+                failure: tracked.failure.clone(),
             })
             .collect()
     }
@@ -165,6 +195,78 @@ impl OperationTracker {
             "tui-op-{}-{}",
             operation_id.0, self.next_instance_nonce
         ))
+    }
+}
+
+#[cfg(test)]
+mod failure_snapshot_tests {
+    use super::*;
+    use aura_app::ui_contract::{SemanticFailureCode, SemanticFailureDomain};
+
+    #[test]
+    fn authoritative_failure_and_cancellation_export_with_their_instance() {
+        let mut tracker = OperationTracker::default();
+        let operation_id = OperationId::device_enrollment_completion_for(
+            &aura_core::types::identifiers::CeremonyId::new("completion-1"),
+        );
+        let failure = SemanticOperationError::new(
+            SemanticFailureDomain::Invitation,
+            SemanticFailureCode::OperationTimedOut,
+        );
+        tracker.set_authoritative_state_with_failure(
+            operation_id.clone(),
+            Some(OperationInstanceId("tui-op-1".to_string())),
+            None,
+            OperationState::Failed,
+            Some(failure.clone()),
+        );
+        let exported = tracker.exported_snapshots().pop().unwrap();
+        assert_eq!(exported.failure, Some(failure));
+        let encoded = serde_json::to_value(&exported).expect("serializable operation");
+        assert_eq!(encoded["failure"]["domain"], "invitation");
+        assert_eq!(encoded["failure"]["code"], "operation_timed_out");
+
+        tracker.set_authoritative_state_with_failure(
+            operation_id,
+            Some(OperationInstanceId("tui-op-2".to_string())),
+            None,
+            OperationState::Cancelled,
+            None,
+        );
+        let exported = tracker.exported_snapshots().pop().unwrap();
+        assert_eq!(exported.state, OperationState::Cancelled);
+        assert!(exported.failure.is_none());
+    }
+
+    #[test]
+    fn replayed_older_ceremony_keeps_newer_completion_snapshot() {
+        let mut tracker = OperationTracker::default();
+        let new_id = OperationId::device_enrollment_completion_for(
+            &aura_core::types::identifiers::CeremonyId::new("new"),
+        );
+        let old_id = OperationId::device_enrollment_completion_for(
+            &aura_core::types::identifiers::CeremonyId::new("old"),
+        );
+        tracker.set_authoritative_state(
+            new_id.clone(),
+            Some(OperationInstanceId("completion-new".to_string())),
+            None,
+            OperationState::Succeeded,
+        );
+        tracker.set_authoritative_state(
+            old_id.clone(),
+            Some(OperationInstanceId("completion-old".to_string())),
+            None,
+            OperationState::Failed,
+        );
+        let snapshots = tracker.exported_snapshots();
+        assert_eq!(snapshots.len(), 2);
+        assert!(snapshots
+            .iter()
+            .any(|op| op.id == new_id && op.state == OperationState::Succeeded));
+        assert!(snapshots
+            .iter()
+            .any(|op| op.id == old_id && op.state == OperationState::Failed));
     }
 }
 

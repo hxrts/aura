@@ -132,6 +132,9 @@ pub struct GuardianAccept {
     pub signature: Vec<u8>,
     /// Guardian's public key for recovery operations
     pub recovery_public_key: Vec<u8>,
+    /// The inviter key that signed the imported invitation code. The
+    /// principal must confirm with the matching retained epoch key.
+    pub invitation_sender_proof_key: Vec<u8>,
 }
 
 /// Guardian decline response
@@ -152,6 +155,8 @@ pub struct GuardianConfirm {
     pub established: bool,
     /// Resulting relationship identifier
     pub relationship_id: Option<CeremonyRelationshipId>,
+    /// Principal signature created only after verifying the guardian response.
+    pub signature: Vec<u8>,
 }
 
 /// Device enrollment invitation request (adds a device to an account authority).
@@ -508,6 +513,7 @@ mod tests {
             invitation_id: InvitationId::new("guard-456"),
             signature: vec![5, 6, 7, 8],
             recovery_public_key: vec![9, 10, 11, 12],
+            invitation_sender_proof_key: vec![13; 32],
         };
 
         let bytes = to_vec(&accept).unwrap();
@@ -515,6 +521,7 @@ mod tests {
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.recovery_public_key, vec![9, 10, 11, 12]);
+        assert_eq!(restored.invitation_sender_proof_key, vec![13; 32]);
     }
 
     #[test]
@@ -666,6 +673,7 @@ mod tests {
                 CeremonyRelationshipId::parse("rel-0011223344556677")
                     .unwrap_or_else(|error| panic!("valid relationship id: {error}")),
             ),
+            signature: vec![1, 2, 3],
         };
 
         let bytes = to_vec(&confirm).unwrap();

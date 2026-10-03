@@ -24,21 +24,19 @@ use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::semantic_lifecycle::{
-    apply_handed_off_terminal_status, LocalTerminalOperationOwner, SemanticOperationTransferScope,
-    WorkflowHandoffOperationOwner,
+    apply_handed_off_terminal_status, submit_verified_import_accept, LocalTerminalOperationOwner,
+    SemanticOperationTransferScope, WorkflowHandoffOperationOwner,
 };
 use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiOperation, UiUpdate, UiUpdateSender};
 use async_lock::RwLock;
-use aura_app::ui::workflows::invitation::import_invitation_details;
 #[cfg(test)]
 use aura_app::ui::workflows::strong_command::{
     CommandTerminalOutcomeStatus, CommandTerminalReasonCode,
 };
 use aura_app::ui_contract::{
-    OperationId, SemanticFailureCode, SemanticFailureDomain, SemanticOperationError,
-    SemanticOperationKind, SemanticOperationPhase, SemanticOperationStatus,
-    WorkflowTerminalOutcome,
+    SemanticFailureCode, SemanticFailureDomain, SemanticOperationError, SemanticOperationPhase,
+    SemanticOperationStatus, WorkflowTerminalOutcome,
 };
 use aura_core::AuthorityId;
 use futures::FutureExt;
@@ -309,47 +307,56 @@ async fn run_invitation_import_flow(
     operation: WorkflowHandoffOperationOwner,
 ) {
     let app_core = ctx.app_core_raw().clone();
-    let operation_id = OperationId::invitation_accept_contact();
-    let kind = SemanticOperationKind::AcceptContactInvitation;
-    let operation_instance_id = operation.harness_handle().instance_id().clone();
-    let workflow_instance_id = operation.workflow_instance_id();
-    let transfer =
+    let import_instance_id = operation.harness_handle().instance_id().clone();
+    let import_transfer =
         operation.handoff_to_app_workflow(SemanticOperationTransferScope::InvitationImport);
-
-    let invitation = match import_invitation_details(&app_core, &code).await {
-        Ok(invitation) => invitation,
-        Err(error) => {
-            tracing::error!(error = %error, "import_invitation_details failed");
-            let _ = apply_handed_off_terminal_status(
+    let invitation = match import_transfer
+        .run_workflow(
+            app_core.clone(),
+            tx.clone(),
+            "import_invitation_details",
+            aura_app::ui::workflows::invitation::import_invitation_details_with_terminal_status(
                 &app_core,
+                &code,
+                import_instance_id,
+            ),
+        )
+        .await
+    {
+        Ok(invitation) => invitation,
+        Err(aura_app::frontend_primitives::SubmittedOperationWorkflowError::Workflow(error)) => {
+            emit_error_toast(
                 &tx,
-                operation_id,
-                operation_instance_id,
-                kind,
-                Some(aura_app::ui_contract::WorkflowTerminalStatus {
-                    causality: None,
-                    status: SemanticOperationStatus::failed(
-                        kind,
-                        SemanticOperationError::new(
-                            SemanticFailureDomain::Command,
-                            SemanticFailureCode::InternalError,
-                        )
-                        .with_detail(error.to_string()),
-                    ),
-                }),
-            )
-            .await;
-            send_ui_update_required(
-                &tx,
-                UiUpdate::ToastAdded(ToastMessage::error(
-                    "invitation",
-                    format!("Import invitation failed: {error}"),
-                )),
+                "invitation",
+                format!("Import invitation failed: {error}"),
             )
             .await;
             return;
         }
+        Err(
+            aura_app::frontend_primitives::SubmittedOperationWorkflowError::Protocol(detail)
+            | aura_app::frontend_primitives::SubmittedOperationWorkflowError::Panicked(detail),
+        ) => {
+            emit_error_toast(&tx, "invitation", detail).await;
+            return;
+        }
     };
+
+    let (accept_operation_id, accept_kind) =
+        aura_app::ui::workflows::invitation::accept_operation_for_imported_invitation(&invitation);
+    for update in invitation_import_success_updates(&code) {
+        send_ui_update_required(&tx, update).await;
+    }
+    let accept_owner = submit_verified_import_accept(
+        app_core.clone(),
+        ctx.tasks(),
+        tx.clone(),
+        accept_operation_id,
+        accept_kind,
+    );
+    let workflow_instance_id = accept_owner.workflow_instance_id();
+    let transfer =
+        accept_owner.handoff_to_app_workflow(SemanticOperationTransferScope::AcceptInvitation);
 
     match transfer
         .run_workflow(
@@ -366,11 +373,7 @@ async fn run_invitation_import_flow(
         )
         .await
     {
-        Ok(()) => {
-            for update in invitation_import_success_updates(&code) {
-                send_ui_update_required(&tx, update).await;
-            }
-        }
+        Ok(()) => {}
         Err(aura_app::frontend_primitives::SubmittedOperationWorkflowError::Workflow(error)) => {
             emit_error_toast(
                 &tx,
@@ -555,6 +558,17 @@ impl CallbackRegistry {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verified_code_import_does_not_emit_acceptance_or_guardian_success() {
+        let updates = invitation_import_success_updates("verified-guardian-code");
+        assert_eq!(updates.len(), 1);
+        assert!(matches!(
+            &updates[0],
+            UiUpdate::InvitationImported { invitation_code }
+                if invitation_code == "verified-guardian-code"
+        ));
+    }
 
     #[test]
     fn invitation_import_success_updates_emit_import_notice() {

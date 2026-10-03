@@ -117,6 +117,10 @@ mod device_enrollment;
 mod exchange;
 mod execution;
 mod guardian;
+
+pub(crate) fn guardian_confirmation_storage_key(invitation_id: &InvitationId) -> String {
+    format!("guardian-confirmation:{invitation_id}")
+}
 mod shareable;
 mod validation;
 mod vm_loop;
@@ -678,7 +682,7 @@ impl InvitationHandler {
             )
             .await
             {
-                return Ok(ImportedSenderTrust::TrustedDevice {
+                return Ok(ImportedSenderTrust::ConfirmedInvitationKey {
                     device_id,
                     key_epoch: proof.key_epoch,
                 });
@@ -686,17 +690,17 @@ impl InvitationHandler {
             let trusted_key = self
                 .trusted_key_resolver
                 .resolve_device_key(device_id)
-                .map_err(|error| {
-                    AgentError::invalid(format!(
-                        "known sender invitation requires trusted sender key resolution: {error}"
-                    ))
+                .map_err(|source| AgentError::UnresolvedDeviceBinding {
+                    authority: shareable.sender_id,
+                    device: device_id,
+                    source,
                 })?;
             if trusted_key.bytes() != proof.public_key.as_slice() {
                 return Err(AgentError::invalid(
                     "known sender invitation proof key does not match trusted device key",
                 ));
             }
-            return Ok(ImportedSenderTrust::TrustedDevice {
+            return Ok(ImportedSenderTrust::UnboundDeviceKeyMatch {
                 device_id,
                 key_epoch: proof.key_epoch,
             });
@@ -1677,10 +1681,11 @@ impl InvitationHandler {
                 self
                     .execute_guardian_invitation_guardian(effects.clone(), invitation)
                     .await
-                    .map_err(|error| {
-                        AgentError::choreography(format!(
-                            "guardian invitation accept follow-up failed for {invitation_id}: {error}"
-                        ))
+                    .map_err(|error| match error {
+                        AgentError::Timeout(reason) => AgentError::Timeout(format!(
+                            "guardian invitation accept follow-up failed for {invitation_id}: {reason}"
+                        )),
+                        other => other,
                     })?;
             }
             InvitationType::DeviceEnrollment { .. } => {
@@ -3200,4 +3205,5 @@ async fn execute_record_receipt(
 #[cfg(test)]
 pub(crate) mod tests {
     include!("invitation/tests.rs");
+    include!("invitation/distributed_tests.rs");
 }

@@ -187,6 +187,8 @@ The cryptographic architecture maintains these invariants.
 5. Production randomness comes from OS entropy via `OsRng`
 6. Identity and key bytes decoded from a remote payload are untrusted until checked against an authoritative local key source. A signature by the same key that signed an imported invitation proves continuity of that invitation, not trusted device identity.
 7. A response is constructed from a completed signature over its canonical transcript; production response construction does not create an unsigned placeholder.
+8. Imported authority tree operations require the verifying package and threshold policy of their parent epoch from an authenticated source. A matching parent commitment, a sibling transport session, or a key delivered beside the operation does not authenticate the operation. An enrolling device needs an explicit, ceremony-bound trust bootstrap before it can adopt a baseline tree.
+9. A transport receipt signed under a key carried in the receipt proves transcript integrity under that key. It does not authenticate the `AuthorityId` in the envelope. Promoting the source to verified authority or device identity requires comparison with an independently trusted key and an authenticated authority/device binding. A nonzero nonce is not replay protection without a checked replay state.
 
 ## 6. Signing Modes
 

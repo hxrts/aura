@@ -54,6 +54,11 @@ Shared Dioxus UI core for Aura providing platform-agnostic UI state, determinist
   `CeremonyStatusHandle` lifecycle status from `aura-app::ui::workflows`
   rather than inferring progress from local timers, local counters, or modal
   transitions alone.
+- The shared UI observes separate code-issuance and enrollment-completion
+  operations. Modal or wizard state cannot synthesize a terminal completion
+  snapshot; exported operation state preserves the app-owned instance,
+  cancellation, and typed failure domain/code. Guardian acceptance uses its
+  own operation kind and waits for verified follow-up evidence.
 - Published observed semantic projections must support stale-state detection through shared revision/sequence and render-convergence semantics.
 - `UiController` exports the app snapshot's `projection_source_revisions` with `UiSnapshot`. Those source graph revisions describe the observed entity values and remain separate from the UI semantic/render `revision`; the UI must not mint or advance source revisions locally.
 - Onboarding must publish through the same semantic snapshot path as every other screen.

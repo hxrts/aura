@@ -54,6 +54,7 @@ fn promote_shared_session_envelopes(
         return;
     };
     let session_ref = session_id.to_string();
+    let self_device_id = effects.config.device_id.to_string();
     let inbox = shared.inbox_for(effects.authority_id);
     let mut inbox = inbox.write();
     let mut promoted = Vec::new();
@@ -68,7 +69,11 @@ fn promote_shared_session_envelopes(
                 .metadata
                 .get("session-id")
                 .is_some_and(|value| value == &session_ref);
-        if matches_session {
+        let addressed_here = match inbox[index].metadata.get("aura-destination-device-id") {
+            Some(device_id) => device_id == &self_device_id,
+            None => inbox[index].destination == effects.authority_id,
+        };
+        if matches_session && addressed_here {
             promoted.push(inbox.remove(index));
         } else {
             index += 1;
@@ -545,6 +550,86 @@ mod tests {
             authority_id,
             RoleIndex::new(role_index.into()).expect("role index"),
         )
+    }
+
+    #[test]
+    fn shared_authority_session_promotion_preserves_other_device_frames() {
+        let authority = AuthorityId::new_from_entropy([0x91; 32]);
+        let first_device = DeviceId::new_from_entropy([0x92; 32]);
+        let second_device = DeviceId::new_from_entropy([0x93; 32]);
+        let shared = crate::runtime::SharedTransport::new();
+        let first =
+            AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+                &AgentConfig {
+                    device_id: first_device,
+                    ..Default::default()
+                },
+                "shared-session-first-device",
+                authority,
+                shared.clone(),
+            )
+            .expect("first device effects");
+        let second =
+            AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+                &AgentConfig {
+                    device_id: second_device,
+                    ..Default::default()
+                },
+                "shared-session-second-device",
+                authority,
+                shared.clone(),
+            )
+            .expect("second device effects");
+        let session_id = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(0x9192));
+        for (device, payload) in [
+            (second_device, b"second".to_vec()),
+            (first_device, b"first".to_vec()),
+        ] {
+            shared.route_envelope(TransportEnvelope {
+                destination: authority,
+                source: authority,
+                context: ContextId::new_from_entropy([0x94; 32]),
+                payload,
+                metadata: HashMap::from([
+                    (
+                        "content-type".to_string(),
+                        "application/aura-choreography".to_string(),
+                    ),
+                    ("session-id".to_string(), session_id.to_string()),
+                    ("aura-destination-device-id".to_string(), device.to_string()),
+                ]),
+                receipt: None,
+            });
+        }
+
+        promote_shared_session_envelopes(&first, session_id);
+        assert_eq!(
+            first
+                .choreography_state
+                .read()
+                .session_inbox_len(session_id),
+            1
+        );
+        assert_eq!(
+            second
+                .choreography_state
+                .read()
+                .session_inbox_len(session_id),
+            0
+        );
+        let remaining = shared.inbox_for(authority).read().clone();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].payload, b"second");
+
+        promote_shared_session_envelopes(&second, session_id);
+        assert!(shared.inbox_for(authority).read().is_empty());
+        assert_eq!(
+            second
+                .choreography_state
+                .read()
+                .session_inbox_len(session_id),
+            1
+        );
     }
 
     #[tokio::test]

@@ -290,9 +290,15 @@ pub(in crate::app) fn modal_view(
                         ));
                         if let Some(error) = &state.error_message {
                             details.push(format!("Error: {error}"));
-                        } else if state.has_failed {
+                        } else if matches!(
+                            model.device_enrollment_completion_state(state.ceremony_id.as_ref()),
+                            Some(OperationState::Failed | OperationState::Cancelled)
+                        ) {
                             details.push("The enrollment ceremony failed.".to_string());
-                        } else if state.is_complete {
+                        } else if model
+                            .device_enrollment_completion_state(state.ceremony_id.as_ref())
+                            == Some(OperationState::Succeeded)
+                        {
                             details.push("Enrollment ceremony complete. The new device is now part of this authority.".to_string());
                         } else {
                             details.push("Leave this dialog open to monitor progress, or press Esc to cancel the ceremony.".to_string());
@@ -467,11 +473,18 @@ pub(in crate::app) fn modal_view(
         ModalState::AddDeviceStep1 => match model.add_device_modal().map(|state| state.step) {
             Some(AddDeviceWizardStep::ShareCode) => "Next".to_string(),
             Some(AddDeviceWizardStep::Confirm) => {
-                if model
-                    .add_device_modal()
-                    .map(|state| state.is_complete || state.has_failed)
-                    .unwrap_or(false)
-                {
+                if matches!(
+                    model.device_enrollment_completion_state(
+                        model
+                            .add_device_modal()
+                            .and_then(|state| state.ceremony_id.as_ref())
+                    ),
+                    Some(
+                        OperationState::Succeeded
+                            | OperationState::Failed
+                            | OperationState::Cancelled
+                    )
+                ) {
                     "Close".to_string()
                 } else {
                     "Refresh".to_string()
@@ -607,6 +620,38 @@ pub(in crate::app) fn modal_view(
 mod tests {
     use super::*;
     use crate::model::CreateInvitationModalState;
+    use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot};
+
+    #[test]
+    fn enrollment_modal_needs_authoritative_completion_before_claiming_success() {
+        let mut model = UiModel::new("authority-local".to_string());
+        model.active_modal = Some(ActiveModal::AddDevice(crate::model::AddDeviceModalState {
+            step: AddDeviceWizardStep::Confirm,
+            device_name: "Laptop".to_string(),
+            ceremony_id: Some(CeremonyId::new("completion-1")),
+            is_complete: true,
+            ..crate::model::AddDeviceModalState::default()
+        }));
+        let modal = modal_view(&model, &ChatRuntimeView::default()).unwrap();
+        assert_ne!(modal.enter_label, "Close");
+        assert!(!modal
+            .details
+            .iter()
+            .any(|detail| detail.contains("now part of this authority")));
+
+        model.operations.push(OperationSnapshot {
+            id: OperationId::device_enrollment_completion_for(&CeremonyId::new("completion-1")),
+            instance_id: OperationInstanceId("completion-1".to_string()),
+            state: OperationState::Succeeded,
+            failure: None,
+        });
+        let modal = modal_view(&model, &ChatRuntimeView::default()).unwrap();
+        assert_eq!(modal.enter_label, "Close");
+        assert!(modal
+            .details
+            .iter()
+            .any(|detail| detail.contains("now part of this authority")));
+    }
 
     #[test]
     fn create_invitation_modal_shows_generated_code_and_copy_action() {

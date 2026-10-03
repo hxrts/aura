@@ -15,7 +15,16 @@ fn default_imported_sender_trust() -> ImportedSenderTrust {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) enum ImportedSenderTrust {
     SelfCertified,
-    TrustedDevice {
+    /// A previously confirmed invitation establishes continuity of the key
+    /// used for that invitation; it does not prove device membership.
+    #[serde(alias = "TrustedDevice")]
+    ConfirmedInvitationKey {
+        device_id: DeviceId,
+        key_epoch: Option<u64>,
+    },
+    /// The claimed device key matches a trusted registry entry, but that
+    /// registry alone does not bind the device to the claimed authority.
+    UnboundDeviceKeyMatch {
         device_id: DeviceId,
         key_epoch: Option<u64>,
     },

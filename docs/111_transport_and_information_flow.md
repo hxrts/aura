@@ -46,7 +46,9 @@ pub struct Receipt {
 }
 ```
 
-This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The `nonce` ensures uniqueness and the `prev` field chains receipts for auditing. The recipient verifies the signature. Receipts support accountability in multi-hop routing.
+This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The `nonce` provides a replay identifier when checked against retained state, and the `prev` field chains receipts for auditing. The recipient verifies the signature. Receipts support accountability in multi-hop routing.
+
+Receipt transcript verification and sender authentication are separate checks. A signature verified with the public key embedded in its own receipt establishes integrity under that key; it does not bind the claimed source authority or device. An ingress owner may publish verified peer identity only after resolving an expected active key from trusted local authority/device state, checking the key and epoch against that binding, and applying replay state. LAN bootstrap frames that have only a self-certified receipt remain untrusted routing input even when their bytes are intact.
 
 ## 4. Information Flow Budgets
 

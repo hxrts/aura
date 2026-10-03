@@ -230,6 +230,60 @@ where
     })
 }
 
+async fn spawn_owned_enrollment_completion_refresh(
+    spawner: OwnedTaskSpawner,
+    runtime: Arc<dyn RuntimeBridge>,
+    app_core: Arc<RwLock<AppCore>>,
+    cancel: HookCancellation,
+) -> Result<(), HookInstallError> {
+    let (started_tx, started_rx) = oneshot::channel();
+    let startup_runtime = runtime.clone();
+    spawn_cancellable_runtime_refresh_task(&spawner, async move {
+        let _ = started_tx.send(());
+        loop {
+            let result = futures::select! {
+                _ = cancel.clone().fuse() => break,
+                result = crate::workflows::ceremonies::refresh_device_enrollment_completions(&app_core).fuse() => result,
+            };
+            if let Err(error) = result {
+                log_refresh_hook_error("device_enrollment_completion_hook", &error);
+            }
+            if !await_enrollment_refresh_interval(&runtime, cancel.clone()).await {
+                break;
+            }
+        }
+    });
+    crate::workflows::runtime::timeout_runtime_call(
+        &startup_runtime,
+        "install_system_refresh_hooks",
+        "enrollment_completion_start",
+        std::time::Duration::from_secs(5),
+        || started_rx,
+    )
+    .await
+    .map_err(|source| HookInstallError::ListenerStart {
+        name: "device_enrollment_completion_hook",
+        source,
+    })?
+    .map_err(|source| HookInstallError::ListenerStart {
+        name: "device_enrollment_completion_hook",
+        source: AuraError::Internal {
+            message: "enrollment completion task exited before acknowledging startup".to_owned(),
+            source: Some(Arc::new(source)),
+        },
+    })
+}
+
+async fn await_enrollment_refresh_interval(
+    runtime: &Arc<dyn RuntimeBridge>,
+    cancel: HookCancellation,
+) -> bool {
+    futures::select! {
+        _ = cancel.fuse() => false,
+        _ = runtime.wait_for_background_refresh(1_000).fuse() => true,
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn_cancellable_runtime_refresh_task<F>(spawner: &OwnedTaskSpawner, fut: F)
 where
@@ -352,6 +406,9 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
         cancellation: cancel_rx.clone(),
         shutdown: spawner.shutdown_token().clone(),
     };
+    let enrollment_spawner = spawner.clone();
+    let enrollment_runtime = runtime.clone();
+    let enrollment_cancel = cancel_rx.clone();
     spawn_owned_signal_refresh(
         contacts,
         spawner.clone(),
@@ -474,6 +531,14 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             .map_err(|source| HookInstallError::InitialRefresh { source })?;
     }
 
+    spawn_owned_enrollment_completion_refresh(
+        enrollment_spawner,
+        enrollment_runtime,
+        Arc::clone(app_core),
+        enrollment_cancel,
+    )
+    .await?;
+
     Ok(group)
 }
 
@@ -486,6 +551,107 @@ mod tests {
     use aura_effects::reactive::CountingTestTaskSpawner;
     use std::sync::atomic::AtomicUsize;
     use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn offline_completion_refresh_parks_until_hook_cancellation() {
+        let runtime: Arc<dyn RuntimeBridge> = Arc::new(OfflineRuntimeBridge::new(
+            aura_core::AuthorityId::new_from_entropy([79; 32]),
+        ));
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let cancel = cancel_rx.map(|_| ()).boxed().shared();
+        let mut wait = Box::pin(await_enrollment_refresh_interval(&runtime, cancel));
+        assert!(wait.as_mut().now_or_never().is_none());
+        cancel_tx.send(()).unwrap();
+        assert!(!wait.await);
+    }
+
+    #[tokio::test]
+    async fn enrollment_completion_replays_after_app_hook_reattachment() {
+        use crate::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
+        use crate::ui_contract::{
+            AuthoritativeSemanticFact, OperationId, SemanticFailureCode, SemanticOperationPhase,
+        };
+
+        let runtime =
+            crate::testing::running_offline_runtime(AuthorityId::new_from_entropy([80; 32]));
+        runtime.set_pending_invitations(Vec::new());
+        let completed = aura_core::CeremonyId::new("hook-replay-completed");
+        let rejected = aura_core::CeremonyId::new("hook-replay-rejected");
+        runtime.set_enrollment_outcome(completed.clone(), None);
+        runtime.set_enrollment_outcome(rejected.clone(), None);
+
+        let first =
+            crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime.clone());
+        AppCore::init_signals_with_hooks(&first).await.unwrap();
+        let first_facts = first.read().await.authoritative_semantic_facts().clone();
+        assert!(first_facts.iter().all(|fact| {
+            !matches!(fact, AuthoritativeSemanticFact::OperationStatus { status, .. }
+                if matches!(status.phase, SemanticOperationPhase::Succeeded | SemanticOperationPhase::Failed))
+        }));
+        assert!(AppCore::detach_runtime(&first).await);
+
+        runtime.set_enrollment_outcome(completed.clone(), Some(CeremonyTerminalOutcome::Committed));
+        runtime.set_enrollment_outcome(
+            rejected.clone(),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Rejected,
+            )),
+        );
+        let reattached =
+            crate::testing::test_app_core_with_runtime(AppConfig::default(), runtime.clone());
+        AppCore::init_signals_with_hooks(&reattached).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let facts = reattached.read().await.authoritative_semantic_facts().clone();
+                let committed = facts.iter().any(|fact| {
+                    matches!(fact,
+                        AuthoritativeSemanticFact::OperationStatus { operation_id, status, .. }
+                        if operation_id == &OperationId::device_enrollment_completion_for(&completed)
+                            && status.phase == SemanticOperationPhase::Succeeded)
+                });
+                let refused = facts.iter().any(|fact| {
+                    matches!(fact,
+                        AuthoritativeSemanticFact::OperationStatus { operation_id, status, .. }
+                        if operation_id == &OperationId::device_enrollment_completion_for(&rejected)
+                            && status.phase == SemanticOperationPhase::Failed
+                            && status.error.as_ref().is_some_and(|error|
+                                error.code == SemanticFailureCode::CeremonyRejected))
+                });
+                if committed && refused {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("reattached app hook must replay each runtime result");
+
+        let facts = reattached
+            .read()
+            .await
+            .authoritative_semantic_facts()
+            .clone();
+        for (ceremony_id, expected_phase) in [
+            (&completed, SemanticOperationPhase::Succeeded),
+            (&rejected, SemanticOperationPhase::Failed),
+        ] {
+            let terminal_count = facts
+                .iter()
+                .filter(|fact| {
+                    matches!(fact,
+                    AuthoritativeSemanticFact::OperationStatus { operation_id, status, .. }
+                    if operation_id == &OperationId::device_enrollment_completion_for(ceremony_id)
+                        && status.phase == expected_phase)
+                })
+                .count();
+            assert_eq!(terminal_count, 1, "one terminal fact per ceremony");
+        }
+        assert!(first.read().await.authoritative_semantic_facts().iter().all(|fact| {
+            !matches!(fact, AuthoritativeSemanticFact::OperationStatus { status, .. }
+                if matches!(status.phase, SemanticOperationPhase::Succeeded | SemanticOperationPhase::Failed))
+        }));
+        AppCore::detach_runtime(&reattached).await;
+    }
 
     #[cfg(feature = "signals")]
     #[tokio::test]

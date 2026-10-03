@@ -3277,6 +3277,72 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
+    async fn get_ceremony_terminal_outcome(
+        &self,
+        ceremony_id: &aura_core::types::identifiers::CeremonyId,
+    ) -> Result<Option<aura_app::runtime_bridge::CeremonyTerminalOutcome>, IntentError> {
+        self.agent
+            .ceremony_runner()
+            .await
+            .terminal_outcome(ceremony_id)
+            .await
+    }
+
+    async fn list_device_enrollment_ceremonies(
+        &self,
+    ) -> Result<Vec<aura_core::types::identifiers::CeremonyId>, IntentError> {
+        self.agent
+            .ceremony_tracker()
+            .await
+            .list_device_enrollment_ceremonies()
+            .await
+    }
+
+    async fn get_guardian_invitation_terminal_outcome(
+        &self,
+        invitation_id: &aura_core::types::identifiers::InvitationId,
+    ) -> Result<Option<aura_app::runtime_bridge::CeremonyTerminalOutcome>, IntentError> {
+        let key = crate::handlers::invitation::guardian_confirmation_storage_key(invitation_id);
+        let effects = self.agent.runtime().effects();
+        let evidence =
+            aura_core::effects::storage::StorageCoreEffects::retrieve(effects.as_ref(), &key)
+                .await
+                .map_err(|error| {
+                    IntentError::internal_error(format!(
+                        "load verified guardian confirmation: {error}"
+                    ))
+                })?;
+        if let Some(bytes) = evidence {
+            let confirm: aura_invitation::protocol::GuardianConfirm =
+                aura_core::util::serialization::from_slice(&bytes).map_err(|error| {
+                    IntentError::internal_error(format!(
+                        "decode verified guardian confirmation: {error}"
+                    ))
+                })?;
+            if confirm.invitation_id != *invitation_id
+                || !confirm.established
+                || confirm.signature.is_empty()
+            {
+                return Err(IntentError::validation_failed(
+                    "stored guardian confirmation evidence is invalid",
+                ));
+            }
+            return Ok(Some(
+                aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed,
+            ));
+        }
+        let ceremony_id = aura_core::types::identifiers::CeremonyId::new(invitation_id.to_string());
+        let runner = self.agent.ceremony_runner().await;
+        match runner.terminal_outcome(&ceremony_id).await {
+            Ok(Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(reason))) => {
+                Ok(Some(
+                    aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(reason),
+                ))
+            }
+            Ok(_) | Err(_) => Ok(None),
+        }
+    }
+
     async fn get_key_rotation_ceremony_status(
         &self,
         ceremony_id: &aura_core::types::identifiers::CeremonyId,
@@ -3862,6 +3928,7 @@ impl AgentRuntimeBridge {
         &self,
         ceremony_id: aura_core::types::identifiers::CeremonyId,
     ) {
+        let ceremony_runner = self.agent.runtime().ceremony_runner().clone();
         let service = crate::handlers::device_epoch_rotation::DeviceEpochRotationService::new(
             self.agent.authority_id(),
             self.agent.runtime().effects(),
@@ -3873,6 +3940,21 @@ impl AgentRuntimeBridge {
         let task_name = format!("device_enrollment_finalize.{ceremony_id}");
         let fut = async move {
             if let Err(error) = service.finalize_sole_device_enrollment(&ceremony_id).await {
+                let reason = if matches!(error, crate::core::AgentError::Timeout(_)) {
+                    aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
+                } else {
+                    aura_app::runtime_bridge::CeremonyFailureReason::RuntimeFailed
+                };
+                if let Err(settle_error) = ceremony_runner
+                    .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
+                    .await
+                {
+                    tracing::warn!(
+                        error = %settle_error,
+                        ceremony_id = %ceremony_id,
+                        "sole-device enrollment terminal outcome publication failed"
+                    );
+                }
                 tracing::warn!(
                     error = %error,
                     ceremony_id = %ceremony_id,

@@ -47,6 +47,8 @@ Summary:
 - All production async work uses structured concurrency with explicit task ownership.
 - External events reach session state only through typed ingress and the current owner.
 - Sibling fact exchange preserves codec, tree-operation, and frame-order causes as typed error categories with their original sources; contact acceptance preconditions and response signing likewise retain typed causes through agent error conversion.
+- Sibling tree ingress verifies each new operation with locally trusted parent-epoch key and threshold metadata, checks its exact parent state, and validates the whole extension before persistence. Missing local trust fails closed even for a first import or a single-signer tree. Enrollment baseline replacement requires a separate authenticated ceremony-scoped verifier chain; an invitation's pending-epoch package or a peer frame is not a trusted parent verifier by itself.
+- A LAN receipt signed under the public key embedded in that same receipt proves payload integrity only. It cannot mint verified authority ingress; the expected authority/device key must come from an independently verified binding. Imported invitation trust distinguishes confirmed invitation-key continuity, an unbound device-key match, and self-certification so a contact relationship alone never certifies a claimed device.
 - Each active session has exactly one local owner at any time.
 - Runtime composition assembles existing handlers; it does not create new effects or protocol logic.
 - Runtime telltale integration consumes bridge artifacts but does not redefine bridge schema.
@@ -290,6 +292,7 @@ Service-owned effects never mutate session state directly. Session-owned effects
 Production fail-closed rules are explicit:
 
 - inbound transport receipts are validated before runtime consumers act on the envelope
+- when multiple devices share one authority inbox, a choreography session may promote only frames addressed to its own device; frames for another device remain in the shared inbox until that device's session owner receives them
 - owner capabilities must match the exact issued session, not merely owner label and generation
 - delegation fails closed when source ownership was not recorded; the runtime does not backfill ownership as a repair path
 - choreography receive timeouts are bound to issued timeout witnesses rather than reconstructed from later elapsed-time checks
@@ -374,6 +377,19 @@ Runtime bridge lookup follows the same strong-ref rule:
   `prestate_hash` bindings end to end; the tracker/runner may not admit
   optional prestate or compatibility wrappers that weaken supersession
   semantics
+- enrollment code issuance and ceremony completion have distinct outcomes.
+  The runtime ceremony owner records one typed terminal outcome, preserves
+  the first result under duplicate or late messages, and makes it available
+  after restart. Deadline, authenticated refusal, cancellation, and commit
+  must settle that owner; a spawned ceremony error may not be log-only.
+- an invitee's local decline or acceptance cannot establish the initiator's
+  terminal outcome by itself. Cross-runtime refusal and guardian completion
+  require invitation-bound authenticated evidence before either side reports
+  ceremony success or rejection.
+- a guardian acceptance binds the inviter proof key from the imported code.
+  The principal signs its post-verification confirmation with the retained
+  local key matching that proof, including when its current identity epoch
+  has rotated; an unavailable old key is an explicit failure.
 - contact invitation acceptance completes only on the inviter's signed
   response (`handlers/invitation/contact_confirmation.rs`): the invitee
   materializes `ContactFact::Added` and marks the invitation accepted only on

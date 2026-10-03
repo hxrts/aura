@@ -686,16 +686,16 @@ fn classification_to_semantic_error(
         CommandTerminalReasonCode::MissingActiveContext => {
             SemanticFailureCode::MissingAuthoritativeContext
         }
-        CommandTerminalReasonCode::None
-        | CommandTerminalReasonCode::PermissionDenied
-        | CommandTerminalReasonCode::NotMember
-        | CommandTerminalReasonCode::NotFound
-        | CommandTerminalReasonCode::InvalidArgument
-        | CommandTerminalReasonCode::InvalidState
-        | CommandTerminalReasonCode::Muted
-        | CommandTerminalReasonCode::Banned
-        | CommandTerminalReasonCode::Unavailable
-        | CommandTerminalReasonCode::Internal => SemanticFailureCode::InternalError,
+        CommandTerminalReasonCode::None => SemanticFailureCode::CommandFailed,
+        CommandTerminalReasonCode::PermissionDenied => SemanticFailureCode::PermissionDenied,
+        CommandTerminalReasonCode::NotMember => SemanticFailureCode::NotMember,
+        CommandTerminalReasonCode::NotFound => SemanticFailureCode::NotFound,
+        CommandTerminalReasonCode::InvalidArgument => SemanticFailureCode::InvalidArgument,
+        CommandTerminalReasonCode::InvalidState => SemanticFailureCode::InvalidState,
+        CommandTerminalReasonCode::Muted => SemanticFailureCode::Muted,
+        CommandTerminalReasonCode::Banned => SemanticFailureCode::Banned,
+        CommandTerminalReasonCode::Unavailable => SemanticFailureCode::Unavailable,
+        CommandTerminalReasonCode::Internal => SemanticFailureCode::InternalError,
     };
     let domain = match status {
         CommandTerminalOutcomeStatus::Ok
@@ -734,6 +734,66 @@ mod tests {
     use super::*;
     use crate::workflows::chat_commands::all_command_help;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn command_terminal_reasons_keep_stable_semantic_codes() {
+        let cases = [
+            (
+                CommandTerminalReasonCode::None,
+                SemanticFailureCode::CommandFailed,
+            ),
+            (
+                CommandTerminalReasonCode::PermissionDenied,
+                SemanticFailureCode::PermissionDenied,
+            ),
+            (
+                CommandTerminalReasonCode::NotMember,
+                SemanticFailureCode::NotMember,
+            ),
+            (
+                CommandTerminalReasonCode::NotFound,
+                SemanticFailureCode::NotFound,
+            ),
+            (
+                CommandTerminalReasonCode::InvalidArgument,
+                SemanticFailureCode::InvalidArgument,
+            ),
+            (
+                CommandTerminalReasonCode::InvalidState,
+                SemanticFailureCode::InvalidState,
+            ),
+            (CommandTerminalReasonCode::Muted, SemanticFailureCode::Muted),
+            (
+                CommandTerminalReasonCode::Banned,
+                SemanticFailureCode::Banned,
+            ),
+            (
+                CommandTerminalReasonCode::Unavailable,
+                SemanticFailureCode::Unavailable,
+            ),
+            (
+                CommandTerminalReasonCode::OperationTimedOut,
+                SemanticFailureCode::OperationTimedOut,
+            ),
+            (
+                CommandTerminalReasonCode::MissingActiveContext,
+                SemanticFailureCode::MissingAuthoritativeContext,
+            ),
+            (
+                CommandTerminalReasonCode::Internal,
+                SemanticFailureCode::InternalError,
+            ),
+        ];
+        for (reason, code) in cases {
+            let error = classification_to_semantic_error(
+                CommandTerminalOutcomeStatus::Failed,
+                reason,
+                "classified command failure".to_owned(),
+            );
+            assert_eq!(error.domain, SemanticFailureDomain::Command);
+            assert_eq!(error.code, code, "reason: {reason:?}");
+        }
+    }
 
     #[test]
     fn slash_command_metadata_marks_observed_commands_ownerless() {

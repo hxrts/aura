@@ -379,14 +379,33 @@ pub enum CeremonyState {
     PendingEpoch { pending_epoch: Epoch, required_responses: u16, received_responses: u16 },
     Committing,
     Committed { consensus_id: ConsensusId, committed_at: PhysicalTime },
-    Aborted { reason: String, aborted_at: PhysicalTime },
+    Aborted { reason: CeremonyFailureReason, aborted_at: PhysicalTime },
     Superseded { by: CeremonyId, reason: SupersessionReason },
+}
+
+pub enum CeremonyFailureReason {
+    Rejected,
+    Cancelled,
+    TimedOut,
+    ChoreographyFailed,
+    RuntimeFailed,
+    Superseded,
 }
 ```
 
 Use cases include add contact, create group, guardian rotation, device enrollment, and recovery.
 
 When a ceremony commits successfully, `committed_agreement` is set to `Agreement::Finalized` with the consensus ID, indicating A3 durability.
+
+An issued invitation or enrollment code is the terminal result of code issuance,
+not the terminal result of the ceremony it starts. Enrollment completion has a
+separate operation instance linked to the ceremony ID. The initiator and invitee
+derive completion from the same authoritative ceremony outcome. A completion
+instance has exactly one terminal result: committed, cancelled, rejected, or
+timed out. The first terminal result is stable under duplicate, late, and replayed
+messages; a conflicting later result cannot replace it. Failure and cancellation
+carry stable, typed reasons independently of display text. An unauthenticated
+response cannot terminate a valid ceremony.
 
 ### 6.5 Unified Consistency Type
 

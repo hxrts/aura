@@ -1,6 +1,7 @@
 //! Shared semantic operation state, facts, and typed workflow outcomes.
 
 use super::{RuntimeEventKind, RuntimeFact};
+use aura_core::CeremonyId;
 use aura_core::{OwnerEpoch, PublicationSequence};
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,7 @@ pub enum UiReadiness {
 #[aura_macros::ownership_lifecycle(
     initial = "Idle",
     ordered = "Idle,Submitting",
-    terminals = "Succeeded,Failed"
+    terminals = "Succeeded,Failed,Cancelled"
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,6 +36,7 @@ pub enum OperationState {
     Submitting,
     Succeeded,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -115,8 +117,10 @@ pub enum SemanticOperationKind {
     CancelGuardianCeremony,
     CancelKeyRotationCeremony,
     StartDeviceEnrollment,
+    CompleteDeviceEnrollment,
     RemoveDevice,
     ImportDeviceEnrollmentCode,
+    ImportInvitation,
     CreateContactInvitation,
     SendFriendRequest,
     AcceptFriendRequest,
@@ -126,6 +130,7 @@ pub enum SemanticOperationKind {
     CreateGuardianInvitation,
     ExportInvitation,
     AcceptContactInvitation,
+    AcceptGuardianInvitation,
     DeclineInvitation,
     RevokeInvitation,
     InviteActorToChannel,
@@ -189,6 +194,7 @@ pub enum SemanticOperationPhase {
 #[serde(rename_all = "snake_case")]
 pub enum SemanticFailureDomain {
     Command,
+    Ceremony,
     Invitation,
     ChannelContext,
     Transport,
@@ -201,12 +207,26 @@ pub enum SemanticFailureDomain {
 #[serde(rename_all = "snake_case")]
 pub enum SemanticFailureCode {
     UnsupportedCommand,
+    PermissionDenied,
+    NotMember,
+    NotFound,
+    InvalidArgument,
+    InvalidState,
+    Muted,
+    Banned,
+    Unavailable,
+    CommandFailed,
     MissingAuthoritativeContext,
     ContactLinkDidNotConverge,
     ChannelBootstrapUnavailable,
     PeerChannelNotEstablished,
     DeliveryReadinessNotReached,
     OperationTimedOut,
+    CeremonyRejected,
+    CeremonyCancelled,
+    CeremonyChoreographyFailed,
+    CeremonyRuntimeFailed,
+    CeremonySuperseded,
     ShellDeclaredSuccessIllegally,
     /// The inviter revoked the invitation before confirming the acceptance.
     InvitationRevoked,
@@ -654,6 +674,11 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn accept_guardian_invitation() -> Self {
+        Self("invitation_accept_guardian".to_string())
+    }
+
+    #[must_use]
     pub fn invitation_accept_channel() -> Self {
         Self("invitation_accept_channel".to_string())
     }
@@ -664,8 +689,18 @@ impl OperationId {
     }
 
     #[must_use]
+    pub fn invitation_import() -> Self {
+        Self("invitation_import".to_string())
+    }
+
+    #[must_use]
     pub fn device_enrollment() -> Self {
         Self("device_enrollment".to_string())
+    }
+
+    #[must_use]
+    pub fn device_enrollment_completion_for(ceremony_id: &CeremonyId) -> Self {
+        Self(format!("device_enrollment_completion:{ceremony_id}"))
     }
 
     #[must_use]

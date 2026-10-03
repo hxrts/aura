@@ -94,7 +94,17 @@ impl ShellRenderState {
             settings_runtime,
             notifications_runtime,
         );
-        let add_device_modal_state = model.add_device_modal().cloned();
+        let mut add_device_modal_state = model.add_device_modal().cloned();
+        if let Some(state) = add_device_modal_state.as_mut() {
+            state.is_complete = matches!(
+                model.device_enrollment_completion_state(state.ceremony_id.as_ref()),
+                Some(OperationState::Succeeded)
+            );
+            state.has_failed = matches!(
+                model.device_enrollment_completion_state(state.ceremony_id.as_ref()),
+                Some(OperationState::Failed | OperationState::Cancelled)
+            );
+        }
         Self {
             footer: runtime.footer(),
             modal: modal_view(model, &runtime.chat),

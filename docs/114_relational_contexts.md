@@ -64,6 +64,8 @@ Neighborhood governance and home-membership state are recorded in neighborhood a
 
 Direct friendship is modeled as a bilateral relational context between authorities. Contact remains unilateral reachability or identification state. Friendship requires explicit bilateral acceptance. Friendship is not represented as a new authority object.
 
+A known contact relationship and a verified device-key binding are separate facts. A fresh invitation from a known contact may establish continuity with a previously confirmed invitation key, but that continuity does not by itself authenticate a newly claimed device ID or a rotated key. If the device binding is unresolved, the import outcome remains unresolved or already linked rather than treating a valid code as malformed.
+
 The context stores lifecycle facts such as proposal, acceptance, and revocation. It may also store bounded trust-introduction artifacts. Those artifacts carry expiry, remaining depth, and fan-out limits. Runtime policy may use the resulting evidence as permit input, but the shared facts do not hard-code runtime policy tiers.
 
 Bounded bootstrap introductions follow the same model. A direct friend may publish an introduction
@@ -138,6 +140,8 @@ Generic facts should include enough metadata (`bindings`, optional labels) for i
 ## 5. Relational Facts
 
 Relational facts express specific cross-authority operations. A `GuardianBinding` fact defines the guardian authority for an account while a `RecoveryGrant` fact defines an allowed update to the account state. A `Generic` fact covers application defined interactions. Consensus-backed facts include the `consensus_commitment` and aggregated signature so reducers can verify provenance even after witnesses rotate.
+
+Guardian invitation confirmation is bound to the invitation, both authorities, and the inviter proof key carried by the issued code. The guardian accepts with a signed recovery key and names that inviter proof key. After verifying and recording the acceptance, the principal confirms with its retained matching signing key. Rotation of the principal's current identity key does not change the key expected by an already issued invitation; if the matching key is unavailable, confirmation fails.
 
 `SessionDelegation` protocol facts record runtime endpoint transfer events. Aura emits these facts when session ownership moves across authorities (for example, guardian handoff or device migration). Each delegation fact includes source authority, destination authority, session id, optional bundle id, and timestamp so reconfiguration decisions remain auditable.
 

@@ -277,15 +277,6 @@ impl UiController {
             state.is_complete = is_complete;
             state.has_failed = has_failed;
             state.error_message = error_message;
-            let device_name = state.device_name.clone();
-            if is_complete {
-                let should_set_name =
-                    model.demo.secondary_device_name.is_none() && !device_name.trim().is_empty();
-                model.demo.has_secondary_device = true;
-                if should_set_name {
-                    model.demo.secondary_device_name = Some(device_name);
-                }
-            }
         }
         drop(model);
         self.request_rerender();

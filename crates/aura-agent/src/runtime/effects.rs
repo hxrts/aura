@@ -779,64 +779,78 @@ impl AuraEffectSystem {
             .map_err(|error| crate::core::AgentError::effects(error.to_string()))
     }
 
-    pub async fn import_tree_ops(
-        &self,
-        ops: &[aura_core::AttestedOp],
-    ) -> Result<(), crate::core::AgentError> {
-        self.tree_handler
-            .import_ops(ops)
-            .await
-            .map_err(|error| crate::core::AgentError::effects(error.to_string()))
-    }
-
     /// Import tree ops replicated from another device of this authority.
     ///
-    /// Only ops that extend the current tree (parent epoch and commitment
-    /// match) and carry a valid signature under it are applied, in order;
-    /// anything else, such as a provisional op a joining device created for
-    /// itself, is skipped. Returns how many ops were applied.
+    /// Every new operation must extend the local tree and verify under an
+    /// independently stored parent-epoch key. The complete extension is
+    /// checked before any operation is persisted. Duplicate operations are
+    /// idempotent; invalid or divergent operations reject the exchange.
     pub async fn import_verified_tree_ops(
         &self,
         ops: &[aura_core::AttestedOp],
     ) -> Result<usize, crate::core::AgentError> {
-        use aura_protocol::effects::TreeEffects;
+        use aura_core::tree::verification::extract_target_node;
         let encode = |op: &aura_core::AttestedOp| {
             aura_core::util::serialization::to_vec(op)
                 .map_err(|error| crate::core::AgentError::internal(error.to_string()))
         };
+        let mut staged = self.export_tree_ops().await?;
         let mut known = std::collections::BTreeSet::new();
-        for op in self.export_tree_ops().await? {
-            known.insert(encode(&op)?);
+        for op in &staged {
+            known.insert(encode(op)?);
         }
-        let mut applied = 0;
+        let mut additions = Vec::new();
         for op in ops {
             if !known.insert(encode(op)?) {
                 continue;
             }
-            let state = self
-                .get_current_state()
-                .await
-                .map_err(|error| crate::core::AgentError::effects(error.to_string()))?;
-            let extends = op.op.parent_epoch == state.epoch
-                && op.op.parent_commitment == state.root_commitment;
-            // A threshold tree carries branch signing keys and every op must
-            // verify under them. A single-signer authority's tree has none (its
-            // ops are signed with the authority key); there the op must extend
-            // this tree and come from an authenticated sibling device, which
-            // already holds the authority's keys.
-            let verified = extends
-                && (state.signing_keys().is_empty()
-                    || self.verify_aggregate_sig(op, &state).await.unwrap_or(false));
-            if !verified {
-                tracing::debug!(extends, "skipping unverified tree op from sibling");
-                continue;
+            let state = aura_journal::commitment_tree::reduce(&staged).map_err(|error| {
+                crate::core::AgentError::Aura(AuraError::crypto(format!(
+                    "Cannot verify sibling tree against invalid local log: {error}"
+                )))
+            })?;
+            if op.op.parent_epoch != state.epoch || op.op.parent_commitment != state.root_commitment
+            {
+                return Err(AuraError::crypto(
+                    "Sibling tree operation does not extend the current parent epoch",
+                )
+                .into());
             }
-            self.apply_attested_op(op.clone())
+            let target = extract_target_node(&op.op.op).or_else(|| match &op.op.op {
+                aura_core::TreeOpKind::RemoveLeaf { leaf, .. } => {
+                    state.get_remove_leaf_affected_parent(leaf)
+                }
+                _ => None,
+            });
+            let target = target.ok_or_else(|| {
+                AuraError::crypto("Sibling tree operation has no verifiable signing node")
+            })?;
+            let (key, threshold) = self
+                .trusted_tree_parent_verifier(&self.authority_id, op.op.parent_epoch.value())
                 .await
-                .map_err(|error| crate::core::AgentError::effects(error.to_string()))?;
-            applied += 1;
+                .map_err(crate::core::AgentError::from)?;
+            if let Some(branch_key) = state.get_signing_key(&target) {
+                if branch_key != &key {
+                    return Err(AuraError::crypto(
+                        "Trusted parent-epoch key conflicts with committed tree state",
+                    )
+                    .into());
+                }
+            }
+            aura_core::tree::verify_attested_op(op, &key, threshold, state.epoch).map_err(
+                |error| AuraError::crypto(format!("Invalid sibling tree signature: {error}")),
+            )?;
+            staged.push(op.clone());
+            aura_journal::commitment_tree::reduce(&staged).map_err(|error| {
+                AuraError::crypto(format!("Invalid sibling tree transition: {error}"))
+            })?;
+            additions.push(op.clone());
         }
-        Ok(applied)
+        self.tree_handler
+            .import_ops(&additions)
+            .await
+            .map_err(crate::core::AgentError::from)?;
+        Ok(additions.len())
     }
 
     /// Adopt `ops` as this device's whole tree OpLog (a device joining an

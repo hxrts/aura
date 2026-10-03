@@ -33,11 +33,6 @@ use aura_core::{
     execute_with_timeout_budget, OwnedShutdownToken, OwnedTaskSpawner, TimeoutBudget,
     TimeoutRunError,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use aura_protocol::{
-    DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
-    VerifiedIngressMetadata,
-};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 #[cfg(not(target_arch = "wasm32"))]
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -373,7 +368,8 @@ impl RuntimeSystem {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker = CeremonyTracker::new(time_effects);
+        let ceremony_tracker =
+            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -444,7 +440,8 @@ impl RuntimeSystem {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker = CeremonyTracker::new(time_effects);
+        let ceremony_tracker =
+            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -515,7 +512,8 @@ impl RuntimeSystem {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker = CeremonyTracker::new(time_effects);
+        let ceremony_tracker =
+            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -595,7 +593,8 @@ impl RuntimeSystem {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         let time_effects: Arc<dyn PhysicalTimeEffects> =
             Arc::new(effect_system.time_effects().clone());
-        let ceremony_tracker = CeremonyTracker::new(time_effects);
+        let ceremony_tracker =
+            CeremonyTracker::new_with_storage(time_effects, effect_system.clone());
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         let reconfiguration_manager = ReconfigurationManager::new();
         let diagnostics = Arc::new(RuntimeDiagnosticSink::new());
@@ -1289,14 +1288,17 @@ async fn handle_inbound_transport_envelope(
     metrics: Arc<tokio::sync::RwLock<LanTransportMetrics>>,
     envelope: TransportEnvelope,
 ) -> Option<TransportEnvelope> {
-    let ingress = match verify_lan_transport_ingress(envelope) {
+    let ingress = match check_lan_transport_integrity(envelope) {
         Ok(ingress) => ingress,
         Err(error) => {
             tracing::debug!(error = %error, "rejected LAN transport envelope before runtime handling");
             return None;
         }
     };
-    let (envelope, _) = ingress.into_parts();
+    // A receipt signed by its own embedded key proves frame integrity only.
+    // The queued envelope retains untrusted source metadata; protocol owners
+    // must resolve a trusted authority/device key before privileged mutation.
+    let envelope = ingress.into_routable_envelope();
     if matches!(
         effects.requeue_envelope(envelope),
         crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow
@@ -1325,16 +1327,28 @@ enum LanTransportIngressError {
     EmptyReceiptNonce,
     #[error("missing content-type metadata")]
     MissingContentType,
-    #[error("invalid ingress evidence: {0}")]
-    Evidence(#[from] aura_protocol::IngressVerificationError),
-    #[error("ingress promotion failed: {0}")]
-    Promotion(String),
+    #[error("unsupported LAN envelope schema version")]
+    UnsupportedSchemaVersion,
+    #[error("invalid LAN envelope schema version")]
+    InvalidSchemaVersion,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn verify_lan_transport_ingress(
+#[derive(Debug)]
+struct IntegrityCheckedLanEnvelope(TransportEnvelope);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl IntegrityCheckedLanEnvelope {
+    /// Release the frame for protocol routing without asserting peer identity.
+    fn into_routable_envelope(self) -> TransportEnvelope {
+        self.0
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn check_lan_transport_integrity(
     envelope: TransportEnvelope,
-) -> Result<VerifiedIngress<TransportEnvelope>, LanTransportIngressError> {
+) -> Result<IntegrityCheckedLanEnvelope, LanTransportIngressError> {
     let receipt = envelope
         .receipt
         .as_ref()
@@ -1369,51 +1383,17 @@ fn verify_lan_transport_ingress(
     let schema_version = envelope
         .metadata
         .get("wire-format-version")
-        .and_then(|version| version.parse::<u16>().ok())
-        .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
-    let metadata = VerifiedIngressMetadata::new(
-        IngressSource::Authority(envelope.source),
-        envelope.context,
-        None,
-        aura_core::Hash32::from_bytes(&envelope.payload),
-        schema_version,
-    );
-    let evidence = IngressVerificationEvidence::builder(metadata)
-        .peer_identity(
-            receipt.src == envelope.source,
-            "receipt source must match envelope source",
-        )?
-        .envelope_authenticity(
-            true,
-            "guard-chain receipt signature must verify against the envelope transcript",
-        )?
-        .capability_authorization(
-            envelope.receipt.is_some(),
-            "guard-chain receipt is required before LAN ingress",
-        )?
-        .namespace_scope(
-            receipt.context == envelope.context
-                && receipt.dst == envelope.destination
-                && envelope.metadata.contains_key("content-type"),
-            "receipt route and content-type must match the envelope scope",
-        )?
-        .schema_version(
-            schema_version <= aura_protocol::messages::WIRE_FORMAT_VERSION,
-            "unsupported LAN envelope schema version",
-        )?
-        .replay_freshness(receipt.nonce != 0, "receipt nonce must be non-zero")?
-        .signer_membership(
-            receipt.src == envelope.source,
-            "LAN receipt signer must match source authority",
-        )?
-        .proof_evidence(true, "guard-chain receipt signature evidence verified")?
-        .build()?;
-
-    DecodedIngress::new(envelope, evidence.metadata().clone())
-        .verify(evidence)
-        .map_err(|error| {
-            LanTransportIngressError::Promotion(format!("promote LAN transport ingress: {error}"))
+        .map(|version| {
+            version
+                .parse::<u16>()
+                .map_err(|_| LanTransportIngressError::InvalidSchemaVersion)
         })
+        .transpose()?
+        .unwrap_or(aura_protocol::messages::WIRE_FORMAT_VERSION);
+    if schema_version > aura_protocol::messages::WIRE_FORMAT_VERSION {
+        return Err(LanTransportIngressError::UnsupportedSchemaVersion);
+    }
+    Ok(IntegrityCheckedLanEnvelope(envelope))
 }
 
 /// Best-effort read of the persisted account nickname for LAN announcements.
@@ -1703,7 +1683,7 @@ mod tests {
         let mut envelope = test_envelope();
         envelope.receipt = None;
 
-        let error = verify_lan_transport_ingress(envelope)
+        let error = check_lan_transport_integrity(envelope)
             .expect_err("unsigned LAN envelope must be rejected");
 
         assert!(matches!(error, LanTransportIngressError::MissingReceipt));
@@ -1714,7 +1694,7 @@ mod tests {
         let mut envelope = test_envelope();
         envelope.receipt.as_mut().expect("receipt").dst = AuthorityId::new_from_entropy([4u8; 32]);
 
-        let error = verify_lan_transport_ingress(envelope)
+        let error = check_lan_transport_integrity(envelope)
             .expect_err("mismatched receipt route must be rejected");
 
         assert!(matches!(
@@ -1728,7 +1708,7 @@ mod tests {
         let mut envelope = test_envelope();
         envelope.metadata.clear();
 
-        let error = verify_lan_transport_ingress(envelope)
+        let error = check_lan_transport_integrity(envelope)
             .expect_err("content-type is required for LAN ingress");
 
         assert!(matches!(
@@ -1738,21 +1718,39 @@ mod tests {
     }
 
     #[test]
-    fn lan_ingress_accepts_bounded_receipt_and_matching_route() {
+    fn lan_ingress_checks_integrity_without_claiming_peer_identity() {
         let envelope = test_envelope();
 
-        let verified =
-            verify_lan_transport_ingress(envelope).expect("valid LAN ingress should verify");
-        let (envelope, metadata) = verified.into_parts();
-
-        assert_eq!(
-            metadata.metadata().source_authority(),
-            Some(envelope.source)
-        );
+        let checked = check_lan_transport_integrity(envelope)
+            .expect("well-formed self-certified LAN frame should pass integrity checks");
+        let envelope = checked.into_routable_envelope();
         assert_eq!(
             envelope.metadata.get("content-type").map(String::as_str),
             Some("application/aura-test-envelope")
         );
+    }
+
+    #[test]
+    fn lan_ingress_rejects_unsupported_schema() {
+        let mut envelope = test_envelope();
+        envelope.metadata.insert(
+            "wire-format-version".to_string(),
+            (aura_protocol::messages::WIRE_FORMAT_VERSION + 1).to_string(),
+        );
+        let mut receipt = envelope.receipt.take().expect("receipt");
+        crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
+            &mut receipt,
+            &envelope,
+            &crate::runtime::receipt_model::test_receipt_signing_key(),
+        )
+        .expect("receipt should bind future schema frame");
+        envelope.receipt = Some(receipt);
+        let error =
+            check_lan_transport_integrity(envelope).expect_err("future schema must be rejected");
+        assert!(matches!(
+            error,
+            LanTransportIngressError::UnsupportedSchemaVersion
+        ));
     }
 
     #[test]

@@ -166,6 +166,28 @@ pub(super) fn set_authoritative_operation_state_sanctioned(
     state.set_authoritative_operation_state(operation_id, instance_id, causality, next_state);
 }
 
+pub(super) fn set_authoritative_operation_status_sanctioned(
+    state: &mut TuiState,
+    operation_id: OperationId,
+    instance_id: Option<aura_app::ui_contract::OperationInstanceId>,
+    causality: Option<aura_app::ui_contract::SemanticOperationCausality>,
+    status: &aura_app::ui_contract::SemanticOperationStatus,
+) {
+    let next_state = match status.phase {
+        aura_app::ui_contract::SemanticOperationPhase::Succeeded => OperationState::Succeeded,
+        aura_app::ui_contract::SemanticOperationPhase::Failed => OperationState::Failed,
+        aura_app::ui_contract::SemanticOperationPhase::Cancelled => OperationState::Cancelled,
+        _ => OperationState::Submitting,
+    };
+    state.set_authoritative_operation_state_with_failure(
+        operation_id,
+        instance_id,
+        causality,
+        next_state,
+        status.error.clone(),
+    );
+}
+
 fn runtime_notification_timestamp(total_facts: usize, index: usize) -> u64 {
     u64::MAX.saturating_sub(total_facts.saturating_sub(index) as u64)
 }
@@ -276,10 +298,11 @@ pub(super) fn semantic_accept_kind_for_invitation(
         .map_or(
             SemanticOperationKind::AcceptContactInvitation,
             |invitation| match invitation.invitation_type {
-                // Guardian invitations use the generic invitation accept path.
-                crate::tui::types::InvitationType::Contact
-                | crate::tui::types::InvitationType::Guardian => {
+                crate::tui::types::InvitationType::Contact => {
                     SemanticOperationKind::AcceptContactInvitation
+                }
+                crate::tui::types::InvitationType::Guardian => {
+                    SemanticOperationKind::AcceptGuardianInvitation
                 }
                 crate::tui::types::InvitationType::Channel => {
                     SemanticOperationKind::AcceptPendingChannelInvitation
@@ -450,7 +473,7 @@ pub(super) fn execute_harness_followup_command(
             };
             let kind = match invitation_type {
                 InvitationKind::Contact => SemanticOperationKind::CreateContactInvitation,
-                InvitationKind::Guardian => SemanticOperationKind::CreateContactInvitation,
+                InvitationKind::Guardian => SemanticOperationKind::CreateGuardianInvitation,
                 InvitationKind::Channel => SemanticOperationKind::InviteActorToChannel,
             };
             let operation = submit_local_terminal_operation(
@@ -484,8 +507,8 @@ pub(super) fn execute_harness_followup_command(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,
-                OperationId::invitation_accept_contact(),
-                SemanticOperationKind::AcceptContactInvitation,
+                OperationId::invitation_import(),
+                SemanticOperationKind::ImportInvitation,
             );
             let handle = operation.harness_handle();
             state.clear_runtime_fact_kind(RuntimeEventKind::ContactLinkReady);
@@ -519,6 +542,9 @@ pub(super) fn execute_harness_followup_command(
             let operation_id = match accept_kind {
                 SemanticOperationKind::AcceptPendingChannelInvitation => {
                     OperationId::invitation_accept_channel()
+                }
+                SemanticOperationKind::AcceptGuardianInvitation => {
+                    OperationId::accept_guardian_invitation()
                 }
                 _ => OperationId::invitation_accept_contact(),
             };
@@ -1184,11 +1210,27 @@ pub(super) fn handle_dispatch_command(
 
 #[cfg(test)]
 mod tests {
-    use super::authoritative_binding_for_requested_join;
-    use crate::tui::types::Channel;
+    use super::{authoritative_binding_for_requested_join, semantic_accept_kind_for_invitation};
+    use crate::tui::types::{Channel, Invitation, InvitationType};
     use aura_app::scenario_contract::SemanticCommandValue;
     use aura_app::ui::contract::HarnessUiCommand;
     use aura_app::ui_contract::ChannelBindingWitness;
+    use aura_app::ui_contract::SemanticOperationKind;
+    use parking_lot::RwLock;
+    use std::sync::Arc;
+
+    #[test]
+    fn guardian_acceptance_uses_its_own_tracked_kind() {
+        let invitations = Arc::new(RwLock::new(vec![Invitation {
+            id: "guardian-1".to_string(),
+            invitation_type: InvitationType::Guardian,
+            ..Invitation::default()
+        }]));
+        assert_eq!(
+            semantic_accept_kind_for_invitation(&invitations, "guardian-1"),
+            SemanticOperationKind::AcceptGuardianInvitation
+        );
+    }
 
     #[test]
     fn immediate_join_binding_requires_authoritative_context() {
