@@ -5370,3 +5370,34 @@ large_stack_async_test!(existing_contact_can_import_a_new_code_signed_by_its_con
         .expect("a confirmed contact's new code should import");
     assert_eq!(reimported.sender_id, pair.sender_id);
 });
+
+#[tokio::test]
+async fn verified_peer_descriptors_survive_a_runtime_restart() {
+    let own = AuthorityId::new_from_entropy([231u8; 32]);
+    let peer = AuthorityId::new_from_entropy([232u8; 32]);
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own).unwrap(),
+    );
+    let handler = handler_for_id(own);
+    let _first = attach_test_rendezvous_manager(effects.as_ref(), own).await;
+    handler
+        .cache_verified_peer_descriptor_for_peer(
+            effects.as_ref(),
+            peer,
+            None,
+            Some("tcp://192.168.1.30:55031"),
+            1_700_000_000_000,
+        )
+        .await;
+
+    // A restart: a fresh rendezvous manager has no descriptors in memory.
+    let _second = attach_test_rendezvous_manager(effects.as_ref(), own).await;
+    let manager = effects.rendezvous_manager().unwrap();
+    assert!(manager.get_any_descriptor_for_authority(peer).await.is_none());
+
+    handler.restore_verified_peer_descriptors(effects.as_ref()).await;
+    assert!(
+        manager.get_any_descriptor_for_authority(peer).await.is_some(),
+        "the persisted verified hint is re-cached"
+    );
+}

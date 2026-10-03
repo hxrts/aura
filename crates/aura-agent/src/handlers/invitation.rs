@@ -2110,6 +2110,59 @@ impl InvitationHandler {
                 Self::verified_hint_descriptor(peer, device_id, context_id, hints.clone(), now_ms);
             let _ = manager.cache_descriptor(descriptor).await;
         }
+        // Persist the verified hint so a restarted (e.g. reloaded browser)
+        // runtime can still reach this peer; descriptors live only in memory.
+        if let Some(addr) = addr {
+            let record = format!(
+                "{peer}\n{}\n{addr}",
+                device_id.map(|id| id.to_string()).unwrap_or_default()
+            );
+            let key = format!(
+                "{}{peer}",
+                Self::verified_peer_hint_prefix(self.context.authority.authority_id())
+            );
+            let _ = effects.store(&key, record.into_bytes()).await;
+        }
+    }
+
+    fn verified_peer_hint_prefix(own: AuthorityId) -> String {
+        format!("verified_peer_hints/{own}/")
+    }
+
+    /// Re-caches every persisted verified peer hint (see
+    /// [`Self::cache_verified_peer_descriptor_for_peer`]) after a restart.
+    pub(crate) async fn restore_verified_peer_descriptors(&self, effects: &AuraEffectSystem) {
+        let prefix = Self::verified_peer_hint_prefix(self.context.authority.authority_id());
+        let Ok(keys) = effects.list_keys(Some(&prefix)).await else {
+            return;
+        };
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        for key in keys {
+            let Ok(Some(bytes)) = effects.retrieve(&key).await else {
+                continue;
+            };
+            let Ok(record) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let mut fields = record.splitn(3, '\n');
+            let (Some(peer), Some(device), Some(addr)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let Ok(peer) = peer.parse::<AuthorityId>() else {
+                continue;
+            };
+            let device_id = device.parse::<DeviceId>().ok();
+            self.cache_verified_peer_descriptor_for_peer(
+                effects,
+                peer,
+                device_id,
+                Some(addr),
+                now_ms,
+            )
+            .await;
+        }
     }
 
     /// Parses a sender hint, a comma-separated list of scheme-tagged
