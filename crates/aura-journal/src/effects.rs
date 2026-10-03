@@ -396,8 +396,15 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         current
             .record_charge(cost)
             .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
-        current.advance_if_due();
-        self.update_flow_budget(context, peer, &current).await
+        // The receipt binds to the epoch and spend this charge landed in; the
+        // spacing-rule advance only takes effect for the next charge.
+        let charged = current;
+        if current.advance_if_due() {
+            self.update_flow_budget(context, peer, &current).await?;
+            Ok(charged)
+        } else {
+            self.update_flow_budget(context, peer, &current).await
+        }
     }
 }
 
@@ -810,10 +817,13 @@ mod tests {
         let (ctx, peer) = (context(9), authority(2));
         let sends = 5 * 1024;
         for send in 0..sends {
-            handler
+            let charged = handler
                 .charge_flow_budget(&ctx, &peer, FlowCost::new(1))
                 .await
                 .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
+            // Receivers reject a zero receipt nonce, and the nonce is the
+            // charged spend, so a charge never reports an empty epoch.
+            assert!(charged.spent >= 1, "send {send} charged {charged:?}");
         }
         let budget = handler
             .get_flow_budget(&ctx, &peer)
