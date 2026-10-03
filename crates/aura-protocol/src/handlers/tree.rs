@@ -388,6 +388,10 @@ fn verify_snapshot_signature(snapshot: &Snapshot) -> Result<(), AuraError> {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl TreeEffects for PersistentTreeHandler {
+    async fn list_attested_ops(&self) -> Result<Vec<AttestedOp>, AuraError> {
+        self.export_ops().await
+    }
+
     async fn get_current_state(
         &self,
     ) -> Result<aura_journal::commitment_tree::TreeState, AuraError> {
