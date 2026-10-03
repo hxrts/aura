@@ -327,6 +327,13 @@ pub(super) async fn invite_authority_to_channel_with_context(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
+    // Note to Self is this authority's private channel; it is never shared.
+    let own_authority = require_runtime(app_core).await?.authority_id();
+    if channel_id == note_to_self_channel_id(own_authority) {
+        return Err(AuraError::invalid(
+            "Note to Self is private and cannot be shared",
+        ));
+    }
     // The invitee requires the channel name; callers like `/invite` only
     // carry the channel id, so take it from the chat projection.
     let channel_name_hint = match channel_name_hint {

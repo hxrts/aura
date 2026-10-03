@@ -2777,3 +2777,25 @@ async fn test_update_channel_info_commits_rename_and_topic() {
         "expected a ChannelUpdated fact carrying the new name and topic, got {updates:?}"
     );
 }
+
+#[tokio::test]
+async fn inviting_a_contact_to_note_to_self_is_refused() {
+    let local = AuthorityId::new_from_entropy([171u8; 32]);
+    let runtime_bridge: Arc<dyn RuntimeBridge> =
+        Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let error = invite_authority_to_channel(
+        &app_core,
+        AuthorityId::new_from_entropy([172u8; 32]),
+        note_to_self_channel_id(local),
+        None,
+        None,
+    )
+    .await
+    .expect_err("Note to Self must not be shared");
+    assert!(error.to_string().contains("Note to Self is private"));
+}
