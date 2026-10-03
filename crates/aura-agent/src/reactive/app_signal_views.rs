@@ -266,6 +266,33 @@ pub(crate) async fn materialize_home_signal_for_channel_acceptance(
     Ok(())
 }
 
+/// The sender's display name: the invitation's own nickname, else the name of
+/// a known contact (guardian and channel invitations carry no nickname).
+async fn invitation_sender_display_name(
+    reactive: &ReactiveHandler,
+    sender_id: AuthorityId,
+    invitation_type: &DomainInvitationType,
+) -> String {
+    let named = app_signal_projection::invitation_sender_name(invitation_type);
+    if named != "Unknown" {
+        return named;
+    }
+    read_registered_signal::<ContactsState>(reactive, &*CONTACTS_SIGNAL, "contacts signal")
+        .await
+        .ok()
+        .and_then(|contacts| {
+            contacts.contact(&sender_id).map(|contact| {
+                if contact.nickname.trim().is_empty() {
+                    contact.nickname_suggestion.clone().unwrap_or_default()
+                } else {
+                    contact.nickname.clone()
+                }
+            })
+        })
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(named)
+}
+
 pub(crate) async fn materialize_pending_invitation_signal(
     reactive: &ReactiveHandler,
     own_authority: AuthorityId,
@@ -302,7 +329,7 @@ pub(crate) async fn materialize_pending_invitation_signal(
         status: InvitationStatus::Pending,
         direction,
         from_id: sender_id,
-        from_name: app_signal_projection::invitation_sender_name(invitation_type),
+        from_name: invitation_sender_display_name(reactive, sender_id, invitation_type).await,
         to_id: (direction == InvitationDirection::Sent && !is_generic_sent_contact_invitation)
             .then_some(receiver_id),
         to_name: if direction == InvitationDirection::Sent {
@@ -423,9 +450,12 @@ impl ReactiveView for InvitationsSignalView {
                             status: InvitationStatus::Pending,
                             direction,
                             from_id: sender_id,
-                            from_name: app_signal_projection::invitation_sender_name(
+                            from_name: invitation_sender_display_name(
+                                &self.reactive,
+                                sender_id,
                                 &invitation_type,
-                            ),
+                            )
+                            .await,
                             to_id: (direction == InvitationDirection::Sent
                                 && !is_generic_sent_contact_invitation)
                                 .then_some(receiver_id),
@@ -2078,6 +2108,53 @@ mod tests {
             .await;
         let state = reactive.read(&*RECOVERY_SIGNAL).await.unwrap();
         assert!(state.pending_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn guardian_invitation_from_a_contact_names_the_sender() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([82u8; 32]);
+        let sender = AuthorityId::new_from_entropy([83u8; 32]);
+        reactive
+            .emit(
+                &*CONTACTS_SIGNAL,
+                ContactsState::from_contacts([Contact {
+                    id: sender,
+                    nickname: String::new(),
+                    nickname_suggestion: Some("AlexWeb".to_string()),
+                    is_guardian: false,
+                    is_member: false,
+                    last_interaction: None,
+                    is_online: false,
+                    read_receipt_policy: ReadReceiptPolicy::default(),
+                    relationship_state: ContactRelationshipState::Contact,
+                    invitation_code: None,
+                }]),
+            )
+            .await
+            .unwrap();
+
+        materialize_pending_invitation_signal(
+            &reactive,
+            own_authority,
+            "guardian-from-contact",
+            sender,
+            own_authority,
+            &DomainInvitationType::Guardian {
+                subject_authority: sender,
+            },
+            None,
+            1,
+            None,
+            None,
+        )
+        .await
+        .expect("materialize guardian invitation");
+
+        let invitations = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+        let invitation = invitations.invitation("guardian-from-contact").unwrap();
+        assert_eq!(invitation.from_name, "AlexWeb");
     }
 
     #[tokio::test]
