@@ -101,6 +101,9 @@ impl TransportEffects for AuraEffectSystem {
                 match send_planned_envelope(self, plan.envelope, &plan.route).await {
                     Ok(()) => {
                         self.transport.record_send(payload_len);
+                        if destination != self.authority_id {
+                            self.transport.record_peer_reachable(destination, now_ms);
+                        }
                         move_manager
                             .record_delivery_result(
                                 plan.replay_marker,
@@ -131,9 +134,13 @@ impl TransportEffects for AuraEffectSystem {
 
         let payload_len = envelope.payload.len();
         let fallback_route = fallback_direct_route(&envelope);
+        let destination = envelope.destination;
         match send_planned_envelope(self, envelope, &fallback_route).await {
             Ok(()) => {
                 self.transport.record_send(payload_len);
+                if destination != self.authority_id {
+                    self.transport.record_peer_reachable(destination, now_ms);
+                }
                 Ok(())
             }
             Err(err) => {

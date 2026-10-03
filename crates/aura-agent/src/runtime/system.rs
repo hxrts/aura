@@ -1297,6 +1297,9 @@ async fn handle_inbound_transport_envelope(
         }
     };
     let (envelope, _) = ingress.into_parts();
+    if let Ok(now) = effects.time_effects().physical_time().await {
+        effects.record_peer_reachable(envelope.source, now.ts_ms);
+    }
     if matches!(
         effects.requeue_envelope(envelope),
         crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow

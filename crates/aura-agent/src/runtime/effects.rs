@@ -1118,6 +1118,18 @@ impl AuraEffectSystem {
             .take_unclaimed_session_envelope(accept)
     }
 
+    /// Record that `peer` was verified reachable at `now_ms`.
+    pub(crate) fn record_peer_reachable(&self, peer: AuthorityId, now_ms: u64) {
+        if peer != self.authority_id {
+            self.transport.record_peer_reachable(peer, now_ms);
+        }
+    }
+
+    /// Distinct peers verified reachable within `window_ms` of `now_ms`.
+    pub(crate) fn reachable_peer_count(&self, now_ms: u64, window_ms: u64) -> usize {
+        self.transport.reachable_peer_count(now_ms, window_ms)
+    }
+
     pub(crate) fn queue_runtime_envelope(
         &self,
         envelope: TransportEnvelope,

@@ -19,12 +19,15 @@ use crate::runtime::shared_transport::SharedTransport;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::AuthorityId;
 use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU32, AtomicU64, Ordering},
     Arc,
 };
 
 pub(crate) const LOCAL_TRANSPORT_INBOX_CAPACITY: usize = 256;
+/// Bound on peers tracked for reachability; the stalest is evicted first.
+const MAX_TRACKED_REACHABLE_PEERS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueEnvelopeOutcome {
@@ -92,6 +95,8 @@ struct TransportSubsystemShared {
     inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     shared_transport: Option<SharedTransport>,
     stats: Arc<TransportStatsCounters>,
+    /// Last time each peer authority was verified reachable (ms).
+    reachable_peers: RwLock<HashMap<AuthorityId, u64>>,
 }
 
 pub struct TransportSubsystem {
@@ -112,6 +117,7 @@ impl TransportSubsystem {
                 inbox: Arc::new(RwLock::new(Vec::new())),
                 shared_transport: None,
                 stats: Arc::new(TransportStatsCounters::default()),
+                reachable_peers: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -128,6 +134,7 @@ impl TransportSubsystem {
                 inbox: shared.inbox_for(authority),
                 shared_transport: Some(shared),
                 stats: Arc::new(TransportStatsCounters::default()),
+                reachable_peers: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -146,6 +153,7 @@ impl TransportSubsystem {
                 inbox,
                 shared_transport,
                 stats: Arc::new(TransportStatsCounters::default()),
+                reachable_peers: RwLock::new(HashMap::new()),
             }),
         }
     }
@@ -233,6 +241,31 @@ impl TransportSubsystem {
     /// Get a snapshot of current stats
     pub fn stats_snapshot(&self) -> TransportStats {
         self.shared.stats.snapshot()
+    }
+
+    /// Record that `peer` was verified reachable at `now_ms` (a successful
+    /// send to it, or an authenticated envelope from it).
+    pub fn record_peer_reachable(&self, peer: AuthorityId, now_ms: u64) {
+        let mut peers = self.shared.reachable_peers.write();
+        if !peers.contains_key(&peer) && peers.len() >= MAX_TRACKED_REACHABLE_PEERS {
+            if let Some(oldest) = peers
+                .iter()
+                .min_by_key(|(_, seen)| **seen)
+                .map(|(id, _)| *id)
+            {
+                peers.remove(&oldest);
+            }
+        }
+        let seen = peers.entry(peer).or_insert(now_ms);
+        *seen = (*seen).max(now_ms);
+    }
+
+    /// Distinct peer authorities verified reachable within `window_ms` of
+    /// `now_ms`; older observations expire.
+    pub fn reachable_peer_count(&self, now_ms: u64, window_ms: u64) -> usize {
+        let mut peers = self.shared.reachable_peers.write();
+        peers.retain(|_, seen| now_ms.saturating_sub(*seen) <= window_ms);
+        peers.len()
     }
 }
 
@@ -347,5 +380,39 @@ mod tests {
         let snapshot = subsystem.stats_snapshot();
         assert_eq!(snapshot.envelopes_sent, 5);
         assert_eq!(snapshot.envelopes_received, 3);
+    }
+}
+
+#[cfg(test)]
+mod reachable_peer_tests {
+    use super::*;
+
+    #[test]
+    fn reachable_peers_count_distinct_authorities_and_expire() {
+        let transport = TransportSubsystem::new();
+        let peer = AuthorityId::new_from_entropy([41u8; 32]);
+        assert_eq!(transport.reachable_peer_count(1_000, 60_000), 0);
+
+        // Two observations (e.g. two devices or sessions) of one authority.
+        transport.record_peer_reachable(peer, 1_000);
+        transport.record_peer_reachable(peer, 2_000);
+        assert_eq!(transport.reachable_peer_count(2_000, 60_000), 1);
+
+        // No verified traffic for longer than the window: unreachable again.
+        assert_eq!(transport.reachable_peer_count(70_000, 60_000), 0);
+    }
+
+    #[test]
+    fn reachable_peer_tracking_is_bounded() {
+        let transport = TransportSubsystem::new();
+        for index in 0..(MAX_TRACKED_REACHABLE_PEERS + 10) {
+            let mut seed = [0u8; 32];
+            seed[..8].copy_from_slice(&(index as u64).to_le_bytes());
+            transport.record_peer_reachable(AuthorityId::new_from_entropy(seed), index as u64);
+        }
+        assert_eq!(
+            transport.reachable_peer_count(u64::MAX / 2, u64::MAX),
+            MAX_TRACKED_REACHABLE_PEERS
+        );
     }
 }
