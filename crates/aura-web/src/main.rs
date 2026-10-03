@@ -924,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn web_onboarding_releases_rerender_ownership_and_stops_candidate_polling() {
+    fn web_onboarding_releases_rerender_ownership_and_bounds_candidate_polling() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let app_path = repo_root.join("crates/aura-web/src/shell/app.rs");
         let source = std::fs::read_to_string(&app_path)
@@ -945,8 +945,9 @@ mod tests {
         );
         assert!(
             body.contains("if onboarding_finished(&controller) {")
-                && body.contains("if !app.has_runtime() {"),
-            "onboarding candidate refresh must stop once the account is ready or when no runtime exists"
+                && body.contains("aura_agent::fetch_bootstrap_broker_candidates(")
+                && body.contains("(bootstrap_broker_url(), bootstrap_broker_auth_token())"),
+            "onboarding candidate refresh must stop once the account is ready, list broker candidates before a runtime exists, and stop when there is neither a runtime nor a broker"
         );
     }
 }

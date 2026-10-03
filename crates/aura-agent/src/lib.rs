@@ -242,6 +242,8 @@ pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceMana
 // Rendezvous service types
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::services::bootstrap_broker::{
+    endpoint_is_loopback as bootstrap_broker_endpoint_is_loopback,
+    fetch_remote_candidates as fetch_bootstrap_broker_candidates, BootstrapBrokerCandidateRecord,
     BootstrapBrokerConfig, BootstrapBrokerLanBindPolicy,
 };
 #[cfg(feature = "choreo-backend-telltale-machine")]
