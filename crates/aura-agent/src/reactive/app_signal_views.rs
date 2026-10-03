@@ -1032,7 +1032,11 @@ impl HomeSignalView {
     }
 
     /// Applies a social fact that creates a home or changes its membership.
-    fn apply_social_fact(homes: &mut HomesState, fact: SocialFact) -> bool {
+    fn apply_social_fact(
+        homes: &mut HomesState,
+        fact: SocialFact,
+        neighborhood_names: &std::collections::HashMap<String, String>,
+    ) -> bool {
         match fact {
             SocialFact::HomeCreated {
                 home_id,
@@ -1085,8 +1089,55 @@ impl HomeSignalView {
                 });
                 true
             }
+            SocialFact::HomeJoinedNeighborhood {
+                home_id,
+                neighborhood_id,
+                ..
+            } => {
+                let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+                let neighborhood = ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string();
+                let name = neighborhood_names
+                    .get(&neighborhood)
+                    .cloned()
+                    .unwrap_or_else(|| "Neighborhood".to_string());
+                let Some(home) = homes.home_mut(&home_id) else {
+                    return false;
+                };
+                match home.join_neighborhood(&neighborhood, &name) {
+                    Ok(joined) => joined,
+                    Err(error) => {
+                        tracing::warn!(%home_id, %error, "neighborhood join fact exceeds the home budget");
+                        false
+                    }
+                }
+            }
             _ => false,
         }
+    }
+
+    /// Names of neighborhoods created in `facts`, keyed by neighborhood id.
+    fn neighborhood_names(facts: &[Fact]) -> std::collections::HashMap<String, String> {
+        facts
+            .iter()
+            .filter_map(|fact| match &fact.content {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID =>
+                {
+                    match SocialFact::from_envelope(envelope)? {
+                        SocialFact::NeighborhoodCreated {
+                            neighborhood_id,
+                            name,
+                            ..
+                        } => Some((
+                            ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string(),
+                            name,
+                        )),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -1107,6 +1158,7 @@ impl ReactiveView for HomeSignalView {
             };
 
             let mut changed = false;
+            let neighborhood_names = Self::neighborhood_names(facts);
 
             for fact in facts {
                 let FactContent::Relational(RelationalFact::Generic {
@@ -1119,7 +1171,7 @@ impl ReactiveView for HomeSignalView {
 
                 if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
                     if let Some(social) = SocialFact::from_envelope(envelope) {
-                        changed |= Self::apply_social_fact(&mut homes, social);
+                        changed |= Self::apply_social_fact(&mut homes, social, &neighborhood_names);
                     }
                     continue;
                 }
@@ -2566,6 +2618,66 @@ mod tests {
             .home_state(&ChannelId::from_bytes([44u8; 32]))
             .unwrap();
         assert!(home.mute_list.contains_key(&target));
+    }
+
+    // work/8.md Task 51: neighborhoods materialize from committed facts (so a
+    // restart replaying them finds them), replays do not double-charge the
+    // home's budget, and a fifth neighborhood is refused.
+    #[tokio::test]
+    async fn home_signal_view_materializes_neighborhoods_within_the_home_budget() {
+        let reactive = ReactiveHandler::new();
+        let context = ContextId::new_from_entropy([6u8; 32]);
+        let actor = AuthorityId::new_from_entropy([1u8; 32]);
+        let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+        let view = HomeSignalView::new(actor, reactive.clone());
+        let home_id = aura_social::HomeId::from_bytes([45u8; 32]);
+        let channel = ChannelId::from_bytes([45u8; 32]);
+        view.update(&[fact_from_relational(
+            SocialFact::home_created_ms(home_id, context, 50, actor, "Den".to_string())
+                .to_generic(),
+        )])
+        .await;
+
+        let neighborhood_facts = |seed: u8| {
+            let neighborhood = aura_social::NeighborhoodId::from_bytes([seed; 32]);
+            vec![
+                fact_from_relational(
+                    SocialFact::neighborhood_created_ms(
+                        neighborhood,
+                        context,
+                        60,
+                        format!("Block {seed}"),
+                    )
+                    .to_generic(),
+                ),
+                fact_from_relational(
+                    SocialFact::home_joined_neighborhood_ms(home_id, neighborhood, context, 60)
+                        .to_generic(),
+                ),
+            ]
+        };
+        let first = neighborhood_facts(70);
+        view.update(&first).await;
+        view.update(&first).await; // replay
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes.home_state(&channel).expect("home");
+        assert_eq!(home.neighborhoods.len(), 1, "a replay does not join twice");
+        assert_eq!(
+            home.neighborhoods.values().next().map(String::as_str),
+            Some("Block 70")
+        );
+
+        for seed in 71..75 {
+            view.update(&neighborhood_facts(seed)).await;
+        }
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let mut home = homes.home_state(&channel).expect("home").clone();
+        assert_eq!(
+            home.neighborhoods.len(),
+            4, // MAX_NEIGHBORHOODS (docs/115)
+            "a fifth neighborhood is refused by the home budget"
+        );
+        assert!(home.join_neighborhood("one-more", "Block 99").is_err());
     }
 
     #[tokio::test]

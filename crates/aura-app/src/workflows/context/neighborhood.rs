@@ -146,7 +146,13 @@ pub async fn move_position(
     publish_neighborhood_projection(app_core, neighborhood).await
 }
 
-/// Create or select the active neighborhood.
+/// Create a neighborhood joined by the active home and return its id.
+///
+/// The neighborhood is durable: `SocialFact::NeighborhoodCreated` and the
+/// home's `HomeJoinedNeighborhood` are committed in the home's context, so it
+/// survives restart and the home's members learn of it. Joining charges the
+/// home's neighborhood budget, so a home past `MAX_NEIGHBORHOODS` gets the
+/// typed budget error before anything is committed.
 pub async fn create_neighborhood(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
@@ -168,21 +174,88 @@ pub async fn create_neighborhood(
     }
     .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
 
-    let neighborhood_id = ChannelId::from_bytes(hash(
+    let neighborhood_channel = ChannelId::from_bytes(hash(
         format!("neighborhood:{authority}:{neighborhood_name}:{timestamp_ms}").as_bytes(),
-    ))
-    .to_string();
+    ));
+    let neighborhood_id = neighborhood_channel.to_string();
 
-    let neighborhood_state = {
+    let (home_id, context_id, homes, neighborhood_state) = {
         let core = app_core.read().await;
+        let mut homes = core.views().get_homes();
+        let home = homes
+            .current_home()
+            .ok_or_else(|| AuraError::invalid("Create a home before creating a neighborhood"))?;
+        let home_id = home.id;
+        let context_id = home
+            .context_id
+            .ok_or_else(|| AuraError::invalid("The active home has no context"))?;
+        homes
+            .home_mut(&home_id)
+            .ok_or_else(|| AuraError::invalid("The active home is not materialized"))?
+            .join_neighborhood(&neighborhood_id, &neighborhood_name)
+            .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+
         let mut neighborhood = core.views().get_neighborhood();
         neighborhood.neighborhood_id = Some(neighborhood_id.clone());
-        neighborhood.neighborhood_name = Some(neighborhood_name);
-        neighborhood
+        neighborhood.neighborhood_name = Some(neighborhood_name.clone());
+        neighborhood.add_member_home(home_id);
+        (home_id, context_id, homes, neighborhood)
     };
 
-    publish_neighborhood_projection(app_core, neighborhood_state).await?;
+    persist_created_neighborhood(
+        app_core,
+        neighborhood_channel,
+        home_id,
+        context_id,
+        &neighborhood_name,
+        timestamp_ms,
+    )
+    .await?;
+    publish_homes_and_neighborhood_projection(app_core, homes, neighborhood_state).await?;
     Ok(neighborhood_id)
+}
+
+/// Commits a created neighborhood and the home's membership in it. Without a
+/// runtime the neighborhood stays local.
+async fn persist_created_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    neighborhood: ChannelId,
+    home_id: ChannelId,
+    context_id: ContextId,
+    name: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    let neighborhood_id = aura_social::NeighborhoodId::from_bytes(*neighborhood.as_bytes());
+    let facts = [
+        aura_social::SocialFact::neighborhood_created_ms(
+            neighborhood_id,
+            context_id,
+            timestamp_ms,
+            name.to_string(),
+        )
+        .to_generic(),
+        aura_social::SocialFact::home_joined_neighborhood_ms(
+            aura_social::HomeId::from_bytes(*home_id.as_bytes()),
+            neighborhood_id,
+            context_id,
+            timestamp_ms,
+        )
+        .to_generic(),
+    ];
+    runtime
+        .commit_relational_facts(&facts)
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "persist neighborhood".to_owned(),
+            source: Some(Arc::new(error)),
+        })
 }
 
 /// Add a home as a member of the active neighborhood and apply allocation budget.

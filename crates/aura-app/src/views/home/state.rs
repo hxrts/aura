@@ -38,12 +38,34 @@ pub struct HomeState {
     pub created_at: u64,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_id: Option<ContextId>,
+    /// Neighborhoods this home has joined (id to name), materialized from
+    /// `SocialFact::NeighborhoodCreated` / `HomeJoinedNeighborhood` facts.
+    #[serde(default)]
+    pub neighborhoods: std::collections::BTreeMap<String, String>,
 }
 
 impl HomeState {
     pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
     pub const MEMBER_ALLOCATION: u64 = 200 * 1024;
     const MAX_KICK_LOG: usize = 200;
+
+    /// Record that this home joined `neighborhood_id`, charging the home's
+    /// neighborhood budget (at most `MAX_NEIGHBORHOODS`, docs/115). Joining a
+    /// neighborhood the home is already in changes nothing and returns
+    /// `Ok(false)`, so replayed facts do not double-charge.
+    pub fn join_neighborhood(
+        &mut self,
+        neighborhood_id: &str,
+        name: &str,
+    ) -> Result<bool, crate::workflows::budget::BudgetError> {
+        if self.neighborhoods.contains_key(neighborhood_id) {
+            return Ok(false);
+        }
+        self.storage.join_neighborhood()?;
+        self.neighborhoods
+            .insert(neighborhood_id.to_string(), name.to_string());
+        Ok(true)
+    }
 
     pub fn new(
         id: ChannelId,
@@ -86,6 +108,7 @@ impl HomeState {
             kick_log: Vec::new(),
             created_at,
             context_id: Some(context_id),
+            neighborhoods: std::collections::BTreeMap::new(),
         }
     }
 
