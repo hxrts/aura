@@ -177,6 +177,21 @@ it refuses active compilers, open incremental files and symlinked parents,
 and preserves release outputs and loaded debug libraries. The build and CI
 guards consider this lane before the complete debug lane.
 
+`just prune-inactive-lane trybuild --dry-run` separately previews the complete
+`target/tests/trybuild` compile-fail cache. Its apply mode requires idle compilers,
+no open files in that cache, and ordinary parent directories. Build and CI guards
+can reclaim it while preserving editor-loaded sibling debug libraries. The next
+compile-fail gate rebuilds this cache; its test sources and expected diagnostics
+remain in the repository.
+
+For an explicit browser release cache reset, `wasm-release` selects
+`target/wasm32-unknown-unknown/wasm-release` and `wasm-host-release` selects
+its host-side build cache at `target/wasm-release`. Preview each with
+`just prune-inactive-lane <lane> --dry-run`. Apply refuses active compilers,
+harness consumers, open files, and symlinked paths. These release lanes are
+manual cleanup choices; automatic guards preserve them. Installed browser
+bundles and run evidence stay outside these compiler cache paths.
+
 To reproduce the debug cache measurement, run
 `bash scripts/dev/compare-debug-incremental.sh --dry-run` first, then `--apply`
 inside Nix during an idle build window. It checks the actual foundation crate

@@ -6,6 +6,7 @@ use parking_lot::RwLock;
 
 use aura_app::ui::signals::{SettingsState, CHAT_SIGNAL, NEIGHBORHOOD_SIGNAL};
 use aura_app::ui::types::ChatState;
+use aura_app::ui_contract::observed_chat_projection;
 use aura_core::AuthorityId;
 
 use super::contracts::subscribe_observed_projection_signal;
@@ -108,6 +109,17 @@ impl ChannelProjectionCoordinator {
         *self.channels.write() = projection.channels;
 
         if let Some(tx) = self.update_tx.as_ref() {
+            spawn_ui_update(
+                &self.tasks,
+                tx,
+                UiUpdate::RuntimeFactObserved(observed_chat_projection(
+                    &chat_state,
+                    selected_channel
+                        .as_ref()
+                        .map(CommittedChannelSelection::channel_id),
+                )),
+                UiUpdatePublication::RequiredUnordered,
+            );
             let channel_signature_changed = {
                 let mut guard = self.last_channel_signature.write();
                 let changed = guard.as_deref() != Some(projection.channel_signature.as_str());
@@ -387,6 +399,34 @@ mod tests {
         let (channels, message_count) = scoped_channel_snapshot(&state, None);
         assert_eq!(channels.len(), 2);
         assert_eq!(message_count, 3);
+    }
+
+    #[test]
+    fn observed_chat_uses_selected_canonical_channel_without_inferred_readiness() {
+        use aura_app::views::chat::NOTE_TO_SELF_CHANNEL_NAME;
+        let home = test_channel_id("home-observation");
+        let notes = test_channel_id("notes-observation");
+        let mut chat = ChatState::from_channels([
+            test_channel(home, "Home"),
+            test_channel(notes, NOTE_TO_SELF_CHANNEL_NAME),
+        ]);
+        chat.apply_message(home, test_message(home, "observed-message", 1));
+        assert_eq!(
+            aura_app::ui_contract::observed_chat_projection(&chat, Some(&home.to_string())),
+            aura_app::ui_contract::RuntimeFact::ChatSignalUpdated {
+                active_channel: "Home".to_string(),
+                channel_count: 2,
+                message_count: 1,
+            }
+        );
+        assert_eq!(
+            aura_app::ui_contract::observed_chat_projection(&chat, Some("absent")),
+            aura_app::ui_contract::RuntimeFact::ChatSignalUpdated {
+                active_channel: NOTE_TO_SELF_CHANNEL_NAME.to_string(),
+                channel_count: 2,
+                message_count: 0,
+            }
+        );
     }
 
     #[test]

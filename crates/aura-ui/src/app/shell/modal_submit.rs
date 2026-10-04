@@ -862,7 +862,8 @@ fn submit_simple_modal_action(
                 match outcome {
                     Ok(_) => controller.info_toast("Device enrollment accepted"),
                     Err(error) => {
-                        controller.runtime_error_toast(format!("Device enrollment failed: {error}"))
+                        controller
+                            .runtime_error_toast(format!("Device enrollment failed: {error}"));
                     }
                 }
                 rerender();

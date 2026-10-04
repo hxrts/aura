@@ -361,7 +361,19 @@ fn reexec_current_tui_process(reason: &str) -> Result<(), AuraError> {
 async fn initialized_runtime_app_core(
     app_config: AppConfig,
     agent: Arc<AuraAgent>,
+    bootstrap_app: Option<Arc<RwLock<AppCore>>>,
 ) -> Result<InitializedAppCore, AuraError> {
+    if let Some(app_core) = bootstrap_app {
+        app_core
+            .write()
+            .await
+            .attach_bootstrap_runtime(agent.as_runtime_bridge())
+            .map_err(|error| AuraError::Internal {
+                message: "attach bootstrap runtime".into(),
+                source: Some(Arc::new(error)),
+            })?;
+        return InitializedAppCore::new(app_core).await;
+    }
     let app_core = AppCore::with_runtime(app_config, agent.as_runtime_bridge())
         .map_err(|error| AuraError::internal(format!("Failed to create AppCore: {error}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
@@ -435,8 +447,16 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
 }
 
 async fn handle_tui_launch(
+    stdio: PreFullscreenStdio,
+    launch: ResolvedTuiLaunch,
+) -> crate::error::TerminalResult<()> {
+    handle_tui_launch_with_bootstrap(stdio, launch, None).await
+}
+
+async fn handle_tui_launch_with_bootstrap(
     mut stdio: PreFullscreenStdio,
     launch: ResolvedTuiLaunch,
+    bootstrap_app: Option<Arc<RwLock<AppCore>>>,
 ) -> crate::error::TerminalResult<()> {
     launch.print_startup(&mut stdio);
 
@@ -445,7 +465,11 @@ async fn handle_tui_launch(
         cleanup_demo_storage(storage.as_ref(), &launch.base_path).await;
     }
 
-    init_tui_tracing(storage.clone(), launch.mode);
+    // The in-process bootstrap generation retains the original global logger
+    // and its owned storage writer, rather than allocating another writer.
+    if bootstrap_app.is_none() {
+        init_tui_tracing(storage.clone(), launch.mode);
+    }
     std::env::set_var(
         "AURA_DEMO_BOB_DEVICE_ID",
         launch.configured_device_id.to_string(),
@@ -573,7 +597,8 @@ async fn handle_tui_launch(
             };
 
             let agent = Arc::new(agent);
-            let app_core = initialized_runtime_app_core(app_config, agent.clone()).await?;
+            let app_core =
+                initialized_runtime_app_core(app_config, agent.clone(), bootstrap_app).await?;
             let mut pending_device_enrollment_code = None;
 
             let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
@@ -824,7 +849,8 @@ async fn handle_tui_launch(
                 };
 
                 let agent = Arc::new(agent);
-                let app_core = initialized_runtime_app_core(app_config, agent.clone()).await?;
+                let app_core =
+                    initialized_runtime_app_core(app_config, agent.clone(), None).await?;
 
                 if let Err(error) =
                     aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw())
@@ -859,6 +885,8 @@ async fn handle_tui_launch(
         }
     };
 
+    let retained_bootstrap_app = app_core.raw().clone();
+    let bootstrap_has_runtime = app_core.runtime().is_some();
     #[cfg(feature = "development")]
     let ctx = match launch.mode {
         TuiMode::Demo { .. } => {
@@ -914,10 +942,16 @@ async fn handle_tui_launch(
         stdio = returned_stdio.into();
     }
     #[cfg(not(feature = "development"))]
-    let _ = returned_stdio;
+    let stdio: PreFullscreenStdio = returned_stdio.into();
     let shell_exit_intent = match result {
         Ok(Ok(intent)) => intent,
-        Ok(Err(error)) => return Err(AuraError::internal(format!("TUI failed: {error}")).into()),
+        Ok(Err(source)) => {
+            return Err(AuraError::Internal {
+                message: "TUI fullscreen generation failed".into(),
+                source: Some(Arc::new(source)),
+            }
+            .into());
+        }
         Err(payload) => {
             return Err(AuraError::internal(format!(
                 "TUI fullscreen generation panicked: {}",
@@ -969,6 +1003,18 @@ async fn handle_tui_launch(
             // Suppress visible output — the re-exec enters fullscreen immediately
             // and any stdout here would flash on the normal terminal buffer.
             tracing::info!("Reloading TUI with newly created bootstrap identity");
+            if !bootstrap_has_runtime {
+                // This runtime-free generation never admits enrollment startup
+                // work. Release its task root before entering another shell.
+                startup_tasks.shutdown();
+                drop(startup_tasks);
+                return Box::pin(handle_tui_launch_with_bootstrap(
+                    stdio,
+                    launch,
+                    Some(retained_bootstrap_app),
+                ))
+                .await;
+            }
             return reexec_current_tui_process("bootstrap reload").map_err(Into::into);
         }
         ShellExitIntent::AuthoritySwitch {

@@ -25,7 +25,10 @@ impl InitializedAppCore {
 
         AppCore::init_signals_with_hooks(&app_core)
             .await
-            .map_err(|e| AuraError::internal(e.to_string()))?;
+            .map_err(|source| AuraError::Internal {
+                message: "initialize required application refresh hooks".into(),
+                source: Some(Arc::new(source)),
+            })?;
 
         Ok(Self { app_core, runtime })
     }

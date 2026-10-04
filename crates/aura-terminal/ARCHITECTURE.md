@@ -185,3 +185,14 @@ Device enrollment import uses the shared three-field contract and transfers subm
 See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
 
 Sync command service ownership requires source-preserving timer, shutdown-signal and runtime supervision outcomes. Every daemon run exit awaits service stop. Failed execution remains primary when stop also fails, with a separately retained typed cleanup cause. A failed timer or backward physical clock cannot publish a tick or successful shutdown. Native terminal diagnostics retain concrete sources; cloned source-bearing errors compare retained source identity rather than matching message text.
+
+Fresh runtime-free account bootstrap resumes in process with the original
+`AppCore` and attaches its first runtime. It never reconstructs terminal account
+success from persisted account metadata. Provisional runtime enrollment and
+explicit authority switching retain the process reload path; this attachment
+API does not prove physical provider transfer.
+
+Fullscreen teardown drops hook futures, closes frontend task admission, and
+requires actual admitted-future drainage within the owned terminal cleanup wait
+before returning or starting another shell generation. A failed drain prevents
+bootstrap reload; a simultaneous fullscreen failure retains both local causes.

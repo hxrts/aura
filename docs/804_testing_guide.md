@@ -1832,3 +1832,58 @@ marker-word and unrelated-helper substitutes for completion while preserving
 ordinary actor publication. Interprocedural ownership remains enforced by the
 annotation ratchet and typed capability gates. The required policy-toolkit lane
 executes these regressions before strict Clippy.
+
+### Fresh terminal bootstrap history continuity
+
+A fresh terminal account starts with a runtime-free `AppCore`. Its bootstrap
+shell transition retains that exact app in process and attaches the first
+runtime, preserving the original account creation terminal operation. The
+shared semantic snapshot must continue to expose that operation after runtime
+readiness; account files or a stale pending bootstrap record cannot manufacture
+another success. The original global tracing writer remains owned across this
+shell transition.
+
+The app regression
+`bootstrap_attachment_retains_original_terminal_history_and_rejects_replacement`
+checks exact operation history and rejects an existing runtime replacement,
+including after detachment. First-runtime attachment is irreversibly spent;
+it runs in the required workspace test lane. Production shared settings parity
+also exercises account creation, runtime readiness and the subsequent semantic
+snapshot across the transition. Provisional enrollment and explicit authority
+switching still use process reload; first-runtime attachment does not establish
+physical provider transfer or runtime retirement.
+
+### Projection observations and authoritative readiness
+
+Browser and terminal shells describe observed canonical chat/contact snapshots
+with the same pure `aura-app::ui_contract` builders. `ChatSignalUpdated` describes
+the current selected (or deterministic default) channel and view counts. The
+default orders equal names by canonical channel ID, and browser message lookup
+keeps that selected ID rather than resolving again by display name. The
+legacy `RemoteFactsPulled` name describes contact/discovery projection counts;
+it does not attest to transport activity or successful anti-entropy. These
+observations replace earlier counts rather than retaining stale count keys.
+Shared parity still compares them. Business-flow waits must use the app-owned
+membership, recipient, delivery, and operation facts; frontend projection loaders
+cannot synthesize readiness from a channel row or a member list.
+
+Frontend task shutdown must acknowledge destruction of admitted futures before
+another in-process shell generation starts. The terminal closes task admission
+and observes completion with its bounded cleanup helper after dropping fullscreen
+hook futures. Cancellation flags alone cannot satisfy this boundary; drain
+failure prevents reload. Required workspace tests cover escaped owned-spawner
+work, rejected post-shutdown admission and never-polled future destruction before
+completion acknowledgment. Bootstrap continuity coverage also reads the newly
+attached runtime's semantic signal, rather than checking only the app store.
+
+The native shell starts one effect-backed shutdown window when a bootstrap
+handoff notification arrives, or after ordinary fullscreen termination. The
+same original deadline bounds fullscreen exit, clearing harness submission
+ownership, and acknowledged child destruction. Failed clock allocation or an
+expired window cannot start a replacement deadline. Teardown preserves native
+notification, clock, sender-clearing, fullscreen, and child-drain failures.
+The controlled-clock `bootstrap_exit_and_task_drain_share_original_shutdown_endpoint`
+regression verifies that four seconds spent exiting leaves one second to drain;
+workspace unit CI runs this test alongside the actual shared parity scenarios.
+The sender-clearing failure regression verifies that a later drain timeout
+retains both native causes even when the bounded future is dropped.

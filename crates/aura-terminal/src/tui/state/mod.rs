@@ -301,6 +301,12 @@ impl TuiState {
     }
 
     pub fn upsert_runtime_fact(&mut self, fact: RuntimeFact) {
+        if matches!(
+            fact,
+            RuntimeFact::ChatSignalUpdated { .. } | RuntimeFact::RemoteFactsPulled { .. }
+        ) {
+            self.clear_runtime_fact_kind(fact.kind());
+        }
         let key = fact.key();
         self.runtime_facts.retain(|existing| existing.key() != key);
         self.runtime_facts.push(fact);
@@ -979,5 +985,29 @@ mod tests {
             assert_authoritative_terminal_regression_allocates_new_instance(operation_id.clone());
             assert_older_authoritative_instance_cannot_replace_newer_submission(operation_id);
         }
+    }
+
+    #[test]
+    fn projection_observations_replace_old_counts_without_erasing_authoritative_facts() {
+        let mut state = TuiState::new();
+        let membership = RuntimeFact::ChannelMembershipReady {
+            channel: aura_app::ui_contract::ChannelFactKey::named("NoteToSelf"),
+            member_count: Some(1),
+        };
+        state.upsert_runtime_fact(membership.clone());
+        state.upsert_runtime_fact(aura_app::ui_contract::observed_contacts_projection(1, 3));
+        state.upsert_runtime_fact(aura_app::ui_contract::observed_contacts_projection(0, 0));
+        assert!(state.runtime_facts.contains(&membership));
+        assert_eq!(
+            state
+                .runtime_facts
+                .iter()
+                .filter(|fact| fact.kind() == RuntimeEventKind::RemoteFactsPulled)
+                .count(),
+            1
+        );
+        assert!(state
+            .runtime_facts
+            .contains(&aura_app::ui_contract::observed_contacts_projection(0, 0)));
     }
 }

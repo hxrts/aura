@@ -42,9 +42,53 @@ printf '%s\n' "$project/target/wasm32-unknown-unknown/debug/data" > "$OPEN_FILE"
 expect_status 1 prune --lane wasm-debug --apply
 rm "$OPEN_FILE"
 
+mkdir -p "$project/target/tests/trybuild"
+: > "$project/target/tests/trybuild/cache"
+expect_status 0 prune --lane trybuild --dry-run
+[[ -f "$project/target/tests/trybuild/cache" ]]
+printf 'cargo\n' > "$ACTIVE_FILE"
+expect_status 1 prune --lane trybuild --apply
+rm "$ACTIVE_FILE"
+printf '%s\n' "$project/target/tests/trybuild/cache" > "$OPEN_FILE"
+expect_status 1 prune --lane trybuild --apply
+rm "$OPEN_FILE"
+printf '%s\n' "$project/target/debug/data" > "$OPEN_FILE"
+expect_status 0 prune --lane trybuild --apply
+[[ ! -e "$project/target/tests/trybuild" && -f "$project/target/debug/data" ]]
+rm "$OPEN_FILE"
+rm -rf "$project/target/tests"
+ln -s "$test_root" "$project/target/tests"
+expect_status 1 prune --lane trybuild --dry-run
+expect_status 1 prune --lane trybuild --apply
+[[ -d "$test_root" && -f "$project/target/release/keep" ]]
+rm "$project/target/tests"
+
 expect_status 0 prune --lane wasm-debug --apply
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 [[ -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
+
+for lane in wasm-release wasm-host-release; do
+  if [[ "$lane" == wasm-release ]]; then
+    cache="$project/target/wasm32-unknown-unknown/wasm-release"
+  else
+    cache="$project/target/wasm-release"
+  fi
+  mkdir -p "$cache"
+  : > "$cache/data"
+  expect_status 0 prune --lane "$lane" --dry-run
+  [[ -f "$cache/data" ]]
+  for consumer in cargo tool_repl aura-harness; do
+    printf '%s\n' "$consumer" > "$ACTIVE_FILE"
+    expect_status 1 prune --lane "$lane" --apply
+  done
+  rm "$ACTIVE_FILE"
+  printf '%s\n' "$cache/data" > "$OPEN_FILE"
+  expect_status 1 prune --lane "$lane" --apply
+  printf '%s\n' "$project/target/debug/data" > "$OPEN_FILE"
+  expect_status 0 prune --lane "$lane" --apply
+  [[ ! -e "$cache" && -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
+  rm "$OPEN_FILE"
+done
 
 mkdir -p "$project/target/debug/incremental"
 : > "$project/target/debug/incremental/cache"

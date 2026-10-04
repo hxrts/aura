@@ -81,6 +81,10 @@ impl UiTaskManager {
     pub fn shutdown(&self) {
         self.inner.shutdown();
     }
+
+    pub async fn wait_drained(&self) {
+        self.inner.wait_drained().await;
+    }
 }
 
 impl Default for UiTaskManager {

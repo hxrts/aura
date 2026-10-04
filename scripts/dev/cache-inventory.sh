@@ -24,6 +24,7 @@ printf 'Allocated KiB\tAge days\tUse\tLane\n'
 now="$(date +%s)"
 paths=("$target"/*)
 [[ -L "$target/debug" ]] || paths+=("$target/debug/incremental")
+[[ -L "$target/tests" ]] || paths+=("$target/tests/trybuild")
 for path in "${paths[@]}"; do
   [[ -d "$path" && ! -L "$path" ]] || continue
   modified="$(stat -f %m "$path" 2>/dev/null || true)"

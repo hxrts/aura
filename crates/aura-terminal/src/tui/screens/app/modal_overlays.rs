@@ -628,7 +628,7 @@ pub fn render_device_import_modal(settings: &SettingsViewProps) -> Option<AnyEle
                 element! {
                     View(flex_direction:FlexDirection::Column,margin_top:Spacing::SM) {
                         Text(content:format!("{}{}",if modal.focused_input==index {"> "}else{"  "},label),color:Theme::TEXT_MUTED)
-                        Text(content:value.to_string(),color:Theme::PRIMARY)
+                        Text(content:(*value).clone(),color:Theme::PRIMARY)
                     }
                 }.into_any()
             }).collect::<Vec<_>>())

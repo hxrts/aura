@@ -110,6 +110,7 @@ mod tests {
     use crate::core::AppConfig;
     use crate::runtime_bridge::OfflineRuntimeBridge;
     use crate::signal_defs::{CONTACTS_SIGNAL, SYNC_STATUS_SIGNAL};
+    use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::AuthorityId;
     use futures::FutureExt;
 
@@ -118,6 +119,63 @@ mod tests {
             crate::testing::running_offline_runtime(AuthorityId::new_from_entropy([seed; 32]));
         runtime.set_pending_invitations(Vec::new());
         runtime
+    }
+
+    #[tokio::test]
+    async fn bootstrap_attachment_retains_original_terminal_history_and_rejects_replacement() {
+        use crate::ui_contract::{
+            AuthoritativeSemanticFact, OperationId, SemanticOperationKind, SemanticOperationPhase,
+            SemanticOperationStatus,
+        };
+        let mut app = AppCore::new(AppConfig::default()).unwrap();
+        let original = vec![AuthoritativeSemanticFact::OperationStatus {
+            operation_id: OperationId::account_create(),
+            instance_id: None,
+            causality: None,
+            status: SemanticOperationStatus::new(
+                SemanticOperationKind::CreateAccount,
+                SemanticOperationPhase::Succeeded,
+            ),
+        }];
+        app.set_authoritative_semantic_facts(original.clone());
+        let runtime = test_runtime(83);
+        app.attach_bootstrap_runtime(runtime.clone()).unwrap();
+        assert_eq!(app.authoritative_semantic_facts(), original);
+        assert!(app.attach_bootstrap_runtime(test_runtime(84)).is_err());
+        assert!(Arc::ptr_eq(
+            app.runtime().unwrap(),
+            &(runtime as Arc<dyn crate::runtime_bridge::RuntimeBridge>)
+        ));
+        assert_eq!(app.authoritative_semantic_facts(), original);
+        let app = Arc::new(RwLock::new(app));
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let observed = app
+            .read()
+            .await
+            .read(&*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            .await
+            .unwrap();
+        assert!(observed.facts.iter().any(|fact| fact == &original[0]));
+        assert!(AppCore::detach_runtime(&app).await);
+        assert!(app
+            .write()
+            .await
+            .attach_bootstrap_runtime(test_runtime(85))
+            .is_err());
+        assert!(app
+            .read()
+            .await
+            .authoritative_semantic_facts()
+            .contains(&original[0]));
+        let initialized = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), test_runtime(86)).unwrap(),
+        ));
+        assert!(AppCore::detach_runtime(&initialized).await);
+        assert!(initialized
+            .write()
+            .await
+            .attach_bootstrap_runtime(test_runtime(87))
+            .is_err());
     }
 
     #[tokio::test]
@@ -179,6 +237,7 @@ mod tests {
             let mut core = app.write().await;
             assert!(matches!(core.hook_install_state, HookInstallState::Stopped));
             core.runtime = Some(runtime);
+            core.runtime_attachment_spent = true;
         }
         AppCore::init_signals_with_hooks(&app).await.unwrap();
         let core = app.read().await;

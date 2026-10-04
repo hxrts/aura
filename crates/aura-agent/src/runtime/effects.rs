@@ -545,7 +545,7 @@ impl AuraEffectSystem {
                 })?;
         Ok(RuntimeBoundedOperationCapability {
             effects: self,
-            lease: lease,
+            lease,
             window,
         })
     }

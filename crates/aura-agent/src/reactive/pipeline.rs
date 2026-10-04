@@ -230,7 +230,6 @@ impl ReactivePipeline {
     }
 
     /// Subscribe to scheduler view updates.
-
     pub fn subscribe(&self) -> broadcast::Receiver<ViewUpdate> {
         self.updates.resubscribe()
     }

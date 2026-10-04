@@ -167,3 +167,16 @@ just ci-observed-layer-boundaries
 Device enrollment import uses the shared three-field contract and transfers submission ownership to the app before awaiting pin/import/acceptance. The shell does not derive an initiator verifier from the received payload or adopt its authority/device identifiers before acceptance. Issuer output preserves actual signed manifest and independent verifier transfer material. Browser account persistence requires an app-issued completed result; legacy pending-code-only replay fails closed.
 
 See [cryptography](../../docs/100_crypto.md), [operation ownership](../../docs/109_operation_categories.md), [shared user flows](../../docs/121_user_flow_harness.md), and [testing](../../docs/804_testing_guide.md).
+
+### Observed runtime projection events
+
+Chat and contact loaders use the shared pure `ui_contract` projection observation
+builders. They publish `ChatSignalUpdated` and the legacy `RemoteFactsPulled`
+projection counts only; the latter is not evidence of a successful network pull.
+Membership, recipient resolution, and message delivery readiness come only from
+the app-owned authoritative semantic fact subscription. A visible channel or its
+member list cannot mint those readiness facts. Current projection observations
+replace the previous observation of the same kind, including when counts fall.
+Equal channel names use canonical IDs to order the default selection, and
+message lookup retains the selected ID. Duplicate-name regression coverage
+checks both the browser view and shared observation builder.

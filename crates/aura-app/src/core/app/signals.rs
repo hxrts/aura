@@ -80,6 +80,30 @@ impl AppCore {
                 )
             })?;
 
+        // Registration can target a newly attached runtime graph. Mirror the
+        // original app-owned history into that observed graph before hooks run;
+        // this restores an existing snapshot and issues no terminal fact.
+        if !self.authoritative_semantic_facts.is_empty() {
+            self.reactive
+                .emit(
+                    &*crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+                    crate::ui_contract::AuthoritativeSemanticFactsSnapshot {
+                        revision: crate::ui_contract::next_projection_revision(None),
+                        facts: self.authoritative_semantic_facts.clone(),
+                    },
+                )
+                .await
+                .map_err(|source| {
+                    RuntimeBridgeError::with_source(
+                        IntentError::reactive_failure(
+                            "bootstrap semantic history snapshot",
+                            source.clone(),
+                        ),
+                        source,
+                    )
+                })?;
+        }
+
         // The runtime may already have replayed its journal before these
         // signals existed; replay into the now-registered signals.
         if let Some(runtime) = self.runtime.as_ref() {

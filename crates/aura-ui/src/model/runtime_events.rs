@@ -5,6 +5,13 @@ use aura_core::types::identifiers::CeremonyId;
 
 impl UiModel {
     pub(super) fn push_runtime_fact(&mut self, fact: RuntimeFact) {
+        if matches!(
+            fact,
+            RuntimeFact::ChatSignalUpdated { .. } | RuntimeFact::RemoteFactsPulled { .. }
+        ) {
+            self.runtime_events
+                .retain(|event| event.fact.kind() != fact.kind());
+        }
         let fact_key = fact.key();
         let existing_id = self
             .runtime_events
@@ -28,6 +35,23 @@ impl UiModel {
 pub(super) struct RuntimeDeviceEnrollmentCeremony {
     status_handle: CeremonyStatusHandle,
     cancel_handle: Option<CeremonyHandle>,
+}
+
+#[cfg(test)]
+mod projection_observation_tests {
+    use super::*;
+
+    #[test]
+    fn latest_projection_counts_replace_previous_observation() {
+        let mut model = UiModel::new("observed-test".to_string());
+        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(3, 2));
+        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(0, 0));
+        assert_eq!(model.runtime_events.len(), 1);
+        assert_eq!(
+            model.runtime_events[0].fact,
+            aura_app::ui_contract::observed_contacts_projection(0, 0)
+        );
+    }
 }
 
 impl UiController {

@@ -3,7 +3,7 @@ use aura_app::signal_defs::DiscoveredPeersState;
 use aura_app::ui::contract::ConfirmationState;
 use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
 use aura_app::ui::types::{ContactRelationshipState, ContactsState};
-use aura_app::ui_contract::RuntimeFact;
+use aura_app::ui_contract::observed_contacts_projection;
 use aura_app::views::EffectiveName;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::AuthorityId;
@@ -103,19 +103,31 @@ pub(in crate::app) async fn load_contacts_runtime_view(
 ) -> ContactsRuntimeView {
     let contacts = {
         let core = controller.app_core().read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+        super::observed_snapshot_or_report(
+            core.read(&*CONTACTS_SIGNAL).await,
+            &controller,
+            CONTACTS_SIGNAL.id(),
+        )
+    };
+    let Some(contacts) = contacts else {
+        return ContactsRuntimeView::default();
     };
     let discovered_peers = {
         let core = controller.app_core().read().await;
-        core.read(&*DISCOVERED_PEERS_SIGNAL)
-            .await
-            .unwrap_or_default()
+        super::observed_snapshot_or_report(
+            core.read(&*DISCOVERED_PEERS_SIGNAL).await,
+            &controller,
+            DISCOVERED_PEERS_SIGNAL.id(),
+        )
+    };
+    let Some(discovered_peers) = discovered_peers else {
+        return ContactsRuntimeView::default();
     };
     let runtime = build_contacts_runtime_view(contacts, discovered_peers);
-    let runtime_facts = vec![RuntimeFact::RemoteFactsPulled {
-        contact_count: u32::try_from(runtime.contacts.len()).unwrap_or(u32::MAX),
-        lan_peer_count: u32::try_from(runtime.lan_peers.len()).unwrap_or(u32::MAX),
-    }];
+    let runtime_facts = vec![observed_contacts_projection(
+        runtime.contacts.len(),
+        runtime.lan_peers.len(),
+    )];
     controller.publish_runtime_contacts_projection(
         runtime
             .contacts

@@ -138,7 +138,7 @@ sweep() {
 }
 prune_safe_lanes() {
   local mode="$1" candidate
-  local candidates=(wasm-debug dylint debug-incremental debug)
+  local candidates=(wasm-debug dylint debug-incremental trybuild debug)
   if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
   for candidate in "${candidates[@]}"; do
     if [[ "$mode" == dry ]]; then

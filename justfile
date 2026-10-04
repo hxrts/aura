@@ -93,7 +93,7 @@ disk-report:
 cache-inventory:
     bash scripts/dev/cache-inventory.sh
 
-# Preview or remove one fully inactive debug lane; apply requires an explicit flag
+# Preview or remove one fully inactive compiler cache lane; apply requires an explicit flag
 prune-inactive-lane lane="wasm-debug" mode="--dry-run":
     bash scripts/dev/prune-inactive-lane.sh --lane {{ lane }} {{ mode }}
 

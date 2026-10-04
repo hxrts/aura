@@ -1159,7 +1159,7 @@ pub fn aura_flow_policy_predicate() -> FlowPredicate {
 fn apply_hardening_profile(config: &mut VMConfig, profile: AuraVmHardeningProfile) {
     config.monitor_mode = MonitorMode::SessionTypePrecheck;
     // Telltale's typed default enforces host contracts; its mode type is private.
-    config.host_contract_assertions = Default::default();
+    config.host_contract_assertions = VMConfig::default().host_contract_assertions;
     config.output_condition_policy =
         OutputConditionPolicy::PredicateAllowList(aura_output_predicate_allow_list());
     config.flow_policy = FlowPolicy::PredicateExpr(aura_flow_policy_predicate());

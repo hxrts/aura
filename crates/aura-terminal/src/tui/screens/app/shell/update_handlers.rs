@@ -1036,6 +1036,12 @@ pub(super) async fn process_ui_update_match(
         // Contacts
         // =========================================================================
         UiUpdate::ContactCountChanged(count) => {
+            tui.with_mut(|state| {
+                state.upsert_runtime_fact(aura_app::ui_contract::observed_contacts_projection(
+                    count,
+                    state.contacts.lan_peer_count,
+                ));
+            });
             let needs_update = {
                 let state = tui.read_clone();
                 state.contacts.contact_count != count
@@ -1158,6 +1164,12 @@ pub(super) async fn process_ui_update_match(
             );
         }
         UiUpdate::LanPeersCountChanged(count) => {
+            tui.with_mut(|state| {
+                state.upsert_runtime_fact(aura_app::ui_contract::observed_contacts_projection(
+                    state.contacts.contact_count,
+                    count,
+                ));
+            });
             let needs_update = {
                 let state = tui.read_clone();
                 state.contacts.lan_peer_count != count

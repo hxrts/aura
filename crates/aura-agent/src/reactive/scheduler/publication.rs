@@ -103,7 +103,6 @@ impl IssuedFactPublication {
 ///     serde_json::from_slice(bytes).unwrap()
 /// }
 /// ```
-
 #[must_use = "choose bounded processing observation or explicit observed-only completion"]
 pub struct FactProcessingTargetCapability {
     owner: Arc<IngressOwner>,

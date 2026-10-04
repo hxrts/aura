@@ -57,7 +57,7 @@ pub(super) fn handle_account_setup_key_queue(
                         AccountSetupField::DeviceImportCode => s.device_import_code.push(c),
                         AccountSetupField::DeviceImportManifest => s.device_import_manifest.push(c),
                         AccountSetupField::DeviceImportInitiatorVerifier => {
-                            s.device_import_initiator_verifier.push(c)
+                            s.device_import_initiator_verifier.push(c);
                         }
                     }
                 }

@@ -24,8 +24,11 @@ mod harness_metadata;
 mod ids;
 mod operations;
 mod parity;
+mod projection_observations;
 mod shared_flow_support;
 mod snapshots;
+
+pub use projection_observations::{observed_chat_projection, observed_contacts_projection};
 
 pub use harness_metadata::{
     BrowserCacheBoundary, BrowserCacheBoundaryMetadata, BrowserHarnessBridgeMethod,

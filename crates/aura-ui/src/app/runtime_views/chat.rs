@@ -1,7 +1,7 @@
 use crate::model::UiController;
 use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_app::ui::types::ChatState;
-use aura_app::ui_contract::{ChannelFactKey, RuntimeFact};
+use aura_app::ui_contract::observed_chat_projection;
 use aura_app::views::chat::is_note_to_self_channel_name;
 use aura_core::effects::reactive::ReactiveEffects;
 use std::sync::Arc;
@@ -56,23 +56,27 @@ fn build_chat_runtime_view(chat: ChatState, selected_channel_id: Option<&str>) -
         ) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => left.name.cmp(&right.name),
+            _ => left
+                .name
+                .cmp(&right.name)
+                .then_with(|| left.id.cmp(&right.id)),
         }
     });
 
-    let active_channel = selected_channel_id
+    let active = selected_channel_id
         .and_then(|channel_id| {
             channels
                 .iter()
                 .find(|channel| channel.id.eq_ignore_ascii_case(channel_id))
-                .map(|channel| channel.name.clone())
         })
-        .or_else(|| channels.first().map(|channel| channel.name.clone()))
+        .or_else(|| channels.first());
+    let active_channel = active
+        .map(|channel| channel.name.clone())
         .unwrap_or_default();
 
     let messages = chat
         .all_channels()
-        .find(|channel| channel.name.eq_ignore_ascii_case(&active_channel))
+        .find(|channel| active.is_some_and(|selected| channel.id.to_string() == selected.id))
         .map(|channel| {
             chat.messages_for_channel(&channel.id)
                 .iter()
@@ -100,15 +104,16 @@ fn build_chat_runtime_view(chat: ChatState, selected_channel_id: Option<&str>) -
 pub(in crate::app) async fn load_chat_runtime_view(
     controller: Arc<UiController>,
 ) -> ChatRuntimeView {
-    fn saturating_u32(value: usize) -> u32 {
-        u32::try_from(value).unwrap_or(u32::MAX)
-    }
-
-    let (chat, authority_id) = {
+    let chat = {
         let core = controller.app_core().read().await;
-        let merged = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-        let authority_id = core.authority().cloned();
-        (merged, authority_id)
+        super::observed_snapshot_or_report(
+            core.read(&*CHAT_SIGNAL).await,
+            &controller,
+            CHAT_SIGNAL.id(),
+        )
+    };
+    let Some(chat) = chat else {
+        return ChatRuntimeView::default();
     };
     let selected_channel_id = controller
         .ui_model()
@@ -120,40 +125,10 @@ pub(in crate::app) async fn load_chat_runtime_view(
         runtime.active_channel,
         runtime.channels.len()
     ));
-    let mut runtime_facts = vec![RuntimeFact::ChatSignalUpdated {
-        active_channel: runtime.active_channel.clone(),
-        channel_count: saturating_u32(runtime.channels.len()),
-        message_count: saturating_u32(runtime.messages.len()),
-    }];
-    if let (Some(channel), Some(authority_id)) = (
-        chat.all_channels()
-            .find(|channel| channel.name.eq_ignore_ascii_case(&runtime.active_channel)),
-        authority_id,
-    ) {
-        let resolved_recipient_count = channel
-            .member_ids
-            .iter()
-            .filter(|member_id| **member_id != authority_id)
-            .count();
-        let resolved_member_count = channel
-            .member_count
-            .max((resolved_recipient_count.saturating_add(1)) as u32);
-        runtime_facts.push(RuntimeFact::ChannelMembershipReady {
-            channel: ChannelFactKey::named(channel.name.clone()),
-            member_count: Some(resolved_member_count),
-        });
-        if resolved_recipient_count > 0 {
-            let channel_key = ChannelFactKey::named(channel.name.clone());
-            runtime_facts.push(RuntimeFact::RecipientPeersResolved {
-                channel: channel_key.clone(),
-                member_count: resolved_member_count,
-            });
-            runtime_facts.push(RuntimeFact::MessageDeliveryReady {
-                channel: channel_key,
-                member_count: resolved_member_count,
-            });
-        }
-    }
+    let runtime_facts = vec![observed_chat_projection(
+        &chat,
+        selected_channel_id.as_deref(),
+    )];
     controller.publish_runtime_channels_projection(
         runtime
             .channels
@@ -169,4 +144,57 @@ pub(in crate::app) async fn load_chat_runtime_view(
         runtime_facts,
     );
     runtime
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use aura_app::ui_contract::RuntimeFact;
+    use aura_app::views::chat::{Channel, Message, MessageDeliveryStatus};
+    use aura_core::{AuthorityId, ChannelId};
+
+    #[test]
+    fn duplicate_names_preserve_selected_identity_and_deterministic_default() {
+        let first = ChannelId::from_bytes([1; 32]);
+        let second = ChannelId::from_bytes([2; 32]);
+        let mut chat = ChatState::from_channels([second, first].map(|id| Channel {
+            id,
+            name: "Duplicate".into(),
+            ..Channel::default()
+        }));
+        chat.apply_message(
+            second,
+            Message {
+                id: "second-only".into(),
+                channel_id: second,
+                sender_id: AuthorityId::new_from_entropy([3; 32]),
+                sender_name: "Sender".into(),
+                content: "Selected channel message".into(),
+                timestamp: 0,
+                reply_to: None,
+                is_own: false,
+                is_read: false,
+                delivery_status: MessageDeliveryStatus::Sent,
+                epoch_hint: None,
+                is_finalized: false,
+            },
+        );
+        let default = build_chat_runtime_view(chat.clone(), None);
+        assert_eq!(default.channels[0].id, first.to_string());
+        assert!(default.messages.is_empty());
+        let selected = second.to_string();
+        let view = build_chat_runtime_view(chat.clone(), Some(&selected));
+        assert_eq!(view.messages.len(), 1);
+        assert_eq!(view.messages[0].channel_id, selected);
+        for (selection, expected) in [(None, 0), (Some(selected.as_str()), 1)] {
+            assert_eq!(
+                observed_chat_projection(&chat, selection),
+                RuntimeFact::ChatSignalUpdated {
+                    active_channel: "Duplicate".into(),
+                    channel_count: 2,
+                    message_count: expected,
+                }
+            );
+        }
+    }
 }

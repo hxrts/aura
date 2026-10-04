@@ -26,6 +26,7 @@ pub struct AppCore {
     pub(super) active_home_selection: Option<ChannelId>,
     pub(super) authoritative_semantic_facts: Vec<AuthoritativeSemanticFact>,
     pub(super) runtime: Option<Arc<dyn RuntimeBridge>>,
+    pub(super) runtime_attachment_spent: bool,
     pub(super) reactive: ReactiveHandler,
     /// Last reactive revision copied into each observed view cell.
     pub(super) projection_revisions: HashMap<SignalId, u64>,
@@ -39,6 +40,28 @@ pub struct AppCore {
 }
 
 impl AppCore {
+    /// Attach the first runtime to an existing bootstrap app, retaining its
+    /// original semantic operation history. Existing runtime custody cannot be
+    /// replaced through this API.
+    pub fn attach_bootstrap_runtime(
+        &mut self,
+        runtime: Arc<dyn RuntimeBridge>,
+    ) -> Result<(), IntentError> {
+        if self.runtime_attachment_spent || self.runtime.is_some() {
+            return Err(IntentError::service_error(
+                "bootstrap app already owns a runtime",
+            ));
+        }
+        let authority = runtime.authority_id();
+        self.authority = Some(authority);
+        self.account_id = AccountId::from_bytes(hash::hash(&authority.to_bytes()));
+        self.reactive = runtime.reactive_handler();
+        self.projection_revisions.clear();
+        self.runtime = Some(runtime);
+        self.runtime_attachment_spent = true;
+        Ok(())
+    }
+
     /// Create a new AppCore instance with the given configuration.
     pub fn new(config: AppConfig) -> Result<Self, IntentError> {
         let config_seed = format!(
@@ -57,6 +80,7 @@ impl AppCore {
             active_home_selection: None,
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
+            runtime_attachment_spent: false,
             reactive,
             projection_revisions: HashMap::new(),
             #[cfg(feature = "callbacks")]
@@ -78,6 +102,7 @@ impl AppCore {
         app.account_id = AccountId::from_bytes(hash::hash(&authority_id.to_bytes()));
         app.reactive = runtime.reactive_handler();
         app.runtime = Some(runtime);
+        app.runtime_attachment_spent = true;
         Ok(app)
     }
 
@@ -96,6 +121,7 @@ impl AppCore {
             active_home_selection: None,
             authoritative_semantic_facts: Vec::new(),
             runtime: None,
+            runtime_attachment_spent: false,
             reactive,
             projection_revisions: HashMap::new(),
             #[cfg(feature = "callbacks")]

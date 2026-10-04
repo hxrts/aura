@@ -76,10 +76,9 @@ use crate::tui::props::{
     extract_notifications_view_props, extract_settings_view_props,
 };
 use crate::tui::state::{transition, DispatchCommand, QueuedModal, TuiCommand, TuiState};
-use crate::tui::timeout_support::{execute_with_terminal_timeout, TerminalTimeoutError};
+use crate::tui::timeout_support::{run_terminal_shutdown_cleanup, TerminalShutdownWindow};
 use crate::tui::updates::{harness_command_channel, ui_update_channel, UiUpdate, UiUpdateSender};
 use std::sync::Mutex;
-use std::time::Duration;
 
 mod dispatch;
 mod dispatch_command_handlers;
@@ -166,48 +165,67 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<ShellExitIn
         demo_mobile_authority_id: ctx_arc.demo_mobile_authority_id(),
     });
     let mut app = build_runtime_app(app_context, callback_context, io_app_props);
+    let mut shutdown_window = None;
     let result = if show_account_setup {
         let app_future = app.fullscreen();
         tokio::pin!(app_future);
         tokio::select! {
             result = &mut app_future => result,
             result = async {
-                bootstrap_handoff_rx.await.map_err(|error| {
-                    std::io::Error::other(format!(
-                        "bootstrap runtime handoff notification dropped before shell exit: {error}"
-                    ))
-                })
-            } => {
+                bootstrap_handoff_rx.await.map_err(std::io::Error::other)
+            } => async {
+                shutdown_window = Some(TerminalShutdownWindow::begin().await);
                 result?;
                 if !ctx_arc.bootstrap_runtime_handoff_committed() {
                     return Err(std::io::Error::other(
                         "bootstrap runtime handoff notified without committed marker",
                     ));
                 }
-                match execute_with_terminal_timeout(
-                    "bootstrap_runtime_handoff_exit",
-                    Duration::from_secs(5),
-                    || async { app_future.as_mut().await },
-                )
-                .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(TerminalTimeoutError::Timeout) => Err(std::io::Error::other(
-                        "bootstrap runtime handoff committed but fullscreen generation did not exit within 5s",
-                    )),
-                    Err(TerminalTimeoutError::Setup { context, detail }) => {
-                        Err(std::io::Error::other(format!(
-                            "{context}: failed to configure bounded bootstrap exit wait: {detail}"
-                        )))
-                    }
-                    Err(TerminalTimeoutError::Operation(error)) => Err(error),
+                match shutdown_window.as_ref() {
+                    Some(Ok(window)) => window.run(|| async { app_future.as_mut().await }).await,
+                    Some(Err(source)) => Err(std::io::Error::other(source.clone())),
+                    None => Err(std::io::Error::other("original shutdown window missing")),
                 }
-            }
+            }.await
         }
     } else {
         app.fullscreen().await
     };
-    let _ = clear_harness_command_sender().await;
+    // Drop iocraft hook futures before closing independently admitted callbacks.
+    drop(app);
+    let tasks = ctx_arc.tasks();
+    tasks.shutdown();
+    // Ordinary quit starts its window here. Bootstrap retains the window born
+    // at its handoff notification, including failed allocation; no renewal.
+    let shutdown_window = match shutdown_window {
+        Some(original) => original,
+        None => TerminalShutdownWindow::begin().await,
+    };
+    let drainage = match shutdown_window {
+        Ok(window) => {
+            run_terminal_shutdown_cleanup(&window, clear_harness_command_sender, || {
+                tasks.wait_drained()
+            })
+            .await
+        }
+        Err(source) => Err(std::io::Error::other(source)),
+    };
+    if let Err(cleanup) = drainage {
+        if let Err(primary) = result {
+            #[derive(Debug, thiserror::Error)]
+            #[error("terminal shell failed: {primary}; required task drainage failed: {cleanup}")]
+            struct ShellAndDrainFailure {
+                #[source]
+                primary: std::io::Error,
+                cleanup: std::io::Error,
+            }
+            return Err(std::io::Error::other(ShellAndDrainFailure {
+                primary,
+                cleanup,
+            }));
+        }
+        return Err(cleanup);
+    }
     result?;
     ctx_arc.take_shell_exit_intent().ok_or_else(|| {
         std::io::Error::other(

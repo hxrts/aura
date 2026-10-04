@@ -438,3 +438,20 @@ Compile-fail test harnesses share aura-testkit's workspace process lock with age
 A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
 
 Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.
+
+### Bootstrap runtime attachment
+
+A runtime-free bootstrap `AppCore` may attach its first runtime while retaining
+its original authoritative semantic operation history. Attachment rejects an
+existing runtime, including after detachment through an irreversible spent
+witness; it does not authorize provider replacement or retirement.
+The app unit regression checks history continuity and rejects replacement.
+
+Frontend task admission and shutdown share one atomic closed/count state. Every
+admitted future, including escaped owned-spawner tasks, retains a completion
+lease until its actual future is destroyed. Portable async serialized observers
+wait for zero retained tasks; cancellation flags are not drainage proof. The
+required workspace regressions cover escaped noncancellable work, closed
+admission, and destruction of an unpolled original future before acknowledgment.
+Bootstrap attachment mirrors existing app-owned semantic history into the new
+observed signal graph before refresh hooks, without issuing new terminal facts.
