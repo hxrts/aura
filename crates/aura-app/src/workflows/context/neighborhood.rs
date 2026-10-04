@@ -92,7 +92,38 @@ async fn publish_homes_and_neighborhood_projection(
     publish_neighborhood_projection(app_core, neighborhood_state).await
 }
 
-/// Move position in neighborhood view.
+/// Highest entry depth (0 limited, 1 partial, 2 full) the viewer may use for
+/// a home: an explicit access override wins, otherwise the hop-based default
+/// (own/member home full, 1-hop neighbor partial, anything else limited).
+fn allowed_entry_depth(
+    neighborhood: &crate::views::neighborhood::NeighborhoodState,
+    homes: &crate::views::home::HomesState,
+    target: &ChannelId,
+    viewer: Option<&aura_core::types::identifiers::AuthorityId>,
+) -> u32 {
+    if let (Some(home), Some(viewer)) = (homes.home_state(target), viewer) {
+        if let Some(level) = home.access_override(viewer) {
+            return match level {
+                aura_social::AccessLevel::Limited => 0,
+                aura_social::AccessLevel::Partial => 1,
+                aura_social::AccessLevel::Full => 2,
+            };
+        }
+        if home.member(viewer).is_some() {
+            return 2;
+        }
+    }
+    if *target == neighborhood.home_home_id {
+        2
+    } else if neighborhood.neighbor(target).is_some() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Move position in neighborhood view. The requested depth is clamped to the
+/// viewer's allowed access level for the target home.
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
@@ -123,10 +154,16 @@ pub async fn move_position(
                 }
             });
 
+        let viewer = core
+            .runtime()
+            .map(|runtime| runtime.authority_id())
+            .or_else(|| core.authority().copied());
+        let allowed_depth =
+            allowed_entry_depth(&neighborhood, &homes, &target_home_id, viewer.as_ref());
         neighborhood.position = Some(TraversalPosition {
             current_home_id: target_home_id,
             current_home_name: home_name,
-            depth: depth_value,
+            depth: depth_value.min(allowed_depth),
             path: vec![target_home_id],
         });
 
