@@ -488,3 +488,21 @@ Receiving inspects configured providers in order and continues only on typed
 provider can delay later entries. Required provider outages should retain a
 concrete native cause. Use the L8 custom-provider regression harness to verify
 actual dispatch, encrypted bytes, and source retention.
+
+### Bounded final clock observation
+
+Use `aura_core::time::timeout::acknowledge_with_timeout_budget` after the actual
+resource owner has acknowledged completion. Pass the original `TimeoutBudget`,
+the selected `PhysicalTimeEffects` provider, the required checkpoint callback,
+and a synchronous publication callback. The helper races the whole observation
+lease/read/checkpoint against `wait_until_physical_deadline`, polls the endpoint
+first when both are ready, and drops losing futures before returning. Publication
+runs with the original observation guard held and has no following await.
+
+Wrappers must forward absolute waits to their configured provider. A current
+read followed by relative sleep, or a delay based on cached high-water, cannot
+bound a stalled current read. Unsupported providers fail explicitly. Native
+providers use cancellable timers; the manual provider waits for actual test
+clock progress. Test delayed registration, blocked observation, hung reads,
+checkpoint delay, native timer faults and same-poll late completion with
+`just _policy-check check absolute-time-observation`.

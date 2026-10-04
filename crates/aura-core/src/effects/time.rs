@@ -16,23 +16,96 @@
 //! All are infrastructure effects implemented in `aura-effects` with stateless handlers.
 
 use crate::time::{OrderTime, PhysicalTime, TimeOrdering};
+use crate::types::window::{PhysicalMillis, WindowPosition};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Error type for time operations.
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum TimeError {
-    #[error("Timeout after {timeout_ms}ms")]
-    Timeout { timeout_ms: u64 },
-    #[error("Timeout handle not found: {handle}")]
-    TimeoutNotFound { handle: TimeoutHandle },
-    #[error("Clock sync failed: {reason}")]
-    ClockSyncFailed { reason: String },
-    #[error("Time service unavailable")]
+    Timeout {
+        timeout_ms: u64,
+    },
+    TimeoutNotFound {
+        handle: TimeoutHandle,
+    },
+    ClockSyncFailed {
+        reason: String,
+    },
     ServiceUnavailable,
-    #[error("Operation failed: {reason}")]
-    OperationFailed { reason: String },
+    OperationFailed {
+        reason: String,
+    },
+    AbsoluteDeadlineUnsupported,
+    PhysicalClockRollback {
+        previous_ms: u64,
+        observed_ms: u64,
+    },
+    InvalidPhysicalClockValue {
+        observed_bits: u64,
+    },
+    ProviderFailure {
+        operation: TimeProviderOperation,
+        #[serde(skip)]
+        source: Option<std::sync::Arc<dyn std::error::Error + Send + Sync>>,
+    },
+}
+
+impl std::fmt::Display for TimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Timeout { timeout_ms } => write!(f, "Timeout after {timeout_ms}ms"),
+            Self::TimeoutNotFound { handle } => write!(f, "Timeout handle not found: {handle}"),
+            Self::ClockSyncFailed { reason } => write!(f, "Clock sync failed: {reason}"),
+            Self::ServiceUnavailable => f.write_str("Time service unavailable"),
+            Self::OperationFailed { reason } => write!(f, "Operation failed: {reason}"),
+            Self::AbsoluteDeadlineUnsupported => {
+                f.write_str("physical deadline waiting is unsupported by the selected provider")
+            }
+            Self::PhysicalClockRollback {
+                previous_ms,
+                observed_ms,
+            } => write!(
+                f,
+                "physical clock rolled back from {previous_ms}ms to {observed_ms}ms"
+            ),
+            Self::InvalidPhysicalClockValue { observed_bits } => write!(
+                f,
+                "physical clock returned an invalid numeric value (bits {observed_bits})"
+            ),
+            Self::ProviderFailure { operation, .. } => {
+                write!(f, "time provider {operation:?} failed")
+            }
+        }
+    }
+}
+impl std::error::Error for TimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            // Dereference the Arc: exposing its container hides the concrete
+            // native cause from downcasting when that cause has no own source.
+            Self::ProviderFailure { source, .. } => source
+                .as_ref()
+                .map(|source| source.as_ref() as &(dyn std::error::Error + 'static)),
+            Self::Timeout { .. }
+            | Self::TimeoutNotFound { .. }
+            | Self::ClockSyncFailed { .. }
+            | Self::ServiceUnavailable
+            | Self::OperationFailed { .. }
+            | Self::AbsoluteDeadlineUnsupported
+            | Self::PhysicalClockRollback { .. }
+            | Self::InvalidPhysicalClockValue { .. } => None,
+        }
+    }
+}
+
+/// The failing provider operation; error sources remain native in process.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum TimeProviderOperation {
+    ReadPhysicalClock,
+    RegisterTimer,
+    WaitTimer,
 }
 
 /// Handle for timeout operations.
@@ -55,6 +128,30 @@ pub enum WakeCondition {
 pub trait PhysicalTimeEffects: Send + Sync {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError>;
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError>;
+
+    /// Wait for an existing fixed physical endpoint and return its actual observation.
+    ///
+    /// Implementations must register against their own configured clock without
+    /// awaiting `physical_time` first. A relative sleep derived from a caller's
+    /// cached observation does not satisfy this contract. Cancellation releases
+    /// timer custody. Unsupported providers fail explicitly without a fallback.
+    /// Receipt generations cannot be used as physical deadline coordinates.
+    ///
+    /// ```compile_fail
+    /// use aura_core::effects::PhysicalTimeEffects;
+    /// use aura_core::types::window::{ReceiptGeneration, WindowPosition};
+    /// async fn wrong_domain(clock: &dyn PhysicalTimeEffects) {
+    ///     let _ = clock.wait_until_physical_deadline(
+    ///         WindowPosition::<ReceiptGeneration>::new(500)
+    ///     ).await;
+    /// }
+    /// ```
+    async fn wait_until_physical_deadline(
+        &self,
+        _deadline: WindowPosition<PhysicalMillis>,
+    ) -> Result<PhysicalTime, TimeError> {
+        Err(TimeError::AbsoluteDeadlineUnsupported)
+    }
 }
 
 #[async_trait]
@@ -113,6 +210,13 @@ impl_arc_effect!(PhysicalTimeEffects {
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         (**self).sleep_ms(ms).await
+    }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> Result<PhysicalTime, TimeError> {
+        (**self).wait_until_physical_deadline(deadline).await
     }
 });
 

@@ -820,3 +820,14 @@ independent authoritative observation contract.
 In-process continuation does not establish restart authority. Durable restoration
 requires the original parent and child checkpoints, signed payload and selected
 profile binding; a retained digest alone cannot authorize a new wait.
+
+### Original local deadline observation
+
+A fixed physical endpoint bounds resource waiting under one original owner; it
+is not shared temporal provenance or distributed completion evidence. The owner
+retains its selected clock, observation lease and required checkpoint through
+terminal acknowledgment. The endpoint has priority over late checkpoint
+completion, and losing read/checkpoint/timer futures release their custody.
+Successful publication is synchronous under the original observation guard and
+requires independently established domain completion. Unsupported or failed
+clock providers cannot substitute a second clock or renew the original window.

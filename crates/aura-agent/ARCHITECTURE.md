@@ -1779,3 +1779,11 @@ Failed service startup can retain partial runtime resources. The lifecycle permi
 `Failed -> Stopping -> Stopped` so their original owner can dispose them; failed
 startup alone is not a disposal acknowledgment. The required startup replay
 clock-failure regression exercises this cleanup path.
+
+Original shutdown service progress acknowledgment uses the core bounded terminal
+observation helper after the private service owner supplies actual stop/task
+proof. The entire final observation is raced against the original fixed endpoint;
+no unbounded clock read or fallible validation follows its synchronous callback.
+AuraEffectSystem and EnhancedTimeHandler delegate absolute waits to the same
+configured provider. This boundary alone does not bound initial shutdown-window
+allocation or replace required service cleanup custody.

@@ -9,10 +9,12 @@
 use async_trait::async_trait;
 use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeError,
+    TimeProviderOperation,
 };
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
+use aura_core::types::window::{PhysicalMillis, WindowPosition};
 use cfg_if::cfg_if;
 use rand::RngCore;
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +54,79 @@ impl PhysicalTimeHandler {
         Self
     }
 
+    /// Required physical observation; clock faults never become epoch zero.
+    #[allow(clippy::disallowed_methods)] // Native clock access belongs to this effect implementation.
+    fn required_physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        let ts_ms = {
+            let elapsed = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|source| TimeError::ProviderFailure {
+                    operation: TimeProviderOperation::ReadPhysicalClock,
+                    source: Some(std::sync::Arc::new(source)),
+                })?;
+            u64::try_from(elapsed.as_millis()).map_err(|source| TimeError::ProviderFailure {
+                operation: TimeProviderOperation::ReadPhysicalClock,
+                source: Some(std::sync::Arc::new(source)),
+            })?
+        };
+        #[cfg(target_arch = "wasm32")]
+        let ts_ms = {
+            let value = Date::now();
+            if !value.is_finite() || value < 0.0 || value >= u64::MAX as f64 {
+                return Err(TimeError::InvalidPhysicalClockValue {
+                    observed_bits: value.to_bits(),
+                });
+            }
+            value as u64
+        };
+        Ok(aura_core::time::PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })
+    }
+
+    async fn wait_with_observer<C>(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+        mut read: C,
+    ) -> Result<aura_core::time::PhysicalTime, TimeError>
+    where
+        C: FnMut() -> Result<aura_core::time::PhysicalTime, TimeError> + Send,
+    {
+        use std::task::Poll;
+        let mut previous = None;
+        let mut timer = None;
+        futures::future::poll_fn(|context| loop {
+            let now = match read() {
+                Ok(now) => now,
+                Err(source) => return Poll::Ready(Err(source)),
+            };
+            if let Some(previous_ms) = previous {
+                if now.ts_ms < previous_ms {
+                    return Poll::Ready(Err(TimeError::PhysicalClockRollback {
+                        previous_ms,
+                        observed_ms: now.ts_ms,
+                    }));
+                }
+            }
+            if now.ts_ms >= deadline.value() {
+                return Poll::Ready(Ok(now));
+            }
+            previous = Some(now.ts_ms);
+            let registration = timer
+                .get_or_insert_with(|| self.sleep_ms((deadline.value() - now.ts_ms).min(1000)));
+            match registration.as_mut().poll(context) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(source)) => return Poll::Ready(Err(source)),
+                Poll::Ready(Ok(())) => {
+                    timer = None;
+                }
+            }
+        })
+        .await
+    }
+
     /// Synchronous physical time helper (ms since epoch).
     ///
     /// This is intended for UI/frontend call sites that are not async and need
@@ -89,11 +164,7 @@ impl PhysicalTimeHandler {
 impl PhysicalTimeEffects for PhysicalTimeHandler {
     #[tracing::instrument(name = "physical_time", level = "trace")]
     async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
-        let ts_ms = self.physical_time_now_ms();
-        let result = aura_core::time::PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        };
+        let result = self.required_physical_time()?;
 
         // Record latency metrics
         #[cfg(not(target_arch = "wasm32"))]
@@ -112,25 +183,7 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         #[cfg(target_arch = "wasm32")]
         {
-            let window = window().ok_or(TimeError::ServiceUnavailable)?;
-            let receiver = {
-                let (sender, receiver) = futures::channel::oneshot::channel::<()>();
-                let callback = Closure::once(move || {
-                    let _ = sender.send(());
-                });
-                let timeout_ms = i32::try_from(ms.min(i32::MAX as u64)).unwrap_or(i32::MAX);
-                window
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(
-                        callback.as_ref().unchecked_ref(),
-                        timeout_ms,
-                    )
-                    .map_err(|err| TimeError::OperationFailed {
-                        reason: format!("setTimeout failed: {err:?}"),
-                    })?;
-                callback.forget();
-                receiver
-            };
-            let _ = receiver.await;
+            sleep_browser_owned(ms).await?;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -138,12 +191,157 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
         }
         Ok(())
     }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        // Recheck on every poll, including a competing checkpoint's wake while
+        // the monotonic timer is pending. A wall-clock jump must not let that
+        // checkpoint publish after the fixed physical endpoint.
+        self.wait_with_observer(deadline, || self.required_physical_time())
+            .await
+    }
+}
+
+cfg_if! {
+if #[cfg(target_arch = "wasm32")] {
+struct BrowserTimer {
+    window: web_sys::Window,
+    id: i32,
+    _callback: Closure<dyn FnMut()>,
+}
+impl Drop for BrowserTimer {
+    fn drop(&mut self) {
+        self.window.clear_timeout_with_handle(self.id);
+    }
+}
+
+#[derive(Debug)]
+struct BrowserTimerRegistrationError(send_wrapper::SendWrapper<wasm_bindgen::JsValue>);
+impl std::fmt::Display for BrowserTimerRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "browser timer registration failed: {:?}", &*self.0)
+    }
+}
+impl std::error::Error for BrowserTimerRegistrationError {}
+
+async fn sleep_browser_owned(ms: u64) -> Result<(), TimeError> {
+    let (timer, receiver) = {
+        let window = window().ok_or(TimeError::ServiceUnavailable)?;
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        let callback = Closure::once(move || {
+            let _ = sender.send(());
+        });
+        let id = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                callback.as_ref().unchecked_ref(),
+                i32::try_from(ms.min(i32::MAX as u64)).unwrap_or(i32::MAX),
+            )
+            .map_err(|source| TimeError::ProviderFailure {
+                operation: TimeProviderOperation::RegisterTimer,
+                source: Some(std::sync::Arc::new(BrowserTimerRegistrationError(
+                    send_wrapper::SendWrapper::new(source),
+                ))),
+            })?;
+        // Browser execution is thread-confined. SendWrapper checks this on
+        // access and Drop while retaining the closure until timer cancellation.
+        (
+            send_wrapper::SendWrapper::new(BrowserTimer {
+                window,
+                id,
+                _callback: callback,
+            }),
+            receiver,
+        )
+    };
+    let outcome = receiver.await.map_err(|source| TimeError::ProviderFailure {
+        operation: TimeProviderOperation::WaitTimer,
+        source: Some(std::sync::Arc::new(source)),
+    });
+    drop(timer);
+    outcome
+}
+}
 }
 
 /// Implement TimeEffects for PhysicalTimeHandler using default implementations
 /// (current_timestamp derives from physical_time via the trait default)
 #[async_trait]
 impl aura_core::effects::TimeEffects for PhysicalTimeHandler {}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod absolute_deadline_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn required_absolute_deadline_rechecks_clock_before_pending_timer() {
+        use futures::FutureExt;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let handler = PhysicalTimeHandler::new();
+        let clock = AtomicU64::new(100);
+        let wait = handler.wait_with_observer(WindowPosition::new(500), || {
+            Ok(aura_core::time::PhysicalTime::exact(
+                clock.load(Ordering::SeqCst),
+            ))
+        });
+        tokio::pin!(wait);
+        assert!(
+            wait.as_mut().now_or_never().is_none(),
+            "actual native timer remains pending"
+        );
+        // Represents the competing observation becoming runnable after a
+        // physical clock jump, before the already registered timer has fired.
+        clock.store(500, Ordering::SeqCst);
+        assert_eq!(
+            wait.as_mut()
+                .now_or_never()
+                .expect("endpoint checked on competing wake")
+                .expect("actual current endpoint")
+                .ts_ms,
+            500
+        );
+    }
+
+    #[tokio::test]
+    async fn required_absolute_deadline_at_epoch_returns_actual_native_clock() {
+        let clock = PhysicalTimeHandler::new();
+        let before = clock
+            .physical_time()
+            .await
+            .expect("actual required native read");
+        let endpoint = clock
+            .wait_until_physical_deadline(WindowPosition::new(0))
+            .await
+            .expect("already elapsed absolute endpoint");
+        assert!(endpoint.ts_ms >= before.ts_ms);
+        assert_ne!(
+            endpoint.ts_ms, 0,
+            "returned witness is an actual observation, not requested endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn required_absolute_deadline_waits_for_actual_native_endpoint() {
+        let clock = PhysicalTimeHandler::new();
+        let start = clock
+            .physical_time()
+            .await
+            .expect("native timer registration observation");
+        let deadline = WindowPosition::new(
+            start
+                .ts_ms
+                .checked_add(2)
+                .expect("native test endpoint fits"),
+        );
+        let endpoint = clock
+            .wait_until_physical_deadline(deadline)
+            .await
+            .expect("original native timer wake");
+        assert!(endpoint.ts_ms >= deadline.value());
+        assert!(endpoint.ts_ms > start.ts_ms);
+    }
+}
 
 /// Simple logical clock handler - stateless pure functions for logical clock operations.
 #[deprecated(

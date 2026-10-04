@@ -13937,6 +13937,11 @@ as in the AES-GCM authenticated encryption cipher.
             features = [ "fs" "process" ];
           }
           {
+            name = "send_wrapper";
+            packageId = "send_wrapper";
+            target = { target, features }: ("wasm32" == target."arch" or null);
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" "rc" ];

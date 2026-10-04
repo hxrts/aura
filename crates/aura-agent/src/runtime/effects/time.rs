@@ -14,6 +14,17 @@ impl PhysicalTimeEffects for AuraEffectSystem {
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         self.time_handler.sleep_ms(ms).await
     }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        self.time_handler
+            .wait_until_physical_deadline(deadline)
+            .await
+    }
 }
 
 #[async_trait]

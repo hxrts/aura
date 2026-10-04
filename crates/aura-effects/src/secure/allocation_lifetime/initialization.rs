@@ -231,7 +231,8 @@ fn publish<T: Serialize>(
         .map_err(|source| source_error("acknowledge original lifetime root", source))
 }
 fn validate(index: &Index, root: [u8; 32]) -> Result<(), AuraError> {
-    if index.version != 1 || index.root != root || index.births.len() > MAX_PROFILE_ALLOCATIONS {
+    if index.version != 1 || index.root != root || index.births.len() > MAX_PROFILE_ALLOCATION_COUNT
+    {
         return Err(invalid("original lifetime root binding contradiction"));
     }
     for (n, birth) in index.births.iter().enumerate() {
@@ -245,7 +246,7 @@ fn validate(index: &Index, root: [u8; 32]) -> Result<(), AuraError> {
     if let Some(pending) = &index.pending {
         FilesystemLifetimeRoot::validate(pending)?;
         if index.phase != Phase::Handed
-            || index.births.len() >= MAX_PROFILE_ALLOCATIONS
+            || index.births.len() >= MAX_PROFILE_ALLOCATION_COUNT
             || index
                 .births
                 .iter()
@@ -624,7 +625,7 @@ pub(super) fn initialize(
             match selected.child(std::path::Path::new(DIRECTORY), false) {
                 Ok(directory) => {
                     if !directory
-                        .names_bounded(MAX_PROFILE_ALLOCATIONS + 1)
+                        .names_bounded(MAX_PROFILE_ALLOCATION_COUNT + 1)
                         .map_err(|source| {
                             source_error("inspect interrupted root initialization", source)
                         })?
@@ -810,7 +811,7 @@ pub(super) fn prepare_birth(
 ) -> Result<(), AuraError> {
     complete_pending_birth(root)?;
     let mut index = required_index(root)?;
-    if index.births.len() >= MAX_PROFILE_ALLOCATIONS
+    if index.births.len() >= MAX_PROFILE_ALLOCATION_COUNT
         || index
             .births
             .iter()
@@ -839,7 +840,7 @@ pub(super) fn recover_references(
     let index = required_index(root)?;
     let names = root
         .directory
-        .names_bounded(MAX_PROFILE_ALLOCATIONS + 1)
+        .names_bounded(MAX_PROFILE_ALLOCATION_COUNT + 1)
         .map_err(|source| source_error("bounded original birth inventory", source))?;
     if names.len() != index.births.len() + 1
         || !names
@@ -1150,7 +1151,7 @@ mod tests {
         provider.child(std::path::Path::new("ordinary"), true)?;
         // Metadata inventory is not decoded allocation authority. The genuine
         // allocated-owner regressions independently validate birth evidence.
-        for index in 0..aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATIONS {
+        for index in 0..aura_core::effects::secret_lifetime::MAX_PROFILE_ALLOCATION_COUNT {
             std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)

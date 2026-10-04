@@ -628,19 +628,19 @@ impl RuntimeShutdownWindowCapability {
                 )
                 .with_cause(source)
             })?;
-        let _observation = self.budget.acquire_observation().await;
-        let now = effects.physical_time().await.map_err(|source| {
-            ServiceError::unavailable(service, "required final cleanup observation failed")
-                .with_cause(source)
-        })?;
-        self.budget.remaining_at(&now).map_err(|source| {
+        aura_core::time::timeout::acknowledge_with_timeout_budget(
+            effects,
+            &self.budget,
+            || async { Ok(()) },
+            publish,
+        )
+        .await
+        .map_err(|source| {
             crate::runtime::services::traits::service_window_failure(
                 service,
                 aura_core::time::timeout::TimeoutRunError::<ServiceError>::Timeout(source),
             )
-        })?;
-        publish();
-        Ok(())
+        })
     }
 
     pub(super) fn budget(&self) -> &TimeoutBudget {

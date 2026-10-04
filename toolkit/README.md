@@ -33,3 +33,7 @@ encoding, immutable primitive input, and exact rooted source dispatch. Its
 actual-source regression rejects raw/fallback/shadowed byte origins and missing
 typed declarations. Run the full `security-boundary-policy` after this focused
 check; passing one constituent check does not prove the aggregate.
+
+`check absolute-time-observation` is the focused required source/discovery/test
+execution inventory for original terminal observation and native/manual absolute
+physical deadline providers. It also runs in `check vm-session-lifecycle`.

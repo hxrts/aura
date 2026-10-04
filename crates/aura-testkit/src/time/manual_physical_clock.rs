@@ -1,4 +1,5 @@
 //! Manual physical time whose sleeps wait for actual test-controlled progress.
+use aura_core::types::window::{PhysicalMillis, WindowPosition};
 use aura_core::{
     effects::{PhysicalTimeEffects, TimeError},
     time::PhysicalTime,
@@ -80,11 +81,102 @@ impl PhysicalTimeEffects for ManualPhysicalClock {
             changed.await;
         }
     }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> Result<PhysicalTime, TimeError> {
+        let mut previous = self.state.now.load(Ordering::SeqCst);
+        loop {
+            let changed = self.state.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if let Some(cause) = self.state.sleep_failure.lock().await.take() {
+                return Err(cause);
+            }
+            let now = self.state.now.load(Ordering::SeqCst);
+            if now < previous {
+                return Err(TimeError::PhysicalClockRollback {
+                    previous_ms: previous,
+                    observed_ms: now,
+                });
+            }
+            if now >= deadline.value() {
+                return Ok(PhysicalTime {
+                    ts_ms: now,
+                    uncertainty: None,
+                });
+            }
+            previous = now;
+            changed.await;
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures::FutureExt;
+    #[tokio::test]
+    async fn required_absolute_deadline_preserves_endpoint_after_delayed_registration() {
+        let clock = Arc::new(ManualPhysicalClock::new(100));
+        let wait = clock.wait_until_physical_deadline(WindowPosition::new(500));
+        tokio::pin!(wait);
+        clock.set_time(350);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.set_time(499);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.set_time(500);
+        assert_eq!(
+            wait.await.expect("original fixed endpoint reached").ts_ms,
+            500
+        );
+    }
+
+    #[tokio::test]
+    async fn required_absolute_deadline_preserves_rollback_and_native_timer_fault() {
+        use std::error::Error;
+        let clock = ManualPhysicalClock::new(350);
+        let wait = clock.wait_until_physical_deadline(WindowPosition::new(500));
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.set_time(300);
+        assert!(matches!(
+            wait.await,
+            Err(TimeError::PhysicalClockRollback {
+                previous_ms: 350,
+                observed_ms: 300
+            })
+        ));
+
+        let wait = clock.wait_until_physical_deadline(WindowPosition::new(500));
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock
+            .fail_next_sleep(TimeError::ProviderFailure {
+                operation: aura_core::effects::time::TimeProviderOperation::WaitTimer,
+                source: Some(Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "selected manual timer provider fault",
+                ))),
+            })
+            .await;
+        let failure = wait
+            .await
+            .expect_err("native timer error, not invented expiry");
+        let cause = failure
+            .source()
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("actual selected IO error");
+        assert_eq!(cause.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(
+            clock
+                .physical_time()
+                .await
+                .expect("time remains actual")
+                .ts_ms,
+            300
+        );
+    }
     #[tokio::test]
     async fn provider_faults_are_one_shot_and_wake_original_waiting_sleep() {
         let clock = ManualPhysicalClock::new(100);

@@ -49,6 +49,50 @@ const CORE_SUITES: &[LifecycleSuite] = &[
         filter: "time::timeout::tests::required_timeout_drops_cancelled_query_before_reacquiring_observation_owner",
     },
 ];
+const TERMINAL_OBSERVATION_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-core/src/time/timeout.rs",
+    functions: &[
+        "required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease",
+        "required_terminal_ack_bounds_contended_observation_gate",
+        "required_terminal_ack_bounds_checkpoint_and_rejects_late_completion",
+        "required_terminal_ack_preserves_native_timer_failure_without_publication",
+        "required_terminal_ack_rejects_native_checkpoint_failure",
+        "required_terminal_ack_publishes_once_with_original_guard_after_checkpoint",
+        "required_terminal_ack_rejects_unsupported_provider_before_publication",
+    ],
+    harness_prefix: "time::timeout::tests::",
+    filter: "time::timeout::tests::required_terminal_ack_",
+}];
+const ABSOLUTE_PROVIDER_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
+        functions: &[
+            "required_absolute_deadline_preserves_endpoint_after_delayed_registration",
+            "required_absolute_deadline_preserves_rollback_and_native_timer_fault",
+        ],
+        harness_prefix: "time::manual_physical_clock::tests::",
+        filter: "time::manual_physical_clock::tests::required_absolute_deadline_",
+    },
+    LifecycleSuite {
+        source: "crates/aura-testkit/src/time/controllable_time.rs",
+        functions: &[
+            "required_absolute_deadline_frozen_scaled_clock_needs_actual_progress",
+            "required_absolute_deadline_shared_control_keeps_rollback_visible",
+        ],
+        harness_prefix: "time::controllable_time::tests::",
+        filter: "time::controllable_time::tests::required_absolute_deadline_",
+    },
+];
+const NATIVE_ABSOLUTE_PROVIDER_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-effects/src/time.rs",
+    functions: &[
+        "required_absolute_deadline_at_epoch_returns_actual_native_clock",
+        "required_absolute_deadline_waits_for_actual_native_endpoint",
+        "required_absolute_deadline_rechecks_clock_before_pending_timer",
+    ],
+    harness_prefix: "time::absolute_deadline_tests::",
+    filter: "time::absolute_deadline_tests::required_absolute_deadline_",
+}];
 const SIGNATURE_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
     source: "crates/aura-signature/src/transcript.rs",
     functions: &["required_encoding_preserves_canonical_wire_and_native_codec_failure"],
@@ -96,6 +140,12 @@ const SYNC_NATIVE_SOURCE_SUITES: &[LifecycleSuite] = &[
     },
 ];
 const AGENT_SUITES: &[LifecycleSuite] = &[
+    LifecycleSuite {
+        source: "crates/aura-agent/src/runtime/time_handler.rs",
+        functions: &["required_absolute_deadline_keeps_actual_configured_provider_and_native_failure"],
+        harness_prefix: "runtime::time_handler::tests::",
+        filter: "runtime::time_handler::tests::required_absolute_deadline_",
+    },
     LifecycleSuite {
         source: "crates/aura-agent/src/reactive/app_signal_views.rs",
         functions: &[
@@ -758,11 +808,17 @@ pub fn run() -> Result<()> {
     let mut core = common.clone();
     core.extend(["-p".into(), "hxrts-aura-core".into()]);
     run_suites(&root, &core, CORE_SUITES)?;
+    run_suites(&root, &core, TERMINAL_OBSERVATION_SUITES)?;
+    run_absolute_deadline_domain_doctest(&target)?;
+    let mut effects = common.clone();
+    effects.extend(["-p".into(), "hxrts-aura-effects".into()]);
+    run_suites(&root, &effects, NATIVE_ABSOLUTE_PROVIDER_SUITES)?;
     let mut signature = common.clone();
     signature.extend(["-p".into(), "hxrts-aura-signature".into()]);
     run_suites(&root, &signature, SIGNATURE_SUITES)?;
     let mut testkit = common.clone();
     testkit.extend(["-p".into(), "aura-testkit".into()]);
+    run_suites(&root, &testkit, ABSOLUTE_PROVIDER_SUITES)?;
     run_suites(&root, &testkit, &[LifecycleSuite {
         source: "crates/aura-testkit/src/time/manual_physical_clock.rs",
         functions: &["provider_faults_are_one_shot_and_wake_original_waiting_sleep"],
@@ -851,6 +907,57 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+/// Focused required source/discovery/execution lane for original terminal observations.
+pub fn run_absolute_time_observation() -> Result<()> {
+    let root = repo_root()?;
+    let target = env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("target"));
+    let target = if target.is_absolute() {
+        target
+    } else {
+        root.join(target)
+    };
+    for (package, suites) in [
+        ("hxrts-aura-core", TERMINAL_OBSERVATION_SUITES),
+        ("hxrts-aura-effects", NATIVE_ABSOLUTE_PROVIDER_SUITES),
+        ("aura-testkit", ABSOLUTE_PROVIDER_SUITES),
+    ] {
+        let args = vec![
+            "test".into(),
+            "--lib".into(),
+            "--target-dir".into(),
+            target.to_string_lossy().into_owned(),
+            "-p".into(),
+            package.into(),
+        ];
+        run_suites(&root, &args, suites)?;
+    }
+    run_absolute_deadline_domain_doctest(&target)?;
+    println!("absolute-time-observation: required original observation evidence clean");
+    Ok(())
+}
+
+fn run_absolute_deadline_domain_doctest(target: &Path) -> Result<()> {
+    let args = vec![
+        "test".into(),
+        "--doc".into(),
+        "--target-dir".into(),
+        target.to_string_lossy().into_owned(),
+        "-p".into(),
+        "hxrts-aura-core".into(),
+        "PhysicalTimeEffects::wait_until_physical_deadline".into(),
+    ];
+    let mut discovery = args.clone();
+    discovery.extend(["--".into(), "--list".into()]);
+    let required = required_doctests(
+        &command_stdout("cargo", &discovery)?,
+        "effects::time::PhysicalTimeEffects::wait_until_physical_deadline",
+        1,
+    )?;
+    require_executed_tests(&command_stdout("cargo", &args)?, &required)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -921,6 +1028,15 @@ mod tests {
         assert!(!SIGNATURE_SUITES.is_empty());
         for suite in SIGNATURE_SUITES {
             assert!(suite.source.starts_with("crates/aura-signature/"));
+        }
+        for suite in TERMINAL_OBSERVATION_SUITES {
+            assert!(suite.source.starts_with("crates/aura-core/"));
+        }
+        for suite in ABSOLUTE_PROVIDER_SUITES {
+            assert!(suite.source.starts_with("crates/aura-testkit/"));
+        }
+        for suite in NATIVE_ABSOLUTE_PROVIDER_SUITES {
+            assert!(suite.source.starts_with("crates/aura-effects/"));
         }
         for suite in DEPENDENCY_SUITES {
             assert!(suite.source.starts_with("tests/"));

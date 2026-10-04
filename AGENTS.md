@@ -633,3 +633,10 @@ Production runtime assembly must reject deterministic seeds before profile acqui
 - Raw threshold service enforcement uses the shared Rust cfg classifier through
   the toolkit policy API. Test-only scope must be established by cfg semantics;
   mixed production/test predicates remain production for quorum primitive fences.
+
+- Required terminal clock observations use the original fixed physical endpoint.
+  Provider wrappers forward `wait_until_physical_deadline` to their configured
+  provider; cached-time relative sleeps cannot bound a required clock read.
+  Run `just _policy-check check absolute-time-observation` for this boundary.
+  The same exact nonignored source/discovery/execution inventory runs in
+  `just ci-vm-session-lifecycle`; a focused pass is not whole-runtime proof.

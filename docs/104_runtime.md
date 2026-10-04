@@ -1208,3 +1208,15 @@ a signed protocol interval or a stronger existing operation window.
 Managed command cleanup acknowledges actual service stop and task completion
 under the original shutdown owner before disposal of reactive processing and
 root tasks. Required cleanup failure withholds whole-runtime completion.
+
+### Local cleanup deadlines and terminal evidence
+
+A resource deadline is a local physical-time budget chosen by its authoritative
+owner. It cannot establish causal/protocol ordering, consensus finality, shared
+Range validity, or distributed completion. Service progress publication requires
+actual disposal/task acknowledgment and a bounded required observation under
+the original shutdown owner. Observation-lock acquisition, clock access and
+checkpoint retain that same fixed endpoint and selected provider. Expired,
+unsupported or failed provider observations cannot publish successful cleanup.
+Frontends and observers cannot substitute another clock, allocate a replacement
+window, or turn timeout diagnostics into domain completion evidence.

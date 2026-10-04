@@ -438,3 +438,21 @@ A diagnostic category and message contain no causal provenance or mutation autho
 ### Deterministic entropy admission
 
 A production assembly rejects an explicit deterministic entropy seed before acquiring profile custody or invoking configured providers. Simulated cryptographic handlers and deterministic random streams require a private seed capability admitted from the actual nonproduction execution mode. Selecting a custom cryptographic handler does not bypass this admission decision.
+
+### Absolute physical deadline observations
+
+`PhysicalTimeEffects::wait_until_physical_deadline` accepts a
+`WindowPosition<PhysicalMillis>` for an existing fixed endpoint. Its successful
+result is an actual selected-provider observation at or beyond that endpoint.
+It neither allocates a new window nor proves domain completion. Registration
+must not depend on an awaited caller clock read or a caller's cached timestamp.
+The selected provider owns timer cancellation and preserves native clock/timer
+failures. A provider lacking this contract returns `AbsoluteDeadlineUnsupported`;
+it cannot silently substitute a relative sleep. Native error sources are
+process-local and are omitted from serialized diagnostics.
+
+Terminal resource acknowledgment requires the original observation lease,
+required current time, window validation and checkpoint to complete within the
+same absolute endpoint. Expiry or provider failure cannot publish success.
+A fixed-endpoint witness can latch expiry without a second awaited clock read.
+Domain owners retain responsibility for the actual manager/task/disposal proof.

@@ -1093,6 +1093,60 @@ where
     }
 }
 
+/// Observe and checkpoint the original window before synchronous terminal publication.
+///
+/// The provider's fixed deadline bounds the entire observation lease, clock read
+/// and checkpoint. This helper does not establish domain completion: its caller
+/// must already hold the actual resource owner's acknowledgment. No await or
+/// fallible clock validation follows publication.
+pub async fn acknowledge_with_timeout_budget<TTime, C, CFut, P, T>(
+    time: &TTime,
+    budget: &TimeoutBudget,
+    checkpoint: C,
+    publish: P,
+) -> TimeoutBudgetResult<T>
+where
+    TTime: PhysicalTimeEffects + Sync,
+    C: FnOnce() -> CFut,
+    CFut: Future<Output = TimeoutBudgetResult<()>>,
+    P: FnOnce() -> T,
+{
+    let observation = Box::pin(async {
+        let guard = budget.acquire_observation().await;
+        let now = current_physical_time(time).await?;
+        budget.remaining_at(&now)?;
+        checkpoint().await?;
+        Ok::<_, TimeoutBudgetError>(guard)
+    });
+    let deadline =
+        Box::pin(time.wait_until_physical_deadline(WindowPosition::new(budget.deadline_at_ms())));
+    // Poll the deadline first: a late checkpoint cannot beat an already ready
+    // endpoint when both futures are runnable on the same poll.
+    match futures::future::select(deadline, observation).await {
+        Either::Left((observed, observation)) => {
+            drop(observation);
+            expire_witnessed_deadline(budget, observed.map_err(time_error)?)
+        }
+        Either::Right((result, deadline)) => {
+            drop(deadline);
+            let _guard = result?;
+            Ok(publish())
+        }
+    }
+}
+
+fn expire_witnessed_deadline<T>(
+    budget: &TimeoutBudget,
+    observed: PhysicalTime,
+) -> TimeoutBudgetResult<T> {
+    if observed.ts_ms < budget.deadline_at_ms() {
+        return Err(TimeoutBudgetError::invalid_policy(
+            "provider returned before the fixed physical deadline",
+        ));
+    }
+    Err(budget.expire_at(&observed)?)
+}
+
 /// Run an async operation with typed retry and optional per-attempt timeout policy.
 pub async fn execute_with_retry_budget<TTime, F, Fut, T, E>(
     time: &TTime,
@@ -1202,6 +1256,291 @@ mod tests {
 
     pub(super) fn physical_time(ts_ms: u64) -> PhysicalTime {
         PhysicalTime::exact(ts_ms)
+    }
+
+    struct TerminalObservationClock {
+        read: Mutex<Option<futures::channel::oneshot::Receiver<PhysicalTime>>>,
+        endpoint:
+            Mutex<Option<futures::channel::oneshot::Receiver<Result<PhysicalTime, TimeError>>>>,
+    }
+    impl TerminalObservationClock {
+        fn controlled() -> (
+            Self,
+            futures::channel::oneshot::Sender<PhysicalTime>,
+            futures::channel::oneshot::Sender<Result<PhysicalTime, TimeError>>,
+        ) {
+            let (read_release, read) = futures::channel::oneshot::channel();
+            let (endpoint_release, endpoint) = futures::channel::oneshot::channel();
+            (
+                Self {
+                    read: Mutex::new(Some(read)),
+                    endpoint: Mutex::new(Some(endpoint)),
+                },
+                read_release,
+                endpoint_release,
+            )
+        }
+    }
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for TerminalObservationClock {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            let read = self
+                .read
+                .lock()
+                .take()
+                .expect("one required terminal clock read");
+            read.await.map_err(|source| TimeError::ProviderFailure {
+                operation: crate::effects::time::TimeProviderOperation::ReadPhysicalClock,
+                source: Some(Arc::new(source)),
+            })
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), TimeError> {
+            panic!("terminal acknowledgment cannot substitute relative sleep")
+        }
+        async fn wait_until_physical_deadline(
+            &self,
+            endpoint: WindowPosition<crate::types::window::PhysicalMillis>,
+        ) -> Result<PhysicalTime, TimeError> {
+            assert_eq!(endpoint.value(), 500, "retained original fixed endpoint");
+            let wait = self
+                .endpoint
+                .lock()
+                .take()
+                .expect("one absolute deadline owner");
+            wait.await.expect("actual fixture endpoint release")
+        }
+    }
+
+    fn terminal_test_budget() -> TimeoutBudget {
+        TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(400))
+            .expect("original terminal interval")
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_bounds_hung_clock_read_and_drops_original_lease() {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        let published = std::cell::Cell::new(false);
+        let mut acknowledgment = Box::pin(super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        ));
+        assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("original endpoint");
+        assert!(matches!(
+            acknowledgment.await,
+            Err(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 500,
+                ..
+            })
+        ));
+        assert!(!published.get());
+        assert!(
+            read.is_canceled(),
+            "losing required read is actually destroyed"
+        );
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+        assert!(matches!(
+            budget.remaining_at(&physical_time(500)),
+            Err(TimeoutBudgetError::DeadlineExceeded { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_bounds_contended_observation_gate() {
+        let (clock, _read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        let held = budget.acquire_observation().await;
+        let published = std::cell::Cell::new(false);
+        let mut acknowledgment = Box::pin(super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        ));
+        assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("fixed endpoint under contention");
+        assert!(matches!(
+            acknowledgment.await,
+            Err(TimeoutBudgetError::DeadlineExceeded { .. })
+        ));
+        assert!(!published.get());
+        assert!(
+            clock.read.lock().is_some(),
+            "clock read was never admitted past held gate"
+        );
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_bounds_checkpoint_and_rejects_late_completion() {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        let (checkpoint_release, checkpoint) = futures::channel::oneshot::channel();
+        let published = std::cell::Cell::new(false);
+        read.send(physical_time(350))
+            .expect("current observation, not cached start");
+        let mut acknowledgment = Box::pin(super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async {
+                checkpoint.await.expect("checkpoint release");
+                Ok(())
+            },
+            || published.set(true),
+        ));
+        assert!(futures::poll!(acknowledgment.as_mut()).is_pending());
+        checkpoint_release
+            .send(())
+            .expect("checkpoint now runnable");
+        endpoint
+            .send(Ok(physical_time(500)))
+            .expect("deadline also runnable");
+        assert!(matches!(
+            acknowledgment.await,
+            Err(TimeoutBudgetError::DeadlineExceeded { .. })
+        ));
+        assert!(
+            !published.get(),
+            "ready deadline wins over a late checkpoint"
+        );
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("selected native timer outage")]
+    struct NativeTerminalTimerFailure;
+
+    #[tokio::test]
+    async fn required_terminal_ack_preserves_native_timer_failure_without_publication() {
+        use std::error::Error;
+        let (clock, _read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        endpoint
+            .send(Err(TimeError::ProviderFailure {
+                operation: crate::effects::time::TimeProviderOperation::WaitTimer,
+                source: Some(Arc::new(NativeTerminalTimerFailure)),
+            }))
+            .expect("selected actual timer fault");
+        let published = std::cell::Cell::new(false);
+        let error = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        )
+        .await
+        .expect_err("timer outage is not timeout or successful acknowledgment");
+        assert!(error
+            .source()
+            .and_then(|cause| cause.source())
+            .and_then(|cause| cause.source())
+            .is_some_and(|cause| cause.is::<NativeTerminalTimerFailure>()));
+        assert!(!published.get());
+        assert!(
+            budget.remaining_at(&physical_time(350)).is_ok(),
+            "timer fault cannot fabricate expiry"
+        );
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_publishes_once_with_original_guard_after_checkpoint() {
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        read.send(physical_time(350))
+            .expect("required current observation");
+        let checkpointed = std::cell::Cell::new(false);
+        let publications = std::cell::Cell::new(0);
+        super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async {
+                checkpointed.set(true);
+                Ok(())
+            },
+            || {
+                assert!(checkpointed.get());
+                assert!(
+                    budget.clock.observation_gate.try_lock().is_none(),
+                    "publication retains original observation owner"
+                );
+                publications.set(publications.get() + 1);
+            },
+        )
+        .await
+        .expect("actual valid clock/checkpoint acknowledgment");
+        assert_eq!(publications.get(), 1);
+        assert!(endpoint.is_canceled(), "losing timer is actually destroyed");
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_rejects_native_checkpoint_failure() {
+        use std::error::Error;
+        let (clock, read, endpoint) = TerminalObservationClock::controlled();
+        let budget = terminal_test_budget();
+        read.send(physical_time(350))
+            .expect("actual current observation");
+        let published = std::cell::Cell::new(false);
+        let failure = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async {
+                Err(TimeoutBudgetError::checkpoint_failure(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "selected required checkpoint outage",
+                )))
+            },
+            || published.set(true),
+        )
+        .await
+        .expect_err("valid clock cannot authorize failed checkpoint publication");
+        assert!(matches!(
+            failure,
+            TimeoutBudgetError::CheckpointFailure { .. }
+        ));
+        assert_eq!(
+            failure
+                .source()
+                .and_then(|cause| cause.source())
+                .and_then(|cause| cause.downcast_ref::<std::io::Error>())
+                .expect("native checkpoint cause")
+                .kind(),
+            std::io::ErrorKind::NotConnected
+        );
+        assert!(!published.get());
+        assert!(endpoint.is_canceled());
+        assert!(budget.clock.observation_gate.try_lock().is_some());
+    }
+
+    #[tokio::test]
+    async fn required_terminal_ack_rejects_unsupported_provider_before_publication() {
+        use std::error::Error;
+        let clock = ScriptedTimeEffects::new([physical_time(350)], SleepBehavior::Immediate);
+        let budget = terminal_test_budget();
+        let published = std::cell::Cell::new(false);
+        let failure = super::acknowledge_with_timeout_budget(
+            &clock,
+            &budget,
+            || async { Ok(()) },
+            || published.set(true),
+        )
+        .await
+        .expect_err("relative-only provider cannot authorize bounded final acknowledgment");
+        assert!(matches!(
+            failure
+                .source()
+                .and_then(|cause| cause.source())
+                .and_then(|cause| cause.downcast_ref::<TimeError>()),
+            Some(TimeError::AbsoluteDeadlineUnsupported)
+        ));
+        assert!(!published.get());
+        assert!(clock.sleep_calls().is_empty());
     }
 
     #[derive(Debug, Clone, Copy)]

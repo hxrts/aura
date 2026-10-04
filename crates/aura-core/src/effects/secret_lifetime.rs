@@ -11,7 +11,7 @@ pub const MAX_SCOPE_BYTES: usize = 1024;
 /// Maximum retained first-decision encoding size.
 pub const MAX_DECISION_BYTES: usize = 131_072;
 /// Maximum original profile allocation inventory size.
-pub const MAX_PROFILE_ALLOCATIONS: usize = 4096;
+pub const MAX_PROFILE_ALLOCATION_COUNT: usize = 4096;
 
 /// Pure routing data. Deserialization grants no lifetime authority.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -131,7 +131,7 @@ impl ProfileSecretLifetimeRecoveryCapability {
             ));
         }
         let backends = self.backend.recover_owned_inventory().await?;
-        if backends.len() > MAX_PROFILE_ALLOCATIONS {
+        if backends.len() > MAX_PROFILE_ALLOCATION_COUNT {
             return Err(AuraError::invalid("oversized owned secret inventory"));
         }
         self.inventory_taken = true;
@@ -152,7 +152,7 @@ impl ProfileSecretLifetimeRecoveryCapability {
             return Err(AuraError::invalid("original inventory was not transferred"));
         }
         let original = self.backend.recover_owned_inventory().await?;
-        if original.len() > MAX_PROFILE_ALLOCATIONS {
+        if original.len() > MAX_PROFILE_ALLOCATION_COUNT {
             return Err(AuraError::invalid(
                 "oversized original birth reconciliation",
             ));

@@ -291,3 +291,16 @@ observation lease for final expiry/checkpoint acknowledgment. This prevents an
 operation's cancelled clock query from retaining the gate needed by its own
 timeout owner. Required source coverage exercises the actual delayed query,
 deadline wake, cancellation drop and unchanged sticky original interval.
+
+The physical deadline effect accepts a typed existing endpoint and cannot confer
+domain completion. `acknowledge_with_timeout_budget` bounds the original final
+observation lease, selected clock read and checkpoint against that endpoint;
+publication is synchronous under the guard after success. Endpoint priority and
+owned loser Drop prevent late checkpoint success and retained stalled reads.
+Relative-only providers fail explicitly. `TimeError::source` dereferences native
+provider causes rather than exposing an Arc container; serialization retains
+only diagnostics. Required source/discovery/execution covers these boundaries.
+
+`MAX_PROFILE_ALLOCATION_COUNT` is the explicit count bound for original protected
+profile inventory. Its 4096 value bounds arithmetic/data shape, not ownership or
+admission authority. The native style/unit gate enforces its count suffix.

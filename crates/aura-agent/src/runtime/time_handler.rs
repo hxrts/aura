@@ -508,6 +508,15 @@ impl aura_core::effects::PhysicalTimeEffects for EnhancedTimeHandler {
     async fn sleep_ms(&self, ms: u64) -> std::result::Result<(), aura_core::effects::TimeError> {
         EnhancedTimeHandler::sleep_ms(self, ms).await
     }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> std::result::Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        self.provider.wait_until_physical_deadline(deadline).await
+    }
 }
 
 impl Default for EnhancedTimeHandler {
@@ -521,6 +530,49 @@ mod tests {
     use super::*;
     use aura_core::effects::TimeError;
     use aura_core::time::PhysicalTime;
+
+    #[tokio::test]
+    async fn required_absolute_deadline_keeps_actual_configured_provider_and_native_failure() {
+        use futures::FutureExt;
+        use std::error::Error;
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(100));
+        let handler = EnhancedTimeHandler::with_provider(clock.clone());
+        let deadline = aura_core::types::window::WindowPosition::new(500);
+        let wait = handler.wait_until_physical_deadline(deadline);
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.set_time(499);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock
+            .fail_next_sleep(TimeError::ProviderFailure {
+                operation: aura_core::effects::time::TimeProviderOperation::WaitTimer,
+                source: Some(Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "actual configured timer outage",
+                ))),
+            })
+            .await;
+        let failure = wait
+            .await
+            .expect_err("selected provider failure cannot choose another clock");
+        assert_eq!(
+            failure
+                .source()
+                .and_then(|cause| cause.downcast_ref::<std::io::Error>())
+                .expect("actual native provider cause")
+                .kind(),
+            std::io::ErrorKind::Interrupted
+        );
+        clock.set_time(500);
+        assert_eq!(
+            handler
+                .wait_until_physical_deadline(deadline)
+                .await
+                .expect("selected provider recovered")
+                .ts_ms,
+            500
+        );
+    }
 
     struct FixedTimeProvider {
         ts_ms: u64,

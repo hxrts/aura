@@ -150,3 +150,6 @@ lock across authenticated reads and installation. Protocol orchestration does
 not require a Tokio executor for this custody primitive. The architecture syntax
 gate enforces that boundary; actual held-decision replacement and extension
 regressions verify writer exclusion and preservation of later evidence.
+
+`TimeoutCoordinator` forwards absolute physical deadline waits to its original
+inner provider; it neither chooses a second clock nor derives a renewed delay.

@@ -333,3 +333,14 @@ preemptible merely because callers perform checkpoints.
 Archived initialization transactions require all three retained inode/ciphertext custody records on every Ready reopen. The native alias reader is observational: authenticated journal validation supplies the authority and exact expected identities. Unreferenced custody metadata cannot satisfy that validation.
 
 Required archived-custody validation also rejects ciphertext corruption at each of the three retained paths, preserving the original birth and current root checkpoint bytes without replacement.
+
+Required physical reads propagate native clock failures instead of returning
+zero. Absolute deadline waits use the actual provider clock and fixed endpoint,
+recheck after timer wakes, and report rollback. Browser timers own their callback
+and cancel registration on Drop; thread-confined JS custody is checked by
+`SendWrapper`. This bookkeeping is local to the timer future, not a runtime
+service or detached task. Native required endpoint tests join the lifecycle gate.
+
+Original lifetime inventory admission and bounded listing use the shared
+`MAX_PROFILE_ALLOCATION_COUNT` count bound, preserving the existing 4096 limit.
+The bound cannot substitute for provider-authenticated inventory custody.

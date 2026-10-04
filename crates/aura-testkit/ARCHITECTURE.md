@@ -175,3 +175,9 @@ Configured crypto fidelity tests use `CustomCryptoProbe`, which delegates real
 primitives and can independently fault KDF, Ed25519 generation, signing or
 verification. Ed25519 failures retain the typed `CustomEd25519Fault` operation;
 they do not substitute keys, signatures or verification outcomes.
+
+`ManualPhysicalClock` registers absolute waits against the supplied fixed endpoint
+without awaiting its injectable clock-read path or advancing time. Actual clock
+notifications drive wakeups; rollback and selected timer failures remain typed.
+Required delayed-registration and native-fault tests run in both the focused
+absolute-time-observation and full VM lifecycle inventories.

@@ -1777,3 +1777,22 @@ statistics count terminal outcomes and cannot prove allocation presence or
 retirement. Exact owner Drop, partial admission and cancelled-future regressions
 must establish removal of real original allocations and preservation of foreign
 records; a diagnostic zero count is insufficient.
+
+### Required absolute terminal observation coverage
+
+`just _policy-check check absolute-time-observation` verifies exact source,
+nonignored harness discovery and successful execution for the core terminal
+acknowledgment tests, the real native provider, and `ManualPhysicalClock`.
+The same inventory runs in `ci-vm-session-lifecycle`. Required cases include a
+hung current read, observation-lock contention, delayed checkpoint with endpoint
+priority, native timer failure without invented expiry, unsupported providers,
+and publication under the original guard. Actual provider cases exercise fixed
+endpoints after delayed registration, rollback, native failure custody and real
+native timer wake observations. A focused pass does not prove the broader
+runtime shutdown, command admission, browser execution or enrollment lifecycle.
+
+The fixed-endpoint inventory also discovers and executes the exact physical-
+deadline trait compile-fail doctest. It rejects receipt-generation coordinates;
+positive provider tests simultaneously require the physical coordinate API.
+The manual `TimeError` display and source matches are exhaustive, so new variants
+require an explicit native-source decision at compile time.

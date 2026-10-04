@@ -13,6 +13,7 @@ use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
 };
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::types::window::{PhysicalMillis, WindowPosition};
 use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -22,6 +23,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ControllableTimeSource {
     current_time: Arc<Mutex<u64>>,
+    physical_changed: Arc<tokio::sync::Notify>,
     time_scale: Arc<Mutex<f64>>,
     frozen: Arc<Mutex<bool>>,
     #[allow(dead_code)]
@@ -37,6 +39,7 @@ impl ControllableTimeSource {
     pub fn new(initial_timestamp: u64) -> Self {
         Self {
             current_time: Arc::new(Mutex::new(initial_timestamp)),
+            physical_changed: Arc::new(tokio::sync::Notify::new()),
             time_scale: Arc::new(Mutex::new(1.0)),
             frozen: Arc::new(Mutex::new(false)),
             timeouts: Arc::new(Mutex::new(HashMap::new())),
@@ -59,12 +62,16 @@ impl ControllableTimeSource {
     pub fn advance_time(&self, millis: u64) {
         let mut current = self.current_time.lock().unwrap();
         *current += millis;
+        drop(current);
+        self.physical_changed.notify_waiters();
     }
 
     /// Set absolute time
     pub fn set_time(&self, timestamp: u64) {
         let mut current = self.current_time.lock().unwrap();
         *current = timestamp;
+        drop(current);
+        self.physical_changed.notify_waiters();
     }
 
     /// Freeze time (no automatic advancement)
@@ -115,6 +122,30 @@ impl PhysicalTimeEffects for ControllableTimeSource {
         let scaled = (ms as f64 * scale).round() as u64;
         self.advance_time(scaled);
         Ok(())
+    }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> Result<PhysicalTime, TimeError> {
+        let mut previous = self.current_timestamp();
+        loop {
+            let changed = self.physical_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let now = self.current_timestamp();
+            if now < previous {
+                return Err(TimeError::PhysicalClockRollback {
+                    previous_ms: previous,
+                    observed_ms: now,
+                });
+            }
+            if now >= deadline.value() {
+                return Ok(PhysicalTime::exact(now));
+            }
+            previous = now;
+            changed.await;
+        }
     }
 }
 
@@ -314,6 +345,44 @@ impl TimeScenario {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn required_absolute_deadline_frozen_scaled_clock_needs_actual_progress() {
+        use futures::FutureExt;
+        let clock = ControllableTimeSource::new(100);
+        clock.set_time_scale(100.0);
+        clock.freeze();
+        let wait = clock.wait_until_physical_deadline(WindowPosition::new(500));
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        assert_eq!(
+            clock.current_timestamp(),
+            100,
+            "registration cannot advance simulation"
+        );
+        clock.set_time(499);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.advance_time(1);
+        assert_eq!(wait.await.expect("actual controlled endpoint").ts_ms, 500);
+    }
+
+    #[tokio::test]
+    async fn required_absolute_deadline_shared_control_keeps_rollback_visible() {
+        use futures::FutureExt;
+        let clock = ControllableTimeSource::new(350);
+        let other = clock.clone();
+        let wait = clock.wait_until_physical_deadline(WindowPosition::new(500));
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        other.set_time(300);
+        assert!(matches!(
+            wait.await,
+            Err(TimeError::PhysicalClockRollback {
+                previous_ms: 350,
+                observed_ms: 300
+            })
+        ));
+    }
 
     #[tokio::test]
     async fn test_controllable_time_advancement() {

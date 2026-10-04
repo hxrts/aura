@@ -44,4 +44,13 @@ impl<T: PhysicalTimeEffects + Clone> PhysicalTimeEffects for TimeoutCoordinator<
     async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         self.inner.sleep_ms(ms).await
     }
+
+    async fn wait_until_physical_deadline(
+        &self,
+        deadline: aura_core::types::window::WindowPosition<
+            aura_core::types::window::PhysicalMillis,
+        >,
+    ) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        self.inner.wait_until_physical_deadline(deadline).await
+    }
 }
