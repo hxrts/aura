@@ -78,12 +78,9 @@ pub(super) fn handle_neighborhood_dispatch(
                     SemanticOperationKind::RevokeModerator
                 },
             );
-            (cb.neighborhood.on_set_moderator)(
-                new_state.neighborhood.entered_home_id.clone(),
-                target_id.to_string(),
-                assign,
-                operation,
-            );
+            // The workflows act on the selected (entered) home and reject an
+            // explicit scope hint (authoritative-ref boundary, eb32244d).
+            (cb.neighborhood.on_set_moderator)(None, target_id.to_string(), assign, operation);
             new_state.modal_queue.dismiss();
         }
         DispatchCommand::OpenAccessOverrideModal => {
@@ -101,13 +98,12 @@ pub(super) fn handle_neighborhood_dispatch(
             new_state.modal_queue.dismiss();
             let app_core = app_core_for_ceremony;
             let update_tx = update_tx_for_ceremony;
-            let home_id = new_state.neighborhood.entered_home_id.clone();
             let target_for_toast = target_id.clone();
             let tasks = tasks_for_events;
             tasks.spawn(async move {
                 match access_workflows::set_access_override(
                     app_core.raw(),
-                    home_id.as_deref(),
+                    None,
                     target_id,
                     access_level.into(),
                 )
@@ -151,12 +147,11 @@ pub(super) fn handle_neighborhood_dispatch(
             new_state.modal_queue.dismiss();
             let app_core = app_core_for_ceremony;
             let update_tx = update_tx_for_ceremony;
-            let home_id = new_state.neighborhood.entered_home_id.clone();
             let tasks = tasks_for_events;
             tasks.spawn(async move {
                 match access_workflows::configure_home_capabilities(
                     app_core.raw(),
-                    home_id.as_deref(),
+                    None,
                     &config.full_csv(),
                     &config.partial_csv(),
                     &config.limited_csv(),

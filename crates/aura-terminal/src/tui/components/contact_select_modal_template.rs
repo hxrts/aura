@@ -122,7 +122,9 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
                         Theme::PRIMARY
                     };
 
-                    let name = contact.nickname.clone();
+                    // The nickname is the local override and often empty; show what
+                    // every other list shows (work/8.md Task 10, F15/F16 run 147).
+                    let name = contact.display_name();
                     let id = contact.id.clone();
                     let pointer = if is_selected { "➤ " } else { "  " };
                     let checkbox = if multi_select {

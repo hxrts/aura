@@ -1236,7 +1236,8 @@ fn submit_simple_modal_action(
             true
         }
         SimpleModalSubmitAction::AssignModerator => {
-            let Some(selected_home_id) = selected_home_id else {
+            // A selected home is required; the workflow acts on that selection.
+            let Some(_selected_home_id) = selected_home_id else {
                 controller.runtime_error_toast("Select an entered home first");
                 rerender();
                 return true;
@@ -1278,19 +1279,11 @@ fn submit_simple_modal_action(
             let rerender_for_moderator = rerender.clone();
             spawn_ui(async move {
                 let result = if member.is_moderator {
-                    moderator_workflows::revoke_moderator(
-                        &app_core,
-                        Some(selected_home_id.as_str()),
-                        &member.authority_id,
-                    )
-                    .await
+                    moderator_workflows::revoke_moderator(&app_core, None, &member.authority_id)
+                        .await
                 } else {
-                    moderator_workflows::grant_moderator(
-                        &app_core,
-                        Some(selected_home_id.as_str()),
-                        &member.authority_id,
-                    )
-                    .await
+                    moderator_workflows::grant_moderator(&app_core, None, &member.authority_id)
+                        .await
                 };
 
                 match result {
@@ -1343,7 +1336,8 @@ fn submit_simple_modal_action(
             let Some(model) = current_model else {
                 return false;
             };
-            let Some(selected_home_id) = selected_home_id else {
+            // A selected home is required; the workflow acts on that selection.
+            let Some(_selected_home_id) = selected_home_id else {
                 controller.runtime_error_toast("Select an entered home first");
                 rerender();
                 return true;
@@ -1372,7 +1366,7 @@ fn submit_simple_modal_action(
             spawn_ui(async move {
                 match access_workflows::set_access_override(
                     &app_core,
-                    Some(selected_home_id.as_str()),
+                    None,
                     authority_id,
                     access_level,
                 )
@@ -1397,7 +1391,8 @@ fn submit_simple_modal_action(
             let Some(model) = current_model else {
                 return false;
             };
-            let Some(selected_home_id) = selected_home_id else {
+            // A selected home is required; the workflow acts on that selection.
+            let Some(_selected_home_id) = selected_home_id else {
                 controller.runtime_error_toast("Select an entered home first");
                 rerender();
                 return true;
@@ -1421,7 +1416,7 @@ fn submit_simple_modal_action(
             spawn_ui(async move {
                 match access_workflows::configure_home_capabilities(
                     &app_core,
-                    Some(selected_home_id.as_str()),
+                    None,
                     &full_caps,
                     &partial_caps,
                     &limited_caps,
