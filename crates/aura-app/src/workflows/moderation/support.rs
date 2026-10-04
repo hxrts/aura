@@ -202,8 +202,17 @@ pub(super) async fn commit_and_fanout(
         }
     }
 
+    // The fact is committed; delivery to each peer is best-effort so an
+    // offline peer cannot turn a committed action into a reported failure
+    // (a retry would commit it twice). Peers catch up through journal sync.
     for peer in fanout {
-        send_moderation_fact_with_retry(runtime, peer, scope.context_id, &fact).await?;
+        let delivery =
+            send_moderation_fact_with_retry(runtime, peer, scope.context_id, &fact).await;
+        #[cfg(feature = "instrumented")]
+        if let Err(error) = &delivery {
+            tracing::warn!(peer = %peer, error = %error, "moderation fact delivery deferred to sync");
+        }
+        let _ = delivery;
     }
 
     Ok(())

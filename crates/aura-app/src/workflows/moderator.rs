@@ -294,9 +294,8 @@ pub async fn grant_moderator_resolved(
         if peer == actor {
             continue;
         }
-        send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact)
-            .await
-            .map_err(|e| super::error::runtime_call("Send moderator grant fact", e))?;
+        // Committed above; delivery is best-effort and peers catch up via sync.
+        let _ = send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
     }
 
     // Observed UI mirror.
@@ -420,9 +419,8 @@ pub async fn revoke_moderator_resolved(
         if peer == actor {
             continue;
         }
-        send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact)
-            .await
-            .map_err(|e| super::error::runtime_call("Send moderator revoke fact", e))?;
+        // Committed above; delivery is best-effort and peers catch up via sync.
+        let _ = send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
     }
 
     let mut homes = homes_signal_snapshot(app_core).await?;
