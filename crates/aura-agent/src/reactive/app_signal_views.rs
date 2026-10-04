@@ -1089,6 +1089,25 @@ impl HomeSignalView {
                 });
                 true
             }
+            // Committed by `set_access_override` and sent to the home's
+            // members; without this the target never saw its override and the
+            // setter lost it on restart (run 148, work/8.md Task 10 F16).
+            SocialFact::AccessOverrideSet {
+                authority_id,
+                home_id,
+                access_level,
+                ..
+            } => {
+                let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+                let Some(home) = homes.home_mut(&home_id) else {
+                    return false;
+                };
+                if home.access_overrides.get(&authority_id) == Some(&access_level) {
+                    return false;
+                }
+                home.set_access_override(authority_id, access_level);
+                true
+            }
             SocialFact::HomeJoinedNeighborhood {
                 home_id,
                 neighborhood_id,
@@ -2618,6 +2637,48 @@ mod tests {
             .home_state(&ChannelId::from_bytes([44u8; 32]))
             .unwrap();
         assert!(home.mute_list.contains_key(&target));
+    }
+
+    // work/8.md Task 10 (F16): an access override committed by a home's
+    // moderator reaches the home view on every member and after restart.
+    #[tokio::test]
+    async fn home_signal_view_materializes_access_overrides() {
+        let reactive = ReactiveHandler::new();
+        let context = ContextId::new_from_entropy([7u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let target = AuthorityId::new_from_entropy([8u8; 32]);
+        let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+        let view = HomeSignalView::new(target, reactive.clone());
+        let home_id = aura_social::HomeId::from_bytes([46u8; 32]);
+        let override_fact = || {
+            fact_from_relational(
+                SocialFact::access_override_set_ms(
+                    target,
+                    home_id,
+                    context,
+                    aura_social::AccessLevel::Partial,
+                    70,
+                )
+                .to_generic(),
+            )
+        };
+        view.update(&[
+            fact_from_relational(
+                SocialFact::home_created_ms(home_id, context, 50, owner, "Den".to_string())
+                    .to_generic(),
+            ),
+            override_fact(),
+        ])
+        .await;
+        view.update(&[override_fact()]).await; // replay is a no-op
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes([46u8; 32]))
+            .expect("home");
+        assert_eq!(
+            home.access_overrides.get(&target),
+            Some(&aura_social::AccessLevel::Partial)
+        );
     }
 
     // work/8.md Task 51: neighborhoods materialize from committed facts (so a
