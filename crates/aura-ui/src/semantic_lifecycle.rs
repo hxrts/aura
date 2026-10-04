@@ -553,6 +553,37 @@ mod tests {
     }
 
     #[test]
+    fn failed_owner_exports_failure_code() {
+        let controller = controller();
+        let owner = UiLocalOperationOwner::submit(
+            controller.clone(),
+            OperationId::ban_actor(),
+            SemanticOperationKind::BanActor,
+        );
+        owner.fail_with(SemanticOperationError::new(
+            SemanticFailureDomain::Command,
+            SemanticFailureCode::PermissionDenied,
+        ));
+
+        let snapshot = controller.semantic_model_snapshot();
+        let operation = snapshot
+            .operations
+            .iter()
+            .find(|operation| operation.id == OperationId::ban_actor())
+            .expect("ban operation exported");
+        assert_eq!(
+            operation.state,
+            aura_app::ui::contract::OperationState::Failed
+        );
+        assert_eq!(
+            operation.failure_code,
+            Some(SemanticFailureCode::PermissionDenied)
+        );
+        let json = serde_json::to_string(operation).unwrap();
+        assert!(json.contains("\"failure_code\":\"permission_denied\""));
+    }
+
+    #[test]
     fn dropped_owner_publishes_failure() {
         let controller = controller();
         let _owner = UiLocalOperationOwner::submit(

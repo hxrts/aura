@@ -1,5 +1,5 @@
 use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot, OperationState};
-use aura_app::ui_contract::SemanticOperationCausality;
+use aura_app::ui_contract::{SemanticFailureCode, SemanticOperationCausality};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -7,6 +7,7 @@ struct TrackedOperation {
     instance_id: OperationInstanceId,
     causality: Option<SemanticOperationCausality>,
     state: OperationState,
+    failure_code: Option<SemanticFailureCode>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -65,6 +66,7 @@ impl OperationTracker {
                     instance_id,
                     causality: None,
                     state,
+                    failure_code: None,
                 },
             );
             return;
@@ -110,6 +112,7 @@ impl OperationTracker {
                             instance_id,
                             causality,
                             state,
+                            failure_code: None,
                         },
                     );
                     return;
@@ -144,6 +147,22 @@ impl OperationTracker {
         })
     }
 
+    /// Attach the owner-reported failure code to a failed operation instance.
+    pub(super) fn set_failure_code(
+        &mut self,
+        operation_id: &OperationId,
+        instance_id: Option<&OperationInstanceId>,
+        code: SemanticFailureCode,
+    ) {
+        if let Some(entry) = self.entries.get_mut(operation_id) {
+            if entry.state == OperationState::Failed
+                && instance_id.map_or(true, |instance| *instance == entry.instance_id)
+            {
+                entry.failure_code = Some(code);
+            }
+        }
+    }
+
     pub(super) fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
         self.entries.get(operation_id).map(|entry| entry.state)
     }
@@ -155,6 +174,7 @@ impl OperationTracker {
                 id: id.clone(),
                 instance_id: tracked.instance_id.clone(),
                 state: tracked.state,
+                failure_code: tracked.failure_code,
             })
             .collect()
     }

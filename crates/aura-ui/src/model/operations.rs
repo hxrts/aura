@@ -50,6 +50,7 @@ impl UiModel {
                 id: operation_id.clone(),
                 instance_id,
                 state,
+                failure_code: None,
             };
             self.operation_causalities.insert(operation_id, None);
             return;
@@ -59,6 +60,7 @@ impl UiModel {
             id: operation_id.clone(),
             instance_id: OperationInstanceId(format!("op-{}", self.operation_instance_key)),
             state,
+            failure_code: None,
         });
         self.operation_causalities.insert(operation_id, None);
     }
@@ -105,6 +107,7 @@ impl UiModel {
                         id: operation_id.clone(),
                         instance_id,
                         state,
+                        failure_code: None,
                     });
                     self.operation_causalities.insert(operation_id, causality);
                     return;
@@ -147,6 +150,22 @@ impl UiModel {
         self.operation_causalities.insert(operation_id, causality);
     }
 
+    /// Attach the owner-reported failure code to the matching failed instance.
+    pub(super) fn set_operation_failure_code(
+        &mut self,
+        operation_id: &OperationId,
+        instance_id: Option<&OperationInstanceId>,
+        code: Option<aura_app::ui_contract::SemanticFailureCode>,
+    ) {
+        if let Some(operation) = self.operations.iter_mut().find(|operation| {
+            &operation.id == operation_id
+                && operation.state == OperationState::Failed
+                && instance_id.map_or(true, |instance| *instance == operation.instance_id)
+        }) {
+            operation.failure_code = code;
+        }
+    }
+
     pub(super) fn clear_operation(&mut self, operation_id: &OperationId) {
         self.operations
             .retain(|operation| &operation.id != operation_id);
@@ -171,8 +190,17 @@ impl UiController {
             }
             _ => OperationState::Submitting,
         };
+        let failure_code = status.error.as_ref().map(|error| error.code);
         let mut model = write_model(&self.model);
-        model.set_authoritative_operation_state(operation_id, instance_id, causality, next_state);
+        model.set_authoritative_operation_state(
+            operation_id.clone(),
+            instance_id.clone(),
+            causality,
+            next_state,
+        );
+        if next_state == OperationState::Failed {
+            model.set_operation_failure_code(&operation_id, instance_id.as_ref(), failure_code);
+        }
         let snapshot = model.semantic_snapshot();
         drop(model);
         self.publish_ui_snapshot(snapshot);

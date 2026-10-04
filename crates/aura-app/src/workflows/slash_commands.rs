@@ -686,14 +686,14 @@ fn classification_to_semantic_error(
         CommandTerminalReasonCode::MissingActiveContext => {
             SemanticFailureCode::MissingAuthoritativeContext
         }
-        CommandTerminalReasonCode::None
-        | CommandTerminalReasonCode::PermissionDenied
+        CommandTerminalReasonCode::PermissionDenied
         | CommandTerminalReasonCode::NotMember
+        | CommandTerminalReasonCode::Muted
+        | CommandTerminalReasonCode::Banned => SemanticFailureCode::PermissionDenied,
+        CommandTerminalReasonCode::None
         | CommandTerminalReasonCode::NotFound
         | CommandTerminalReasonCode::InvalidArgument
         | CommandTerminalReasonCode::InvalidState
-        | CommandTerminalReasonCode::Muted
-        | CommandTerminalReasonCode::Banned
         | CommandTerminalReasonCode::Unavailable
         | CommandTerminalReasonCode::Internal => SemanticFailureCode::InternalError,
     };
@@ -734,6 +734,29 @@ mod tests {
     use super::*;
     use crate::workflows::chat_commands::all_command_help;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn denial_reasons_map_to_permission_denied_failure_code() {
+        for reason in [
+            CommandTerminalReasonCode::PermissionDenied,
+            CommandTerminalReasonCode::NotMember,
+            CommandTerminalReasonCode::Muted,
+            CommandTerminalReasonCode::Banned,
+        ] {
+            let error = classification_to_semantic_error(
+                CommandTerminalOutcomeStatus::Denied,
+                reason,
+                "denied".to_string(),
+            );
+            assert_eq!(error.code, SemanticFailureCode::PermissionDenied);
+        }
+        let error = classification_to_semantic_error(
+            CommandTerminalOutcomeStatus::Failed,
+            CommandTerminalReasonCode::Internal,
+            "boom".to_string(),
+        );
+        assert_eq!(error.code, SemanticFailureCode::InternalError);
+    }
 
     #[test]
     fn slash_command_metadata_marks_observed_commands_ownerless() {

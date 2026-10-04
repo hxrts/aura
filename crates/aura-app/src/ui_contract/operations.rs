@@ -216,6 +216,8 @@ pub enum SemanticFailureCode {
     InvitationAlreadySettled,
     /// The inviter did not confirm the acceptance within the bounded wait.
     InviterDidNotConfirm,
+    /// The actor lacks the role or capability the operation requires.
+    PermissionDenied,
     InternalError,
 }
 

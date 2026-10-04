@@ -611,6 +611,7 @@ fn semantic_wait_can_require_operation_state() {
             id: OperationId::invitation_accept_contact(),
             instance_id: OperationInstanceId("test-operation-instance".to_string()),
             state: OperationState::Succeeded,
+            failure_code: None,
         }],
         toasts: Vec::new(),
         runtime_events: Vec::new(),
@@ -643,11 +644,13 @@ fn semantic_wait_operation_state_uses_recorded_handle_for_instance() {
                 id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("stale-instance".to_string()),
                 state: OperationState::Failed,
+                failure_code: None,
             },
             OperationSnapshot {
                 id: OperationId::invitation_accept_contact(),
                 instance_id: OperationInstanceId("fresh-instance".to_string()),
                 state: OperationState::Succeeded,
+                failure_code: None,
             },
         ],
         toasts: Vec::new(),
@@ -692,6 +695,7 @@ fn operation_handle_match_requires_matching_instance_and_state() {
             id: OperationId::invitation_accept_contact(),
             instance_id: OperationInstanceId("handle-instance".to_string()),
             state: OperationState::Succeeded,
+            failure_code: None,
         }],
         toasts: Vec::new(),
         runtime_events: Vec::new(),
@@ -701,6 +705,7 @@ fn operation_handle_match_requires_matching_instance_and_state() {
             id: OperationId::invitation_accept_contact(),
             instance_id: OperationInstanceId("other-instance".to_string()),
             state: OperationState::Succeeded,
+            failure_code: None,
         }],
         ..matching_snapshot.clone()
     };
@@ -709,6 +714,7 @@ fn operation_handle_match_requires_matching_instance_and_state() {
             id: OperationId::invitation_accept_contact(),
             instance_id: OperationInstanceId("handle-instance".to_string()),
             state: OperationState::Failed,
+            failure_code: None,
         }],
         ..matching_snapshot.clone()
     };

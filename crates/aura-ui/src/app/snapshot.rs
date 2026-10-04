@@ -34,6 +34,7 @@ fn upsert_snapshot_operation(
         id: operation_id,
         instance_id: OperationInstanceId("synthetic-operation".to_string()),
         state,
+        failure_code: None,
     });
 }
 

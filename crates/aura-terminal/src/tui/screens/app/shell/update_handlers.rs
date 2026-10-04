@@ -855,6 +855,9 @@ pub(super) async fn process_ui_update_match(
                 }
                 _ => OperationState::Submitting,
             };
+            let failure_code = status.error.as_ref().map(|error| error.code);
+            let failure_instance = instance_id.clone();
+            let failure_operation = operation_id.clone();
             tui.with_mut(|state| {
                 set_authoritative_operation_state_sanctioned(
                     state,
@@ -863,6 +866,15 @@ pub(super) async fn process_ui_update_match(
                     causality,
                     next_state,
                 );
+                if next_state == OperationState::Failed {
+                    if let Some(code) = failure_code {
+                        state.set_operation_failure_code(
+                            &failure_operation,
+                            failure_instance.as_ref(),
+                            code,
+                        );
+                    }
+                }
             });
             if let Some(message) = failure_message.filter(|_| !failure_already_reported) {
                 tui.with_mut(|state| {

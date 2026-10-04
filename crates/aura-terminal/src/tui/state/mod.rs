@@ -262,6 +262,16 @@ impl TuiState {
             .set_authoritative_state(operation_id, instance_id, causality, state);
     }
 
+    pub fn set_operation_failure_code(
+        &mut self,
+        operation_id: &OperationId,
+        instance_id: Option<&OperationInstanceId>,
+        code: aura_app::ui_contract::SemanticFailureCode,
+    ) {
+        self.operation_states
+            .set_failure_code(operation_id, instance_id, code);
+    }
+
     #[must_use]
     pub fn operation_already_failed(
         &self,

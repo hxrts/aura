@@ -44,6 +44,9 @@ pub struct OperationSnapshot {
     pub id: OperationId,
     pub instance_id: OperationInstanceId,
     pub state: OperationState,
+    /// Typed failure code when `state` is `Failed` and the owner reported one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<super::SemanticFailureCode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

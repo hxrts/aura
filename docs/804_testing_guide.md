@@ -82,6 +82,8 @@ If a migrated parity-critical flow needs both actor and move semantics, the spli
 
 `UiSnapshot` and render-convergence data are authoritative. Observation surfaces must be side-effect free. Recovery and retries must be explicit and separate from observation.
 
+A failed `OperationSnapshot` carries the owner-reported `failure_code` (a `SemanticFailureCode`, serialized in snake case and omitted when absent). Assert refusals on that code, for example `permission_denied` for a moderation command from an actor without the role or capability, not on toast text.
+
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.
 
 Browser semantic observation must fail closed when the published snapshot is unavailable. It must not silently repair by reading a live controller or model snapshot behind the harness bridge. Channel-binding responses must either carry authoritative context materialization or fail explicitly. Selected ids or labels alone are not semantic bindings.

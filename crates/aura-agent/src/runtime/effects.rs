@@ -1128,6 +1128,8 @@ impl AuraEffectSystem {
     }
 
     /// Record that `peer` was verified reachable at `now_ms`.
+    // Only the native LAN ingress path records reachability.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn record_peer_reachable(&self, peer: AuthorityId, now_ms: u64) {
         if peer != self.authority_id {
             self.transport.record_peer_reachable(peer, now_ms);
