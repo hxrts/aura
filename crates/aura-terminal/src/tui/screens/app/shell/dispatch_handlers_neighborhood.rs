@@ -98,7 +98,13 @@ pub(super) fn handle_neighborhood_dispatch(
             new_state.modal_queue.dismiss();
             let app_core = app_core_for_ceremony;
             let update_tx = update_tx_for_ceremony;
-            let target_for_toast = target_id.clone();
+            // Name the contact in the toast rather than its raw authority id.
+            let target_for_toast = shared_contacts_for_dispatch
+                .read()
+                .iter()
+                .find(|contact| contact.id == target_id.to_string())
+                .map(|contact| contact.display_name())
+                .unwrap_or_else(|| target_id.to_string());
             let tasks = tasks_for_events;
             tasks.spawn(async move {
                 match access_workflows::set_access_override(

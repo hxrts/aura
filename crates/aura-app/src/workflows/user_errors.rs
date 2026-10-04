@@ -45,6 +45,11 @@ pub fn classify(raw: &str) -> UserFacingError {
             crate::workflows::budget::MAX_NEIGHBORHOODS
         ));
     }
+    if lowered.contains("only members can be designated as moderators") {
+        return UserFacingError::Sentence(
+            "Only home members can be moderators; this person is a participant".to_string(),
+        );
+    }
     if lowered.contains("home at member capacity") {
         return UserFacingError::Sentence(format!(
             "This home already has the maximum of {} members",
@@ -89,6 +94,12 @@ mod tests {
         assert_eq!(
             classify("Internal error: Home at member capacity (8/8)"),
             UserFacingError::Sentence("This home already has the maximum of 8 members".to_string())
+        );
+        assert_eq!(
+            classify("Operation failed: Invalid: Only members can be designated as moderators"),
+            UserFacingError::Sentence(
+                "Only home members can be moderators; this person is a participant".to_string()
+            )
         );
     }
 
