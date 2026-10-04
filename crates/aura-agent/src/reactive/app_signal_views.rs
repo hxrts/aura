@@ -1036,6 +1036,7 @@ impl HomeSignalView {
         homes: &mut HomesState,
         fact: SocialFact,
         neighborhood_names: &std::collections::HashMap<String, String>,
+        own_authority: &AuthorityId,
     ) -> bool {
         match fact {
             SocialFact::HomeCreated {
@@ -1050,13 +1051,14 @@ impl HomeSignalView {
                 if homes.has_home(&home_id) {
                     return false;
                 }
-                let home = HomeState::new(
+                let mut home = HomeState::new(
                     home_id,
                     Some(name),
                     creator_id,
                     created_at.ts_ms,
                     context_id,
                 );
+                home.designate_creator_moderator(&creator_id, own_authority);
                 tracing::info!(home_id = %home_id, context_id = %context_id, "materialized home from HomeCreated fact");
                 let first_home = homes.is_empty();
                 let _ = homes.add_home(home);
@@ -1190,7 +1192,12 @@ impl ReactiveView for HomeSignalView {
 
                 if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
                     if let Some(social) = SocialFact::from_envelope(envelope) {
-                        changed |= Self::apply_social_fact(&mut homes, social, &neighborhood_names);
+                        changed |= Self::apply_social_fact(
+                            &mut homes,
+                            social,
+                            &neighborhood_names,
+                            &self.own_authority,
+                        );
                     }
                     continue;
                 }
@@ -2618,6 +2625,35 @@ mod tests {
         assert!(home_state.ban_list.contains_key(&target));
         assert_eq!(home_state.ban_list.get(&target).unwrap().reason, "spamming");
         assert_eq!(home_state.id, home_id);
+    }
+
+    #[tokio::test]
+    async fn home_created_designates_creator_moderator_for_each_viewer() {
+        let creator = AuthorityId::new_from_entropy([21u8; 32]);
+        let other = AuthorityId::new_from_entropy([22u8; 32]);
+        let context_id = ContextId::new_from_entropy([23u8; 32]);
+        let home_id = aura_social::HomeId::from_bytes([24u8; 32]);
+        for (viewer, expected) in [
+            (creator, aura_app::views::home::HomeRole::Moderator),
+            (other, aura_app::views::home::HomeRole::Participant),
+        ] {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let view = HomeSignalView::new(viewer, reactive.clone());
+            let created =
+                SocialFact::home_created_ms(home_id, context_id, 1, creator, "Den".to_string())
+                    .to_generic();
+            view.update(&[fact_from_relational(created)]).await;
+            let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+            let home = homes
+                .home_state(&ChannelId::from_bytes([24u8; 32]))
+                .unwrap();
+            assert_eq!(home.my_role, expected);
+            assert_eq!(
+                home.member(&creator).unwrap().role,
+                aura_app::views::home::HomeRole::Moderator
+            );
+        }
     }
 
     #[tokio::test]

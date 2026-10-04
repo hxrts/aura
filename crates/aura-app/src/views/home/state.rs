@@ -174,6 +174,22 @@ impl HomeState {
         self.access_overrides.get(authority_id).copied()
     }
 
+    /// Record home creation as the creator's initial moderator designation
+    /// (docs/115 §3.3: the creator is the sole member, so creation is that
+    /// governance decision) and set the viewer's own role accordingly.
+    pub fn designate_creator_moderator(&mut self, creator: &AuthorityId, viewer: &AuthorityId) {
+        if let Some(member) = self.member_mut(creator) {
+            member.role = HomeRole::Moderator;
+        }
+        self.my_role = if creator == viewer {
+            HomeRole::Moderator
+        } else {
+            self.member(viewer)
+                .map(|member| member.role)
+                .unwrap_or(HomeRole::Participant)
+        };
+    }
+
     /// Effective access level of an authority in this home, when it can be
     /// determined from home-local state: an explicit override wins, otherwise
     /// a member of the home has Full (same-home) access. Returns `None` for a

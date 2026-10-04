@@ -471,6 +471,7 @@ async fn create_home_with_creator(
         timestamp_ms,
         context_id,
     );
+    home.designate_creator_moderator(&creator, &creator);
 
     let (homes, neighborhood) = {
         let mut core = app_core.write().await;
