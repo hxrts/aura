@@ -1200,7 +1200,9 @@ impl ReactiveView for HomeSignalView {
 
                 match envelope.type_id.as_str() {
                     HOME_BAN_FACT_TYPE_ID => {
-                        if let Some(ban) = HomeBanFact::from_envelope(envelope) {
+                        if let Some(ban) = HomeBanFact::from_envelope(envelope).filter(|ban| {
+                            home_state.actor_may_moderate(&ban.actor_authority, "moderate:ban")
+                        }) {
                             let record = BanRecord {
                                 authority_id: ban.banned_authority,
                                 reason: ban.reason,
@@ -1213,14 +1215,21 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                     HOME_UNBAN_FACT_TYPE_ID => {
-                        if let Some(unban) = HomeUnbanFact::from_envelope(envelope) {
+                        if let Some(unban) =
+                            HomeUnbanFact::from_envelope(envelope).filter(|unban| {
+                                home_state
+                                    .actor_may_moderate(&unban.actor_authority, "moderate:ban")
+                            })
+                        {
                             if home_state.remove_ban(&unban.unbanned_authority).is_some() {
                                 changed = true;
                             }
                         }
                     }
                     HOME_MUTE_FACT_TYPE_ID => {
-                        if let Some(mute) = HomeMuteFact::from_envelope(envelope) {
+                        if let Some(mute) = HomeMuteFact::from_envelope(envelope).filter(|mute| {
+                            home_state.actor_may_moderate(&mute.actor_authority, "moderate:mute")
+                        }) {
                             let record = MuteRecord {
                                 authority_id: mute.muted_authority,
                                 duration_secs: mute.duration_secs,
@@ -1233,14 +1242,21 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                     HOME_UNMUTE_FACT_TYPE_ID => {
-                        if let Some(unmute) = HomeUnmuteFact::from_envelope(envelope) {
+                        if let Some(unmute) =
+                            HomeUnmuteFact::from_envelope(envelope).filter(|unmute| {
+                                home_state
+                                    .actor_may_moderate(&unmute.actor_authority, "moderate:mute")
+                            })
+                        {
                             if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
                                 changed = true;
                             }
                         }
                     }
                     HOME_KICK_FACT_TYPE_ID => {
-                        if let Some(kick) = HomeKickFact::from_envelope(envelope) {
+                        if let Some(kick) = HomeKickFact::from_envelope(envelope).filter(|kick| {
+                            home_state.actor_may_moderate(&kick.actor_authority, "moderate:kick")
+                        }) {
                             let record = KickRecord {
                                 authority_id: kick.kicked_authority,
                                 channel: kick.channel_id,
@@ -1254,7 +1270,9 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                     HOME_PIN_FACT_TYPE_ID => {
-                        if let Some(pin) = HomePinFact::from_envelope(envelope) {
+                        if let Some(pin) = HomePinFact::from_envelope(envelope).filter(|pin| {
+                            home_state.actor_may_moderate(&pin.actor_authority, "pin_content")
+                        }) {
                             home_state.pin_message_with_meta(PinnedMessageMeta {
                                 message_id: pin.message_id,
                                 pinned_by: pin.actor_authority,
@@ -1264,14 +1282,22 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                     HOME_UNPIN_FACT_TYPE_ID => {
-                        if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
+                        if let Some(unpin) =
+                            HomeUnpinFact::from_envelope(envelope).filter(|unpin| {
+                                home_state.actor_may_moderate(&unpin.actor_authority, "pin_content")
+                            })
+                        {
                             if home_state.unpin_message(&unpin.message_id) {
                                 changed = true;
                             }
                         }
                     }
                     HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
-                        if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
+                        if let Some(grant) =
+                            HomeGrantModeratorFact::from_envelope(envelope).filter(|grant| {
+                                home_state.actor_may_designate_moderators(&grant.actor_authority)
+                            })
+                        {
                             if let Some(member) = home_state.member_mut(&grant.target_authority) {
                                 if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
                                     member.role = HomeRole::Moderator;
@@ -1290,7 +1316,11 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                     HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
-                        if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
+                        if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope)
+                            .filter(|revoke| {
+                                home_state.actor_may_designate_moderators(&revoke.actor_authority)
+                            })
+                        {
                             if let Some(member) = home_state.member_mut(&revoke.target_authority) {
                                 if matches!(member.role, HomeRole::Moderator) {
                                     member.role = HomeRole::Member;
@@ -1491,6 +1521,12 @@ impl ChatSignalView {
         if candidates
             .iter()
             .any(|home| home.is_muted(&sender_id, sent_at_ms))
+        {
+            return false;
+        }
+        if candidates
+            .iter()
+            .any(|home| !home.allows_access_capability(&sender_id, "send_message"))
         {
             return false;
         }
@@ -2060,13 +2096,17 @@ mod tests {
         register_app_signals(reactive).await.unwrap();
 
         let home_id = ChannelId::from_bytes([7u8; 32]);
-        let home_state = HomeState::new(
+        let mut home_state = HomeState::new(
             home_id,
             Some("test-home".to_string()),
             AuthorityId::new_from_entropy([1u8; 32]),
             0,
             context,
         );
+        // The creator is designated moderator so its moderation facts apply.
+        if let Some(creator) = home_state.member_mut(&AuthorityId::new_from_entropy([1u8; 32])) {
+            creator.role = aura_app::views::home::HomeRole::Moderator;
+        }
 
         let mut homes = HomesState::new();
         let result = homes.add_home(home_state);
@@ -2412,6 +2452,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sender_allowed_for_context_denies_limited_access_sender() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([45u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive.clone(), effects);
+        let context_id = ContextId::new_from_entropy([46u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([47u8; 32]);
+        let home_id = ChannelId::from_bytes([48u8; 32]);
+
+        let mut home = HomeState::new(
+            home_id,
+            Some("home".to_string()),
+            own_authority,
+            0,
+            context_id,
+        );
+        home.add_member(aura_app::views::home::HomeMember {
+            id: sender_id,
+            name: "sender".to_string(),
+            role: aura_app::views::home::HomeRole::Participant,
+            is_online: true,
+            joined_at: 1,
+            last_seen: Some(1),
+            storage_allocated: 0,
+        });
+        let mut homes = HomesState::new();
+        homes.add_home(home.clone());
+        reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
+        assert!(
+            view.sender_allowed_for_context(context_id, home_id, sender_id, 1, false)
+                .await
+        );
+
+        home.set_access_override(sender_id, aura_social::AccessLevel::Limited);
+        let mut homes = HomesState::new();
+        homes.add_home(home);
+        reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
+        assert!(
+            !view
+                .sender_allowed_for_context(context_id, home_id, sender_id, 2, false)
+                .await,
+            "a Limited override removes send_message"
+        );
+    }
+
+    #[tokio::test]
     async fn sender_allowed_for_context_denies_when_context_is_ambiguous() {
         let reactive = ReactiveHandler::new();
         register_app_signals(&reactive).await.unwrap();
@@ -2528,6 +2621,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn home_signal_view_ignores_moderation_from_non_moderator() {
+        let reactive = ReactiveHandler::new();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let mut homes = setup_homes(&reactive, context_id).await;
+        let member = AuthorityId::new_from_entropy([7u8; 32]);
+        let target = AuthorityId::new_from_entropy([9u8; 32]);
+        {
+            let home = homes.current_home_mut().expect("home exists");
+            home.add_member(aura_app::views::home::HomeMember {
+                id: member,
+                name: "member".to_string(),
+                role: aura_app::views::home::HomeRole::Member,
+                is_online: true,
+                joined_at: 1,
+                last_seen: Some(1),
+                storage_allocated: 0,
+            });
+            reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
+        }
+        let view = HomeSignalView::new(member, reactive.clone());
+
+        let ban = HomeBanFact::new_ms(context_id, None, target, member, "x".to_string(), 999, None)
+            .to_generic();
+        let unknown_actor = AuthorityId::new_from_entropy([8u8; 32]);
+        let grant =
+            HomeGrantModeratorFact::new_ms(context_id, member, unknown_actor, 100).to_generic();
+        view.update(&[fact_from_relational(ban), fact_from_relational(grant)])
+            .await;
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        assert!(!home_state.ban_list.contains_key(&target));
+        assert!(matches!(
+            home_state.member(&member).unwrap().role,
+            aura_app::views::home::HomeRole::Member
+        ));
+    }
+
+    #[tokio::test]
     async fn home_signal_view_updates_moderator_roles() {
         let reactive = ReactiveHandler::new();
         let context_id = ContextId::new_from_entropy([3u8; 32]);
@@ -2631,6 +2763,9 @@ mod tests {
         assert!(home.member(&target).is_some());
 
         // Moderation now applies to the materialized home.
+        // once the actor holds a moderator designation.
+        let designate = HomeGrantModeratorFact::new_ms(new_context, actor, actor, 70).to_generic();
+        view.update(&[fact_from_relational(designate)]).await;
         view.update(&[fact_from_relational(mute)]).await;
         let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home = homes

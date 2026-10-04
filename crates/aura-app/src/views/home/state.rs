@@ -196,6 +196,37 @@ impl HomeState {
         }
     }
 
+    /// Receiver-side check for a moderation or pin fact's actor: the actor
+    /// must be a moderator in the known roster and its access level must
+    /// grant `capability`. An empty roster is treated as unknown and not
+    /// restricted here.
+    pub fn actor_may_moderate(&self, actor: &AuthorityId, capability: &str) -> bool {
+        if self.members.is_empty() {
+            return true;
+        }
+        match self.member(actor) {
+            Some(member) => {
+                matches!(member.role, HomeRole::Moderator)
+                    && self.allows_access_capability(actor, capability)
+            }
+            None => false,
+        }
+    }
+
+    /// Receiver-side check for a moderator designation or revocation: the
+    /// actor must be a threshold member (member or moderator) in the known
+    /// roster with the `grant_moderator` access capability. An empty roster
+    /// is treated as unknown.
+    pub fn actor_may_designate_moderators(&self, actor: &AuthorityId) -> bool {
+        if self.members.is_empty() {
+            return true;
+        }
+        self.member(actor).is_some_and(|member| {
+            member.role.is_threshold_member()
+                && self.allows_access_capability(actor, "grant_moderator")
+        })
+    }
+
     pub fn set_access_override(&mut self, authority_id: AuthorityId, access_level: AccessLevel) {
         self.access_overrides.insert(authority_id, access_level);
     }
