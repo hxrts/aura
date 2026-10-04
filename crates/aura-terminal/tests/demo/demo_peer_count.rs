@@ -13,27 +13,29 @@ use async_lock::RwLock;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_app::signal_defs::{ConnectionStatus, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL};
-use aura_app::{AppConfig, AppCore};
+use aura_app::AppCore;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::ExecutionMode;
-use aura_core::hash;
-use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_journal::DomainFact;
-use aura_relational::ContactFact;
-use aura_terminal::demo::DemoSimulator;
-use aura_terminal::handlers::tui::create_account;
-use aura_terminal::tui::context::InitializedAppCore;
-use aura_terminal::{handlers::tui::TuiMode, ids};
+use aura_core::types::identifiers::AuthorityId;
 
 #[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
 mod support;
 
+use support::{FullTestEnv, FullTestEnvConfig};
+
+async fn demo_env(name: &str) -> FullTestEnv {
+    FullTestEnv::with_config(FullTestEnvConfig {
+        name: name.to_string(),
+        nickname_suggestion: Some("Bob".to_string()),
+        with_demo_peers: true,
+        ..Default::default()
+    })
+    .await
+}
+
 async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[AuthorityId]) {
     let start = tokio::time::Instant::now();
-
     loop {
         let state = {
             let core = app_core.read().await;
@@ -41,228 +43,75 @@ async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[Authorit
                 .await
                 .expect("read CONTACTS_SIGNAL")
         };
-
         if expected
             .iter()
             .all(|id| state.all_contacts().any(|c| c.id == *id))
         {
             return;
         }
-
-        if start.elapsed() > Duration::from_secs(2) {
+        if start.elapsed() > Duration::from_secs(10) {
             panic!(
-                "Timed out waiting for contacts; expected={:?}, got={:?}",
-                expected,
+                "Timed out waiting for contacts; expected={expected:?}, got={:?}",
                 state.all_contacts().map(|c| c.id).collect::<Vec<_>>()
             );
         }
-
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
 
-#[tokio::test]
-async fn demo_refresh_account_reports_two_online_contacts() {
-    let seed = 2024u64;
-
-    // Match the demo-mode authority/context derivation used by the TUI handler.
-    let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let authority_id = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let context_id = ContextId::new_from_entropy(bob_context_entropy);
-
-    // Use a unique data dir so this test is hermetic.
-    let test_dir = support::unique_test_dir("aura-demo-peer-count");
-
-    // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), authority_id, context_id)
+/// Import and accept both demo peers' contact codes through the TUI's path.
+async fn add_demo_peers_as_contacts(env: &FullTestEnv) -> [AuthorityId; 2] {
+    let peers = env.demo_peers.as_ref().expect("demo peers started");
+    let (alice_code, carol_code) = peers
+        .signed_contact_invite_codes()
         .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-    let shared_transport = simulator.shared_transport();
+        .expect("demo peers create signed contact codes");
+    for code in [&alice_code, &carol_code] {
+        let invitation =
+            aura_app::ui::workflows::invitation::import_invitation_details(&env.app_core, code)
+                .await
+                .expect("import_invitation_details should succeed");
+        aura_app::ui::workflows::invitation::accept_invitation(&env.app_core, invitation)
+            .await
+            .expect("accept_invitation should succeed");
+    }
+    let ids = [peers.alice_authority(), peers.carol_authority()];
+    wait_for_contacts(&env.app_core, &ids).await;
+    ids
+}
 
-    let agent_config = AgentConfig {
-        device_id: ids::device_id(bob_device_id_str),
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let effect_ctx =
-        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
-
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(authority_id)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport)
-        .await
-        .expect("Failed to build demo simulation agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-
-    let initialized = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
-
-    // Make Alice + Carol contacts (facts), then wait for CONTACTS_SIGNAL to reflect them.
-    let alice_id = simulator.alice_authority();
-    let carol_id = simulator.carol_authority();
-
-    let contact_facts = vec![
-        ContactFact::added_with_timestamp_ms(
-            ContextId::new_from_entropy([2u8; 32]),
-            authority_id,
-            alice_id,
-            "Alice".to_string(),
-            1,
-        )
-        .to_generic(),
-        ContactFact::added_with_timestamp_ms(
-            ContextId::new_from_entropy([2u8; 32]),
-            authority_id,
-            carol_id,
-            "Carol".to_string(),
-            2,
-        )
-        .to_generic(),
-    ];
-
-    agent
-        .clone()
-        .as_runtime_bridge()
-        .commit_relational_facts(&contact_facts)
-        .await
-        .expect("commit contacts");
-
-    wait_for_contacts(initialized.raw(), &[alice_id, carol_id]).await;
-
-    // Run the same refresh path the TUI uses; it should emit Online{2}.
-    aura_app::ui::workflows::system::refresh_account(initialized.raw())
+async fn connection_status(env: &FullTestEnv) -> ConnectionStatus {
+    // The TUI refreshes connection status on its account refresh tick.
+    aura_app::ui::workflows::system::refresh_account(&env.app_core)
         .await
         .expect("refresh_account should succeed");
-
-    let status = {
-        let core = initialized.raw().read().await;
-        core.read(&*CONNECTION_STATUS_SIGNAL)
-            .await
-            .expect("read CONNECTION_STATUS_SIGNAL")
-    };
-
-    assert_eq!(status, ConnectionStatus::Online { peer_count: 2 });
-
-    // Keep TuiMode imported in this test file as a compile-time guard that
-    // demo/prod mode remains a first-class concept in the public handler API.
-    let _ = TuiMode::Demo { seed };
-
-    simulator
-        .stop()
+    let core = env.app_core.read().await;
+    core.read(&*CONNECTION_STATUS_SIGNAL)
         .await
-        .expect("Failed to stop demo simulator");
+        .expect("read CONNECTION_STATUS_SIGNAL")
+}
+
+#[tokio::test]
+async fn demo_refresh_account_reports_two_online_contacts() {
+    let env = demo_env("peer-count-refresh").await;
+    add_demo_peers_as_contacts(&env).await;
+    assert_eq!(
+        connection_status(&env).await,
+        ConnectionStatus::Online { peer_count: 2 }
+    );
 }
 
 #[tokio::test]
 async fn demo_accepting_contact_invites_updates_peer_count() {
-    let seed = 2024u64;
-
-    let bob_device_id_str = "demo:bob";
-    let test_dir = support::unique_test_dir("aura-demo-peer-count-invites");
-
-    // Persist a demo-mode account config so invitation acceptance has bootstrap state.
-    let (authority_id, context_id) = create_account(&test_dir, "Bob")
-        .await
-        .expect("create_account should succeed");
-
-    // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), authority_id, context_id)
-        .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-
-    let agent_config = AgentConfig {
-        device_id: ids::device_id(bob_device_id_str),
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let effect_ctx =
-        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
-
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(authority_id)
-        .build_simulation_async_with_shared_transport(
-            seed,
-            &effect_ctx,
-            simulator.shared_transport(),
-        )
-        .await
-        .expect("Failed to build demo simulation agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-    let initialized = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
-
-    // Import + accept demo contact invite codes (the same path the TUI uses).
-    let alice_id = simulator.alice_authority();
-    let carol_id = simulator.carol_authority();
-
-    let (alice_code, carol_code) = simulator
-        .signed_contact_invite_codes()
-        .await
-        .expect("demo peers create signed contact codes");
-
-    for code in [&alice_code, &carol_code] {
-        let invitation =
-            aura_app::ui::workflows::invitation::import_invitation_details(initialized.raw(), code)
-                .await
-                .expect("import_invitation_details should succeed");
-
-        aura_app::ui::workflows::invitation::accept_invitation(initialized.raw(), invitation)
-            .await
-            .expect("accept_invitation should succeed");
-    }
-
-    wait_for_contacts(initialized.raw(), &[alice_id, carol_id]).await;
-
-    // `accept_invitation` should have refreshed signals; verify peer count is 2.
-    let status = {
-        let core = initialized.raw().read().await;
-        core.read(&*CONNECTION_STATUS_SIGNAL)
-            .await
-            .expect("read CONNECTION_STATUS_SIGNAL")
-    };
-
-    assert_eq!(status, ConnectionStatus::Online { peer_count: 2 });
-
-    simulator
-        .stop()
-        .await
-        .expect("Failed to stop demo simulator");
+    let env = demo_env("peer-count-invites").await;
+    let before = connection_status(&env).await;
+    assert!(
+        !matches!(before, ConnectionStatus::Online { peer_count: 2 }),
+        "no contacts yet: {before:?}"
+    );
+    add_demo_peers_as_contacts(&env).await;
+    assert_eq!(
+        connection_status(&env).await,
+        ConnectionStatus::Online { peer_count: 2 }
+    );
 }

@@ -226,13 +226,21 @@ async fn test_demo_invitation_codes_are_parseable() {
 async fn test_import_invitation_command_with_demo_codes() {
     println!("\n=== ImportInvitation Command Test ===\n");
 
-    let env = FullTestEnv::new("import-demo").await;
-    let seed = 2024;
-    // Names and seeds must match AgentFactory::create_demo_agents
-    let alice_code = generate_demo_invite_code("Alice", seed);
-    let carol_code = generate_demo_invite_code("Carol", seed + 1);
-    let alice_sender = parse_demo_invite_code(&alice_code).sender_id;
-    let carol_sender = parse_demo_invite_code(&carol_code).sender_id;
+    // Demo peers share this agent's transport so they can confirm the
+    // contact invitations; the codes are what demo mode shows as hints.
+    let env = FullTestEnv::with_config(support::FullTestEnvConfig {
+        name: "import-demo".to_string(),
+        with_demo_peers: true,
+        ..Default::default()
+    })
+    .await;
+    let simulator = env.demo_peers.as_ref().expect("demo peers started");
+    let (alice_code, carol_code) = simulator
+        .signed_contact_invite_codes()
+        .await
+        .expect("demo peers create signed contact codes");
+    let alice_sender = simulator.alice_authority();
+    let carol_sender = simulator.carol_authority();
 
     // Phase 1: Import Alice's invite code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
