@@ -36,7 +36,7 @@ use aura_recovery::guardian_ceremony::CeremonyProposal;
 use aura_relational::ContactFact;
 
 use super::identities::{demo_authority_id, demo_context_id, demo_device_id, GuardianAcceptance};
-use crate::error::TerminalResult;
+use crate::error::{TerminalError, TerminalResult};
 use crate::tui::tasks::UiTaskOwner;
 
 const EXTENDED_DEMO_PEER_NAMES: [&str; 13] = [
@@ -190,6 +190,33 @@ impl DemoSimulator {
 
     pub fn carol_agent(&self) -> Arc<AuraAgent> {
         self.carol.clone()
+    }
+
+    /// Signed contact invitation codes from Alice and Carol to Bob, created
+    /// through each peer's invitation service so they carry a real sender
+    /// proof and import like any other contact code.
+    pub async fn signed_contact_invite_codes(&self) -> TerminalResult<(String, String)> {
+        async fn code_for(
+            agent: &AuraAgent,
+            name: &str,
+            receiver: AuthorityId,
+        ) -> TerminalResult<String> {
+            let invitations = agent
+                .invitations()
+                .map_err(|error| TerminalError::Operation(error.to_string()))?;
+            let invitation = invitations
+                .invite_as_contact(receiver, Some(name.to_string()), None, None, None)
+                .await
+                .map_err(|error| TerminalError::Operation(error.to_string()))?;
+            invitations
+                .export_code(&invitation.invitation_id)
+                .await
+                .map_err(|error| TerminalError::Operation(error.to_string()))
+        }
+        Ok((
+            code_for(&self.alice, "Alice", self.bob_authority).await?,
+            code_for(&self.carol, "Carol", self.bob_authority).await?,
+        ))
     }
 
     pub fn mobile_device_id(&self) -> aura_core::DeviceId {
@@ -1174,5 +1201,44 @@ mod tests {
         assert_ne!(sim.alice_authority(), sim.carol_authority());
         assert_ne!(sim.mobile_authority(), sim.alice_authority());
         sim.stop().await.unwrap();
+    }
+
+    #[test]
+    fn signed_contact_invite_codes_carry_sender_proofs() {
+        // Invitation creation needs the terminal's 32 MiB worker stack.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(signed_contact_invite_codes_body())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    async fn signed_contact_invite_codes_body() {
+        use aura_agent::handlers::ShareableInvitation;
+        let dir = std::env::temp_dir().join("aura-demo-sim-signed-codes");
+        let bob_authority = ids::authority_id("demo:test:bob:authority");
+        let bob_context = ids::context_id("demo:test:bob:context");
+        let sim = DemoSimulator::new(2024, dir, bob_authority, bob_context)
+            .await
+            .unwrap();
+        let (alice_code, carol_code) = sim.signed_contact_invite_codes().await.unwrap();
+        for (code, sender) in [
+            (alice_code, sim.alice_authority()),
+            (carol_code, sim.carol_authority()),
+        ] {
+            let (invitation, proof) = ShareableInvitation::from_code_with_proof(&code).unwrap();
+            assert_eq!(invitation.sender_id, sender);
+            assert!(
+                proof.is_some(),
+                "demo contact codes must carry a sender proof"
+            );
+        }
     }
 }
