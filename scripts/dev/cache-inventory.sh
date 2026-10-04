@@ -22,7 +22,9 @@ printf 'Active-use guard: %s\n' "$state"
 printf 'Open-file scan: %s\n' "$open_scan"
 printf 'Allocated KiB\tAge days\tUse\tLane\n'
 now="$(date +%s)"
-for path in "$target"/*; do
+paths=("$target"/*)
+[[ -L "$target/debug" ]] || paths+=("$target/debug/incremental")
+for path in "${paths[@]}"; do
   [[ -d "$path" && ! -L "$path" ]] || continue
   modified="$(stat -f %m "$path" 2>/dev/null || true)"
   if [[ ! "$modified" =~ ^[0-9]+$ ]]; then
@@ -33,7 +35,7 @@ for path in "$target"/*; do
   [[ "$size" =~ ^[0-9]+$ ]] || size=unavailable
   age=$(((now - modified) / 86400))
   (( age >= 0 )) || age=0
-  lane_name="${path##*/}"
+  lane_name="${path#"$target"/}"
   if [[ "$lane_name" == release && -n "$harness_consumers" ]]; then
     use=harness-consumer
   elif [[ "$open_scan" == available ]] && rg -F -q "$path" <<< "$open_files"; then

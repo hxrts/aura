@@ -28,6 +28,7 @@ printf 'Build context: lane=%s profile=%s target=%s features=%s\n' \
   "${AURA_BUILD_LANE:-unlabelled}" "${AURA_BUILD_PROFILE:-unlabelled}" \
   "${AURA_BUILD_TARGET_TRIPLE:-$rust_host}" "${AURA_BUILD_FEATURES:-unlabelled}"
 printf 'Free: %s KiB\n' "$(free_kib)"
+printf 'Incremental policy: %s\n' "${CARGO_INCREMENTAL:-Cargo default}"
 printf 'Checkout: %s KiB\n' "$(size_kib "$root")"
 
 printf 'Other linked Aura worktrees (separate build caches, KiB):\n'

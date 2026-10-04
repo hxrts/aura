@@ -13,6 +13,12 @@ cap_gib="${AURA_BUILD_TARGET_CAP_GIB:-24}"
 min_free_gib="${AURA_BUILD_MIN_FREE_GIB:-15}"
 emergency_gib="${AURA_BUILD_EMERGENCY_FREE_GIB:-5}"
 poll_seconds="${AURA_BUILD_POLL_SECONDS:-2}"
+# Debug caches accumulate across rebuilds. Keep the measured bounded default,
+# with an explicit opt-in for workloads that benefit from incremental reuse.
+export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+[[ "$CARGO_INCREMENTAL" == 0 || "$CARGO_INCREMENTAL" == 1 ]] || {
+  echo 'build-budget: CARGO_INCREMENTAL must be 0 or 1' >&2; exit 2;
+}
 
 usage() {
   cat <<'EOF'
@@ -22,6 +28,7 @@ Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
 Defaults: target soft cap 24 GiB, admission floor 15 GiB free, emergency floor
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
 AURA_BUILD_EMERGENCY_FREE_GIB (integer GiB). Run inside nix develop.
+Incremental compilation defaults to 0; set CARGO_INCREMENTAL=1 to opt in.
 EOF
 }
 
@@ -131,7 +138,7 @@ sweep() {
 }
 prune_safe_lanes() {
   local mode="$1" candidate
-  local candidates=(wasm-debug dylint debug)
+  local candidates=(wasm-debug dylint debug-incremental debug)
   if (( allow_live_harness == 1 )); then candidates=(wasm-debug); fi
   for candidate in "${candidates[@]}"; do
     if [[ "$mode" == dry ]]; then
@@ -152,6 +159,7 @@ prune_safe_lanes() {
 
 printf 'Budget: target=%s GiB soft; admission=%s GiB free; emergency=%s GiB free\n' \
   "$cap_gib" "$min_free_gib" "$emergency_gib"
+printf 'Build policy: CARGO_INCREMENTAL=%s\n' "$CARGO_INCREMENTAL"
 before_free="$(free_kib)"
 before_target="$(target_kib strict)"
 printf 'Before: free=%s KiB target=%s KiB\n' "$before_free" "$before_target"

@@ -56,7 +56,7 @@ separately, including debug incremental and trybuild caches; it never
 collects another worktree's target.
 Work 8 debug, test, and Clippy rebuilds also produce Cargo artifacts. Route
 each of those commands through the same guard, keeping any chosen Cargo
-profile or incremental environment settings on the command. During an
+profile or explicit incremental override on the command. During an
 approved live LAN run, use:
 
 ```bash
@@ -68,8 +68,14 @@ Replace the Cargo command after `--` for `cargo check`, `cargo clippy`, or
 another package test. Omit `--allow-live-harness` outside a live run. The
 guard refuses admission when another builder is active or free space is below
 the configured floor; wait for the current owner to finish and release an
-idle cache window before retrying. The incremental-cache default remains
-pending the isolated measurement in `work/9.md`.
+idle cache window before retrying. Guarded builds default to
+`CARGO_INCREMENTAL=0`; opt in with `CARGO_INCREMENTAL=1` when the saved rebuild
+time justifies its retained cache. The fixed-source foundation measurement
+retained 289,240 KiB without incremental compilation versus 552,508 KiB after
+an incremental source rebuild (47.6% less). The wrapper's measured rebuild
+times were 16s versus 12s; this is a foundation check, not a whole-workspace
+performance guarantee. The wrapper and saved disk report log the effective
+setting, and the safety fixture verifies both the default and override.
 
 Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
 have stopped. Its startup and per-step preflight refuses active consumers,
@@ -122,6 +128,10 @@ It prints the host and commit before building, enters `nix develop` when
 needed, and accepts `AURA_EXPECT_COMMIT=<full-hash>` to reject a host on a
 different revision or a checkout with uncommitted changes. Use its
 `--dry-run` flag to preview the selected recipe.
+Use `scripts/harness/lan/build.sh all` for the complete terminal, web and
+harness build sequence. It requires a clean checkout, pins the initial commit
+through every step, and stops at the first failure. Run this sequence on one
+host at a time; it does not start an E2E run or modify the other host.
 On Host B, the macOS application firewall may need the newly signed
 `bin/aura` authorized again after a rebuild, as described in `work/8.md`.
 The build helper does not change firewall settings.
@@ -158,6 +168,25 @@ Global Cargo sweeping also skips a target with open files, such as proc-macro
 libraries loaded by `rust-analyzer`; it then considers only fully inactive
 whole lanes. The 24 GiB target is a soft between-build goal, so a lane held
 open by another process may remain above it until that process exits.
+`just prune-inactive-lane debug-incremental --dry-run` previews the complete
+incremental cache independently of sibling debug dependencies. With `--apply`,
+it refuses active compilers, open incremental files and symlinked parents,
+and preserves release outputs and loaded debug libraries. The build and CI
+guards consider this lane before the complete debug lane.
+
+To reproduce the debug cache measurement, run
+`bash scripts/dev/compare-debug-incremental.sh --dry-run` first, then `--apply`
+inside Nix during an idle build window. It checks the actual foundation crate
+with incremental compilation enabled and disabled, measuring a clean check,
+a warm check and a harmless source rebuild. It uses a fixed-commit source
+archive and sequential disposable targets, retains logs under
+`artifacts/disk-budget/debug-comparisons`, and retains its source snapshot on
+failure. It leaves the main checkout's source, target and E2E evidence intact.
+`just ci-build-cache-policy` runs the isolated Bash safety fixtures, including
+default/override inheritance, active-build refusal, symlink containment,
+fixed-commit sequencing, evidence retention and atomic installation. Both
+GitHub Fast CI and `ci-dry-run` require this gate; it performs no real build
+or shared-cache deletion.
 
 ## Creating an Agent
 

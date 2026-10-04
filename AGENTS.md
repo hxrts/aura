@@ -38,6 +38,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Build | `scripts/harness/lan/build.sh <lane>` | Tracked LAN host build entry point with optional `AURA_EXPECT_COMMIT` check |
 | Build | `just disk-report`, `just cache-inventory`, `just build-budget-dry-run` | Read-only disk and cache inventory, cleanup preview |
 | Build | `just prune-inactive-lane wasm-debug --apply` | Guarded whole-lane cleanup when that lane is idle |
+| Build | `just prune-inactive-lane debug-incremental --dry-run` | Preview an idle incremental cache without removing loaded debug libraries |
 | Build | `just check` | Check without building |
 | Build | `just clippy` | Lint (warnings as errors) |
 | Build | `just ci-policy-toolkit-clippy` | Strict all-target lint of the excluded repo-local policy toolkit; also runs in `just ci-clippy` |
@@ -53,6 +54,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Dev | `just watch` | Rebuild on changes |
 | Dev | `just clean` | Clean artifacts |
 | Arch | `just check-arch` | Verify architecture compliance |
+| Test | `just ci-build-cache-policy` | Verify guarded builds, cache cleanup and E2E evidence retention with isolated fixtures |
 | Arch | `just ci-ownership-policy` | Run ownership/runtime boundary enforcement |
 | Arch | `just lint-arch-syntax` | Run Rust-native syntax/policy lints that replaced grep-heavy `arch.sh` checks |
 | Arch | `just ci-annotation-ratchet` | Run changed-files ownership annotation ratchets and ignored-test-count ratchets |
@@ -391,6 +393,11 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 
 ## Usage Efficiency
 
+- Guard repeated Cargo/Dioxus builds with `scripts/dev/build-budget.sh`;
+  it defaults to `CARGO_INCREMENTAL=0`. Opt in explicitly with
+  `CARGO_INCREMENTAL=1` when measured rebuild savings justify cache retention.
+- Use `scripts/harness/lan/build.sh all` for a clean, fixed-commit,
+  sequential terminal/web/harness build cycle on each host.
 - Write new repository automation as Bash `.sh` scripts, not Python scripts.
 - Prefer specific file paths over broad searches
 - Use `just check-arch` before complex refactoring

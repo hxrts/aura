@@ -88,10 +88,20 @@ expect_status() {
 
 reset_case
 expect_status 0 run_budget -- sh -c 'exit 0'
-[[ "$(wc -l < "$CALLS_FILE")" -eq 1 ]]
+[[ "$(wc -l < "$CALLS_FILE")" -eq 2 ]] # Post-build preview, then apply.
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
 [[ "$(awk -F '\t' 'NR == 2 {print NF}' "$project/artifacts/disk-budget/builds.tsv")" -eq 18 ]]
 rg -l 'Build context: lane=test' "$project"/artifacts/disk-budget/report.* >/dev/null
+
+reset_case
+expect_status 0 env -u CARGO_INCREMENTAL bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --no-prune -- sh -c 'test "$CARGO_INCREMENTAL" = 0'
+rg -q 'Build policy: CARGO_INCREMENTAL=0' "$test_root/output"
+reset_case
+expect_status 0 env CARGO_INCREMENTAL=1 bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --no-prune -- sh -c 'test "$CARGO_INCREMENTAL" = 1'
+rg -q 'Build policy: CARGO_INCREMENTAL=1' "$test_root/output"
+reset_case
+expect_status 2 env CARGO_INCREMENTAL=invalid bash "$repo_root/scripts/dev/build-budget.sh" --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" ]]
 
 reset_case
 expect_status 0 run_budget --no-prune -- sh -c 'exit 0'
@@ -128,7 +138,7 @@ mkdir "$project/target"
 reset_case
 printf '%s\n' $((11 * 1024 * 1024)) > "$SIZE_FILE"
 expect_status 0 run_budget -- sh -c 'exit 0'
-[[ "$(wc -l < "$CALLS_FILE")" -eq 3 ]]
+[[ "$(wc -l < "$CALLS_FILE")" -eq 4 ]] # Pre- and post-build preview/apply.
 rg -q -- '--dry-run' "$CALLS_FILE"
 
 reset_case

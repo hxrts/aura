@@ -14,15 +14,16 @@ while [[ $# -gt 0 ]]; do
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|wasm-debug|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|wasm-debug|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
 case "$lane" in
   debug) relative=target/debug ;;
+  debug-incremental) relative=target/debug/incremental ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
   dylint) relative=target/dylint ;;
   release) relative=target/release ;;
-  *) echo 'lane must be debug, wasm-debug, dylint or release' >&2; exit 2 ;;
+  *) echo 'lane must be debug, debug-incremental, wasm-debug, dylint or release' >&2; exit 2 ;;
 esac
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo 'no Cargo.toml in root' >&2; exit 2; }
@@ -30,6 +31,9 @@ root="$(cd "$root" && pwd -P)"
   echo 'target path contains a symlink' >&2; exit 1;
 }
 path="$root/$relative"
+if [[ "$lane" == debug-incremental && -L "$root/target/debug" ]]; then
+  echo 'debug parent is a symlink' >&2; exit 1
+fi
 [[ ! -L "$path" ]] || { echo "lane is a symlink: $path" >&2; exit 1; }
 if [[ ! -d "$path" ]]; then echo "No lane at $path"; exit 0; fi
 size="$(du -sk "$path" | awk 'NR == 1 {print $1}')"
@@ -59,7 +63,8 @@ if printf '%s\n' "$open_files" | rg -F "$path"; then
   exit 1
 fi
 # Inspect again after acquiring the shared lock and checking active users.
-[[ -d "$path" && ! -L "$path" ]] || { echo 'lane changed during preflight' >&2; exit 1; }
+[[ -d "$path" && ! -L "$path" && ! -L "$root/target" ]] || { echo 'lane changed during preflight' >&2; exit 1; }
+[[ "$lane" != debug-incremental || ! -L "$root/target/debug" ]] || { echo 'debug parent changed during preflight' >&2; exit 1; }
 printf 'Removing whole inactive lane: %s (%s KiB)\n' "$path" "$size"
 rm -rf -- "$path"
 printf 'Free after: %s KiB\n' "$(df -Pk "$root" | awk 'NR == 2 {print $4}')"

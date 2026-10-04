@@ -489,6 +489,19 @@ ci-clippy:
 ci-policy-toolkit-clippy:
     cargo clippy --manifest-path toolkit/xtask/Cargo.toml --all-targets -- -D warnings
 
+# Verify cache guards and evidence retention without a real Cargo build.
+ci-build-cache-policy:
+    bash -n scripts/dev/*.sh scripts/harness/lan/build.sh
+    bash scripts/dev/test-build-budget.sh
+    bash scripts/dev/test-prune-ci-cache.sh
+    bash scripts/dev/test-prune-inactive-lane.sh
+    bash scripts/dev/test-lan-build-sequence.sh
+    bash scripts/dev/test-retain-e2e-runs.sh
+    bash scripts/dev/test-lan-retention.sh
+    bash scripts/dev/test-install-aura-binary.sh
+    bash scripts/dev/test-compare-release-scopes.sh
+    bash scripts/dev/compare-debug-incremental.sh --dry-run
+
 # Build check
 ci-build:
     cargo build --workspace -q
@@ -932,13 +945,13 @@ ci-harness-typed-semantic-errors:
     just _policy-check check harness-typed-semantic-errors
 
 ci-harness-typed-json-boundary:
-    just policy-dylint-harness-boundaries
+    just toolkit-dylint-harness-boundaries
 
 ci-harness-move-ownership-boundary:
     just _ownership-lint harness-move-ownership-boundary crates/aura-app crates/aura-terminal crates/aura-web crates/aura-harness
 
 ci-harness-authoritative-fact-boundary:
-    just policy-dylint-harness-boundaries
+    just toolkit-dylint-harness-boundaries
 
 ci-harness-actor-vs-move-ownership:
     just _policy-check check harness-actor-vs-move-ownership
@@ -1187,6 +1200,7 @@ ci-dry-run profile="push":
     # CI / Fast (push + pull_request)
     add_step "CI Dry-Run Parity"         "nix develop .#ci --command just ci-dry-run-parity"
     add_step "Preflight"                  "nix develop --command just ci-preflight"
+    add_step "Build Cache Policy"         "nix develop .#ci --command just ci-build-cache-policy"
     add_step "Format Check"               "nix develop --command just ci-format"
     add_step "Docs Links"                 "nix develop --command just ci-docs-links"
     add_step "Crate Doc Links"            "nix develop --command just ci-crates-doc-links"

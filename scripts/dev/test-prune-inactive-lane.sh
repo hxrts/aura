@@ -46,9 +46,28 @@ expect_status 0 prune --lane wasm-debug --apply
 [[ ! -e "$project/target/wasm32-unknown-unknown/debug" ]]
 [[ -f "$project/target/debug/data" && -f "$project/target/release/keep" ]]
 
+mkdir -p "$project/target/debug/incremental"
+: > "$project/target/debug/incremental/cache"
+expect_status 0 prune --lane debug-incremental --dry-run
+[[ -f "$project/target/debug/incremental/cache" ]]
+printf 'rustc\n' > "$ACTIVE_FILE"
+expect_status 1 prune --lane debug-incremental --apply
+rm "$ACTIVE_FILE"
+printf '%s\n' "$project/target/debug/incremental/cache" > "$OPEN_FILE"
+expect_status 1 prune --lane debug-incremental --apply
+rm "$OPEN_FILE"
+# An analyzer holding a sibling dependency must not block collection of the
+# completed incremental lane or lose its loaded library.
+printf '%s\n' "$project/target/debug/data" > "$OPEN_FILE"
+expect_status 0 prune --lane debug-incremental --apply
+[[ ! -e "$project/target/debug/incremental" && -f "$project/target/debug/data" ]]
+rm "$OPEN_FILE"
+
 rm -rf "$project/target/debug"
 ln -s "$test_root" "$project/target/debug"
 expect_status 1 prune --lane debug --apply
+expect_status 1 prune --lane debug-incremental --dry-run
+expect_status 1 prune --lane debug-incremental --apply
 [[ -d "$test_root" && -f "$project/target/release/keep" ]]
 
 expect_status 0 prune --lane release --dry-run

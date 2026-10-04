@@ -26,6 +26,22 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
+  build-cache-policy:
+    name: Build Cache Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: build-cache-policy
+      - run: nix develop .#ci --command just ci-build-cache-policy
+      - name: Failure bundle
+        if: failure()
+        uses: ./.github/actions/failure-bundle
+        with:
+          name: ci-fast
+          replay-command: nix develop .#ci --command just ci-build-cache-policy
+
   format:
     name: Format Check
     runs-on: ubuntu-latest
