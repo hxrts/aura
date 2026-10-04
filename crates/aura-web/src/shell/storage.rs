@@ -720,15 +720,6 @@ pub(crate) fn persist_demo_tablet_enrollment_code(
     )
 }
 
-pub(crate) fn clear_demo_tablet_enrollment_code(storage_key: &str) -> Result<(), WebUiError> {
-    WebSessionStorage::required(WebUiOperation::ClearPendingDeviceEnrollmentCode)?.remove(
-        storage_key,
-        WebUiOperation::ClearPendingDeviceEnrollmentCode,
-        "WEB_DEMO_TABLET_CODE_CLEAR_FAILED",
-        "demo tablet enrollment code",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

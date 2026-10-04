@@ -72,7 +72,6 @@ impl RuntimeShutdownEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeServiceLifecycleEvent {
-    ReconcileFailed,
     Transition,
     PostStartFailed,
 }
@@ -80,7 +79,6 @@ pub enum RuntimeServiceLifecycleEvent {
 impl RuntimeServiceLifecycleEvent {
     pub const fn as_event_name(self) -> &'static str {
         match self {
-            Self::ReconcileFailed => "runtime.service.lifecycle.reconcile_failed",
             Self::Transition => "runtime.service.lifecycle.transition",
             Self::PostStartFailed => "runtime.service.lifecycle.post_start_failed",
         }

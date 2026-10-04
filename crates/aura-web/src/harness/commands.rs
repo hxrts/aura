@@ -868,7 +868,7 @@ async fn execute_semantic_intent(
                 SemanticOperationKind::ImportDeviceEnrollmentCode,
                 UiOperationTransferScope::ImportDeviceEnrollment,
             )?;
-            let instance = Some(handle.instance_id.clone());
+            let instance = Some(handle.instance_id().clone());
             spawn_handoff_workflow_task(
                 "import_device_enrollment",
                 controller.clone(),

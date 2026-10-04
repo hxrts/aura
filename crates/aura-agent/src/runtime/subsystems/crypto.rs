@@ -497,6 +497,7 @@ mod tests {
     }
 }
 
+#[cfg(unix)]
 #[derive(Debug, thiserror::Error)]
 enum SecretLifetimeHandoffError {
     #[error("original selected secret lifetime handoff already consumed")]

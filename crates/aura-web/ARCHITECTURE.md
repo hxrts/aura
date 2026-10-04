@@ -44,6 +44,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   setup verifier pin or infer that the new device accepted enrollment.
 
 - Browser-only APIs stay in this crate.
+- Enrollment submission reads the exact retained operation instance through
+  `UiOperationHandle::instance_id()` and consumes operation kinds through the
+  app facade. Browser compilation enforces the private-field boundary; it
+  must not be relaxed to accommodate a stale frontend caller.
 - Shared UI behavior remains in `aura-ui`.
 - Browser shell DOM-id resolution reuses the shared typed helper surface from
   `aura-ui` rather than re-opening `web_dom_id().expect(...)` chains at each

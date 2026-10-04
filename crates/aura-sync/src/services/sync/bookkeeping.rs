@@ -90,30 +90,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Clean up sync sessions after completion.
-    pub(super) async fn cleanup_sync_sessions(&self, peers: &[DeviceId]) -> SyncResult<()> {
-        let mut session_manager = self.session_manager.write();
-
-        for &peer in peers {
-            if let Err(e) = session_manager.close_session(peer) {
-                tracing::warn!(
-                    operation_id = JOURNAL_SYNC_OPERATION_ID,
-                    peer_id = %peer,
-                    error = %e,
-                    "Failed to clean up session for peer"
-                );
-            } else {
-                tracing::debug!(
-                    operation_id = JOURNAL_SYNC_OPERATION_ID,
-                    peer_id = %peer,
-                    "Cleaned up sync session for peer"
-                );
-            }
-        }
-
-        Ok(())
-    }
-
     /// Discover available peers via peer_manager.
     pub(super) async fn discover_available_peers(&self) -> SyncResult<Vec<DeviceId>> {
         let peer_manager = self.peer_manager.read();
@@ -178,44 +154,6 @@ impl SyncService {
             .take(max_peers)
             .map(|(peer, _)| peer)
             .collect())
-    }
-
-    /// Create sync sessions for selected peers.
-    pub(super) async fn create_sync_sessions<T: PhysicalTimeEffects>(
-        session_manager: &RwLock<SessionManager<serde_json::Value>>,
-        peers: &[DeviceId],
-        time_effects: &T,
-    ) -> SyncResult<Vec<DeviceId>> {
-        let mut session_peers = Vec::new();
-        let now = time_effects
-            .physical_time()
-            .await
-            .map_err(time_error_to_aura)?;
-
-        let mut manager = session_manager.write();
-        for &peer in peers {
-            match manager.create_session(vec![peer], &now) {
-                Ok(session_id) => {
-                    session_peers.push(peer);
-                    tracing::debug!(
-                        operation_id = JOURNAL_SYNC_OPERATION_ID,
-                        session_id = %session_id,
-                        peer_id = %peer,
-                        "Created auto-sync session for peer"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        operation_id = JOURNAL_SYNC_OPERATION_ID,
-                        peer_id = %peer,
-                        error = %e,
-                        "Failed to create auto-sync session for peer"
-                    );
-                }
-            }
-        }
-
-        Ok(session_peers)
     }
 
     /// Update peer scores based on sync results.

@@ -336,59 +336,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Execute journal sync protocol with peers
-    #[allow(clippy::await_holding_lock)]
-    async fn execute_journal_sync_protocol<E>(
-        &self,
-        effects: &E,
-        peers: &[DeviceId],
-    ) -> SyncResult<Vec<(DeviceId, Option<u64>)>>
-    where
-        E: SyncProtocolEffects,
-    {
-        let mut sync_results = Vec::new();
-        let authority_id = effects.authority_id();
-
-        for &peer in peers {
-            tracing::debug!(
-                operation_id = JOURNAL_SYNC_OPERATION_ID,
-                authority_id = %authority_id,
-                peer_id = %peer,
-                "Executing journal sync with peer"
-            );
-
-            // Clone protocol state to avoid holding lock across await; write back after sync.
-            let mut protocol_clone = { self.journal_sync.write().clone() };
-            let result = protocol_clone.sync_with_peer(effects, peer).await;
-            *self.journal_sync.write() = protocol_clone;
-
-            match result {
-                Ok(synced_operations) => {
-                    sync_results.push((peer, Some(synced_operations)));
-                    tracing::info!(
-                        operation_id = JOURNAL_SYNC_OPERATION_ID,
-                        authority_id = %authority_id,
-                        peer_id = %peer,
-                        synced_operations,
-                        "Successfully synced operations with peer"
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(
-                        operation_id = JOURNAL_SYNC_OPERATION_ID,
-                        authority_id = %authority_id,
-                        peer_id = %peer,
-                        error = %e,
-                        "Failed to sync with peer"
-                    );
-                    sync_results.push((peer, None));
-                }
-            }
-        }
-
-        Ok(sync_results)
-    }
-
     /// Wait for active sessions to complete with timeout
     ///
     /// # Arguments

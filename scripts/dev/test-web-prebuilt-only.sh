@@ -32,7 +32,8 @@ EOF
 chmod +x "$scratch/bin/"* "$project/scripts/web/dx.sh"
 valid_bundle() {
   printf 'index\n' > "$public/index.html"
-  printf 'window.__AURA_HARNESS__ = {};\n' > "$public/assets/app.js"
+  # Asset admission needs the exported marker, without installing a driver.
+  printf 'const __AURA_HARNESS__ = {};\n' > "$public/assets/app.js"
   touch -t 203001010000 "$public/index.html"
   : > "$CALLS_FILE"
 }

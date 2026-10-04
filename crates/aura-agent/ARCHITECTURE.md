@@ -77,6 +77,14 @@ retained failure when reporting health; logs alone do not establish service
 health. Aggregate drain includes descendants through the shared admission
 registry and observes actual future drop before registration removal.
 
+The sync command registry selects the native fallible interval spawner on
+native targets and its supervised local counterpart on WASM. Its service
+implementation follows `RuntimeService`'s platform-specific future contract:
+native futures remain `Send`; browser futures stay on their owning executor.
+Both paths retain the same registry, task group, terminal failure and shutdown
+custody. The native sync-registry regressions and `just ci-agent-wasm` enforce
+this boundary; a successful native build alone cannot establish browser support.
+
 Native required-read normalization classifies actual `AuraError` variants and
 typed budget failures through retained source chains. Known storage, validation,
 permission, network, crypto and serialization failures do not become Internal.

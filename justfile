@@ -658,13 +658,14 @@ ci-choreo-concurrency-contracts:
     AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-concurrency-contracts" \
     cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_concurrent_contracts -- --nocapture
 
-# WASM choreography backend matrix for aura-agent
+# WASM runtime backend matrix and browser harness compilation
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-machine"
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-web --target wasm32-unknown-unknown --features "web,harness"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:

@@ -50,7 +50,6 @@ pub enum PendingAccountBootstrapSource {
 pub enum RuntimeIdentityStageSource {
     HarnessStaging,
     AuthoritySwitch,
-    ImportDeviceEnrollment,
 }
 
 impl BootstrapHandoff {
@@ -79,8 +78,6 @@ impl BootstrapHandoff {
                 match source {
                     RuntimeIdentityStageSource::HarnessStaging => "harness_staging",
                     RuntimeIdentityStageSource::AuthoritySwitch => "authority_switch",
-                    RuntimeIdentityStageSource::ImportDeviceEnrollment =>
-                        "import_device_enrollment",
                 },
                 authority_id,
                 device_id

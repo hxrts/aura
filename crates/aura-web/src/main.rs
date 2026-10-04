@@ -27,7 +27,7 @@ cfg_if! {
             active_storage_prefix, bootstrap_broker_auth_token,
             bootstrap_broker_invitation_token, bootstrap_broker_url,
             clear_pending_device_enrollment_code, clear_storage_key,
-            device_enrollment_bootstrap_name, dual_demo_web_enabled, harness_instance_id,
+            dual_demo_web_enabled, harness_instance_id,
             harness_mode_enabled, load_pending_account_bootstrap,
             load_pending_device_enrollment_code, load_selected_runtime_identity,
             logged_optional, pending_account_bootstrap_key, pending_device_enrollment_code_key,

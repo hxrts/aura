@@ -941,6 +941,14 @@ Stop the run and use `scripts/harness/lan/build.sh web` before retrying.
 negative fixtures. Successful asset admission is build evidence only; observe
 the authoritative frontend readiness and semantic operation contracts normally.
 
+Enrollment submission carries the exact typed instance from the retained
+`UiOperationHandle` accessor into the app-owned workflow. The app facade
+exports the semantic operation kind; private handle fields remain private.
+Compile the actual `web,harness` binary when this bridge changes: an effects
+or agent-only WASM check cannot catch stale frontend imports or field access.
+The required push-time `just ci-agent-wasm` gate also checks this browser binary
+with `web,harness` enabled and warnings treated as errors.
+
 LAN E2E bundles under `.tmp/e2e/run/<host>/artifacts/runs/` are separate from
 Cargo compiler caches. `scripts/harness/lan/drv.sh start <config>` creates a
 unique bundle and active retention manifest using `AURA_E2E_RUN_TOKEN`.
@@ -1352,7 +1360,8 @@ source/discovery/execution inventory; successful zero-test exits do not count.
 
 `just ci-agent-wasm`, invoked by the existing conformance CI workflow, runs
 warnings-as-errors Clippy for the wasm effects library before the agent backend
-matrix. This gates browser secure-provider API and lint regressions that native
+matrix and the actual `aura-web` harness binary. This gates browser
+secure-provider API, frontend facade and lint regressions that native
 Clippy cannot observe.
 
 Capability-boundary changes require the full macro validator regressions and compile-fail suite, followed by ownership CI. Use an exact signature type; when a semantic capability label differs, add `capability_type = Type`. A held runtime receiver can declare `receiver_type = OwnerType` and must pass the generated concrete type check. Do not add decorative capability constants or annotate String/AuraError as authorization evidence. Classify pure validators and observed projections accurately. Readiness publication helpers retain the actual readiness capability through publication. The aggregate requires source attributes, actual discovery and successful exact execution of the full-validator adversarial tests; compile-fail snapshots must be checked against real compiler output.

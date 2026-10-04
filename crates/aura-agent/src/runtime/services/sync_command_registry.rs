@@ -211,23 +211,32 @@ impl SyncCommandRegistryService {
         if auto_sync {
             let registry = self.clone();
             let retained = entry.clone();
+            let round = move || {
+                let command = AdmittedSyncCommandCapability {
+                    registry: registry.clone(),
+                    entry: retained.clone(),
+                };
+                async move {
+                    match command.sync_request(None).await {
+                        Ok(_) => Ok(true),
+                        Err(source) if original_command_closed(&source) => Ok(false),
+                        Err(source) => Err(source),
+                    }
+                }
+            };
+            #[cfg(not(target_arch = "wasm32"))]
             let _owned_round = entry.rounds.spawn_try_interval_until_named(
                 "sync.command.periodic",
                 entry.context.time_effects(),
                 round_interval,
-                move || {
-                    let command = AdmittedSyncCommandCapability {
-                        registry: registry.clone(),
-                        entry: retained.clone(),
-                    };
-                    async move {
-                        match command.sync_request(None).await {
-                            Ok(_) => Ok(true),
-                            Err(source) if original_command_closed(&source) => Ok(false),
-                            Err(source) => Err(source),
-                        }
-                    }
-                },
+                round,
+            );
+            #[cfg(target_arch = "wasm32")]
+            let _owned_round = entry.rounds.spawn_local_try_interval_until_named(
+                "sync.command.periodic",
+                entry.context.time_effects(),
+                round_interval,
+                round,
             );
         }
         Ok(())
@@ -310,7 +319,8 @@ impl SyncCommandRegistryService {
     }
 }
 
-#[async_trait]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeService for SyncCommandRegistryService {
     fn name(&self) -> &'static str {
         "sync_command_registry"

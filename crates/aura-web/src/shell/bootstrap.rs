@@ -97,15 +97,6 @@ pub(crate) async fn stage_initial_web_account_bootstrap(nickname: &str) -> Resul
     Ok(())
 }
 
-pub(crate) fn device_enrollment_bootstrap_name(nickname_suggestion: Option<&str>) -> String {
-    let nickname_suggestion = nickname_suggestion.unwrap_or("").trim();
-    if nickname_suggestion.is_empty() {
-        "Aura User".to_string()
-    } else {
-        nickname_suggestion.to_string()
-    }
-}
-
 pub(crate) async fn submit_runtime_bootstrap_handoff(
     handoff: harness_bridge::BootstrapHandoff,
 ) -> Result<(), WebUiError> {

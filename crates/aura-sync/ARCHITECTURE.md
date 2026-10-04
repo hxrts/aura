@@ -31,6 +31,10 @@ Synchronization protocol providing fact exchange, merkle verification, anti-entr
 ## Invariants
 
 - Sync operations must not bypass guard chain checks in runtime.
+- Required peer synchronization owns protocol execution and session cleanup;
+  unused legacy execution/session helpers must not introduce parallel paths.
+  The required `just ci-agent-wasm` gate checks runtime consumers with warnings
+  treated as errors, including unused private sync helpers.
 - Protocols should operate on explicit inputs (snapshot, budget, timestamp).
 - Merkle verification ensures fact integrity across peers.
 - Peer Biscuit validation must use a configured trust root and concrete sync

@@ -19,8 +19,8 @@ use crate::workflows::{self, AccountCreationStageMode};
 
 use super::bootstrap::submit_runtime_bootstrap_handoff;
 use super::storage::{
-    active_storage_prefix, clear_demo_tablet_enrollment_code, demo_tablet_enrollment_code_key,
-    dual_demo_web_enabled, persist_demo_tablet_enrollment_code,
+    active_storage_prefix, demo_tablet_enrollment_code_key, dual_demo_web_enabled,
+    persist_demo_tablet_enrollment_code,
 };
 use crate::browser_promises::browser_sleep_ms;
 
@@ -292,7 +292,7 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                 aura_app::ui::contract::SemanticOperationKind::ImportDeviceEnrollmentCode,
                 aura_ui::semantic_lifecycle::UiOperationTransferScope::ImportDeviceEnrollment,
             );
-            let instance = Some(handle.instance_id.clone());
+            let instance = Some(handle.instance_id().clone());
             let controller = controller.clone();
             shared_web_task_owner().spawn_local(async move {
                 let app=controller.app_core().clone();

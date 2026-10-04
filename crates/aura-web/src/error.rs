@@ -50,16 +50,6 @@ impl WebUiError {
         Self::new(operation, ErrorCategory::Operation, code, message)
     }
 
-    pub(crate) fn with_operation(&self, operation: WebUiOperation) -> Self {
-        Self {
-            operation,
-            category: self.category,
-            code: self.code,
-            message: self.message.clone(),
-            source: self.source.clone(),
-        }
-    }
-
     pub(crate) fn with_source(
         mut self,
         source: impl std::error::Error + Send + Sync + 'static,
