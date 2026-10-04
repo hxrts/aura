@@ -132,6 +132,9 @@ Use `scripts/harness/lan/build.sh all` for the complete terminal, web and
 harness build sequence. It requires a clean checkout, pins the initial commit
 through every step, and stops at the first failure. Run this sequence on one
 host at a time; it does not start an E2E run or modify the other host.
+LAN browser startup requires the prebuilt harness-enabled bundle and fails if
+it is missing or stale. It cannot quietly start an unguarded Dioxus build or
+clear the serving cache; stop the run and repeat the guarded web build first.
 On Host B, the macOS application firewall may need the newly signed
 `bin/aura` authorized again after a rebuild, as described in `work/8.md`.
 The build helper does not change firewall settings.

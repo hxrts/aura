@@ -933,6 +933,14 @@ Browser harness artifacts are written under `artifacts/harness/browser/`.
 
 ### LAN Run Artifact Retention
 
+The tracked LAN driver sets `AURA_HARNESS_WEB_PREBUILT_ONLY=1`. Its static
+server requires a current `web,harness` bundle; missing, stale or non-harness
+assets fail startup without an implicit Dioxus build or release-cache deletion.
+Stop the run and use `scripts/harness/lan/build.sh web` before retrying.
+`just ci-build-cache-policy` verifies this boundary with isolated positive and
+negative fixtures. Successful asset admission is build evidence only; observe
+the authoritative frontend readiness and semantic operation contracts normally.
+
 LAN E2E bundles under `.tmp/e2e/run/<host>/artifacts/runs/` are separate from
 Cargo compiler caches. `scripts/harness/lan/drv.sh start <config>` creates a
 unique bundle and active retention manifest using `AURA_E2E_RUN_TOKEN`.

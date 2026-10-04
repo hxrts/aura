@@ -491,11 +491,12 @@ ci-policy-toolkit-clippy:
 
 # Verify cache guards and evidence retention without a real Cargo build.
 ci-build-cache-policy:
-    bash -n scripts/dev/*.sh scripts/harness/lan/build.sh
+    bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/web/serve-static.sh
     bash scripts/dev/test-build-budget.sh
     bash scripts/dev/test-prune-ci-cache.sh
     bash scripts/dev/test-prune-inactive-lane.sh
     bash scripts/dev/test-lan-build-sequence.sh
+    bash scripts/dev/test-web-prebuilt-only.sh
     bash scripts/dev/test-retain-e2e-runs.sh
     bash scripts/dev/test-lan-retention.sh
     bash scripts/dev/test-install-aura-binary.sh

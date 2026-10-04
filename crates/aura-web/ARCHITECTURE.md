@@ -26,6 +26,12 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
 
 ## Invariants
 
+- LAN browser startup consumes a previously guarded `web,harness` build.
+  The tracked LAN driver sets `AURA_HARNESS_WEB_PREBUILT_ONLY=1`; the static
+  server rejects missing, stale or non-harness assets without clearing the
+  cache or invoking Dioxus. Stop the run and rebuild through the host build
+  helper before retrying. This is build admission, not semantic readiness.
+
 - `ExportDeviceEnrollmentSetup` runs through the page-owned semantic queue and
   the bounded app workflow. Its immediate `DeviceEnrollmentSetup` value carries
   the exact runtime-issued code; export has no enrollment ceremony handle and

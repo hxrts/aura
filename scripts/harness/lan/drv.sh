@@ -58,6 +58,7 @@ start)
   rm -f "$FIFO" "$OUT"; mkfifo "$FIFO"; echo 0 > "$SEQ"
   export AURA_HARNESS_AURA_BIN="${AURA_HARNESS_AURA_BIN:-$here/aura-wrap.sh}"
   export AURA_HARNESS_RUN_TOKEN="$AURA_E2E_RUN_TOKEN"
+  export AURA_HARNESS_WEB_PREBUILT_ONLY=1
   # Expose the browser transport relay on this host's LAN address (taken from the config's
   # non-loopback bind_address) so peers on the other host reach its browsers.
   lan_host=$(grep -o 'bind_address = "[^"]*"' "$2" | cut -d'"' -f2 | cut -d: -f1 | grep -v "^127\." | head -1 || true)

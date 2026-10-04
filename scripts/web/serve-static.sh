@@ -7,6 +7,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
 web_root="$repo_root/crates/aura-web"
 build_profile="${AURA_HARNESS_WEB_BUILD_PROFILE:-release}"
+prebuilt_only="${AURA_HARNESS_WEB_PREBUILT_ONLY:-0}"
+[[ "$prebuilt_only" == 0 || "$prebuilt_only" == 1 ]] || {
+    echo 'AURA_HARNESS_WEB_PREBUILT_ONLY must be 0 or 1' >&2; exit 2;
+}
 dioxus_config="$web_root/Dioxus.toml"
 config_backup=""
 
@@ -71,7 +75,21 @@ web_build_has_harness_support() {
     return 1
 }
 
+# LAN validation must never trigger an unguarded Dioxus build or clear a
+# serving cache after the harness has started. Build on the idle host first.
+if [[ "$prebuilt_only" == 1 ]]; then
+    [[ "$build_profile" == release || "$build_profile" == debug ]] || {
+        echo "[serve-web-static] unsupported profile: $build_profile" >&2; exit 1;
+    }
+    prebuilt_dir="$repo_root/target/dx/aura-web/$build_profile/web/public"
+    if web_sources_stale "$prebuilt_dir/index.html" || ! web_build_has_harness_support "$prebuilt_dir"; then
+        echo '[serve-web-static] missing, stale or non-harness web bundle; stop the harness and run scripts/harness/lan/build.sh web first' >&2
+        exit 1
+    fi
+fi
+
 for profile in debug release; do
+    [[ "$prebuilt_only" == 0 ]] || break
     build_output="$repo_root/target/dx/aura-web/$profile/web/public/index.html"
     if web_sources_stale "$build_output"; then
         echo "[serve-web-static] source files changed, clearing $profile dx cache"
