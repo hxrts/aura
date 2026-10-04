@@ -196,3 +196,17 @@ fixtures; full workspace test runs include this enforcement coverage.
 A successful Git inventory with no Rust inputs fails explicitly; it does not
 trigger a filesystem fallback that would reintroduce ignored artifacts. Outside
 a Git checkout, native directory discovery remains available.
+
+### Account creation submission guard
+
+The frontend semantic handoff lint rejects actual parsed calls to
+`submit_local_terminal_operation` or `LocalTerminalOperationOwner::submit`
+whose direct operation-kind argument is `SemanticOperationKind::CreateAccount`.
+The typed CreateAccount callback is the primary boundary; this guard prevents a
+coordinated callback/signature change from restoring frontend-local completion.
+Qualified paths and grouped arguments are covered without matching comments,
+strings, or unrelated type names. Only proven lexical test predicates exclude
+production enforcement; mixed predicates and later production items remain
+checked. Syn fixtures cover rejection, sanctioned handoff, and lexical scopes.
+Run `just ci-frontend-handoff-boundary` and the ownership aggregate when changing
+this boundary.

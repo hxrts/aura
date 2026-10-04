@@ -333,6 +333,30 @@ fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     Ok(output)
 }
 
+/// Add a peer to the sync list
+fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
+    let mut output = CliOutput::new();
+
+    let peer_id = ids::device_id(peer_str);
+    output.kv("Added peer to sync list", peer_id.to_string());
+    output.println("Note: This will take effect on the next sync daemon start.");
+
+    let _ = ctx; // Acknowledge context
+    Ok(output)
+}
+
+/// Remove a peer from the sync list
+fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
+    let mut output = CliOutput::new();
+
+    let peer_id = ids::device_id(peer_str);
+    output.kv("Removed peer from sync list", peer_id.to_string());
+    output.println("Note: This will take effect on the next sync daemon start.");
+
+    let _ = ctx; // Acknowledge context
+    Ok(output)
+}
+
 #[cfg(test)]
 mod owned_sync_failure_tests {
     use super::*;
@@ -490,28 +514,4 @@ mod owned_sync_failure_tests {
         .expect_err("cleanup failure rejects successful run");
         assert!(find_cause::<aura_agent::ServiceError>(&error).is_some());
     }
-}
-
-/// Add a peer to the sync list
-fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Added peer to sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
-}
-
-/// Remove a peer from the sync list
-fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Removed peer from sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
 }

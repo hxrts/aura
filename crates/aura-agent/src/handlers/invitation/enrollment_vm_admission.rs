@@ -1068,10 +1068,232 @@ async fn sign_control(
         signature,
     })
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredQuorumInitialRequest {
+    version: u16,
+    transcript_digest: [u8; 32],
+    signature: Vec<u8>,
+}
+
+/// Native evidence has no public construction, clone, or deserialization path.
+/// ```compile_fail
+/// use aura_agent::handlers::invitation::enrollment_vm_admission::VerifiedQuorumInitialRequest;
+/// let forged: VerifiedQuorumInitialRequest = serde_json::from_str("{}").unwrap();
+/// ```
+struct VerifiedQuorumInitialRequest {
+    frame: EnrollmentControlFrame,
+}
+
+fn initial_request_location(
+    manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+) -> AgentResult<SecureStorageLocation> {
+    let transcript = aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript::from_manifest(manifest).map_err(transcript_stage)?;
+    let digest = aura_core::hash::hash(&transcript.transcript_bytes().map_err(transcript_stage)?);
+    Ok(SecureStorageLocation::with_sub_key(
+        "enrollment_quorum_initial_request_v1",
+        manifest.subject.to_string(),
+        // The canonical transcript already binds the complete original manifest
+        // and Request. Compact ASCII addressing avoids escaped display values
+        // exceeding the native filesystem component bound; record verification
+        // retains the original signature, transcript and runtime/window checks.
+        hex::encode(digest),
+    ))
+}
+
+// Borrows actual native issuance or retained control custody. Neither remote
+// manifests nor independently supplied byte slices can construct this owner.
+enum OriginalInitialRequestVerifier<'owner> {
+    Issued(&'owner crate::handlers::invitation_service::IssuedEnrollmentManifestBinding),
+    Retained(&'owner super::enrollment_trust::RetainedEnrollmentVmControl),
+}
+impl OriginalInitialRequestVerifier<'_> {
+    fn original_request_key<'owner>(
+        &'owner self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<&'owner [u8]> {
+        match self {
+            Self::Issued(issued) => {
+                issued.require_effects(effects)?;
+                Ok(issued.confirmation_verifier())
+            }
+            Self::Retained(retained) => {
+                retained.require_runtime_owner(effects)?;
+                Ok(retained.expected_request_verifier())
+            }
+        }
+    }
+    fn manifest(&self) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+        match self {
+            Self::Issued(issued) => issued.manifest(),
+            Self::Retained(retained) => retained.manifest(),
+        }
+    }
+}
+async fn verify_initial_request(
+    effects: &AuraEffectSystem,
+    original: &OriginalInitialRequestVerifier<'_>,
+    signature: Vec<u8>,
+) -> AgentResult<VerifiedQuorumInitialRequest> {
+    use aura_core::effects::CryptoExtendedEffects;
+    let manifest = original.manifest();
+    let transcript = aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript::from_manifest(manifest).map_err(transcript_stage)?;
+    let bytes = transcript.required_transcript_bytes().map_err(stage)?;
+    if original.original_request_key(effects)? != manifest.initiator_confirmation_verifier
+        || !effects
+            .frost_verify(&bytes, &signature, original.original_request_key(effects)?)
+            .await?
+    {
+        return Err(failure(EnrollmentVmAdmissionError::Signature));
+    }
+    Ok(VerifiedQuorumInitialRequest {
+        frame: EnrollmentControlFrame {
+            version: 2,
+            manifest_digest: aura_core::hash::hash(
+                &manifest.transcript_bytes().map_err(transcript_stage)?,
+            ),
+            decision: EnrollmentControlDecision::Request(DeviceEnrollmentRequest {
+                invitation_id: manifest.invitation.clone(),
+                subject_authority: manifest.subject,
+                ceremony_id: manifest.ceremony.clone(),
+                pending_epoch: manifest.pending_epoch,
+                device_id: manifest.invitee_device,
+            }),
+            committed_ops: None,
+            signature,
+        },
+    })
+}
+
+#[aura_macros::capability_boundary(category = "capability_gated", capability = "issued", capability_type = crate::handlers::invitation_service::IssuedEnrollmentManifestBinding, family = "runtime_helper")]
+pub(crate) async fn retain_quorum_initial_request(
+    effects: &AuraEffectSystem,
+    issued: &crate::handlers::invitation_service::IssuedEnrollmentManifestBinding,
+    final_inventory: &crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<'_, '_>,
+    approved: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    signature: Vec<u8>,
+) -> AgentResult<()> {
+    issued.require_effects(effects)?;
+    final_inventory.require_manifest(effects, issued.manifest())?;
+    if !std::ptr::eq(approved.effects().as_ref(), effects)
+        || approved
+            .manifest()
+            .transcript_bytes()
+            .map_err(transcript_stage)?
+            != issued
+                .manifest()
+                .transcript_bytes()
+                .map_err(transcript_stage)?
+    {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    let root = final_inventory
+        .inventory()
+        .iter()
+        .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
+        .ok_or_else(|| failure(EnrollmentVmAdmissionError::Binding))?;
+    if root.mode != aura_core::effects::crypto::SigningMode::Threshold || root.threshold < 2 {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    let package = frost_ed25519::keys::PublicKeyPackage::deserialize(&root.public_key_package)
+        .map_err(stage)?;
+    let expected = package.verifying_key().serialize();
+    if expected.as_slice() != issued.confirmation_verifier() {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    let verified = verify_initial_request(
+        effects,
+        &OriginalInitialRequestVerifier::Issued(issued),
+        signature,
+    )
+    .await?;
+    let bytes = verified
+        .frame
+        .transcript()
+        .transcript_bytes()
+        .map_err(transcript_stage)?;
+    let record = StoredQuorumInitialRequest {
+        version: 1,
+        transcript_digest: aura_core::hash::hash(&bytes),
+        signature: verified.frame.signature,
+    };
+    let encoded = aura_core::util::serialization::to_vec(&record).map_err(stage)?;
+    let location = initial_request_location(issued.manifest())?;
+    match effects
+        .secure_store_immutable(
+            &location,
+            &encoded,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+            ],
+        )
+        .await?
+    {
+        aura_core::effects::secure::ImmutableSecureStoreOutcome::Created => Ok(()),
+        aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists => {
+            if effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await?
+                == encoded
+            {
+                Ok(())
+            } else {
+                Err(failure(EnrollmentVmAdmissionError::Binding))
+            }
+        }
+    }
+}
+
+async fn load_quorum_initial_request(
+    effects: &AuraEffectSystem,
+    retained: &RetainedEnrollmentVmControl,
+) -> AgentResult<Option<VerifiedQuorumInitialRequest>> {
+    retained
+        .require_runtime_owner(effects)
+        .map_err(AgentError::from)?;
+    let location = initial_request_location(retained.manifest())?;
+    if !effects.secure_exists(&location).await? {
+        return Ok(None);
+    }
+    let bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await?;
+    if bytes.len() > MAX_CONTROL_FRAME_BYTES {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    let record: StoredQuorumInitialRequest =
+        aura_core::util::serialization::from_slice(&bytes).map_err(stage)?;
+    let verified = verify_initial_request(
+        effects,
+        &OriginalInitialRequestVerifier::Retained(retained),
+        record.signature,
+    )
+    .await?;
+    if record.version != 1
+        || retained.digest() != verified.frame.manifest_digest
+        || record.transcript_digest
+            != aura_core::hash::hash(
+                &verified
+                    .frame
+                    .transcript()
+                    .transcript_bytes()
+                    .map_err(transcript_stage)?,
+            )
+    {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    Ok(Some(verified))
+}
+
 pub(super) async fn sign_request(
     effects: &AuraEffectSystem,
     retained: &RetainedEnrollmentVmControl,
 ) -> AgentResult<EnrollmentControlFrame> {
+    if let Some(verified) = load_quorum_initial_request(effects, retained).await? {
+        return Ok(verified.frame);
+    }
     let manifest = retained.manifest();
     let request = DeviceEnrollmentRequest {
         invitation_id: manifest.invitation.clone(),
@@ -1457,6 +1679,44 @@ mod tests {
             let frame = sign_request(issuer_effects.as_ref(), &retained)
                 .await
                 .expect("actual control signer");
+            let public_request = aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript::from_manifest(retained.manifest())
+                .expect("derive narrowly scoped public request");
+            assert_eq!(
+                public_request.transcript_bytes().unwrap(),
+                frame.transcript().transcript_bytes().unwrap(),
+                "reviewed public request must match actual native control bytes exactly"
+            );
+            verify_initial_request(
+                issuer_effects.as_ref(),
+                &OriginalInitialRequestVerifier::Retained(&retained),
+                frame.signature.clone(),
+            )
+            .await
+            .expect("genuine native initial request signature");
+            let mut substituted_manifest = retained.manifest().clone();
+            substituted_manifest.invitee_device = issuer_effects.device_id();
+            let substituted_request = aura_invitation::enrollment_initial_request::EnrollmentInitialRequestTranscript::from_manifest(&substituted_manifest)
+                .expect("actual substituted physical request");
+            assert!(!aura_core::effects::CryptoExtendedEffects::frost_verify(
+                issuer_effects.as_ref(),
+                &substituted_request
+                    .required_transcript_bytes()
+                    .expect("encode actual substituted request"),
+                &frame.signature,
+                retained.expected_request_verifier(),
+            )
+            .await
+            .expect("native verification of substituted physical target"));
+            let mut substituted_signature = frame.signature.clone();
+            substituted_signature[0] ^= 1;
+            verify_initial_request(
+                issuer_effects.as_ref(),
+                &OriginalInitialRequestVerifier::Retained(&retained),
+                substituted_signature,
+            )
+            .await
+            .err()
+            .expect("corrupt real native signature rejected");
             let request = frame
                 .verify_request(invitee_effects.as_ref(), &admitted)
                 .await
@@ -1570,14 +1830,17 @@ mod committed_receipt_tests {
     #[test]
     fn real_committed_confirmation_is_durable_and_reverified_before_activation_capability() {
         crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let original_transport = crate::SharedTransport::new();
             let (issuer, invitee, invitation, start, _accept, verified) = Box::pin(
-                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_transport(
                     "confirmed-import-receipt",
+                    original_transport.clone(),
                 ),
             )
             .await;
             let issuer_effects = issuer.runtime().effects();
             let invitee_effects = invitee.runtime().effects();
+            let original_invitee_config = invitee_effects.config().clone();
             let retained = RetainedEnrollmentVmControl::load(issuer_effects.clone(), &invitation)
                 .await
                 .unwrap();
@@ -1983,107 +2246,6 @@ mod committed_receipt_tests {
             )
             .await
             .unwrap();
-            // A second real issuance after the first attested epoch fence must
-            // export the actual active threshold package, although its history
-            // contains only old-epoch signature parents.
-            {
-                use aura_app::runtime_bridge::RuntimeBridge;
-                let third_authority = aura_core::AuthorityId::new_from_entropy([181; 32]);
-                let third_config = crate::core::AgentConfig {
-                    device_id: aura_core::DeviceId::new_from_entropy([182; 32]),
-                    storage: crate::core::config::StorageConfig {
-                        base_path: tempfile::Builder::new()
-                            .prefix("aura-second-enrollment-")
-                            .tempdir()
-                            .unwrap()
-                            .keep(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                let third_context = aura_core::context::EffectContext::new(
-                    third_authority,
-                    aura_core::ContextId::new_from_entropy([183; 32]),
-                    aura_core::effects::ExecutionMode::Testing,
-                );
-                let third_runtime = crate::runtime::EffectSystemBuilder::testing()
-                    .with_authority(third_authority)
-                    .with_config(third_config)
-                    .build(&third_context)
-                    .await
-                    .unwrap();
-                let third =
-                    std::sync::Arc::new(crate::AuraAgent::new(third_runtime, third_authority));
-                let third_bridge = crate::runtime_bridge::AgentRuntimeBridge::new(third.clone());
-                third_bridge.bootstrap_signing_keys().await.unwrap();
-                let setup = third_bridge
-                    .export_device_enrollment_setup_request()
-                    .await
-                    .unwrap();
-                let issuer_bridge = std::sync::Arc::new(
-                    crate::runtime_bridge::AgentRuntimeBridge::new(issuer.clone()),
-                );
-                let issuer_app = std::sync::Arc::new(async_lock::RwLock::new(
-                    aura_app::AppCore::with_runtime(
-                        aura_app::AppConfig::default(),
-                        issuer_bridge.clone(),
-                    )
-                    .unwrap(),
-                ));
-                let setup=aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&issuer_app,setup).await.unwrap();
-                let second = issuer_bridge
-                    .initiate_device_enrollment_ceremony("Second actual device".into(), setup)
-                    .await
-                    .unwrap();
-                let transfer = second.manifest_transfer.as_ref().unwrap();
-                let third_app = std::sync::Arc::new(async_lock::RwLock::new(
-                    aura_app::AppCore::with_runtime(
-                        aura_app::AppConfig::default(),
-                        std::sync::Arc::new(third_bridge),
-                    )
-                    .unwrap(),
-                ));
-                let selected =
-                    aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
-                        &third_app,
-                        transfer.manifest_code.clone(),
-                        transfer.initiator_verifier_code.clone(),
-                    )
-                    .await
-                    .unwrap();
-                let manifest = selected.manifest();
-                assert_eq!(manifest.version, 2);
-                assert_eq!(manifest.final_epoch, admitted.manifest().pending_epoch);
-                assert!(manifest
-                    .parents
-                    .iter()
-                    .all(|parent| parent.epoch < manifest.final_epoch));
-                let active = manifest.final_inventory().unwrap();
-                assert_eq!(active.len(), 1);
-                assert_eq!(active[0].epoch, manifest.final_epoch);
-                assert_eq!(active[0].commitment, manifest.final_commitment);
-                assert_eq!(
-                    active[0].mode,
-                    aura_core::crypto::single_signer::SigningMode::Threshold
-                );
-                assert_eq!(active[0].threshold, 2);
-                assert_eq!(active[0].participants.len(), 2);
-                assert_eq!(active[0].public_key_package, original_package);
-                assert_ne!(
-                    active[0].public_key_package,
-                    manifest.parents[0].public_key_package
-                );
-                crate::runtime_bridge::AgentRuntimeBridge::new(third.clone())
-                    .import_enrollment_invitation(&second.enrollment_code, selected)
-                    .await
-                    .unwrap();
-                third
-                    .runtime()
-                    .tasks()
-                    .shutdown_gracefully(std::time::Duration::from_secs(5))
-                    .await
-                    .unwrap();
-            }
             let original_account = serde_json::json!({
                 "authority_id": admitted.manifest().invitee_authority,
                 "context_id": crate::core::context::default_context_id_for_authority(admitted.manifest().invitee_authority),
@@ -2093,6 +2255,18 @@ mod committed_receipt_tests {
                 .store(
                     "account.json",
                     serde_json::to_vec(&original_account).unwrap(),
+                )
+                .await
+                .unwrap();
+            let original_import_config_location = SecureStorageLocation::with_sub_key(
+                "threshold_config",
+                admitted.manifest().subject.to_string(),
+                admitted.manifest().pending_epoch.to_string(),
+            );
+            let original_import_config = invitee_effects
+                .secure_retrieve(
+                    &original_import_config_location,
+                    &[SecureStorageCapability::Read],
                 )
                 .await
                 .unwrap();
@@ -2116,6 +2290,49 @@ mod committed_receipt_tests {
                 serde_json::to_value(admitted.manifest().subject).unwrap()
             );
             assert_eq!(projected["nickname_suggestion"], "preserve-this-name");
+            assert_eq!(
+                invitee_effects
+                    .secure_retrieve(&package_location, &[SecureStorageCapability::Read],)
+                    .await
+                    .unwrap(),
+                original_package,
+                "activation preserves original signed immutable raw share"
+            );
+            assert_eq!(
+                invitee_effects
+                    .secure_retrieve(
+                        &original_import_config_location,
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await
+                    .unwrap(),
+                original_import_config,
+                "activation preserves original signed immutable config"
+            );
+            #[cfg(unix)]
+            let original_activation = {
+                let proof = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                    invitee_effects.as_ref(),
+                    invitation.receiver_id,
+                    &invitation.invitation_id,
+                )
+                .await
+                .unwrap();
+                let owner = invitee_effects
+                    .load_confirmed_activation_envelope(&proof)
+                    .await
+                    .unwrap();
+                invitee_effects
+                    .assert_confirmed_managed_allocation_boundaries_for_test(&owner)
+                    .await
+                    .expect("genuine confirmed owner enforces native allocation scope, reference and one-time birth");
+                let target = invitee_effects.confirmed_activation_record_location_for_test(&owner);
+                let bytes = invitee_effects
+                    .secure_retrieve(&target, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap();
+                (target, bytes)
+            };
             let recovered = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
                 invitee_effects.as_ref(),
                 invitation.receiver_id,
@@ -2141,6 +2358,91 @@ mod committed_receipt_tests {
                 .unwrap(),
                 projected
             );
+
+            #[cfg(unix)]
+            {
+                let (target, original) = &original_activation;
+                assert_eq!(
+                    invitee_effects
+                        .secure_retrieve(target, &[SecureStorageCapability::Read])
+                        .await
+                        .unwrap(),
+                    *original,
+                    "repeated actual handoff acknowledges original envelope without reencryption"
+                );
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(target)
+                    .await
+                    .unwrap());
+                let proof = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                    invitee_effects.as_ref(),
+                    invitation.receiver_id,
+                    &invitation.invitation_id,
+                )
+                .await
+                .unwrap();
+                assert!(
+                    crate::runtime::services::enrollment_profile::complete_confirmed_handoff(
+                        invitee_effects.as_ref(),
+                        &invitee.runtime().threshold_signing(),
+                        proof,
+                    )
+                    .await
+                    .is_err(),
+                    "missing original activation envelope cannot renew its birth"
+                );
+                assert!(
+                    !invitee_effects.secure_exists(target).await.unwrap(),
+                    "failed loader must not repair missing envelope"
+                );
+                invitee_effects
+                    .secure_store_immutable(target, &[0xff], &[SecureStorageCapability::Write])
+                    .await
+                    .unwrap();
+                let proof = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                    invitee_effects.as_ref(),
+                    invitation.receiver_id,
+                    &invitation.invitation_id,
+                )
+                .await
+                .unwrap();
+                let failure =
+                    crate::runtime::services::enrollment_profile::complete_confirmed_handoff(
+                        invitee_effects.as_ref(),
+                        &invitee.runtime().threshold_signing(),
+                        proof,
+                    )
+                    .await
+                    .expect_err("corrupt original activation envelope fails closed");
+                let mut cause: &(dyn std::error::Error + 'static) = &failure;
+                let mut native_codec = false;
+                loop {
+                    native_codec |= cause.is::<serde_json::Error>();
+                    match cause.source() {
+                        Some(source) => cause = source,
+                        None => break,
+                    }
+                }
+                assert!(
+                    native_codec,
+                    "original provider codec failure reaches handoff owner"
+                );
+                assert_eq!(
+                    invitee_effects
+                        .secure_retrieve(target, &[SecureStorageCapability::Read])
+                        .await
+                        .unwrap(),
+                    [0xff]
+                );
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(target)
+                    .await
+                    .unwrap());
+                invitee_effects
+                    .secure_store_immutable(target, original, &[SecureStorageCapability::Write])
+                    .await
+                    .unwrap();
+            }
 
             let epoch = invitee_effects
                 .secure_retrieve(
@@ -2239,36 +2541,421 @@ mod committed_receipt_tests {
                 .secure_retrieve(&key, &[SecureStorageCapability::Read])
                 .await
                 .unwrap();
-            invitee_effects
+            let mutation = invitee_effects
                 .secure_store(&key, b"corrupt", &[SecureStorageCapability::Write])
                 .await
-                .unwrap();
-            assert!(
-                super::super::enrollment_manifest_admission::load_confirmed_enrollment(
-                    invitee_effects.as_ref(),
-                    invitation.receiver_id,
-                    &invitation.invitation_id,
-                )
-                .await
-                .is_err()
-            );
-            invitee_effects
-                .secure_store(&key, &bytes, &[SecureStorageCapability::Write])
-                .await
-                .unwrap();
-            invitee_effects
+                .expect_err("production write cannot replace immutable original confirmation");
+            let deletion = invitee_effects
                 .secure_delete(&key, &[SecureStorageCapability::Delete])
                 .await
-                .unwrap();
-            assert!(
-                super::super::enrollment_manifest_admission::load_confirmed_enrollment(
-                    invitee_effects.as_ref(),
-                    invitation.receiver_id,
-                    &invitation.invitation_id,
+                .expect_err("production delete cannot retire immutable original confirmation");
+            for failure in [&mutation, &deletion] {
+                let mut cause: &(dyn std::error::Error + 'static) = failure;
+                let mut native_immutable = false;
+                loop {
+                    native_immutable |=
+                        cause.is::<aura_core::effects::secure::ImmutableSecureRecordMutation>();
+                    match cause.source() {
+                        Some(source) => cause = source,
+                        None => break,
+                    }
+                }
+                assert!(
+                    native_immutable,
+                    "production immutable denial retains native cause: {failure:?}"
+                );
+            }
+            assert_eq!(
+                invitee_effects
+                    .secure_retrieve(&key, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                bytes
+            );
+            #[cfg(unix)]
+            {
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&key)
+                    .await
+                    .unwrap());
+                invitee_effects
+                    .secure_store_immutable(&key, b"corrupt", &[SecureStorageCapability::Write])
+                    .await
+                    .unwrap();
+                assert!(
+                    super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                        invitee_effects.as_ref(),
+                        invitation.receiver_id,
+                        &invitation.invitation_id,
+                    )
+                    .await
+                    .is_err(),
+                    "actual selected-provider confirmation corruption is refused"
+                );
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&key)
+                    .await
+                    .unwrap());
+                invitee_effects
+                    .secure_store_immutable(&key, &bytes, &[SecureStorageCapability::Write])
+                    .await
+                    .unwrap();
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&key)
+                    .await
+                    .unwrap());
+                assert!(
+                    super::super::enrollment_manifest_admission::load_confirmed_enrollment(
+                        invitee_effects.as_ref(),
+                        invitation.receiver_id,
+                        &invitation.invitation_id,
+                    )
+                    .await
+                    .is_err(),
+                    "actual selected-provider confirmation loss is refused"
+                );
+                // Restore only the captured original after observing refusal.
+                invitee_effects
+                    .secure_store_immutable(&key, &bytes, &[SecureStorageCapability::Write])
+                    .await
+                    .expect("restore exact original receipt after intentional deletion fault");
+            }
+            let first_manifest = admitted.manifest().clone();
+            let original_memo_location = initial_request_location(&first_manifest).unwrap();
+            assert_eq!(original_memo_location.sub_key.as_deref().unwrap().len(), 64);
+            let mut long_bound_manifest = first_manifest.clone();
+            long_bound_manifest.ceremony = aura_core::CeremonyId::new("c".repeat(128));
+            long_bound_manifest.invitation = aura_core::InvitationId::new("i".repeat(128));
+            let long_bound_location = initial_request_location(&long_bound_manifest).unwrap();
+            assert_ne!(
+                original_memo_location, long_bound_location,
+                "compact addressing retains complete ceremony/invitation transcript binding"
+            );
+            for component in [
+                long_bound_location.namespace.as_str(),
+                long_bound_location.key.as_str(),
+                long_bound_location.sub_key.as_deref().unwrap(),
+            ] {
+                assert!(
+                    component
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric()
+                            || matches!(byte, b'-' | b'_' | b'.')),
+                    "native component encoding must not expand compact addresses"
+                );
+                assert!(
+                    component.len() + 32 < 255,
+                    "compact memo component leaves room for native immutable publication suffix"
+                );
+            }
+
+            let adopted_context: aura_core::ContextId =
+                serde_json::from_value(projected["context_id"].clone())
+                    .expect("actual committed profile context projection");
+
+            // Required task completion and every actual old provider reference
+            // precede reopening the same native physical profile. Success of
+            // this exclusive acquisition proves no old profile lease survived.
+            invitee
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+                .expect("actual original invitee task completion before same-profile reopen");
+            drop(archive_reloaded);
+            drop(archive);
+            drop(durable);
+            drop(window);
+            drop(admitted);
+            drop(invitee_effects);
+            drop(invitee);
+            let selected_profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(
+                &original_invitee_config,
+            )
+            .expect("exclusive original physical profile after acknowledged old runtime teardown");
+            let adopted_context = aura_core::context::EffectContext::new(
+                first_manifest.subject,
+                adopted_context,
+                aura_core::effects::ExecutionMode::Testing,
+            );
+            let reopened_runtime =
+                crate::runtime::EffectSystemBuilder::testing_with_owned_profile(selected_profile)
+                    .with_authority(first_manifest.subject)
+                    .with_config(original_invitee_config)
+                    .with_shared_transport(original_transport.clone())
+                    .build(&adopted_context)
+                    .await
+                    .expect(
+                        "actual confirmed original physical profile reopen under adopted subject",
+                    );
+            let reopened_invitee = std::sync::Arc::new(crate::AuraAgent::new(
+                reopened_runtime,
+                first_manifest.subject,
+            ));
+            use aura_app::runtime_bridge::RuntimeBridge;
+            crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone())
+                .bootstrap_signing_keys()
+                .await
+                .expect(
+                    "restore original confirmed active native share without reminting authority",
+                );
+            assert_eq!(
+                reopened_invitee
+                    .runtime()
+                    .threshold_signing()
+                    .public_key_package(&first_manifest.subject)
+                    .await
+                    .expect("actual active native threshold package after original profile reload"),
+                original_package,
+            );
+            let quorum_required = reopened_invitee
+                .runtime()
+                .effects()
+                .require_local_physical_solo_identity_policy(
+                    &first_manifest.subject,
+                    first_manifest.pending_epoch,
                 )
                 .await
-                .is_err()
-            );
+                .expect_err(
+                    "actual reloaded 2/2 key remains quorum-owned after valid native share read",
+                );
+            let mut cause: &(dyn std::error::Error + 'static) = &quorum_required;
+            let mut actual_quorum = false;
+            loop {
+                actual_quorum |= matches!(cause.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>(),
+                    Some(crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired { threshold: 2 }));
+                match cause.source() {
+                    Some(source) => cause = source,
+                    None => break,
+                }
+            }
+            assert!(actual_quorum, "native current-key effect must preserve concrete 2/2 quorum source, not Storage or solo authority");
+            // A second real issuance after the first attested epoch fence must
+            // export the actual active threshold package, although its history
+            // contains only old-epoch signature parents.
+            {
+                use aura_app::runtime_bridge::RuntimeBridge;
+                let third_authority = aura_core::AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-agent.enrollment.real-committed-confirmation.second-quorum.third-authority"));
+                let third_config = crate::core::AgentConfig {
+                    device_id: aura_core::DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-agent.enrollment.real-committed-confirmation.second-quorum.third-device")),
+                    storage: crate::core::config::StorageConfig {
+                        base_path: tempfile::Builder::new()
+                            .prefix("aura-second-enrollment-")
+                            .tempdir()
+                            .unwrap()
+                            .keep(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let third_context = aura_core::context::EffectContext::new(
+                    third_authority,
+                    aura_core::ContextId::new_from_entropy(aura_core::hash::hash(b"aura-agent.enrollment.real-committed-confirmation.second-quorum.third-context")),
+                    aura_core::effects::ExecutionMode::Testing,
+                );
+                let third_profile =
+                    crate::runtime::builder::TestingOwnedProfileCapability::acquire(&third_config)
+                        .expect("actual independent third-device physical profile custody");
+                let third_runtime =
+                    crate::runtime::EffectSystemBuilder::testing_with_owned_profile(third_profile)
+                        .with_authority(third_authority)
+                        .with_config(third_config)
+                        .with_shared_transport(original_transport.clone())
+                        .build(&third_context)
+                        .await
+                        .unwrap();
+                let third =
+                    std::sync::Arc::new(crate::AuraAgent::new(third_runtime, third_authority));
+                let third_bridge = crate::runtime_bridge::AgentRuntimeBridge::new(third.clone());
+                third_bridge.bootstrap_signing_keys().await.unwrap();
+                let setup = third_bridge
+                    .export_device_enrollment_setup_request()
+                    .await
+                    .unwrap();
+                let issuer_bridge = std::sync::Arc::new(
+                    crate::runtime_bridge::AgentRuntimeBridge::new(issuer.clone()),
+                );
+                let issuer_app = std::sync::Arc::new(async_lock::RwLock::new(
+                    aura_app::AppCore::with_runtime(
+                        aura_app::AppConfig::default(),
+                        issuer_bridge.clone(),
+                    )
+                    .unwrap(),
+                ));
+                let setup=aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&issuer_app,setup).await.unwrap();
+                let prepared = issuer_bridge
+                    .prepare_device_enrollment_ceremony(
+                        "Second actual device".into(),
+                        setup.clone(),
+                    )
+                    .await
+                    .expect("one original held issuer prepares exact public signing intent");
+                let sibling_bridge = std::sync::Arc::new(
+                    crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone()),
+                );
+                assert!(prepared
+                    .signing_intent_code
+                    .starts_with("aura-enrollment-signing-intent:v2:"));
+                assert!(aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
+                    prepared.signing_intent_code.replacen("aura-enrollment-signing-intent:v2:", "aura-enrollment-signing-intent:v1:", 1),
+                ).is_err(), "historical consent is never promoted to initial-request approval");
+                let sibling_app = std::sync::Arc::new(async_lock::RwLock::new(
+                    aura_app::AppCore::with_runtime(
+                        aura_app::AppConfig::default(),
+                        sibling_bridge.clone(),
+                    )
+                    .expect("actual adopted sibling app runtime owner"),
+                ));
+                let sibling_setup = aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                    &sibling_app, prepared.setup_transfer_code.clone(),
+                ).await.expect("explicit independent sibling setup verifier pin");
+                let sibling_intent = aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
+                    prepared.signing_intent_code.clone(),
+                ).expect("explicit sibling selection of exact public intent");
+                assert_eq!(sibling_intent.domains(), [
+                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::Manifest,
+                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::PublicTransport,
+                    aura_invitation::enrollment_signing_intent::EnrollmentInitiationSigningDomain::InitialRequest,
+                ]);
+                let sibling_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
+                    &sibling_app, sibling_intent, sibling_setup,
+                ).await.expect("explicit original active sibling user approval");
+                let original_dynamic_owner = sibling_app
+                    .read()
+                    .await
+                    .runtime()
+                    .cloned()
+                    .expect("app retains original sibling bridge allocation directly");
+                sibling_approval
+                    .require_runtime_owner(original_dynamic_owner.as_ref())
+                    .expect("original retained dynamic bridge is the same approval owner");
+                sibling_approval
+                    .require_runtime_owner(sibling_bridge.as_ref())
+                    .expect("concrete coercion preserves the same original bridge allocation");
+                let different_bridge_same_agent =
+                    crate::runtime_bridge::AgentRuntimeBridge::new(reopened_invitee.clone());
+                assert!(matches!(
+    sibling_approval.require_runtime_owner(&different_bridge_same_agent),
+    Err(aura_core::AuraError::PermissionDenied { .. }),
+), "a different bridge allocation over the same agent cannot consume original approval");
+                drop(original_dynamic_owner);
+                sibling_bridge
+                    .approve_device_enrollment_signing(sibling_approval)
+                    .await
+                    .expect("owned original sibling accepts bounded participant ingress");
+                let own_intent = aura_app::ui::workflows::ceremonies::select_user_transferred_enrollment_signing_intent(
+                    prepared.signing_intent_code,
+                ).expect("original issuer selects exact prepared public intent");
+                let own_approval = aura_app::ui::workflows::ceremonies::approve_user_selected_enrollment_signing_intent(
+                    &issuer_app, own_intent, setup,
+                ).await.expect("original issuer explicit user approval");
+                for (domain, diagnostic, required) in [
+                    (
+                        "manifest",
+                        own_approval.manifest().transcript_bytes().unwrap(),
+                        own_approval.manifest().required_transcript_bytes().unwrap(),
+                    ),
+                    (
+                        "public transport",
+                        own_approval.transport().transcript_bytes().unwrap(),
+                        own_approval
+                            .transport()
+                            .required_transcript_bytes()
+                            .unwrap(),
+                    ),
+                    (
+                        "initial Request",
+                        own_approval.initial_request().transcript_bytes().unwrap(),
+                        own_approval
+                            .initial_request()
+                            .required_transcript_bytes()
+                            .unwrap(),
+                    ),
+                ] {
+                    assert_eq!(
+                        diagnostic, required,
+                        "required encoding preserves exact original approved {domain} domain bytes"
+                    );
+                }
+                let second = issuer_bridge
+                    .resume_device_enrollment_signing(own_approval)
+                    .await
+                    .expect("genuine approved active 2-of-2 runtime quorum issuance");
+                assert_eq!(
+                    second.ceremony_id, prepared.ceremony_id,
+                    "resume retains the original prepared ceremony allocation"
+                );
+                let transfer = second.manifest_transfer.as_ref().unwrap();
+                let third_app = std::sync::Arc::new(async_lock::RwLock::new(
+                    aura_app::AppCore::with_runtime(
+                        aura_app::AppConfig::default(),
+                        std::sync::Arc::new(third_bridge),
+                    )
+                    .unwrap(),
+                ));
+                let selected =
+                    aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
+                        &third_app,
+                        transfer.manifest_code.clone(),
+                        transfer.initiator_verifier_code.clone(),
+                    )
+                    .await
+                    .unwrap();
+                let manifest = selected.manifest();
+                assert_eq!(manifest.version, 2);
+                assert_eq!(
+                    aura_invitation::shareable::ShareableInvitation::from_code(
+                        &second.enrollment_code
+                    )
+                    .unwrap()
+                    .version,
+                    aura_invitation::shareable::ShareableInvitation::ENROLLMENT_QUORUM_VERSION,
+                );
+                assert_eq!(manifest.final_epoch, first_manifest.pending_epoch);
+                assert!(manifest
+                    .parents
+                    .iter()
+                    .all(|parent| parent.epoch < manifest.final_epoch));
+                let active = manifest.final_inventory().unwrap();
+                assert_eq!(active.len(), 1);
+                assert_eq!(active[0].epoch, manifest.final_epoch);
+                assert_eq!(active[0].commitment, manifest.final_commitment);
+                assert_eq!(
+                    active[0].mode,
+                    aura_core::crypto::single_signer::SigningMode::Threshold
+                );
+                assert_eq!(active[0].threshold, 2);
+                assert_eq!(active[0].participants.len(), 2);
+                assert_eq!(active[0].public_key_package, original_package);
+                assert_ne!(
+                    active[0].public_key_package,
+                    manifest.parents[0].public_key_package
+                );
+                crate::runtime_bridge::AgentRuntimeBridge::new(third.clone())
+                    .import_enrollment_invitation(&second.enrollment_code, selected)
+                    .await
+                    .unwrap();
+                third
+                    .runtime()
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .unwrap();
+                drop(sibling_app);
+                drop(sibling_bridge);
+            }
+            reopened_invitee
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+                .expect("actual reopened sibling signing actor completion");
+            issuer
+                .runtime()
+                .tasks()
+                .shutdown_gracefully(std::time::Duration::from_secs(5))
+                .await
+                .expect("actual issuer task completion after second issuance evidence");
         });
     }
 }

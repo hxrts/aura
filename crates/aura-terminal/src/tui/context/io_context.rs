@@ -426,6 +426,28 @@ impl IoContext {
     // Account file operations (isolated, async)
     // =========================================================================
 
+    pub async fn stage_account_for_bootstrap(
+        &self,
+        original_app: &Arc<RwLock<AppCore>>,
+        nickname: String,
+        instance: Option<aura_app::ui_contract::OperationInstanceId>,
+    ) -> aura_app::ui_contract::WorkflowTerminalOutcome<(
+        aura_core::AuthorityId,
+        aura_core::ContextId,
+    )> {
+        let outcome = crate::handlers::tui::stage_account_for_bootstrap(
+            self.account_files.base_path(),
+            original_app,
+            nickname,
+            instance,
+        )
+        .await;
+        if outcome.result.is_ok() {
+            self.set_account_created();
+        }
+        outcome
+    }
+
     pub async fn create_account(&self, nickname_suggestion: &str) -> TerminalResult<()> {
         tracing::info!(
             nickname = nickname_suggestion,

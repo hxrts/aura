@@ -559,6 +559,97 @@ impl AuraEffectSystem {
 }
 const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
 
+impl AuraEffectSystem {
+    /// Original native tree custody authorizes addressing only current sibling
+    /// members. Packet proof verification and local approval remain independent.
+    pub(crate) async fn send_owned_enrollment_round(
+        &self,
+        custody: &super::EnrollmentTranscriptTreeOwner<'_, '_, '_>,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        destination_device: aura_core::DeviceId,
+        packet: &aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket,
+    ) -> Result<(), aura_core::AuraError> {
+        window.execute(self, || async {
+            custody.require_manifest(self, manifest)?;
+            // require_manifest establishes exact equality with independently
+            // retained original custody before these public fields are read.
+            let retained = manifest.final_inventory.as_ref()
+                .and_then(|inventory| inventory.iter().find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0)))
+                .ok_or_else(|| aura_core::AuraError::permission_denied("owned signing route lacks original retained root inventory"))?;
+            if !retained.participants.contains(&aura_core::ParticipantIdentity::device(destination_device))
+                || destination_device == self.device_id()
+                || manifest.subject != self.authority_id
+            {
+                return Err(aura_core::AuraError::permission_denied("owned signing destination is not a retained original sibling"));
+            }
+            let payload = aura_core::util::serialization::to_vec(packet)?;
+            if payload.len() > aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::MAXIMUM_WIRE_BYTES {
+                return Err(aura_core::AuraError::invalid("owned signing packet exceeds its wire bound"));
+            }
+            let context = default_context_id_for_authority(manifest.subject);
+            // The deterministic transport obeys the same charge-before-send
+            // contract; no Testing branch skips the guard receipt.
+            let charged = aura_core::effects::FlowBudgetEffects::charge_flow(
+                self, &context, &manifest.subject, aura_core::FlowCost::new(1),
+            ).await?;
+            let mut metadata = HashMap::new();
+            metadata.insert("content-type".into(), "application/aura-approved-enrollment-round-v1".into());
+            metadata.insert("aura-destination-device-id".into(), destination_device.to_string());
+            metadata.insert(SOURCE_DEVICE_METADATA_KEY.into(), self.device_id().to_string());
+            metadata.insert("aura-enrollment-round-session".into(), hex::encode(packet.packet.session));
+            send_guarded_transport_envelope(self, TransportEnvelope {
+                destination: manifest.subject, source: self.authority_id, context, payload, metadata,
+                receipt: Some(aura_core::effects::transport::TransportReceipt {
+                    context: charged.ctx, src: charged.src, dst: charged.dst,
+                    epoch: charged.epoch.value(), cost: charged.cost.value(), nonce: charged.nonce.value(),
+                    prev: charged.prev.0, sig: charged.sig.into_bytes(),
+                }),
+            }).await.map_err(|source| aura_core::AuraError::Network {
+                message: "emit original guarded enrollment round".into(), source: Some(std::sync::Arc::new(source)),
+            })
+        }).await.map_err(|source| aura_core::AuraError::Network {
+            message: "original sealed enrollment send window".into(), source: Some(std::sync::Arc::new(source)),
+        })
+    }
+
+    /// Metadata only selects a bounded candidate. The retained native participant
+    /// verifier and admitted local owner must verify the returned packet.
+    pub(crate) async fn receive_owned_enrollment_round(
+        &self,
+        window: &crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+        session: [u8; 32],
+    ) -> Result<
+        aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket,
+        aura_core::AuraError,
+    > {
+        window.execute(self, || async {
+            let session_locator = hex::encode(session);
+            loop {
+                match self.take_inbound_envelope(|envelope|
+                    envelope.metadata.get("content-type").is_some_and(|kind| kind == "application/aura-approved-enrollment-round-v1")
+                    && envelope.metadata.get("aura-enrollment-round-session") == Some(&session_locator)
+                ) {
+                    Ok(envelope) => return aura_protocol::transcript_round_packet::ParticipantProvenRoundPacket::decode_bounded(&envelope.payload),
+                    Err(TransportError::NoMessage) => {},
+                    Err(source) => return Err(aura_core::AuraError::Network { message: "original signing inbox failure".into(), source: Some(std::sync::Arc::new(source)) }),
+                }
+                match self.receive_configured_envelope().await {
+                    Ok(envelope) => {
+                        if matches!(self.queue_runtime_envelope(envelope), crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow) {
+                            return Err(aura_core::AuraError::Network { message: "owned signing ingress capacity exceeded".into(), source: Some(std::sync::Arc::new(TransportError::IngressCapacityExceeded { capacity: crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY })) });
+                        }
+                    },
+                    Err(TransportError::NoMessage) => window.retry_delay(self, 25).await.map_err(aura_core::AuraError::from)?,
+                    Err(source) => return Err(aura_core::AuraError::Network { message: "original configured signing ingress failure".into(), source: Some(std::sync::Arc::new(source)) }),
+                }
+            }
+        }).await.map_err(|source| aura_core::AuraError::Network {
+            message: "original sealed enrollment receive window".into(), source: Some(std::sync::Arc::new(source)),
+        })
+    }
+}
+
 /// Sync peers are addressed by device; prefer the sender's device id when present.
 fn network_source_id(envelope: &aura_core::effects::TransportEnvelope) -> uuid::Uuid {
     envelope

@@ -439,6 +439,11 @@ pub struct VerifiedEnrollmentSetupPossession {
 }
 
 impl VerifiedEnrollmentSetupPossession {
+    /// Export the same public proof envelope. A recipient must independently
+    /// verify/pin this transfer; serialized bytes cannot mint possession trust.
+    pub fn transfer_code(&self) -> Result<String, EnrollmentSetupError> {
+        self.request.encode()
+    }
     pub fn statement(&self) -> &DeviceEnrollmentSetupStatement {
         &self.request.statement
     }

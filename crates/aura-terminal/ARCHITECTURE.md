@@ -196,3 +196,9 @@ Fullscreen teardown drops hook futures, closes frontend task admission, and
 requires actual admitted-future drainage within the owned terminal cleanup wait
 before returning or starting another shell generation. A failed drain prevents
 bootstrap reload; a simultaneous fullscreen failure retains both local causes.
+
+## Runtime-free account creation ownership
+
+The configured native staging adapter delegates actual pending-bootstrap and encrypted account-profile writes to the app-owned staging workflow. The original operation instance transfers before the first awaited producer step. Only acknowledged writes mint app-owned terminal success; frontend callbacks observe completion and request bootstrap reload. The retained AppCore supplies that original history to the new runtime signal graph. Runtime attachment rejects replacement, and pending-file reconciliation cannot manufacture account-create success.
+
+Regression coverage must exercise actual storage production and observe the original operation after runtime attachment; manually seeded semantic facts do not establish producer ownership. The CreateAccount callback requires a workflow handoff owner, preventing submission with a local terminal owner.

@@ -624,6 +624,44 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// The runtime is responsible for rotating threshold keys and updating the
     /// account commitment tree to remove the specified device leaf.
+    /// Prepare one owned original enrollment and pause before quorum signing.
+    /// The returned code identifies public data; every current signer must give
+    /// explicit local approval on its own already active runtime.
+    async fn prepare_device_enrollment_ceremony(
+        &self,
+        nickname_suggestion: String,
+        setup: crate::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+    ) -> Result<
+        super::PreparedDeviceEnrollmentSigning,
+        aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+    > {
+        let _ = (nickname_suggestion, setup);
+        Err(aura_invitation::enrollment_setup::EnrollmentIssuanceError::Unavailable)
+    }
+
+    /// Admit exact local consent into a bounded original participant actor.
+    /// Receipt of the prepared code or any round packet cannot invoke this.
+    async fn approve_device_enrollment_signing(
+        &self,
+        approval: crate::ui::workflows::ceremonies::UserApprovedEnrollmentSigningIntent,
+    ) -> Result<(), aura_core::AuraError> {
+        let _ = approval;
+        Err(aura_core::AuraError::invalid(
+            "runtime does not own approved enrollment signing",
+        ))
+    }
+
+    /// Resume the original prepared issuer through its retained ingress. The
+    /// strongest local consent supplies identity; raw ids do not authorize it.
+    async fn resume_device_enrollment_signing(
+        &self,
+        approval: crate::ui::workflows::ceremonies::UserApprovedEnrollmentSigningIntent,
+    ) -> Result<DeviceEnrollmentStart, aura_invitation::enrollment_setup::EnrollmentIssuanceError>
+    {
+        let _ = approval;
+        Err(aura_invitation::enrollment_setup::EnrollmentIssuanceError::Unavailable)
+    }
+
     async fn initiate_device_removal_ceremony(
         &self,
         device_id: String,

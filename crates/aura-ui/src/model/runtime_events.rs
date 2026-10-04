@@ -37,23 +37,6 @@ pub(super) struct RuntimeDeviceEnrollmentCeremony {
     cancel_handle: Option<CeremonyHandle>,
 }
 
-#[cfg(test)]
-mod projection_observation_tests {
-    use super::*;
-
-    #[test]
-    fn latest_projection_counts_replace_previous_observation() {
-        let mut model = UiModel::new("observed-test".to_string());
-        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(3, 2));
-        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(0, 0));
-        assert_eq!(model.runtime_events.len(), 1);
-        assert_eq!(
-            model.runtime_events[0].fact,
-            aura_app::ui_contract::observed_contacts_projection(0, 0)
-        );
-    }
-}
-
 impl UiController {
     pub fn publish_runtime_notifications_projection(
         &self,
@@ -372,5 +355,22 @@ impl UiController {
         set_toast(&mut model, '✓', message);
         drop(model);
         self.request_rerender();
+    }
+}
+
+#[cfg(test)]
+mod projection_observation_tests {
+    use super::*;
+
+    #[test]
+    fn latest_projection_counts_replace_previous_observation() {
+        let mut model = UiModel::new("observed-test".to_string());
+        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(3, 2));
+        model.push_runtime_fact(aura_app::ui_contract::observed_contacts_projection(0, 0));
+        assert_eq!(model.runtime_events.len(), 1);
+        assert_eq!(
+            model.runtime_events[0].fact,
+            aura_app::ui_contract::observed_contacts_projection(0, 0)
+        );
     }
 }

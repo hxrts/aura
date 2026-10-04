@@ -515,19 +515,20 @@ mod tests {
             .commit_key_rotation(&invitation.sender_id, epoch)
             .await
             .expect("actual rotated signer activation");
-        let active =
-            require_active_identity_signing_context(effects.as_ref(), &invitation.sender_id)
-                .await
-                .expect("actual rotated physical policy");
-        assert_ne!(
-            require_identity_keys(&active)
-                .await
-                .expect("actual new key")
-                .1
-                .as_slice(),
-            original_proof.public_key.as_slice()
-        );
-        drop(active);
+        {
+            let active =
+                require_active_identity_signing_context(effects.as_ref(), &invitation.sender_id)
+                    .await
+                    .expect("actual rotated physical policy");
+            assert_ne!(
+                require_identity_keys(&active)
+                    .await
+                    .expect("actual new key")
+                    .1
+                    .as_slice(),
+                original_proof.public_key.as_slice()
+            );
+        }
         let rotated = export(&handler, &effects, &invitation).await;
         assert_eq!(
             ShareableInvitation::from_code_with_proof(&rotated)
@@ -585,19 +586,20 @@ mod tests {
             .commit_key_rotation(&invitation.sender_id, epoch)
             .await
             .expect("actual rotated signer activation");
-        let active =
-            require_active_identity_signing_context(effects.as_ref(), &invitation.sender_id)
-                .await
-                .expect("actual rotated physical policy");
-        assert_ne!(
-            require_identity_keys(&active)
-                .await
-                .expect("actual new key")
-                .1
-                .as_slice(),
-            original_proof.public_key.as_slice()
-        );
-        drop(active);
+        {
+            let active =
+                require_active_identity_signing_context(effects.as_ref(), &invitation.sender_id)
+                    .await
+                    .expect("actual rotated physical policy");
+            assert_ne!(
+                require_identity_keys(&active)
+                    .await
+                    .expect("actual new key")
+                    .1
+                    .as_slice(),
+                original_proof.public_key.as_slice()
+            );
+        }
         let rotated = export(&handler, &effects, &invitation).await;
         assert_eq!(
             ShareableInvitation::from_code_with_proof(&rotated)

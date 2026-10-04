@@ -32,6 +32,56 @@ const DEFAULT_HARNESS_CONVERGENCE_STEP_TIMEOUT_MS: u64 = 1_000;
 /// primary terminal lifecycle.
 pub type WorkflowBestEffort = PostTerminalBestEffort<AuraError>;
 
+/// Prepare the native issuer's retained allocation. Native readiness transfers
+/// only after its original sealed clock and task owner have been admitted;
+/// early failure returns the source and performs the owner's teardown.
+pub(crate) async fn prepare_original_enrollment_issuer(
+    runtime: &Arc<dyn RuntimeBridge>,
+    nickname_suggestion: String,
+    setup: crate::workflows::ceremonies::UserTransferredEnrollmentSetup,
+) -> Result<
+    crate::runtime_bridge::PreparedDeviceEnrollmentSigning,
+    aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+> {
+    runtime
+        .prepare_device_enrollment_ceremony(nickname_suggestion, setup)
+        .await
+}
+
+/// Admit only the original device's explicit consent. Native readiness keeps
+/// the actual participant task in its bounded registry under the local sealed
+/// approval window; this adapter cannot turn packet receipt into consent.
+pub(crate) async fn approve_original_enrollment_participant(
+    runtime: &Arc<dyn RuntimeBridge>,
+    approval: crate::workflows::ceremonies::UserApprovedEnrollmentSigningIntent,
+) -> Result<(), AuraError> {
+    approval.require_runtime_owner(runtime.as_ref())?;
+    runtime.approve_device_enrollment_signing(approval).await
+}
+
+/// Resume the retained native issuer and observe its original bounded owner.
+/// The runtime bridge consumes this original approval, checks its runtime
+/// identity, and waits/drains through the prepared issuer's restricted original
+/// completion observer. An app timeout would replace that clock or drop the
+/// retained completion future, so this adapter delegates that entire boundary.
+pub(crate) async fn resume_original_enrollment_issuer(
+    runtime: &Arc<dyn RuntimeBridge>,
+    approval: crate::workflows::ceremonies::UserApprovedEnrollmentSigningIntent,
+) -> Result<
+    crate::runtime_bridge::DeviceEnrollmentStart,
+    aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+> {
+    approval
+        .require_runtime_owner(runtime.as_ref())
+        .map_err(
+            |source| aura_invitation::enrollment_setup::EnrollmentIssuanceError::Failure {
+                stage: aura_invitation::enrollment_setup::EnrollmentIssuanceStage::InvitationExport,
+                source,
+            },
+        )?;
+    runtime.resume_device_enrollment_signing(approval).await
+}
+
 #[cfg(test)]
 static HARNESS_MODE_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 

@@ -21,6 +21,7 @@ enum Contract {
     ContactResponse,
     GuardianPair,
     GuardianPossession,
+    InitialRequest,
 }
 struct Scope<'a> {
     path: &'a str,
@@ -38,6 +39,60 @@ struct Scope<'a> {
     sealed_guardian_confirmation: bool,
     sealed_guardian_pair: bool,
     sealed_guardian_possession: bool,
+    sealed_initial_request: bool,
+}
+
+// Validate the finite native owner and both original-runtime checks, not a
+// nearby resolver name or caller-provided key alias.
+fn initial_request_accessor_origin(file: &syn::File) -> bool {
+    let owner = file.items.iter().any(|item| {
+        let syn::Item::Enum(item) = item else { return false };
+        if item.ident != "OriginalInitialRequestVerifier" || cfg_test(&item.attrs)
+            || !matches!(item.vis, syn::Visibility::Inherited) || item.variants.len() != 2
+        { return false; }
+        item.variants.iter().all(|variant| {
+            let expected: &[&str] = match variant.ident.to_string().as_str() {
+                "Issued" => &["crate", "handlers", "invitation_service", "IssuedEnrollmentManifestBinding"],
+                "Retained" => &["super", "enrollment_trust", "RetainedEnrollmentVmControl"],
+                _ => return false,
+            };
+            variant.fields.len() == 1 && variant.fields.iter().all(|field| {
+                matches!(&field.ty, syn::Type::Reference(reference) if reference.mutability.is_none()
+                    && matches!(reference.elem.as_ref(), syn::Type::Path(path) if path.qself.is_none()
+                        && path.path.segments.iter().map(|segment| segment.ident.to_string()).eq(expected.iter().map(|segment| (*segment).to_owned()))))
+            })
+        })
+    });
+    owner && file.items.iter().any(|item| {
+        let syn::Item::Impl(item) = item else { return false };
+        if cfg_test(&item.attrs) || path_name(&item.self_ty).as_deref() != Some("OriginalInitialRequestVerifier") { return false; }
+        item.items.iter().any(|item| {
+            let syn::ImplItem::Fn(method) = item else { return false };
+            if method.sig.ident != "original_request_key" || cfg_test(&method.attrs)
+                || !matches!(method.vis, syn::Visibility::Inherited) || method.block.stmts.len() != 1 { return false; }
+            let Some(syn::Stmt::Expr(syn::Expr::Match(dispatch), None)) = method.block.stmts.first() else { return false };
+            if identifier(&dispatch.expr).as_deref() != Some("self") || dispatch.arms.len() != 2 { return false; }
+            dispatch.arms.iter().enumerate().all(|(index, arm)| {
+                let (variant, binding, check, accessor) = if index == 0 {
+                    ("Issued", "issued", "require_effects", "confirmation_verifier")
+                } else { ("Retained", "retained", "require_runtime_owner", "expected_request_verifier") };
+                let syn::Pat::TupleStruct(pattern) = &arm.pat else { return false };
+                if arm.guard.is_some() || pattern.path.segments.len() != 2
+                    || pattern.path.segments[0].ident != "Self" || pattern.path.segments[1].ident != variant
+                    || pattern.elems.len() != 1 || !matches!(pattern.elems.first(), Some(syn::Pat::Ident(name)) if name.ident == binding && name.mutability.is_none() && name.subpat.is_none()) { return false; }
+                let syn::Expr::Block(body) = arm.body.as_ref() else { return false };
+                if body.block.stmts.len() != 2 { return false; }
+                let Some(syn::Stmt::Expr(syn::Expr::Try(required), Some(_))) = body.block.stmts.first() else { return false };
+                let syn::Expr::MethodCall(check_call) = required.expr.as_ref() else { return false };
+                if check_call.method != check || identifier(&check_call.receiver).as_deref() != Some(binding)
+                    || check_call.args.len() != 1 || check_call.args.first().and_then(identifier).as_deref() != Some("effects") { return false; }
+                let Some(syn::Stmt::Expr(syn::Expr::Call(result), None)) = body.block.stmts.last() else { return false };
+                matches!(result.func.as_ref(), syn::Expr::Path(path) if path.path.is_ident("Ok"))
+                    && result.args.len() == 1 && matches!(result.args.first(), Some(syn::Expr::MethodCall(key))
+                        if key.method == accessor && key.args.is_empty() && identifier(&key.receiver).as_deref() == Some(binding))
+            })
+        })
+    })
 }
 pub(super) fn cfg_test(attributes: &[syn::Attribute]) -> bool {
     fn contains(meta: &syn::Meta) -> bool {
@@ -425,6 +480,16 @@ fn transferred_record_origin(file: &syn::File) -> bool {
 
 impl Scope<'_> {
     fn contract(&self) -> Contract {
+        if self.path == "crates/aura-agent/src/handlers/invitation/enrollment_vm_admission.rs"
+            && self.sealed_initial_request
+            && self.implementation.is_none()
+            && self
+                .function
+                .as_ref()
+                .is_some_and(|signature| signature.ident == "verify_initial_request")
+        {
+            return Contract::InitialRequest;
+        }
         if self.path == "crates/aura-agent/src/handlers/invitation/guardian.rs"
             && self.sealed_guardian_possession
             && self.implementation.is_none()
@@ -497,6 +562,15 @@ impl Scope<'_> {
     }
     fn key_allowed(&self, expr: &syn::Expr) -> bool {
         match self.contract() {
+            Contract::InitialRequest => {
+                let syn::Expr::Try(required) = naked(expr) else {
+                    return false;
+                };
+                matches!(naked(&required.expr), syn::Expr::MethodCall(call)
+                    if call.method == "original_request_key" && call.args.len() == 1
+                    && call.args.first().and_then(identifier).as_deref() == Some("effects")
+                    && identifier(&call.receiver).is_some_and(|name| self.admitted_bindings.contains(&name)))
+            }
             Contract::Retained => retained_package(expr),
             Contract::Admitted => {
                 let Some(base) = named_field(expr, "initiator_confirmation_verifier") else {
@@ -586,7 +660,7 @@ impl Scope<'_> {
         let old_bindings = std::mem::take(&mut self.admitted_bindings);
         for arg in &signature.inputs {
             if let syn::FnArg::Typed(arg) = arg {
-                if matches!(arg.ty.as_ref(), syn::Type::Reference(reference) if matches!(reference.elem.as_ref(), syn::Type::Path(path) if path.path.is_ident("AdmittedEnrollmentManifest") || (path.qself.is_none() && path.path.leading_colon.is_none() && path.path.segments.len() == 1 && path.path.segments.last().is_some_and(|segment| segment.ident == "RequiredContactResponseVerificationCapability" || segment.ident == "RequiredGuardianConfirmationVerificationCapability" || segment.ident == "RequiredGuardianPairVerificationCapability" || segment.ident == "RequiredGuardianPossessionVerificationCapability"))))
+                if matches!(arg.ty.as_ref(), syn::Type::Reference(reference) if reference.mutability.is_none() && matches!(reference.elem.as_ref(), syn::Type::Path(path) if path.path.is_ident("AdmittedEnrollmentManifest") || (path.qself.is_none() && path.path.leading_colon.is_none() && path.path.segments.len() == 1 && path.path.segments.last().is_some_and(|segment| segment.ident == "RequiredContactResponseVerificationCapability" || segment.ident == "RequiredGuardianConfirmationVerificationCapability" || segment.ident == "RequiredGuardianPairVerificationCapability" || segment.ident == "RequiredGuardianPossessionVerificationCapability" || segment.ident == "OriginalInitialRequestVerifier"))))
                     || matches!(arg.ty.as_ref(), syn::Type::Reference(reference) if matches!(reference.elem.as_ref(), syn::Type::Path(path) if path.path.is_ident("AdmissionRecord")))
                     || matches!(arg.pat.as_ref(), syn::Pat::Ident(name) if name.ident == "independently_supplied_verifier" && name.mutability.is_none())
                 {
@@ -746,6 +820,7 @@ sealed_response_owner: sealed_definition(&file, "PinnedEnrollmentResponseVerifie
         sealed_guardian_confirmation: sealed_definition(&file, "RequiredGuardianConfirmationVerificationCapability") && imported_key_accessor_origin(&file, "RequiredGuardianConfirmationVerificationCapability"),
         sealed_guardian_possession: sealed_definition(&file, "RequiredGuardianPossessionVerificationCapability") && guardian_possession_accessor_origin(&file),
         sealed_guardian_pair: sealed_definition(&file, "RequiredGuardianPairVerificationCapability") && guardian_pair_accessor_origin(&file),
+        sealed_initial_request: initial_request_accessor_origin(&file),
     };
     scope.visit_file(&file);
     Ok(scope.result)
@@ -753,6 +828,42 @@ sealed_response_owner: sealed_definition(&file, "PinnedEnrollmentResponseVerifie
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn initial_request_requires_exact_native_original_owner_key() {
+        let path = "crates/aura-agent/src/handlers/invitation/enrollment_vm_admission.rs";
+        let source = include_str!(
+            "../../../../crates/aura-agent/src/handlers/invitation/enrollment_vm_admission.rs"
+        );
+        let actual = analyze(path, source).unwrap();
+        assert!(actual.typed_contract);
+        assert!(actual.violations.is_empty(), "{:?}", actual.violations);
+        for invalid in [
+            source.replace("issued.require_effects(effects)?;", ""),
+            source.replace("retained.require_runtime_owner(effects)?;", ""),
+            source.replace("Ok(issued.confirmation_verifier())", "Ok(peer.verifier())"),
+            source.replace(
+                "Ok(retained.expected_request_verifier())",
+                "Ok(peer.verifier())",
+            ),
+            source.replace(
+                "&'owner super::enrollment_trust::RetainedEnrollmentVmControl",
+                "&'owner RemoteRecord",
+            ),
+            source.replace(
+                "&'owner crate::handlers::invitation_service::IssuedEnrollmentManifestBinding",
+                "&'owner RemoteRecord",
+            ),
+            source.replace(
+                "original.original_request_key(effects)?",
+                "manifest.initiator_confirmation_verifier.as_slice()",
+            ),
+        ] {
+            assert!(
+                !analyze(path, &invalid).unwrap().violations.is_empty(),
+                "raw or foreign origin must reject"
+            );
+        }
+    }
     #[test]
     fn actual_guardian_roles_reject_unbound_possession_sources() {
         let path = "crates/aura-agent/src/handlers/invitation/guardian.rs";

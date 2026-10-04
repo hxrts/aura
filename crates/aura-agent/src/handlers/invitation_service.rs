@@ -26,6 +26,378 @@ use std::sync::Arc;
 const DEFERRED_INVITATION_DELIVERY_ATTEMPTS: usize = 12;
 const DEFERRED_INVITATION_DELIVERY_BACKOFF_MS: u64 = 500;
 
+// Pure trusted-key metadata is derived by the caller from its retained native
+// owner; this helper verifies the actual typed domain, never arbitrary bytes.
+async fn verify_original_quorum_transcript<T: aura_signature::SecurityTranscript + ?Sized>(
+    effects: &AuraEffectSystem,
+    transcript: &T,
+    signature: &[u8],
+    trusted_key: &aura_core::TrustedPublicKey,
+) -> AgentResult<bool> {
+    use aura_core::effects::CryptoExtendedEffects;
+    let transcript_bytes = transcript.required_transcript_bytes().map_err(|source| {
+        AgentError::from(aura_core::AuraError::crypto_with_source(
+            "encode original quorum verification transcript",
+            Arc::new(source),
+        ))
+    })?;
+    Ok(effects
+        .frost_verify(&transcript_bytes, signature, trusted_key.bytes())
+        .await?)
+}
+
+impl InvitationServiceApi {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "issued", capability_type = IssuedEnrollmentManifestBinding, family = "runtime_helper")]
+    pub(crate) async fn retain_quorum_initial_request(
+        &self,
+        issued: &IssuedEnrollmentManifestBinding,
+        final_inventory: &crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+            '_,
+            '_,
+        >,
+        approved: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+        signature: Vec<u8>,
+    ) -> AgentResult<()> {
+        super::invitation::retain_quorum_initial_request(
+            self.effects.as_ref(),
+            issued,
+            final_inventory,
+            approved,
+            signature,
+        )
+        .await
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentFinalVerifierInventoryCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn preview_owned_enrollment_transport(
+        &self,
+        reserved: &super::invitation::ReservedInvitationIssuance,
+        final_inventory: &crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+            '_,
+            '_,
+        >,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        invitation_type: InvitationType,
+    ) -> AgentResult<(
+        Invitation,
+        aura_invitation::shareable::PublicEnrollmentTransportSigningIntent,
+        ShareableInvitationTransportMetadata,
+    )> {
+        final_inventory.require_manifest(self.effects.as_ref(), manifest)?;
+        let invitation = self.handler.preview_reserved_device_enrollment(
+            self.effects.as_ref(),
+            reserved,
+            invitation_type,
+        )?;
+        Self::require_quorum_invitation_binding(&invitation, manifest)?;
+        let transport = self.sender_transport_metadata();
+        if transport.sender_device_id != Some(manifest.initiator_device) {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        let shareable = ShareableInvitation::from(&invitation)
+            .with_enrollment_quorum_transcript()
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                        Box::new(source),
+                    ),
+                )
+            })?;
+        let public =
+            aura_invitation::shareable::PublicEnrollmentTransportSigningIntent::from_invitation(
+                &shareable, &transport,
+            )
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                        Box::new(source),
+                    ),
+                )
+            })?;
+        public.require_manifest(manifest).map_err(|source| {
+            AgentError::EnrollmentManifest(
+                aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(Box::new(
+                    source,
+                )),
+            )
+        })?;
+        Ok((invitation, public, transport))
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentFinalVerifierInventoryCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn export_quorum_enrollment_manifest(
+        &self,
+        reserved: &super::invitation::ReservedInvitationIssuance,
+        selected_setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        final_inventory: &crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+            '_,
+            '_,
+        >,
+        manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+        signature: Vec<u8>,
+    ) -> AgentResult<(
+        aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
+        IssuedEnrollmentManifestBinding,
+    )> {
+        use aura_invitation::enrollment_manifest::{
+            encode_initiator_verifier_transfer, EnrollmentManifestError,
+            SignedEnrollmentTrustManifest,
+        };
+        final_inventory.require_manifest(self.effects.as_ref(), &manifest)?;
+        manifest
+            .validate_setup_validity(selected_setup.statement())
+            .map_err(AgentError::EnrollmentManifest)?;
+        if !reserved.owns_effects(self.effects.as_ref())
+            || reserved.issuer_binding() != (manifest.subject, manifest.initiator_device)
+            || manifest.invitation != *reserved.invitation_id()
+            || manifest.subject != self.handler.authority_context().authority_id()
+            || manifest.initiator_device != self.effects.device_id()
+            || manifest.setup.nonce != selected_setup.statement().nonce
+            || manifest.setup.digest != selected_setup.digest()
+            || manifest.invitee_authority != selected_setup.statement().authority
+            || manifest.invitee_device != selected_setup.statement().device
+        {
+            return Err(AgentError::invalid(
+                "quorum manifest original reservation/setup differs",
+            ));
+        }
+        // The expected group key is derived from original independently held
+        // native inventory, never supplied by remote approval/signature fields.
+        let root = final_inventory
+            .inventory()
+            .iter()
+            .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
+            .ok_or_else(|| AgentError::invalid("original quorum inventory lacks root"))?;
+        if root.mode != aura_core::effects::crypto::SigningMode::Threshold || root.threshold < 2 {
+            return Err(AgentError::invalid(
+                "quorum export requires genuine retained threshold policy",
+            ));
+        }
+        let native = frost_ed25519::keys::PublicKeyPackage::deserialize(&root.public_key_package)
+            .map_err(|source| {
+            AgentError::from(aura_core::AuraError::crypto_with_source(
+                "decode original native quorum verifier",
+                Arc::new(source),
+            ))
+        })?;
+        let public = native.verifying_key().serialize().to_vec();
+        if public != manifest.initiator_confirmation_verifier {
+            return Err(AgentError::invalid(
+                "manifest verifier differs from original native quorum key",
+            ));
+        }
+        let trusted_key = aura_core::TrustedPublicKey::active(
+            aura_core::TrustedKeyDomain::AuthorityThreshold,
+            Some(manifest.final_epoch),
+            public.clone(),
+            aura_core::Hash32(aura_core::hash::hash(&public)),
+        );
+        if !verify_original_quorum_transcript(
+            self.effects.as_ref(),
+            &manifest,
+            &signature,
+            &trusted_key,
+        )
+        .await?
+        {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        let baseline = self
+            .effects
+            .export_tree_ops()
+            .await?
+            .iter()
+            .map(aura_core::util::serialization::to_vec)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(aura_core::AuraError::from)?;
+        let checked = manifest
+            .clone()
+            .verify_signature(self.effects.as_ref(), &public, &signature)
+            .await
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(
+                    EnrollmentManifestExportValidationError::Signature(source),
+                )))
+            })?
+            .verify_baseline(&baseline)
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(
+                    EnrollmentManifestExportValidationError::Baseline(source),
+                )))
+            })?;
+        let digest = checked.manifest_digest();
+        let manifest_code = SignedEnrollmentTrustManifest {
+            manifest: manifest.clone(),
+            signature,
+        }
+        .encode()
+        .map_err(AgentError::EnrollmentManifest)?;
+        let initiator_verifier_code = encode_initiator_verifier_transfer(
+            manifest.subject,
+            manifest.initiator_device,
+            &public,
+        )
+        .map_err(AgentError::EnrollmentManifest)?;
+        let binding = IssuedEnrollmentManifestBinding {
+            runtime_owner: self.effects.clone(),
+            manifest,
+            digest,
+            signed_code: manifest_code.clone(),
+            confirmation_verifier: public,
+        };
+        Ok((
+            aura_app::runtime_bridge::EnrollmentManifestTransferCodes {
+                manifest_code,
+                initiator_verifier_code,
+            },
+            binding,
+        ))
+    }
+
+    fn require_quorum_invitation_binding(
+        invitation: &Invitation,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> AgentResult<()> {
+        let InvitationType::DeviceEnrollment {
+            subject_authority,
+            invitee_authority,
+            initiator_device_id,
+            device_id,
+            ceremony_id,
+            pending_epoch,
+            setup_binding,
+            key_package,
+            public_key_package,
+            threshold_config,
+            baseline_tree_ops,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        };
+        let baseline = aura_core::util::serialization::to_vec(baseline_tree_ops)
+            .map_err(aura_core::AuraError::from)?;
+        if invitation.invitation_id != manifest.invitation
+            || invitation.sender_id != manifest.subject
+            || invitation.receiver_id != manifest.invitee_authority
+            || *subject_authority != manifest.subject
+            || *invitee_authority != Some(manifest.invitee_authority)
+            || *initiator_device_id != manifest.initiator_device
+            || *device_id != manifest.invitee_device
+            || *ceremony_id != manifest.ceremony
+            || *pending_epoch != manifest.pending_epoch
+            || setup_binding.as_ref() != Some(&manifest.setup)
+            || aura_core::hash::hash(key_package) != manifest.pending_share_digest
+            || aura_core::hash::hash(public_key_package)
+                != manifest.pending_public_key_package_digest
+            || aura_core::Hash32::from_bytes(threshold_config)
+                != manifest.pending_threshold_config_digest
+            || baseline_tree_ops.len() != manifest.baseline_count as usize
+            || aura_core::hash::hash(&baseline) != manifest.baseline_digest
+        {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        Ok(())
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "issued", capability_type = IssuedEnrollmentManifestBinding, family = "runtime_helper")]
+    pub(crate) async fn export_quorum_enrollment_invitation(
+        &self,
+        invitation: &Invitation,
+        issued: &IssuedEnrollmentManifestBinding,
+        approved: &aura_invitation::shareable::PublicEnrollmentTransportSigningIntent,
+        frozen_transport: &ShareableInvitationTransportMetadata,
+        signature: Vec<u8>,
+    ) -> AgentResult<String> {
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        use aura_signature::SecurityTranscript;
+        issued.require_effects(self.effects.as_ref())?;
+        Self::require_quorum_invitation_binding(invitation, issued.manifest())?;
+        approved
+            .require_manifest(issued.manifest())
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
+            })?;
+        if approved.transport_metadata() != frozen_transport
+            || frozen_transport.sender_device_id != Some(issued.manifest().initiator_device)
+        {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        let shareable = ShareableInvitation::from(invitation)
+            .with_enrollment_quorum_transcript()
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
+            })?;
+        let actual = shareable
+            .signing_transcript_with_transport(frozen_transport)
+            .required_transcript_bytes()
+            .map_err(|source| {
+                AgentError::from(aura_core::AuraError::crypto_with_source(
+                    "encode original quorum transport",
+                    Arc::new(source),
+                ))
+            })?;
+        let selected = approved.required_transcript_bytes().map_err(|source| {
+            AgentError::from(aura_core::AuraError::crypto_with_source(
+                "encode approved quorum transport",
+                Arc::new(source),
+            ))
+        })?;
+        let trusted_key = aura_core::TrustedPublicKey::active(
+            aura_core::TrustedKeyDomain::AuthorityThreshold,
+            Some(issued.manifest().final_epoch),
+            issued.confirmation_verifier().to_vec(),
+            aura_core::Hash32(aura_core::hash::hash(issued.confirmation_verifier())),
+        );
+        if actual != selected
+            || !verify_original_quorum_transcript(
+                self.effects.as_ref(),
+                approved,
+                &signature,
+                &trusted_key,
+            )
+            .await?
+        {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
+            );
+        }
+        let code = shareable
+            .to_signed_code_with_transport(
+                ShareableInvitationSenderProof {
+                    scheme: ShareableInvitation::SENDER_PROOF_SCHEME.into(),
+                    public_key: issued.confirmation_verifier().to_vec(),
+                    signature,
+                    sender_device_id: frozen_transport.sender_device_id,
+                    key_epoch: Some(issued.manifest().final_epoch),
+                },
+                frozen_transport.clone(),
+            )
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
+            })?;
+        Ok(self.append_sender_hint(code, frozen_transport))
+    }
+}
+
 /// Retains the original choreography failure and a distinct settlement failure.
 /// The standard source chain follows the original concrete execution cause.
 #[derive(Debug)]

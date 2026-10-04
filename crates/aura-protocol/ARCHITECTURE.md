@@ -153,3 +153,21 @@ regressions verify writer exclusion and preservation of later evidence.
 
 `TimeoutCoordinator` forwards absolute physical deadline waits to its original
 inner provider; it neither chooses a second clock nor derives a renewed delay.
+
+### Public enrollment transcript rounds
+
+The L4 coordinator accepts public commitments, verified shares, exact approved
+messages and independently retained public policy. Private participant material
+and nonce custody remain in original L6 owners. Packet codecs bound wire shape;
+exact session/intent/domain/party/phase validation and individual native share
+proofs authenticate admitted rounds without granting user consent or group
+signing authority. Only aggregate verification under the retained public group
+package establishes the group signature.
+
+The public signing policy borrows the actual `SecurityTranscript` and an active
+`TrustedPublicKey` in the authority threshold domain. Required canonical encoding
+retains native codec causes. The coordinator independently decodes its retained
+public package and checks the selected verifier, epoch presence and key hash
+before participant callbacks. L6 additionally requires byte equality with the
+original approved domain. Raw-byte policy construction is compile-fail guarded;
+wrong domain, revoked key, corrupt hash and codec failures have unit coverage.

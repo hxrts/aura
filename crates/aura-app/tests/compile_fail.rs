@@ -22,7 +22,7 @@ fn acquire_trybuild_lock() -> TrybuildProcessLock {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
-        .expect("workspace root");
+        .unwrap_or_else(|| panic!("compile-fail crate must reside under the workspace root"));
     TrybuildProcessLock::acquire_workspace(workspace, std::time::Duration::from_secs(900))
         .unwrap_or_else(|error| panic!("required compile-fail workspace lock: {error:?}"))
 }

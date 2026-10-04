@@ -14750,6 +14750,11 @@ as in the AES-GCM authenticated encryption cipher.
             rename = "aura-mpst";
           }
           {
+            name = "hxrts-aura-signature";
+            packageId = "hxrts-aura-signature";
+            rename = "aura-signature";
+          }
+          {
             name = "hxrts-aura-store";
             packageId = "hxrts-aura-store";
             rename = "aura-store";

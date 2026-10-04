@@ -644,3 +644,48 @@ Required archived-custody validation also rejects ciphertext corruption at each 
 ### Runtime quorum custody
 
 Possession of retained dealer shares does not authorize a runtime to manufacture a quorum. A raw signing context cannot establish distributed signing ownership. Required local key material is validated before an unavailable quorum owner is reported; malformed and missing material remain distinct native failures. Each admitted distributed signing participant controls its own share and one-use nonce.
+
+### Explicit enrollment transcript quorum
+
+Enrollment signing consent identifies one versioned canonical intent containing
+exactly the trust manifest, public version 3 invitation transport, and initial
+version 2 enrollment Request control transcript. Initial Request fields derive
+from that manifest and its transcript digest; consent grants no arbitrary control
+signing authority. Committed and Failed control transcripts require separate
+approval and remain unavailable through this initial intent.
+
+The public coordinator accepts the actual typed security transcript. Its canonical
+required encoding must equal the original approved domain bytes before a round
+starts. Manifest version selection and native codec causes remain intact; raw
+message bytes cannot construct this signing policy.
+
+Aggregate verification retains an active typed authority threshold key derived
+from the independently approved native public package and epoch. Enrollment
+verification retains its original sealed final inventory, issued manifest or
+retained generation; copied verifier bytes cannot substitute for that owner.
+
+Each active physical participant retains only its own protected share and
+one-use nonce. Packet authentication proves possession of the exact individual
+verifying share from independently authenticated current ordered public material;
+it is not a whole-authority signature or user consent. Aggregate signatures must
+verify against the independently retained current group package. Each approved
+transcript domain has distinct immutable approval/nonce retirement evidence.
+
+### Confirmed imported key activation
+
+The original signed imported share and pending configuration remain immutable.
+Confirmed activation retains a distinct immutable encrypted envelope, binding
+its original protected receipt, physical device, subject, epoch, manifest digest,
+share commitment and exact pending configuration. Its birth is recorded before
+publication; loss after birth cannot create a replacement nonce or envelope.
+Reactivation acknowledges the same reverified envelope. Final agreement is
+derived from the confirmed generation without changing the original signed
+configuration. Corrupt or missing original evidence fails closed.
+
+Confirmed import wrapping secrets have managed allocation lifetime ownership.
+Their scope version 2 binds the original verified receipt's manifest digest,
+subject, physical device, epoch, ceremony, invitation and exact share commitment.
+Birth, read and positive sealing require that genuine original confirmation;
+a permanent legacy wrapping key cannot substitute for this custody. An existing
+original allocation prohibits replacement birth even if envelope publication was
+interrupted before its separate birth anchor was published.

@@ -2964,6 +2964,89 @@ fn scan_frontend_semantic_handoff_boundary(file: &Path, syntax: &File) -> Vec<St
         violations: Vec::new(),
     };
     visitor.visit_file(syntax);
+    visitor
+        .violations
+        .extend(scan_account_create_local_submission(file, syntax));
+    visitor.violations
+}
+
+/// Callback typing is the primary boundary. This syntax fence prevents a
+/// coordinated owner/signature change from restoring the old local-only path.
+fn scan_account_create_local_submission(file: &Path, syntax: &File) -> Vec<String> {
+    fn path_ends_with(path: &syn::Path, suffix: &[&str]) -> bool {
+        path.segments.len() >= suffix.len()
+            && path
+                .segments
+                .iter()
+                .rev()
+                .zip(suffix.iter().rev())
+                .all(|(segment, expected)| segment.ident == *expected)
+    }
+
+    fn is_create_account(expression: &Expr) -> bool {
+        match expression {
+            Expr::Path(path) => {
+                path_ends_with(&path.path, &["SemanticOperationKind", "CreateAccount"])
+            }
+            Expr::Paren(group) => is_create_account(&group.expr),
+            Expr::Group(group) => is_create_account(&group.expr),
+            Expr::Reference(reference) => is_create_account(&reference.expr),
+            _ => false,
+        }
+    }
+
+    struct Visitor<'a> {
+        file: &'a Path,
+        violations: Vec<String>,
+    }
+
+    impl<'ast> Visit<'ast> for Visitor<'_> {
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_mod(self, node);
+            }
+        }
+
+        fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_impl(self, node);
+            }
+        }
+
+        fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
+                visit::visit_item_fn(self, node);
+            }
+        }
+
+        fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+            if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
+                visit::visit_impl_item_fn(self, node);
+            }
+        }
+
+        fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+            if let Expr::Path(callee) = node.func.as_ref() {
+                let local_submission =
+                    path_ends_with(&callee.path, &["submit_local_terminal_operation"])
+                        || path_ends_with(&callee.path, &["LocalTerminalOperationOwner", "submit"]);
+                if local_submission && node.args.iter().any(is_create_account) {
+                    let start = node.span().start();
+                    self.violations.push(format!(
+                        "{}:{}:{}: CreateAccount requires workflow handoff to the actual app-owned staging producer; frontend-local terminal submission loses authoritative history",
+                        self.file.display(), start.line, start.column + 1,
+                    ));
+                }
+            }
+            visit::visit_expr_call(self, node);
+        }
+    }
+
+    let mut visitor = Visitor {
+        file,
+        violations: Vec::new(),
+    };
+    visitor.visit_file(syntax);
     visitor.violations
 }
 
@@ -3238,6 +3321,84 @@ mod tests {
     use super::scan_semantic_owner_stable_wrapper;
     use std::path::Path;
     use syn::parse_file;
+
+    #[test]
+    fn account_create_local_submission_rejects_actual_helper_and_direct_owner_calls() {
+        for callee in [
+            "submit_local_terminal_operation",
+            "crate::tui::semantic_lifecycle::submit_local_terminal_operation",
+            "LocalTerminalOperationOwner::submit",
+            "crate::tui::semantic_lifecycle::LocalTerminalOperationOwner::submit",
+        ] {
+            let source = format!("fn producer() {{ {callee}(app, tasks, tx, id, (aura_app::ui_contract::SemanticOperationKind::CreateAccount)); }}");
+            let syntax = match parse_file(&source) {
+                Ok(syntax) => syntax,
+                Err(error) => panic!("parse fixture: {error}"),
+            };
+            let violations = super::scan_frontend_semantic_handoff_boundary(
+                Path::new("crates/aura-terminal/src/tui/semantic_lifecycle.rs"),
+                &syntax,
+            );
+            assert_eq!(violations.len(), 1, "{violations:#?}");
+            assert!(violations[0].contains("CreateAccount requires workflow handoff"));
+        }
+    }
+
+    #[test]
+    fn account_create_submission_accepts_handoff_and_ignores_text_or_unrelated_paths() {
+        let source = r#"
+            fn producer() {
+                submit_workflow_handoff_operation(app, tasks, tx, id, SemanticOperationKind::CreateAccount);
+                WorkflowHandoffOperationOwner::submit(app, tasks, tx, id, SemanticOperationKind::CreateAccount);
+                submit_local_terminal_operation(app, tasks, tx, id, SemanticOperationKind::CreateChannel);
+                submit_local_terminal_operation("SemanticOperationKind::CreateAccount");
+                submit_local_terminal_operation(app, OtherOperationKind::CreateAccount);
+                OtherLocalTerminalOperationOwner::submit(app, SemanticOperationKind::CreateAccount);
+                // submit_local_terminal_operation(app, SemanticOperationKind::CreateAccount);
+            }
+        "#;
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse fixture: {error}"),
+        };
+        let violations = super::scan_frontend_semantic_handoff_boundary(
+            Path::new("crates/aura-terminal/src/tui/semantic_lifecycle.rs"),
+            &syntax,
+        );
+        assert!(violations.is_empty(), "{violations:#?}");
+    }
+
+    #[test]
+    fn account_create_submission_excludes_only_proven_lexical_test_scopes() {
+        let source = r#"
+            #[cfg(all(test, feature = "fixtures"))]
+            mod fixtures {
+                fn producer() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+            }
+            #[test]
+            fn test_producer() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+            #[cfg(any(test, unix))]
+            fn mixed_producer() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+            struct Native;
+            #[cfg(test)]
+            impl TestOnly {
+                fn excluded() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+            }
+            impl Native {
+                #[cfg(test)]
+                fn test_method() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+                fn production_method() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+            }
+            fn later_production() { submit_local_terminal_operation(SemanticOperationKind::CreateAccount); }
+        "#;
+        let syntax = match parse_file(source) {
+            Ok(syntax) => syntax,
+            Err(error) => panic!("parse fixture: {error}"),
+        };
+        let violations =
+            super::scan_account_create_local_submission(Path::new("fixture.rs"), &syntax);
+        assert_eq!(violations.len(), 3, "{violations:#?}");
+    }
 
     #[test]
     fn spawn_policy_excludes_only_proven_test_configurations() {

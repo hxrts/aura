@@ -1,3 +1,6 @@
+use std::sync::Arc;
+mod confirmed_activation;
+
 /// Exact retained package location and original storage cause, without
 /// changing absence into another layout after a failed required read.
 #[derive(Debug, thiserror::Error)]
@@ -3684,6 +3687,47 @@ impl AuraEffectSystem {
         )
     }
 
+    /// Dispatch current private reads from the independently retained original
+    /// profile receipt. Matching ids check scope; they do not authorize a new
+    /// envelope or select a replacement after required-read failure.
+    async fn read_current_participant_key_package(
+        &self,
+        authority: &AuthorityId,
+        epoch: u64,
+        participant: &ParticipantIdentity,
+        location: &SecureStorageLocation,
+    ) -> Result<Vec<u8>, AuraError> {
+        let confirmed = crate::runtime::services::enrollment_profile::load_original_committed_profile_confirmation(self).await?;
+        if let Some(confirmed) = &confirmed {
+            let manifest = confirmed.confirmation().manifest();
+            if manifest.subject == *authority && manifest.pending_epoch == epoch {
+                if *participant != ParticipantIdentity::device(manifest.invitee_device) {
+                    return Err(held_registration_error(
+                        HeldEnrollmentRegistrationError::Binding,
+                    ));
+                }
+                let public = self
+                    .secure_retrieve(
+                        &Self::threshold_public_key_location(authority, epoch),
+                        &[SecureStorageCapability::Read],
+                    )
+                    .await?;
+                if aura_core::hash::hash(&public) != manifest.pending_public_key_package_digest {
+                    return Err(held_registration_error(
+                        HeldEnrollmentRegistrationError::Binding,
+                    ));
+                }
+                let owner = self.load_confirmed_activation_envelope(confirmed).await?;
+                return self.decrypt_confirmed_activation_envelope(&owner).await;
+            }
+        }
+        let envelope = self
+            .secure_retrieve(location, &[SecureStorageCapability::Read])
+            .await?;
+        self.decrypt_participant_key_package(authority, epoch, participant, &envelope)
+            .await
+    }
+
     /// Validate exact local physical signer policy before any identity secret read.
     pub(crate) async fn require_local_physical_solo_identity_policy(
         &self,
@@ -3770,15 +3814,14 @@ impl AuraEffectSystem {
                     ),
                 ));
             }
-            let envelope = self
-                .secure_retrieve(
-                    &Self::participant_share_location(authority, epoch, &local),
-                    &[SecureStorageCapability::Read],
-                )
-                .await?;
             let key = zeroize::Zeroizing::new(
-                self.decrypt_participant_key_package(authority, epoch, &local, &envelope)
-                    .await?,
+                self.read_current_participant_key_package(
+                    authority,
+                    epoch,
+                    &local,
+                    &Self::participant_share_location(authority, epoch, &local),
+                )
+                .await?,
             );
             tree_signing::validate_retained_threshold_key_package(
                 &key,
@@ -3857,17 +3900,21 @@ impl AuraEffectSystem {
                 ))
             }
         }
-        let caps = [SecureStorageCapability::Read];
         let solo = Self::solo_signing_key_location(authority, current_epoch);
         let location = if self.secure_exists(&solo).await? {
             solo
         } else {
             Self::participant_share_location(authority, current_epoch, &participant)
         };
-        let envelope = self.secure_retrieve(&location, &caps).await?;
-        let key_package = self
-            .decrypt_participant_key_package(authority, current_epoch, &participant, &envelope)
-            .await?;
+        let key_package = zeroize::Zeroizing::new(
+            self.read_current_participant_key_package(
+                authority,
+                current_epoch,
+                &participant,
+                &location,
+            )
+            .await?,
+        );
         let package = SingleSignerKeyPackage::import_from_secure_storage(
             &key_package,
             SecretExportContext::secure_storage(
@@ -4465,18 +4512,12 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         } else {
             Self::solo_signing_key_location(&context.authority, current_epoch)
         };
-        let envelope = self.secure_retrieve(&location, &caps).await?;
-        if envelope.len() > 131_072 {
-            return Err(AuraError::crypto(
-                "required signing envelope exceeds bounds",
-            ));
-        }
         let key_package = zeroize::Zeroizing::new(
-            self.decrypt_participant_key_package(
+            self.read_current_participant_key_package(
                 &context.authority,
                 current_epoch,
                 participant,
-                &envelope,
+                &location,
             )
             .await?,
         );
@@ -4710,6 +4751,23 @@ struct AllocationParticipantEnvelope {
     ciphertext: Vec<u8>,
 }
 impl EnrollmentSecretScope {
+    fn confirmed(
+        confirmed: &crate::handlers::invitation::enrollment_manifest_admission::DurableConfirmedEnrollmentCapability,
+    ) -> Result<Self, AuraError> {
+        let proof = confirmed.confirmation();
+        let manifest = proof.manifest();
+        Ok(Self {
+            version: 2,
+            authority: manifest.subject,
+            epoch: manifest.pending_epoch,
+            ceremony: manifest.ceremony.clone(),
+            invitation: manifest.invitation.clone(),
+            original_profile_digest: proof.manifest_digest(),
+            participant: ParticipantIdentity::device(manifest.invitee_device),
+            package_digest: manifest.pending_share_digest,
+        })
+    }
+
     fn original(
         owner: &StoredEnrollmentGenerationProfile,
         participant: &ParticipantIdentity,
@@ -4786,7 +4844,7 @@ impl AuraEffectSystem {
             .fresh_birth(
                 &OwnedSecretBirthCapability {
                     runtime_identity: self.crypto.lifetime_owner_identity(),
-                    plan,
+                    origin: OriginalSecretBirthOrigin::Plan(plan),
                     scope: scope.clone(),
                 },
                 wrap.as_ref(),
@@ -5023,8 +5081,10 @@ impl AuraEffectSystem {
                             &reference,
                             &OwnedSecretPositiveCapability {
                                 runtime_identity: self.crypto.lifetime_owner_identity(),
-                                activation,
-                                original: &owner,
+                                origin: OriginalSecretPositiveOrigin::Issuer {
+                                    activation,
+                                    original: &owner,
+                                },
                                 decision: &positive,
                             },
                         )
@@ -5042,11 +5102,16 @@ impl AuraEffectSystem {
     }
 }
 
-/// Borrowed original birth authorization. Private fields preserve the held plan.
+/// Borrowed original birth authorization from a held rotation plan or a
+/// reverified confirmed-import envelope owner.
 pub(in crate::runtime) struct OwnedSecretBirthCapability<'a, 'owner> {
     runtime_identity: std::sync::Arc<()>,
-    plan: &'a AuthenticatedEnrollmentRotationPlan<'owner>,
+    origin: OriginalSecretBirthOrigin<'a, 'owner>,
     scope: EnrollmentSecretScope,
+}
+enum OriginalSecretBirthOrigin<'a, 'owner> {
+    Plan(&'a AuthenticatedEnrollmentRotationPlan<'owner>),
+    Confirmed(&'a confirmed_activation::ConfirmedActivationEnvelopeCapability<'owner>),
 }
 impl OwnedSecretBirthCapability<'_, '_> {
     pub(in crate::runtime) fn require_runtime_owner(
@@ -5062,7 +5127,17 @@ impl OwnedSecretBirthCapability<'_, '_> {
     }
 
     pub(in crate::runtime) fn scope_bytes(&self) -> Result<Vec<u8>, AuraError> {
-        self.plan.generation.require_effects(self.plan.effects)?;
+        match &self.origin {
+            OriginalSecretBirthOrigin::Plan(plan) => {
+                plan.generation.require_effects(plan.effects)?;
+            }
+            OriginalSecretBirthOrigin::Confirmed(owner) => {
+                let expected = EnrollmentSecretScope::confirmed(owner.confirmed())?;
+                if self.scope != expected {
+                    return Err(AuraError::invalid("confirmed original birth scope differs"));
+                }
+            }
+        }
         self.scope.encode()
     }
 }
@@ -5164,12 +5239,20 @@ impl OwnedSecretReadCapability {
         Ok(())
     }
 }
+/// Positive publication borrows the original issuer activation or the exact
+/// reverified confirmed-import envelope owner and its immutable decision.
 pub(in crate::runtime) struct OwnedSecretPositiveCapability<'a, 'owner> {
     runtime_identity: std::sync::Arc<()>,
-    activation:
-        &'a crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'owner>,
-    original: &'a StoredEnrollmentGenerationProfile,
+    origin: OriginalSecretPositiveOrigin<'a, 'owner>,
     decision: &'a [u8],
+}
+enum OriginalSecretPositiveOrigin<'a, 'owner> {
+    Issuer {
+        activation:
+            &'a crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'owner>,
+        original: &'a StoredEnrollmentGenerationProfile,
+    },
+    Confirmed(&'a confirmed_activation::ConfirmedActivationEnvelopeCapability<'owner>),
 }
 impl OwnedSecretPositiveCapability<'_, '_> {
     pub(in crate::runtime) fn require_runtime_owner(
@@ -5185,26 +5268,40 @@ impl OwnedSecretPositiveCapability<'_, '_> {
     }
 
     pub(in crate::runtime) fn require_scope(&self, bytes: &[u8]) -> Result<(), AuraError> {
-        if self.activation.ceremony_id() != &self.original.ceremony {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::Binding,
-            ));
-        }
-        let scope: EnrollmentSecretScope =
-            serde_json::from_slice(bytes).map_err(|source| AuraError::Serialization {
-                message: "decode positive original birth scope".into(),
-                source: Some(std::sync::Arc::new(source)),
-            })?;
-        if !self.original.participants.contains(&scope.participant)
-            || !scope.same_generation(&EnrollmentSecretScope::original(
-                self.original,
-                &scope.participant,
-                &[],
-            )?)
-        {
-            return Err(held_registration_error(
-                HeldEnrollmentRegistrationError::Binding,
-            ));
+        match &self.origin {
+            OriginalSecretPositiveOrigin::Issuer {
+                activation,
+                original,
+            } => {
+                if activation.ceremony_id() != &original.ceremony {
+                    return Err(held_registration_error(
+                        HeldEnrollmentRegistrationError::Binding,
+                    ));
+                }
+                let scope: EnrollmentSecretScope =
+                    serde_json::from_slice(bytes).map_err(|source| AuraError::Serialization {
+                        message: "decode positive original birth scope".into(),
+                        source: Some(Arc::new(source)),
+                    })?;
+                if !original.participants.contains(&scope.participant)
+                    || !scope.same_generation(&EnrollmentSecretScope::original(
+                        original,
+                        &scope.participant,
+                        &[],
+                    )?)
+                {
+                    return Err(held_registration_error(
+                        HeldEnrollmentRegistrationError::Binding,
+                    ));
+                }
+            }
+            OriginalSecretPositiveOrigin::Confirmed(owner) => {
+                if EnrollmentSecretScope::confirmed(owner.confirmed())?.encode()? != bytes {
+                    return Err(AuraError::invalid(
+                        "confirmed original positive scope differs",
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -5604,7 +5701,7 @@ mod authenticated_roster_tests {
         }
         impl<T: ?Sized> AmbiguousClone<()> for T {}
         struct CloneImplemented;
-        impl<T: ?Sized + Clone> AmbiguousClone<CloneImplemented> for T {}
+        impl<T: Clone> AmbiguousClone<CloneImplemented> for T {}
         let _ = <AuthenticatedEnrollmentRotationPlan<'static> as AmbiguousClone<_>>::check;
         let _ = <EnrollmentGenerationReservation<'static> as AmbiguousClone<_>>::check;
         let _ = <EnrollmentFinalVerifierInventoryCapability<'static, 'static> as AmbiguousClone<
@@ -5619,10 +5716,7 @@ mod authenticated_roster_tests {
         }
         impl<T: ?Sized> AmbiguousDeserialize<()> for T {}
         struct DeserializeImplemented;
-        impl<T: ?Sized + for<'de> serde::Deserialize<'de>>
-            AmbiguousDeserialize<DeserializeImplemented> for T
-        {
-        }
+        impl<T: for<'de> serde::Deserialize<'de>> AmbiguousDeserialize<DeserializeImplemented> for T {}
         let _ = <AuthenticatedEnrollmentRotationPlan<'static> as AmbiguousDeserialize<_>>::check;
         let _ = <EnrollmentGenerationReservation<'static> as AmbiguousDeserialize<_>>::check;
         let _ = <EnrollmentFinalVerifierInventoryCapability<'static,'static> as AmbiguousDeserialize<_>>::check;
@@ -6054,7 +6148,7 @@ mod registered_generation_actual_owner_tests {
             .expect("original registered state");
         let registered = effects
             .resume_owned_enrollment_registration(
-                &tracker,
+                tracker,
                 state.initiator_id,
                 state.new_epoch,
                 &state.ceremony_id,
@@ -6618,16 +6712,18 @@ fn original_response_quorum_is_distinct_from_signing_policy() {
 mod missing_response_policy_history_tests {
     use super::*;
     fn old_owner_bytes(bytes: &[u8]) -> Vec<u8> {
-        let mut old: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        let mut old: serde_json::Value = serde_json::from_slice(bytes)
+            .expect("decode original owner for historical schema fixture");
         assert!(old
             .as_object_mut()
-            .unwrap()
+            .expect("original owner must encode as an object")
             .remove("response_policy")
             .is_some());
-        let owner: StoredEnrollmentGenerationProfile = serde_json::from_value(old).unwrap();
+        let owner: StoredEnrollmentGenerationProfile =
+            serde_json::from_value(old).expect("decode historical owner without response policy");
         assert!(owner.response_policy.is_none());
         assert!(owner.proved_legacy_response_policy.is_none());
-        serde_json::to_vec(&owner).unwrap()
+        serde_json::to_vec(&owner).expect("encode original historical owner bytes")
     }
     async fn replace_with_historical_bytes(
         effects: &AuraEffectSystem,
@@ -6639,7 +6735,7 @@ mod missing_response_policy_history_tests {
         assert!(effects
             .fault_remove_secure_record_for_test(key)
             .await
-            .unwrap());
+            .expect("remove selected provider record for historical schema fault"));
         effects
             .secure_store_immutable(
                 key,
@@ -6650,7 +6746,7 @@ mod missing_response_policy_history_tests {
                 ],
             )
             .await
-            .unwrap();
+            .expect("retain exact historical fixture bytes immutably");
     }
     #[tokio::test]
     async fn truly_old_missing_response_policy_uses_protected_original_registration_and_preserves_bytes(
@@ -6663,41 +6759,41 @@ mod missing_response_policy_history_tests {
             let live = super::super::enrollment_generation_profile_location(&issuer.authority_id(), epoch);
             let allocated = SecureStorageLocation::new("device_enrollment_generation_allocation_v1", start.ceremony_id.to_string());
             let registered = registration_history_location(&start.ceremony_id);
-            let old_allocated = old_owner_bytes(&effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.unwrap());
-            let old_registered = old_owner_bytes(&effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.unwrap());
+            let old_allocated = old_owner_bytes(&effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"));
+            let old_registered = old_owner_bytes(&effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"));
             replace_with_historical_bytes(effects.as_ref(), &allocated, &old_allocated).await;
             replace_with_historical_bytes(effects.as_ref(), &registered, &old_registered).await;
             let legacy = super::super::legacy_enrollment_generation_profile_location(&issuer.authority_id(), epoch);
-            effects.secure_store_immutable(&legacy, &old_registered, &[SecureStorageCapability::Read, SecureStorageCapability::Write]).await.unwrap();
-            effects.secure_delete(&live, &[SecureStorageCapability::Delete]).await.unwrap();
+            effects.secure_store_immutable(&legacy, &old_registered, &[SecureStorageCapability::Read, SecureStorageCapability::Write]).await.expect("retain original historical generation bytes");
+            effects.secure_delete(&live, &[SecureStorageCapability::Delete]).await.expect("clear migration live slot for actual legacy restore");
             assert!(effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.is_err());
-            let original = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.unwrap();
+            let original = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.expect("recover original protected enrollment registration");
             let original_deadline = original.timeout_budget.deadline_at_ms();
             let custody = effects.acquire_enrollment_generation_custody().await;
-            effects.migrate_legacy_generation_live_slot(&custody, issuer.authority_id(), epoch).await.unwrap();
-            let restored = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.unwrap();
+            effects.migrate_legacy_generation_live_slot(&custody, issuer.authority_id(), epoch).await.expect("migrate actual original legacy generation");
+            let restored = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.expect("read restored original generation");
             assert_eq!(restored, old_registered);
-            let mut owner: StoredEnrollmentGenerationProfile = serde_json::from_slice(&restored).unwrap();
-            effects.hydrate_legacy_response_policy(&mut owner).await.unwrap();
-            owner.response_policy().unwrap().require_exact(original.threshold_k, original.total_n).unwrap();
-            let detached: StoredEnrollmentGenerationProfile = serde_json::from_slice(&serde_json::to_vec(&owner).unwrap()).unwrap();
+            let mut owner: StoredEnrollmentGenerationProfile = serde_json::from_slice(&restored).expect("decode restored historical owner");
+            effects.hydrate_legacy_response_policy(&mut owner).await.expect("hydrate response policy from original protected evidence");
+            owner.response_policy().expect("original evidence supplies exact response policy").require_exact(original.threshold_k, original.total_n).expect("hydrated policy matches original signing roster");
+            let detached: StoredEnrollmentGenerationProfile = serde_json::from_slice(&serde_json::to_vec(&owner).expect("encode detached historical owner")).expect("decode detached historical owner without process proof");
             assert!(detached.proved_legacy_response_policy.is_none());
             assert!(detached.response_policy().is_err());
-            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.unwrap(), old_allocated);
-            assert_eq!(effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.unwrap(), old_registered);
-            assert_eq!(effects.secure_retrieve(&legacy, &[SecureStorageCapability::Read]).await.unwrap(), old_registered);
-            let after = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.unwrap();
+            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_allocated);
+            assert_eq!(effects.secure_retrieve(&registered, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
+            assert_eq!(effects.secure_retrieve(&legacy, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
+            let after = crate::handlers::invitation::enrollment_trust::recover_allocated_enrollment_registration(effects.as_ref(), &start.ceremony_id).await.expect("recover original protected enrollment registration");
             assert_eq!(after.timeout_budget.deadline_at_ms(), original_deadline);
             let proof = legacy_response_policy_location(&start.ceremony_id);
-            assert!(effects.fault_remove_secure_record_for_test(&proof).await.unwrap());
-            let missing = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.unwrap_err();
+            assert!(effects.fault_remove_secure_record_for_test(&proof).await.expect("remove original policy proof for required missing-record fault"));
+            let missing = effects.read_owned_enrollment_generation_profile(issuer.authority_id(), epoch).await.expect_err("missing original policy proof must refuse generation restoration");
             assert!(matches!(missing, AuraError::Storage { .. }));
-            let source = std::error::Error::source(&missing).unwrap()
-                .downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>().unwrap();
+            let source = std::error::Error::source(&missing).expect("missing policy proof retains native source")
+                .downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>().expect("native source identifies original missing secure record");
             assert_eq!(source.location(), &proof);
 
-            assert_eq!(effects.secure_retrieve(&live, &[SecureStorageCapability::Read]).await.unwrap(), old_registered);
-            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.unwrap(), old_allocated);
+            assert_eq!(effects.secure_retrieve(&live, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_registered);
+            assert_eq!(effects.secure_retrieve(&allocated, &[SecureStorageCapability::Read]).await.expect("read exact original historical secure record"), old_allocated);
         }).await;
     }
 }
@@ -6840,5 +6936,247 @@ impl AuraEffectSystem {
             });
         }
         Ok(())
+    }
+}
+// Staged inside runtime/effects/crypto.rs, where the protected verifier and
+// authenticated history validators remain private. No raw caller tree DTO.
+pub(crate) struct ApprovedEnrollmentTreeCustody<'runtime> {
+    effects: &'runtime AuraEffectSystem,
+    generation: EnrollmentGenerationCustodyCapability<'runtime>,
+    _tree: aura_protocol::handlers::tree::TreeDecisionLease<'runtime>,
+    _archive: Option<
+        crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<
+            'runtime,
+        >,
+    >,
+    inventory: aura_invitation::enrollment_manifest::EnrollmentParentVerifier,
+}
+impl ApprovedEnrollmentTreeCustody<'_> {
+    pub(crate) fn generation(&self) -> &EnrollmentGenerationCustodyCapability<'_> {
+        &self.generation
+    }
+    pub(crate) fn require_manifest(
+        &self,
+        effects: &AuraEffectSystem,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> Result<(), AuraError> {
+        self.generation.require_effects(effects)?;
+        if !std::ptr::eq(self.effects, effects)
+            || manifest.subject != effects.authority_id
+            || manifest.final_epoch != self.inventory.epoch
+            || manifest.final_commitment != self.inventory.commitment
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        let supplied = manifest.final_inventory().map_err(|source| {
+            AuraError::crypto_with_source(
+                "approved exact active inventory missing",
+                Arc::new(source),
+            )
+        })?;
+        if aura_core::util::serialization::to_vec(&supplied)?
+            != aura_core::util::serialization::to_vec(&vec![self.inventory.clone()])?
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::Substituted,
+            ));
+        }
+        Ok(())
+    }
+}
+impl AuraEffectSystem {
+    /// Remote participant-local custody, acquired once after original local
+    /// explicit approval. It authorizes no provisional namespace substitution.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "RuntimeApprovedEnrollmentSigningIntent",
+        family = "authorizer"
+    )]
+    pub(crate) async fn acquire_approved_enrollment_tree_custody<'a>(
+        &'a self,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<ApprovedEnrollmentTreeCustody<'a>, AuraError> {
+        if !std::ptr::eq(self, approval.effects().as_ref())
+            || approval.manifest().subject != self.authority_id
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::OwnerBinding,
+            ));
+        }
+        let generation = self.acquire_enrollment_generation_custody().await;
+        let tree = self.lock_tree_decision().await;
+        let ops = self
+            .export_tree_ops()
+            .await
+            .map_err(|source| AuraError::Crypto {
+                message: "read original approved native signing history".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        let archive =
+            crate::runtime::services::enrollment_profile::load_original_active_profile_archive(
+                self,
+            )
+            .await?;
+        let parents = match &archive {
+            Some(original) => {
+                self.collect_imported_enrollment_parent_inventory(original, &ops)
+                    .await?
+            }
+            None => self.collect_enrollment_parent_inventory(&ops).await?,
+        };
+        let state = aura_journal::commitment_tree::reduce(&ops).map_err(|source| {
+            AuraError::crypto_with_source(
+                "reduce original approved authenticated history",
+                Arc::new(source),
+            )
+        })?;
+        let baseline = ops
+            .iter()
+            .map(aura_core::util::serialization::to_vec)
+            .collect::<Result<Vec<_>, _>>()?;
+        let manifest = approval.manifest();
+        manifest.validate_shape().map_err(|source| {
+            AuraError::crypto_with_source(
+                "validate native approved manifest shape",
+                Arc::new(source),
+            )
+        })?;
+        manifest
+            .validate_setup_validity(approval.setup().statement())
+            .map_err(|source| {
+                AuraError::crypto_with_source(
+                    "validate native original setup binding",
+                    Arc::new(source),
+                )
+            })?;
+        let genesis = aura_journal::commitment_tree::state::TreeState::new();
+        if manifest.baseline_count as usize != ops.len()
+            || manifest.baseline_digest
+                != aura_core::hash::hash(&aura_core::util::serialization::to_vec(&baseline)?)
+            || aura_core::util::serialization::to_vec(&manifest.parents)?
+                != aura_core::util::serialization::to_vec(&parents)?
+            || manifest.starting_epoch != genesis.epoch.value()
+            || manifest.starting_commitment != genesis.root_commitment
+            || manifest.invitee_authority != approval.setup().statement().authority
+            || manifest.invitee_device != approval.setup().statement().device
+            || manifest.setup.nonce != approval.setup().statement().nonce
+            || manifest.setup.digest != approval.setup().digest()
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::BaselineMismatch,
+            ));
+        }
+        if state
+            .branches
+            .keys()
+            .any(|node| *node != aura_core::tree::NodeIndex(0))
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::PolicyMismatch,
+            ));
+        }
+        if state
+            .leaves
+            .keys()
+            .any(|leaf| state.get_leaf_parent(*leaf) != Some(aura_core::tree::NodeIndex(0)))
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::MissingLeafParent,
+            ));
+        }
+        let epoch = state.epoch.value();
+        let metadata = self
+            .require_threshold_config_metadata(&self.authority_id, epoch)
+            .await?;
+        let (_, threshold, package) = self
+            .trusted_tree_parent_verifier_inventory(&self.authority_id, epoch)
+            .await?;
+        let devices: std::collections::BTreeSet<_> = state
+            .leaves
+            .values()
+            .filter(|leaf| leaf.role == aura_core::tree::LeafRole::Device)
+            .map(|leaf| leaf.device_id)
+            .collect();
+        if !devices.contains(&self.device_id())
+            || !devices.contains(&manifest.initiator_device)
+            || devices.contains(&manifest.invitee_device)
+            || metadata.participants.len() != devices.len()
+            || metadata
+                .participants
+                .iter()
+                .any(|participant| match participant {
+                    ParticipantIdentity::Device(device) => !devices.contains(device),
+                    _ => true,
+                })
+        {
+            return Err(final_inventory_error(
+                EnrollmentFinalInventoryError::PolicyMismatch,
+            ));
+        }
+        let custody = ApprovedEnrollmentTreeCustody {
+            effects: self,
+            generation,
+            _tree: tree,
+            _archive: archive,
+            inventory: aura_invitation::enrollment_manifest::EnrollmentParentVerifier {
+                epoch,
+                commitment: state.root_commitment,
+                signing_node: aura_core::tree::NodeIndex(0),
+                mode: metadata.mode,
+                threshold,
+                participants: metadata.participants,
+                public_key_package: package,
+                agreement: metadata.agreement_mode,
+            },
+        };
+        custody.require_manifest(self, approval.manifest())?;
+        Ok(custody)
+    }
+}
+// Staged inside runtime/effects/crypto.rs. One narrow borrowed signing owner
+// preserves the actual original tree/generation allocation in both roles.
+enum EnrollmentTranscriptTreeOrigin<'custody, 'owner, 'runtime> {
+    Issuer(&'custody EnrollmentFinalVerifierInventoryCapability<'owner, 'runtime>),
+    Participant(&'custody ApprovedEnrollmentTreeCustody<'runtime>),
+}
+pub(crate) struct EnrollmentTranscriptTreeOwner<'custody, 'owner, 'runtime> {
+    origin: EnrollmentTranscriptTreeOrigin<'custody, 'owner, 'runtime>,
+}
+impl<'custody, 'owner, 'runtime> EnrollmentTranscriptTreeOwner<'custody, 'owner, 'runtime> {
+    pub(crate) fn from_original_issuer(
+        inventory: &'custody EnrollmentFinalVerifierInventoryCapability<'owner, 'runtime>,
+    ) -> Self {
+        Self {
+            origin: EnrollmentTranscriptTreeOrigin::Issuer(inventory),
+        }
+    }
+    pub(crate) fn from_original_participant(
+        custody: &'custody ApprovedEnrollmentTreeCustody<'runtime>,
+    ) -> Self {
+        Self {
+            origin: EnrollmentTranscriptTreeOrigin::Participant(custody),
+        }
+    }
+    pub(crate) fn require_manifest(
+        &self,
+        effects: &AuraEffectSystem,
+        manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> Result<(), AuraError> {
+        match self.origin {
+            EnrollmentTranscriptTreeOrigin::Issuer(inventory) => {
+                inventory.require_manifest(effects, manifest)
+            }
+            EnrollmentTranscriptTreeOrigin::Participant(custody) => {
+                custody.require_manifest(effects, manifest)
+            }
+        }
+    }
+    pub(crate) fn generation(&self) -> &EnrollmentGenerationCustodyCapability<'_> {
+        match self.origin {
+            EnrollmentTranscriptTreeOrigin::Issuer(inventory) => inventory.reservation.generation(),
+            EnrollmentTranscriptTreeOrigin::Participant(custody) => custody.generation(),
+        }
     }
 }

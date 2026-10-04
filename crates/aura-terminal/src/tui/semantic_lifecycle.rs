@@ -23,6 +23,7 @@ static NEXT_OWNER_OPERATION_NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SemanticOperationTransferScope {
+    CreateAccount,
     InvitationImport,
     ImportDeviceEnrollment,
     CreateGuardianInvitation,
@@ -721,12 +722,8 @@ mod tests {
         kind: SemanticOperationKind,
     }
 
-    fn local_terminal_cases() -> [OperationInvariantCase; 3] {
+    fn local_terminal_cases() -> [OperationInvariantCase; 2] {
         [
-            OperationInvariantCase {
-                operation_id: OperationId::account_create,
-                kind: SemanticOperationKind::CreateAccount,
-            },
             OperationInvariantCase {
                 operation_id: OperationId::invitation_create,
                 kind: SemanticOperationKind::CreateContactInvitation,
@@ -738,8 +735,12 @@ mod tests {
         ]
     }
 
-    fn parity_critical_handoff_cases() -> [OperationInvariantCase; 4] {
+    fn parity_critical_handoff_cases() -> [OperationInvariantCase; 5] {
         [
+            OperationInvariantCase {
+                operation_id: OperationId::account_create,
+                kind: SemanticOperationKind::CreateAccount,
+            },
             OperationInvariantCase {
                 operation_id: OperationId::invitation_create,
                 kind: SemanticOperationKind::InviteActorToChannel,

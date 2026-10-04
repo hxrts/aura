@@ -1916,10 +1916,8 @@ mod tests {
                     .expect("actual accepted original ingress");
                 if index == 0 {
                     first = Some(target);
-                } else {
-                    if let Some(previous) = last.replace(target) {
-                        previous.acknowledge_observed_only();
-                    }
+                } else if let Some(previous) = last.replace(target) {
+                    previous.acknowledge_observed_only();
                 }
             }
             last.expect("actual final target")

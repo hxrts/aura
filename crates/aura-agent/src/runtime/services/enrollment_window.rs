@@ -12,6 +12,148 @@ use aura_core::{AuraError, TimeoutBudget, TimeoutBudgetError, TimeoutRunError};
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
 
+mod signing_checkpoint;
+
+#[cfg(test)]
+mod signing_contract_guards {
+    use super::HeldIssuerCompletionObserver;
+
+    #[test]
+    fn completion_observer_cannot_duplicate_or_deserialize_original_custody() {
+        struct CloneImplemented;
+        trait AmbiguousIfClone<A> {
+            fn marker() {}
+        }
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        impl<T: Clone> AmbiguousIfClone<CloneImplemented> for T {}
+        let _ = <HeldIssuerCompletionObserver as AmbiguousIfClone<_>>::marker;
+
+        struct DeserializeImplemented;
+        trait AmbiguousIfDeserialize<A> {
+            fn marker() {}
+        }
+        impl<T: ?Sized> AmbiguousIfDeserialize<()> for T {}
+        impl<T: serde::de::DeserializeOwned> AmbiguousIfDeserialize<DeserializeImplemented> for T {}
+        let _ = <HeldIssuerCompletionObserver as AmbiguousIfDeserialize<_>>::marker;
+    }
+}
+
+/// Restricted original issuer completion observation. No execution permit,
+/// Clone/Deserialize, arbitrary executor, child, nonce or session API is exposed.
+pub(crate) struct HeldIssuerCompletionObserver {
+    active: TimeoutBudget,
+    original: super::ceremony_tracker::HeldIssuerClockObservationCapability,
+}
+impl HeldIssuerCompletionObserver {
+    pub(crate) async fn receive_issuer_result(
+        &self,
+        effects: &AuraEffectSystem,
+        receiver: tokio::sync::oneshot::Receiver<
+            Result<
+                aura_app::runtime_bridge::DeviceEnrollmentStart,
+                aura_invitation::enrollment_setup::EnrollmentIssuanceError,
+            >,
+        >,
+    ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, AuraError> {
+        self.original.require_effects(effects)?;
+        aura_core::time::timeout::execute_with_timeout_budget_and_checkpoint(
+            effects,
+            &self.active,
+            || async {
+                self.original
+                    .checkpoint()
+                    .await
+                    .map_err(TimeoutBudgetError::checkpoint_failure)
+            },
+            || async {
+                receiver
+                    .await
+                    .map_err(|source| AuraError::Internal {
+                        message: "original prepared issuer result channel stopped".into(),
+                        source: Some(Arc::new(source)),
+                    })?
+                    .map_err(|source| AuraError::Internal {
+                        message: "original prepared issuer rejected completion".into(),
+                        source: Some(Arc::new(source)),
+                    })
+            },
+        )
+        .await
+        .map_err(|source| AuraError::Internal {
+            message: "original issuer completion observation failed".into(),
+            source: Some(Arc::new(source)),
+        })
+    }
+
+    pub(crate) async fn wait_owned_group(
+        &self,
+        effects: &AuraEffectSystem,
+        group: &crate::task_registry::TaskGroup,
+    ) -> Result<(), crate::task_registry::TaskSupervisionError> {
+        use crate::task_registry::TaskSupervisionError;
+        self.original
+            .require_effects(effects)
+            .map_err(|source| TaskSupervisionError::Budget {
+                group: group.name().into(),
+                source: Box::new(TimeoutBudgetError::checkpoint_failure(source)),
+            })?;
+        let outcome = aura_core::time::timeout::execute_with_timeout_budget_and_checkpoint(
+            effects,
+            &self.active,
+            || async {
+                self.original
+                    .checkpoint()
+                    .await
+                    .map_err(TimeoutBudgetError::checkpoint_failure)
+            },
+            || group.wait_with_original_budget(effects, &self.active),
+        )
+        .await;
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(TimeoutRunError::Operation(source)) => Err(source),
+            Err(TimeoutRunError::Timeout(source)) => {
+                let failure = match source {
+                    source @ TimeoutBudgetError::DeadlineExceeded { .. } => {
+                        TaskSupervisionError::Timeout {
+                            group: group.name().into(),
+                            active_tasks: group.active_tasks(),
+                            source: Box::new(source),
+                        }
+                    }
+                    source => TaskSupervisionError::Budget {
+                        group: group.name().into(),
+                        source: Box::new(source),
+                    },
+                };
+                group.request_cancellation();
+                match group.abort_remaining() {
+                    Ok(()) => Err(failure),
+                    Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        ..
+                    }) => Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        cause: Some(Box::new(failure)),
+                    }),
+                    Err(source) => Err(source),
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn shutdown_owned_group(
+        &self,
+        effects: &AuraEffectSystem,
+        group: &crate::task_registry::TaskGroup,
+    ) -> Result<(), crate::task_registry::TaskSupervisionError> {
+        group.request_cancellation();
+        self.wait_owned_group(effects, group).await
+    }
+}
+
 /// Preparation authority is separate from protocol execution admission.
 pub(crate) enum EnrollmentCancellationPreparationCapability {
     Active(EnrollmentCancellationWindowCapability),
@@ -282,6 +424,12 @@ struct FrozenAdmittedCheckpoint {
     budget_bytes: Vec<u8>,
 }
 enum WindowCheckpoint {
+    HeldIssuer {
+        capability: Arc<RegisteredEnrollmentWindowCapability>,
+    },
+    ApprovedSigning {
+        capability: Arc<signing_checkpoint::ApprovedSigningCheckpoint>,
+    },
     Registered {
         capability: Arc<RegisteredEnrollmentWindowCapability>,
     },
@@ -318,6 +466,159 @@ fn admitted_location(namespace: &str, binding: &AdmittedWindowBinding) -> Secure
     SecureStorageLocation::new(namespace, binding.ceremony.to_string())
 }
 impl EnrollmentWindowCapability {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "original_held_issuer_window",
+        receiver_type = EnrollmentWindowCapability,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn held_issuer_completion_observer(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<HeldIssuerCompletionObserver, AuraError> {
+        let WindowCheckpoint::HeldIssuer { capability } = self.checkpoint.as_ref() else {
+            return Err(AuraError::permission_denied(
+                "completion requires actual held issuer preparation window",
+            ));
+        };
+        capability.require_effects(effects)?;
+        self.remaining_ms(effects).await.map_err(AuraError::from)?;
+        let original = capability.completion_observation();
+        if !self.active.shares_observation_owner_with(original.budget()) {
+            return Err(AuraError::permission_denied(
+                "issuer completion original clock changed",
+            ));
+        }
+        Ok(HeldIssuerCompletionObserver {
+            active: self.active.clone(),
+            original,
+        })
+    }
+    fn require_execution_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        match self.checkpoint.as_ref() {
+            WindowCheckpoint::Registered { capability }
+            | WindowCheckpoint::HeldIssuer { capability } => capability.require_effects(effects),
+            WindowCheckpoint::ApprovedSigning { capability } => capability.require_effects(effects),
+            WindowCheckpoint::Admitted {
+                effects: original, ..
+            } => {
+                if std::ptr::eq(original.as_ref(), effects) {
+                    Ok(())
+                } else {
+                    Err(AuraError::permission_denied(
+                        "admitted clock effect owner changed",
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Observe the exact owned task group under this sealed original clock.
+    /// Raw timeout access is confined to the window implementation.
+    pub(crate) async fn wait_owned_group(
+        &self,
+        effects: &AuraEffectSystem,
+        group: &crate::task_registry::TaskGroup,
+    ) -> Result<(), crate::task_registry::TaskSupervisionError> {
+        use crate::task_registry::TaskSupervisionError;
+        self.require_execution_effects(effects)
+            .map_err(|source| TaskSupervisionError::Budget {
+                group: group.name().into(),
+                source: Box::new(TimeoutBudgetError::checkpoint_failure(source)),
+            })?;
+        let outcome = self
+            .execute(effects, || async {
+                // active is an original-owned child, so attenuation is retained.
+                group.wait_with_original_budget(effects, &self.active).await
+            })
+            .await;
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(TimeoutRunError::Operation(source)) => Err(source),
+            Err(TimeoutRunError::Timeout(source)) => {
+                let failure = match source {
+                    source @ TimeoutBudgetError::DeadlineExceeded { .. } => {
+                        TaskSupervisionError::Timeout {
+                            group: group.name().into(),
+                            active_tasks: group.active_tasks(),
+                            source: Box::new(source),
+                        }
+                    }
+                    source => TaskSupervisionError::Budget {
+                        group: group.name().into(),
+                        source: Box::new(source),
+                    },
+                };
+                group.request_cancellation();
+                match group.abort_remaining() {
+                    Ok(()) => Err(failure),
+                    Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        ..
+                    }) => Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        cause: Some(Box::new(failure)),
+                    }),
+                    Err(source) => Err(source),
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn shutdown_owned_group(
+        &self,
+        effects: &AuraEffectSystem,
+        group: &crate::task_registry::TaskGroup,
+    ) -> Result<(), crate::task_registry::TaskSupervisionError> {
+        group.request_cancellation();
+        self.wait_owned_group(effects, group).await
+    }
+    /// Mint only from the actual allocation while its original decision remains held.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentGenerationReservation",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn held_issuer(
+        effects: Arc<AuraEffectSystem>,
+        tracker: &super::ceremony_tracker::CeremonyTracker,
+        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+    ) -> Result<Self, AuraError> {
+        let capability = Arc::new(tracker.held_issuer_window(&effects, reservation).await?);
+        capability.checkpoint().await?;
+        Ok(Self {
+            active: capability.budget().clone(),
+            original: capability.budget().clone(),
+            _lease: capability.lease(),
+            checkpoint: Arc::new(WindowCheckpoint::HeldIssuer { capability }),
+        })
+    }
+
+    /// New sibling consent creates its local allocation once. No peer clock is used.
+    /// Any previous allocation (including restart or consumed approval) refuses
+    /// a second owner; only children of the retained original may continue.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "RuntimeApprovedEnrollmentSigningIntent",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn approved_signing(
+        effects: Arc<AuraEffectSystem>,
+        approval: &crate::runtime_bridge::enrollment_quorum::RuntimeApprovedEnrollmentSigningIntent,
+    ) -> Result<Self, AuraError> {
+        let (capability, budget, lease) =
+            signing_checkpoint::ApprovedSigningCheckpoint::allocate(effects, approval).await?;
+        Ok(Self {
+            active: budget.clone(),
+            original: budget,
+            _lease: lease,
+            checkpoint: Arc::new(WindowCheckpoint::ApprovedSigning {
+                capability: Arc::new(capability),
+            }),
+        })
+    }
     fn admitted_binding(witness: &AdmittedEnrollmentManifest) -> AdmittedWindowBinding {
         let manifest = witness.manifest();
         AdmittedWindowBinding {
@@ -955,6 +1256,27 @@ impl EnrollmentWindowCapability {
         confirmation_at: Option<&PhysicalTime>,
     ) -> Result<Option<FrozenAdmittedCheckpoint>, TimeoutBudgetError> {
         match self.checkpoint.as_ref() {
+            WindowCheckpoint::HeldIssuer { capability } => {
+                if confirmation_at.is_some() {
+                    return Err(TimeoutBudgetError::CheckpointDiscontinuity {
+                        detail: "held issuer cannot acknowledge invitee confirmation".into(),
+                    });
+                }
+                capability
+                    .checkpoint()
+                    .await
+                    .map_err(TimeoutBudgetError::checkpoint_failure)?;
+                Ok(None)
+            }
+            WindowCheckpoint::ApprovedSigning { capability } => {
+                if confirmation_at.is_some() {
+                    return Err(TimeoutBudgetError::CheckpointDiscontinuity {
+                        detail: "sibling signing cannot acknowledge invitee confirmation".into(),
+                    });
+                }
+                capability.checkpoint(&self.original).await?;
+                Ok(None)
+            }
             WindowCheckpoint::Registered { capability } => {
                 if confirmation_at.is_some() {
                     return Err(TimeoutBudgetError::CheckpointDiscontinuity {

@@ -127,6 +127,9 @@ pub(crate) struct ConfirmedParentInventoryCapability<'runtime> {
     tuples: Vec<EnrollmentParentVerifier>,
 }
 impl ConfirmedParentInventoryCapability<'_> {
+    pub(crate) fn confirmed(&self) -> &DurableConfirmedEnrollmentCapability {
+        &self._confirmed
+    }
     /// Consumes archive evidence only with the actual physical runtime owner and
     /// original cryptographically checked history prefix. Later operations are
     /// verified against admitted node policy, never an ambient package cache.

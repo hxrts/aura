@@ -707,3 +707,14 @@ runtime-owned durable confirmation evidence for the exact imported generation.
 They are not independent agreement operations, and local accepted status or
 receipt locator fields do not authorize adoption. Generic key-rotation commit
 is not an alternate enrollment activation path.
+
+### Enrollment initiation under an active quorum
+
+Preparing an enrollment signing intent retains the original issuer allocation
+and establishes neither enrollment success nor local signing consent. Each
+active physical participant independently approves the exact manifest, public
+transport commitment, and initial Request under its current authenticated policy.
+Resuming that allocation may produce a pending enrollment code only after all
+three signatures verify. This initiation does not authorize later Committed or
+Failed controls, durable membership, or invitee activation. Those outcomes retain
+their separate agreement and evidence requirements.

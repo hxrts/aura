@@ -66,7 +66,7 @@ use tui_tracing::init_tui_tracing;
 pub use account::{
     create_account, export_account_backup, import_account_backup,
     persist_completed_enrollment_runtime_identity, restore_recovered_account,
-    try_load_account_from_path,
+    stage_account_for_bootstrap, try_load_account_from_path,
 };
 
 pub use aura_app::ui::types::{

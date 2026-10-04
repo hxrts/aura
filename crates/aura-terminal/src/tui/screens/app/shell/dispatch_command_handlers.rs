@@ -623,7 +623,7 @@ pub(super) fn handle_dispatch_command_match(
                 new_state.toast_error("UI update sender is unavailable");
                 return EventCommandLoopAction::ContinueCommand;
             };
-            let operation = submit_local_terminal_operation(
+            let operation = submit_workflow_handoff_operation(
                 app_core_for_events,
                 tasks_for_events,
                 update_tx,

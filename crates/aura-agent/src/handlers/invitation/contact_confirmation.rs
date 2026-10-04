@@ -933,7 +933,7 @@ mod required_contact_identity_tests {
             source: pair.sender_id,
             context: continuation.invitation.context_id,
             payload: serde_json::to_vec(&response).unwrap(),
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
             receipt: None,
         };
         let original = select_required_contact_response_verification(

@@ -361,7 +361,7 @@ pub(super) fn execute_harness_followup_command(
             let Some(update_tx) = update_tx.clone() else {
                 return Err("UI update sender is unavailable".to_string());
             };
-            let operation = submit_local_terminal_operation(
+            let operation = submit_workflow_handoff_operation(
                 app_ctx.app_core.raw().clone(),
                 app_ctx.tasks(),
                 update_tx,

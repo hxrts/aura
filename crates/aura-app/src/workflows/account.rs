@@ -8,6 +8,8 @@
 //! Account backup operations (encode/decode/validate) are portable business
 //! logic. The actual file I/O for export/import remains in aura-terminal.
 mod bootstrap;
+mod staging;
+pub use staging::stage_runtime_free_account_with_terminal_status;
 mod validation;
 
 pub use bootstrap::{

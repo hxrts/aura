@@ -116,10 +116,11 @@ mod crypto;
 #[cfg(test)]
 pub(crate) use crypto::ParticipantEnvelopeBoundsError;
 pub(crate) use crypto::{
-    held_registration_error, EnrollmentFinalVerifierInventoryCapability,
-    EnrollmentGenerationCustodyCapability, EnrollmentGenerationReservation,
-    EnrollmentResponsePolicy, HeldEnrollmentRegistrationError,
-    RegisteredEnrollmentGenerationCapability, RequiredSigningParticipantError,
+    held_registration_error, EnrollmentFinalInventoryError,
+    EnrollmentFinalVerifierInventoryCapability, EnrollmentGenerationCustodyCapability,
+    EnrollmentGenerationReservation, EnrollmentResponsePolicy, EnrollmentTranscriptTreeOwner,
+    HeldEnrollmentRegistrationError, RegisteredEnrollmentGenerationCapability,
+    RequiredSigningParticipantError,
 };
 
 pub(in crate::runtime) use crypto::{
@@ -3738,8 +3739,7 @@ mod tests {
 
         let failure = effects
             .verified_biscuit_frontier()
-            .err()
-            .expect("actual token signature rejects a different root");
+            .expect_err("actual token signature rejects a different root");
         assert!(matches!(failure, AuraError::Crypto { .. }));
         assert!(
             failure.source().is_some(),
@@ -4259,12 +4259,29 @@ impl AuraEffectSystem {
             .secure_storage()
             .secure_retrieve(&location, &[SecureStorageCapability::Read])
             .await;
-        let metadata = Self::decode_required_threshold_metadata(data)?;
+        let mut metadata = Self::decode_required_threshold_metadata(data)?;
         if let Some(origin) = metadata.bootstrap_migration_origin {
             crate::runtime::services::threshold_signing::validate_bootstrap_migration_origin(
                 self, authority, epoch, origin,
             )
             .await?;
+        }
+        if metadata.agreement_mode != aura_core::threshold::AgreementMode::ConsensusFinalized {
+            if let Some(archive) =
+                crate::runtime::services::enrollment_profile::load_original_active_profile_archive(
+                    self,
+                )
+                .await?
+            {
+                if archive.manifest().subject == *authority
+                    && archive.manifest().pending_epoch == epoch
+                {
+                    let owner = self
+                        .load_confirmed_activation_envelope(archive.confirmed())
+                        .await?;
+                    metadata = self.confirmed_activation_finalized_config(&owner).await?;
+                }
+            }
         }
         Ok(metadata)
     }
@@ -4377,20 +4394,20 @@ fn authenticated_browser_harness_mode() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ThresholdConfigMetadata {
     /// Minimum signers required (k in k-of-n)
-    threshold_k: u16,
+    pub(crate) threshold_k: u16,
     /// Total number of participants (n in k-of-n)
-    total_n: u16,
+    pub(crate) total_n: u16,
     /// Participants (in protocol participant order)
     #[serde(default)]
-    participants: Vec<aura_core::threshold::ParticipantIdentity>,
+    pub(crate) participants: Vec<aura_core::threshold::ParticipantIdentity>,
     /// Signing mode for the stored epoch.
-    mode: SigningMode,
+    pub(crate) mode: SigningMode,
     /// Agreement mode (A1/A2/A3) for the stored epoch
     #[serde(default)]
-    agreement_mode: aura_core::threshold::AgreementMode,
+    pub(crate) agreement_mode: aura_core::threshold::AgreementMode,
     /// Exact protected original bootstrap migration decision, absent for fresh keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    bootstrap_migration_origin: Option<[u8; 32]>,
+    pub(crate) bootstrap_migration_origin: Option<[u8; 32]>,
 }
 
 impl ThresholdConfigMetadata {
@@ -4403,7 +4420,7 @@ impl ThresholdConfigMetadata {
 }
 
 impl ThresholdConfigMetadata {
-    fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
+    pub(crate) fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
         self.participants.clone()
     }
 }

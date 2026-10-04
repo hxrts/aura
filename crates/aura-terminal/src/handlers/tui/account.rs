@@ -249,6 +249,22 @@ pub async fn create_account(
     create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
 }
 
+/// Native configured staging adapter. Semantic completion belongs to the app producer.
+pub async fn stage_account_for_bootstrap(
+    base_path: &Path,
+    app: &Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
+    nickname: String,
+    instance: Option<aura_app::ui_contract::OperationInstanceId>,
+) -> aura_app::ui_contract::WorkflowTerminalOutcome<(AuthorityId, ContextId)> {
+    let storage = open_bootstrap_storage(base_path);
+    let time = PhysicalTimeHandler::new();
+    let crypto = RealCryptoHandler::new();
+    aura_app::ui::workflows::account::stage_runtime_free_account_with_terminal_status(
+        app, &storage, &time, &crypto, nickname, instance,
+    )
+    .await
+}
+
 /// Persist only an app-issued accepted/adopted enrollment identity.
 pub async fn persist_completed_enrollment_runtime_identity(
     base_path: &Path,
@@ -450,9 +466,223 @@ pub async fn import_account_backup(
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use aura_core::effects::ReactiveEffects;
     use tempfile::tempdir;
 
     use super::*;
+
+    #[tokio::test]
+    async fn native_staging_producer_retains_original_account_operation_in_attached_signal() {
+        use aura_app::ui::types::{AppConfig, AppCore};
+        use aura_app::ui_contract::{
+            AuthoritativeSemanticFact, OperationId, OperationInstanceId, SemanticOperationPhase,
+        };
+        let dir = tempdir().expect("actual configured native root");
+        let app = Arc::new(async_lock::RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap(),
+        ));
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let instance = OperationInstanceId("native-stage-original-instance".into());
+        let staged =
+            stage_account_for_bootstrap(dir.path(), &app, "Alice".into(), Some(instance.clone()))
+                .await;
+        let (authority, context) = staged.result.expect("native encrypted writes acknowledged");
+        assert!(staged.terminal.is_some());
+        let loaded = try_load_account_from_path(dir.path()).await.unwrap();
+        assert!(
+            matches!(loaded, AccountLoadResult::Loaded { authority: a, context: c, .. } if a == authority && c == context)
+        );
+        let facts = app.read().await.authoritative_semantic_facts();
+        let original = facts.iter().find(|fact| matches!(fact,
+        AuthoritativeSemanticFact::OperationStatus { operation_id, instance_id, status, .. }
+        if *operation_id == OperationId::account_create() && instance_id.as_ref() == Some(&instance)
+            && status.phase == SemanticOperationPhase::Succeeded
+    )).expect("actual producer published original terminal").clone();
+        let effect_context = crate::handlers::EffectContext::new(
+            authority,
+            context,
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            aura_agent::AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&effect_context)
+                .await
+                .unwrap(),
+        );
+        app.write()
+            .await
+            .attach_bootstrap_runtime(agent.clone().as_runtime_bridge())
+            .unwrap();
+
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let snapshot = app
+            .read()
+            .await
+            .read(&*aura_app::ui::signals::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            .await
+            .unwrap();
+        assert!(snapshot.facts.contains(&original));
+        assert!(app
+            .write()
+            .await
+            .attach_bootstrap_runtime(agent.clone().as_runtime_bridge())
+            .is_err());
+        assert!(AppCore::detach_runtime(&app).await);
+        drop(app);
+        agent
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        let agent = match Arc::try_unwrap(agent) {
+            Ok(agent) => agent,
+            Err(_) => panic!("acknowledged native tasks must release the original agent owner"),
+        };
+        agent.shutdown(&effect_context).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_staging_rejects_runtime_backed_app_without_writes_or_success() {
+        use aura_app::ui::types::{AppConfig, AppCore};
+        use aura_app::ui_contract::{AuthoritativeSemanticFact, SemanticOperationPhase};
+        let dir = tempdir().unwrap();
+        let authority = AuthorityId::new_from_entropy(aura_core::hash::hash(
+            b"aura-terminal.account.native-staging-rejects-runtime-backed.authority",
+        ));
+        let effect_context = crate::handlers::EffectContext::new(
+            authority,
+            ContextId::new_from_entropy(aura_core::hash::hash(
+                b"aura-terminal.account.native-staging-rejects-runtime-backed.context",
+            )),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let agent = Arc::new(
+            aura_agent::AgentBuilder::new()
+                .with_authority(authority)
+                .build_testing_async(&effect_context)
+                .await
+                .unwrap(),
+        );
+        let runtime = agent.clone().as_runtime_bridge();
+
+        let app = Arc::new(async_lock::RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let staged = stage_account_for_bootstrap(dir.path(), &app, "Alice".into(), None).await;
+        assert!(staged.result.is_err());
+        assert!(staged.terminal.is_some());
+        assert!(matches!(
+            try_load_account_from_path(dir.path()).await.unwrap(),
+            AccountLoadResult::NotFound
+        ));
+        assert!(!app.read().await.authoritative_semantic_facts().iter().any(|fact| matches!(fact,
+        AuthoritativeSemanticFact::OperationStatus { status, .. } if status.phase == SemanticOperationPhase::Succeeded)));
+        assert!(AppCore::detach_runtime(&app).await);
+        drop(app);
+        agent
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
+        let agent = match Arc::try_unwrap(agent) {
+            Ok(agent) => agent,
+            Err(_) => panic!("acknowledged native tasks must release the original agent owner"),
+        };
+        agent.shutdown(&effect_context).await.unwrap();
+    }
+
+    struct RejectAccountProfile(BootstrapStorage);
+
+    #[async_trait::async_trait]
+    impl StorageCoreEffects for RejectAccountProfile {
+        async fn store(
+            &self,
+            key: &str,
+            value: Vec<u8>,
+        ) -> Result<(), aura_core::effects::StorageError> {
+            if key == ACCOUNT_FILENAME {
+                return Err(aura_core::effects::StorageError::BackendFailure {
+                    operation: "profile acknowledgment".into(),
+                    source: AuraError::Storage {
+                        message: "injected native profile failure".into(),
+                        source: Some(Arc::new(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "original profile cause",
+                        ))),
+                    },
+                });
+            }
+            self.0.store(key, value).await
+        }
+        async fn retrieve(
+            &self,
+            key: &str,
+        ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+            self.0.retrieve(key).await
+        }
+        async fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+            self.0.remove(key).await
+        }
+        async fn list_keys(
+            &self,
+            prefix: Option<&str>,
+        ) -> Result<Vec<String>, aura_core::effects::StorageError> {
+            self.0.list_keys(prefix).await
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_staging_profile_failure_keeps_native_source_and_never_publishes_success() {
+        use aura_app::ui::types::{AppConfig, AppCore};
+        use aura_app::ui_contract::{
+            AuthoritativeSemanticFact, OperationInstanceId, SemanticOperationPhase,
+        };
+        use std::error::Error;
+        let dir = tempdir().unwrap();
+        let app = Arc::new(async_lock::RwLock::new(
+            AppCore::new(AppConfig::default()).unwrap(),
+        ));
+        AppCore::init_signals_with_hooks(&app).await.unwrap();
+        let storage = RejectAccountProfile(open_bootstrap_storage(dir.path()));
+        let outcome =
+            aura_app::ui::workflows::account::stage_runtime_free_account_with_terminal_status(
+                &app,
+                &storage,
+                &PhysicalTimeHandler::new(),
+                &RealCryptoHandler::new(),
+                "Alice".into(),
+                Some(OperationInstanceId("original-profile-failure".into())),
+            )
+            .await;
+        let cause = outcome.result.unwrap_err();
+        let mut source = Some(&cause as &(dyn Error + 'static));
+        let mut native = false;
+        while let Some(error) = source {
+            if let Some(io) = error.downcast_ref::<std::io::Error>() {
+                assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+                native = true;
+            }
+            source = error.source();
+        }
+        assert!(
+            native,
+            "original backend cause must survive terminal publication"
+        );
+        assert!(outcome.terminal.is_some());
+        assert!(storage
+            .retrieve(PENDING_ACCOUNT_BOOTSTRAP_FILENAME)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(storage.retrieve(ACCOUNT_FILENAME).await.unwrap().is_none());
+        let facts = app.read().await.authoritative_semantic_facts();
+        assert!(facts.iter().any(|fact| matches!(fact, AuthoritativeSemanticFact::OperationStatus { status, .. } if status.phase == SemanticOperationPhase::Failed)));
+        assert!(!facts.iter().any(|fact| matches!(fact, AuthoritativeSemanticFact::OperationStatus { status, .. } if status.phase == SemanticOperationPhase::Succeeded)));
+    }
 
     #[tokio::test]
     async fn create_account_persists_pending_bootstrap_and_account() {

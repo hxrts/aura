@@ -94,9 +94,11 @@ pub mod view;
 /// Descriptors for invitation-based peer connection
 pub mod descriptor;
 pub mod enrollment_admission;
+pub mod enrollment_initial_request;
 pub mod enrollment_manifest;
 /// Device-owned enrollment setup codes and sealed possession evidence.
 pub mod enrollment_setup;
+pub mod enrollment_signing_intent;
 /// Shareable invitation code format and validated import provenance.
 pub mod shareable;
 

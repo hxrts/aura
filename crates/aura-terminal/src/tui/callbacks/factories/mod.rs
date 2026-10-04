@@ -453,30 +453,28 @@ impl AppCallbacks {
 
     fn make_create_account(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateAccountCallback {
         Arc::new(
-            move |nickname_suggestion: String, operation: LocalTerminalOperationOwner| {
-                let create_nickname = nickname_suggestion.clone();
-                spawn_local_terminal_result_callback(
+            move |nickname: String, operation: WorkflowHandoffOperationOwner| {
+                let producer = ctx.clone();
+                let staged_nickname = nickname.clone();
+                spawn_handoff_workflow_callback_with_success(
                     ctx.clone(),
                     tx.clone(),
                     operation,
-                    "CreateAccount callback",
-                    move |ctx| async move { ctx.create_account(&create_nickname).await },
-                    move |tx, ()| async move {
-                        tracing::info!("tui create_account callback succeeded");
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::NicknameSuggestionChanged(nickname_suggestion),
-                        )
-                        .await;
-                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
+                    WorkflowHandoffSpec::new(
+                        SemanticOperationTransferScope::CreateAccount,
+                        "account",
+                        "Create account failed",
+                        "Create account staging workflow",
+                    ),
+                    move |original_app, instance| async move {
+                        producer
+                            .stage_account_for_bootstrap(&original_app, staged_nickname, instance)
+                            .await
                     },
-                    |tx, error| async move {
-                        tracing::error!("tui create_account callback failed: {error}");
-                        send_ui_update_reliable(
-                            &tx,
-                            UiUpdate::operation_failed(UiOperation::CreateAccount, error),
-                        )
-                        .await;
+                    move |tx, _identity| async move {
+                        send_ui_update_reliable(&tx, UiUpdate::NicknameSuggestionChanged(nickname))
+                            .await;
+                        send_ui_update_reliable(&tx, UiUpdate::AccountCreated).await;
                     },
                 );
             },

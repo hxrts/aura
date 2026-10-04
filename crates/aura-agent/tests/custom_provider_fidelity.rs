@@ -53,7 +53,7 @@ fn envelope() -> TransportEnvelope {
         source: AuthorityId::new_from_entropy([197; 32]),
         context: ContextId::new_from_entropy([199; 32]),
         payload: vec![4],
-        metadata: Default::default(),
+        metadata: std::collections::HashMap::default(),
         receipt: None,
     }
 }

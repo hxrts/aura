@@ -455,3 +455,30 @@ required workspace regressions cover escaped noncancellable work, closed
 admission, and destruction of an unpolled original future before acknowledgment.
 Bootstrap attachment mirrors existing app-owned semantic history into the new
 observed signal graph before refresh hooks, without issuing new terminal facts.
+
+## Runtime-free account creation ownership
+
+The configured native staging adapter delegates actual pending-bootstrap and encrypted account-profile writes to the app-owned staging workflow. The original operation instance transfers before the first awaited producer step. Only acknowledged writes mint app-owned terminal success; frontend callbacks observe completion and request bootstrap reload. The retained AppCore supplies that original history to the new runtime signal graph. Runtime attachment rejects replacement, and pending-file reconciliation cannot manufacture account-create success.
+
+Regression coverage must exercise actual storage production and observe the original operation after runtime attachment; manually seeded semantic facts do not establish producer ownership. The CreateAccount callback requires a workflow handoff owner, preventing submission with a local terminal owner.
+
+### Explicit original-device enrollment signing consent
+
+Shared workflows select a versioned transfer intent and issue a move-only
+`UserApprovedEnrollmentSigningIntent` only for explicit local approval through
+its original runtime bridge. Consent covers exact manifest, public v3 invitation
+transport and initial Request transcripts. The runtime independently validates
+current active membership, native policy and local share custody. Public bytes,
+remote packets, parsed transfer data and matching ids cannot manufacture this
+approval. Its public API forbids construction, Clone and deserialization.
+
+### Enrollment approval origin identity
+
+Explicit user approval retains its original runtime bridge allocation. Runtime
+admission compares that allocation's data address, since compiler-generated
+trait vtables may be duplicated at different addresses across codegen units. Concrete and
+dynamic references to the same retained object preserve origin; a separately
+allocated bridge over the same native agent remains foreign. Authority IDs,
+effect equivalence, and public metadata cannot replace this owner identity. The
+actual native quorum fixture verifies both original-reference admission and
+foreign-facade rejection before consuming explicit participant approval.

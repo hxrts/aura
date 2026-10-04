@@ -837,6 +837,61 @@ fn normalize_ws_url(addr: &str) -> String {
     }
 }
 
+impl AuraEffectSystem {
+    /// Extract only physical configured ingress. Consumer APIs check their retained
+    /// matching inbox first; session-specific pumps cannot take/requeue an unrelated
+    /// retained frame repeatedly and starve the next physical frame.
+    pub(super) async fn receive_configured_envelope(
+        &self,
+    ) -> Result<TransportEnvelope, TransportError> {
+        for provider in &self.custom_transports {
+            match provider.receive_envelope().await {
+                Ok(envelope) => {
+                    self.validate_configured_envelope(&envelope)?;
+                    return Ok(envelope);
+                }
+                Err(TransportError::NoMessage) => continue,
+                Err(error) => {
+                    self.transport.record_receive_failure();
+                    return Err(error);
+                }
+            }
+        }
+        Err(TransportError::NoMessage)
+    }
+
+    fn validate_configured_envelope(
+        &self,
+        envelope: &TransportEnvelope,
+    ) -> Result<(), TransportError> {
+        let addressed_here = match envelope.metadata.get("aura-destination-device-id") {
+            Some(device) => device == &self.device_id().to_string(),
+            None => envelope.destination == self.authority_id,
+        };
+        if !addressed_here {
+            return Err(TransportError::InvalidEnvelope {
+                reason: "configured ingress belongs to another physical receiver".into(),
+            });
+        }
+        validate_inbound_transport_receipt(envelope)
+    }
+
+    /// Select one explicit provider before emission. A failed send never changes providers.
+    async fn select_custom_transport(
+        &self,
+        context: ContextId,
+        peer: AuthorityId,
+    ) -> &dyn TransportEffects {
+        for provider in &self.custom_transports {
+            if provider.is_channel_established(context, peer).await {
+                return provider.as_ref();
+            }
+        }
+        // Caller admits this branch only for the nonempty bounded configured inventory.
+        self.custom_transports[0].as_ref()
+    }
+}
+
 #[cfg(test)]
 fn harness_browser_transport_ws_url(current_host: &str, harness_mode: bool) -> Option<String> {
     if !harness_mode || current_host.is_empty() {
@@ -1442,60 +1497,5 @@ mod tests {
             error,
             TransportError::ReceiptValidationFailed { .. }
         ));
-    }
-}
-
-impl AuraEffectSystem {
-    /// Extract only physical configured ingress. Consumer APIs check their retained
-    /// matching inbox first; session-specific pumps cannot take/requeue an unrelated
-    /// retained frame repeatedly and starve the next physical frame.
-    pub(super) async fn receive_configured_envelope(
-        &self,
-    ) -> Result<TransportEnvelope, TransportError> {
-        for provider in &self.custom_transports {
-            match provider.receive_envelope().await {
-                Ok(envelope) => {
-                    self.validate_configured_envelope(&envelope)?;
-                    return Ok(envelope);
-                }
-                Err(TransportError::NoMessage) => continue,
-                Err(error) => {
-                    self.transport.record_receive_failure();
-                    return Err(error);
-                }
-            }
-        }
-        Err(TransportError::NoMessage)
-    }
-
-    fn validate_configured_envelope(
-        &self,
-        envelope: &TransportEnvelope,
-    ) -> Result<(), TransportError> {
-        let addressed_here = match envelope.metadata.get("aura-destination-device-id") {
-            Some(device) => device == &self.device_id().to_string(),
-            None => envelope.destination == self.authority_id,
-        };
-        if !addressed_here {
-            return Err(TransportError::InvalidEnvelope {
-                reason: "configured ingress belongs to another physical receiver".into(),
-            });
-        }
-        validate_inbound_transport_receipt(envelope)
-    }
-
-    /// Select one explicit provider before emission. A failed send never changes providers.
-    async fn select_custom_transport(
-        &self,
-        context: ContextId,
-        peer: AuthorityId,
-    ) -> &dyn TransportEffects {
-        for provider in &self.custom_transports {
-            if provider.is_channel_established(context, peer).await {
-                return provider.as_ref();
-            }
-        }
-        // Caller admits this branch only for the nonempty bounded configured inventory.
-        self.custom_transports[0].as_ref()
     }
 }

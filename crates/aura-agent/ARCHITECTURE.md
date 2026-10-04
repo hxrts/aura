@@ -1795,3 +1795,47 @@ no unbounded clock read or fallible validation follows its synchronous callback.
 AuraEffectSystem and EnhancedTimeHandler delegate absolute waits to the same
 configured provider. This boundary alone does not bound initial shutdown-window
 allocation or replace required service cleanup custody.
+
+### Prepared enrollment quorum custody
+
+Runtime-private bounded quorum registry owns actual prepared issuer and remote
+participant task groups. Original app approval binds the canonical manifest,
+public v3 invitation transport and exact initial Request; ingress metadata never
+approves a participant. Native material admission retains current generation/tree
+custody and reads only the local physical share. Packet proofs use current ordered
+public verifying shares independently of historical leaf identities.
+
+The issuer completion registry owns a restricted move-only
+`HeldIssuerCompletionObserver`, without an execution lease or arbitrary executor.
+Execution remains in the original issuer frame; completion/drain observes its
+same protected clock/checkpoints. Each transcript domain retires approval before
+nonce creation. Registry stop closes capacity before owner transfer and consumes
+actual group cancellation/drain proofs, retaining all native failures.
+
+Confirmed import activation keeps original signed share/configuration records
+immutable. Its private envelope capability revalidates the actual durable receipt
+and imported generation; a separate birth anchor prohibits fresh allocation after
+record loss. Native restore and local key readers use that retained receipt,
+while active subject signing requires the actual adopted runtime. Final agreement
+is derived from this proof rather than overwriting pending configuration. The
+required actual confirmation fixture covers replay, corruption and loss before
+its genuine reopened two-runtime signing assertion; see docs/104_runtime.md and
+docs/804_testing_guide.md.
+
+The confirmed envelope effect owner uses allocation-managed `fresh_birth`,
+`read_original` and `seal_positive` with genuine confirmed import origins on the
+existing sealed capability types. Scope version 2 derives from the independently
+reverified receipt, never a synthetic issuer plan. It rejects any already born
+original scope before replacement allocation; publication interruption therefore
+retains its concrete storage refusal. Legacy permanent wrapping keys are not
+used on this path.
+
+### Canonical retained signing policy metadata
+
+`runtime::effects::ThresholdConfigMetadata` owns the pure six-field persisted
+policy schema used by native effects, signing services, and receipt-derived
+confirmed activation. Its crate-local fields grant no signing custody or
+capability. Consumers retain the original field order, serde defaults, and
+optional migration-field omission, preserving immutable protected-record
+digests. Confirmed agreement is derived from the original verified receipt and
+activation owner; the signed original configuration is never rewritten.

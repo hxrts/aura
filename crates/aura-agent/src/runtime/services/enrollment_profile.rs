@@ -256,3 +256,78 @@ pub(crate) async fn complete_confirmed_handoff(
     }
     Ok(())
 }
+// Staged inside runtime/services/enrollment_profile.rs. The protected committed
+// record is a locator only; native receipt+archive revalidation supplies origin.
+pub(crate) async fn load_original_active_profile_archive<'runtime>(
+    effects: &'runtime AuraEffectSystem,
+) -> Result<
+    Option<
+        crate::handlers::invitation::enrollment_parent_archive::ConfirmedParentInventoryCapability<
+            'runtime,
+        >,
+    >,
+    AuraError,
+> {
+    let committed_key = location(effects.device_id(), "committed");
+    if !effects.secure_exists(&committed_key).await? {
+        return Ok(None);
+    }
+    let record = decode(
+        &effects
+            .secure_retrieve(&committed_key, &[SecureStorageCapability::Read])
+            .await?,
+    )?;
+    let confirmed =
+        crate::handlers::invitation::enrollment_manifest_admission::load_confirmed_enrollment(
+            effects,
+            record.provisional,
+            &record.invitation,
+        )
+        .await
+        .map_err(|source| AuraError::PermissionDenied {
+            message: "reverify original adopted profile history origin".into(),
+            source: Some(Arc::new(source)),
+        })?;
+    validate_binding(effects, &record, &confirmed)?;
+    if aura_guards::GuardContextProvider::authority_id(effects) != record.subject {
+        return Err(denied(ProfileHandoffError::Binding));
+    }
+    let archive = crate::handlers::invitation::enrollment_parent_archive::load_confirmed_parent_archive_from_confirmed(
+        effects, &confirmed,
+    ).await?;
+    Ok(Some(archive))
+}
+/// Read-only original committed-profile receipt. Provisional identity permits
+/// its own local secret read after commit; it never grants signing approval.
+pub(crate) async fn load_original_committed_profile_confirmation(
+    effects: &AuraEffectSystem,
+) -> Result<Option<DurableConfirmedEnrollmentCapability>, AuraError> {
+    let key = location(effects.device_id(), "committed");
+    if !effects.secure_exists(&key).await? {
+        return Ok(None);
+    }
+    let record = decode(
+        &effects
+            .secure_retrieve(&key, &[SecureStorageCapability::Read])
+            .await?,
+    )?;
+    let confirmed =
+        crate::handlers::invitation::enrollment_manifest_admission::load_confirmed_enrollment(
+            effects,
+            record.provisional,
+            &record.invitation,
+        )
+        .await
+        .map_err(|source| AuraError::PermissionDenied {
+            message: "reverify original committed profile secret-read receipt".into(),
+            source: Some(Arc::new(source)),
+        })?;
+    validate_binding(effects, &record, &confirmed)?;
+    let configured = aura_guards::GuardContextProvider::authority_id(effects);
+    if configured != record.subject && configured != record.provisional {
+        return Err(denied(ProfileHandoffError::Binding));
+    }
+    crate::handlers::invitation::enrollment_manifest_admission::require_confirmed_import_generation(effects, &confirmed)
+        .await.map_err(|source| AuraError::PermissionDenied { message: "require original committed profile import custody".into(), source: Some(Arc::new(source)) })?;
+    Ok(Some(confirmed))
+}

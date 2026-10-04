@@ -4,6 +4,18 @@
 
 #![allow(missing_docs)] // Ceremony workflow types are self-documenting
 
+mod enrollment_quorum_workflows;
+mod enrollment_signing_intent;
+pub use enrollment_quorum_workflows::{
+    approve_device_enrollment_quorum, prepare_device_enrollment_quorum,
+    resume_device_enrollment_quorum_with_terminal_status,
+};
+pub use enrollment_signing_intent::{
+    approve_user_selected_enrollment_signing_intent,
+    select_user_transferred_enrollment_signing_intent, UserApprovedEnrollmentSigningIntent,
+    UserTransferredEnrollmentSigningIntent,
+};
+
 use std::sync::Arc;
 
 use async_lock::RwLock;
@@ -66,6 +78,13 @@ pub struct UserTransferredEnrollmentSetup {
 }
 
 impl UserTransferredEnrollmentSetup {
+    /// Forward the original public possession proof for explicit sibling selection.
+    /// This code never grants signature permission or carries private material.
+    pub fn transfer_code(
+        &self,
+    ) -> Result<String, aura_invitation::enrollment_setup::EnrollmentSetupError> {
+        self.possession.transfer_code()
+    }
     /// The exact device-owned signing statement selected by the user.
     pub fn statement(&self) -> &aura_invitation::enrollment_setup::DeviceEnrollmentSetupStatement {
         self.possession.statement()

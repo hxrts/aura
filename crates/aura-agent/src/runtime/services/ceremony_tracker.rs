@@ -151,6 +151,37 @@ pub(super) struct RegisteredEnrollmentWindowCapability {
     lease: Arc<tokio::sync::OwnedSemaphorePermit>,
     notice_binding: std::sync::OnceLock<Arc<RegisteredEnrollmentNoticeBindingCapability>>,
 }
+
+/// Completion observation retains original clock identity without an execution
+/// permit. It cannot admit a session, sign, bind notices, or manufacture children.
+pub(super) struct HeldIssuerClockObservationCapability {
+    tracker: CeremonyTracker,
+    state: TrackedCeremony,
+}
+impl HeldIssuerClockObservationCapability {
+    pub(super) fn budget(&self) -> &aura_core::TimeoutBudget {
+        &self.state.timeout_budget
+    }
+    pub(super) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        let original = self.tracker.shared.persistence.as_ref().ok_or_else(|| {
+            AuraError::permission_denied("issuer completion lacks persistent effect owner")
+        })?;
+        if !std::ptr::eq(original.as_ref(), effects) {
+            return Err(AuraError::permission_denied(
+                "issuer completion effect owner changed",
+            ));
+        }
+        Ok(())
+    }
+    pub(super) async fn checkpoint(&self) -> Result<(), AuraError> {
+        self.tracker
+            .checkpoint_enrollment_clock_bound(
+                &self.state.ceremony_id,
+                Some(RegisteredClockCheckpointAuthority::Completion(self)),
+            )
+            .await
+    }
+}
 /// Exact issuer identity retained by the original registered window. This
 /// runtime-local binding is never decoded from storage or peer wire data.
 pub(crate) struct RegisteredEnrollmentNoticeBindingCapability {
@@ -159,6 +190,25 @@ pub(crate) struct RegisteredEnrollmentNoticeBindingCapability {
     expires_at_ms: u64,
 }
 impl RegisteredEnrollmentWindowCapability {
+    pub(super) fn completion_observation(&self) -> HeldIssuerClockObservationCapability {
+        HeldIssuerClockObservationCapability {
+            tracker: self.tracker.clone(),
+            state: self.state.clone(),
+        }
+    }
+    pub(super) fn require_effects(&self, effects: &AuraEffectSystem) -> Result<(), AuraError> {
+        let original = self.tracker.shared.persistence.as_ref().ok_or_else(|| {
+            AuraError::permission_denied("registered clock has no persistent effect owner")
+        })?;
+        if !std::ptr::eq(original.as_ref(), effects) {
+            return Err(AuraError::permission_denied(
+                "registered clock effect owner changed",
+            ));
+        }
+        Ok(())
+    }
+    // This producer stays in the tracker module; callers cannot construct raw
+    // state/lease authority or bypass the original allocation verification.
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "RegisteredEnrollmentNoticeBindingCapability",
@@ -262,6 +312,53 @@ impl RegisteredEnrollmentWindowCapability {
     }
 }
 
+impl CeremonyTracker {
+    pub(super) async fn held_issuer_window(
+        &self,
+        effects: &Arc<crate::runtime::AuraEffectSystem>,
+        reservation: &crate::runtime::effects::EnrollmentGenerationReservation<'_>,
+    ) -> Result<RegisteredEnrollmentWindowCapability, AuraError> {
+        reservation.require_effects(effects.as_ref())?;
+        reservation.require_tracker(self)?;
+        let persistence =
+            self.shared.persistence.as_ref().ok_or_else(|| {
+                AuraError::invalid("held issuer requires original persistent clock")
+            })?;
+        if !Arc::ptr_eq(persistence, effects) {
+            return Err(AuraError::permission_denied(
+                "held issuer persistence owner changed",
+            ));
+        }
+        // No enrollment decision acquisition here: the supplied reservation
+        // already holds that exact gate. Checkpoints use the distinct write gate.
+        let state = self.get(reservation.ceremony_id()).await?;
+        reservation.validate_allocated_registration(effects.as_ref(), &state)?;
+        self.require_live_enrollment_window(&state).await?;
+        if state.terminal_outcome.is_some()
+            || state.has_failed
+            || state.is_committed
+            || state.is_superseded
+        {
+            return Err(AuraError::permission_denied(
+                "held issuer allocation is terminal",
+            ));
+        }
+        let lease = state
+            .enrollment_window_lease
+            .clone()
+            .try_acquire_owned()
+            .map_err(registered_window_lease_error)?;
+        let capability = RegisteredEnrollmentWindowCapability {
+            tracker: self.clone(),
+            state,
+            lease: Arc::new(lease),
+            notice_binding: std::sync::OnceLock::new(),
+        };
+        capability.checkpoint().await?;
+        Ok(capability)
+    }
+}
+
 /// Original allocation observation custody for cancellation preparation only.
 /// This does not acquire an execution permit or authorize VM/session admission.
 pub(super) struct CancellationClockObservationCapability {
@@ -300,6 +397,7 @@ impl RegisteredCancelledNoticeCapability {
 }
 enum RegisteredClockCheckpointAuthority<'a> {
     Execution(&'a RegisteredEnrollmentWindowCapability),
+    Completion(&'a HeldIssuerClockObservationCapability),
     Cancellation(&'a CancellationClockObservationCapability),
 }
 impl CancellationClockObservationCapability {
@@ -1470,6 +1568,7 @@ impl CeremonyTracker {
         if let Some(expected) = expected {
             let original = match expected {
                 RegisteredClockCheckpointAuthority::Execution(capability) => &capability.state,
+                RegisteredClockCheckpointAuthority::Completion(capability) => &capability.state,
                 RegisteredClockCheckpointAuthority::Cancellation(capability) => &capability.state,
             };
             let mut retained = original.clone();
@@ -4267,6 +4366,71 @@ mod tests {
         result.expect("register actual held original allocation");
         (tracker, clock, id)
     }
+    #[tokio::test]
+    async fn original_completion_observation_releases_execution_lease_without_renewing_clock() {
+        let (issuer, invitee, tracker, clock, id) =
+            issued_registered_clock_fixture("original-completion-observation-lease").await;
+        let state = tracker
+            .get(&id)
+            .await
+            .expect("actual original registered allocation");
+        let semaphore = state.enrollment_window_lease.clone();
+        let deadline = state.timeout_budget.deadline_at_ms();
+        let permit = semaphore
+            .clone()
+            .try_acquire_owned()
+            .expect("actual original execution permit");
+        // Test-only original capability construction uses genuine retained state
+        // and the actual semaphore allocation, not a serialized replacement.
+        let execution = RegisteredEnrollmentWindowCapability {
+            tracker,
+            state,
+            lease: Arc::new(permit),
+            notice_binding: std::sync::OnceLock::new(),
+        };
+        let observation = execution.completion_observation();
+        assert!(observation
+            .budget()
+            .shares_observation_owner_with(execution.budget()));
+        assert!(
+            semaphore.clone().try_acquire_owned().is_err(),
+            "observation does not release a still-live executor"
+        );
+        assert!(
+            observation
+                .require_effects(invitee.runtime().effects().as_ref())
+                .is_err(),
+            "another physical runtime cannot drive original completion observation"
+        );
+        drop(execution);
+        let registered_permit = semaphore
+            .clone()
+            .try_acquire_owned()
+            .expect("completion observer retains no execution permit during registered handoff");
+        observation
+            .require_effects(issuer.runtime().effects().as_ref())
+            .expect("actual original effect owner");
+        observation
+            .checkpoint()
+            .await
+            .expect("genuine original protected checkpoint remains valid after lease transfer");
+        assert_eq!(observation.budget().deadline_at_ms(), deadline);
+        clock.set_time(deadline + 1);
+        let now = issuer
+            .runtime()
+            .effects()
+            .physical_time()
+            .await
+            .expect("actual original local clock");
+        assert!(observation.budget().remaining_at(&now).is_err());
+        observation
+            .checkpoint()
+            .await
+            .expect("persist original expiration without renewing interval");
+        assert_eq!(observation.budget().deadline_at_ms(), deadline);
+        drop(registered_permit);
+    }
+
     #[tokio::test]
     async fn held_original_recovery_rejects_expired_allocation_before_live_publication() {
         let (first, clock, id) = registered_clock_fixture("held-original-expired-allocation").await;

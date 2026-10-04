@@ -101,6 +101,11 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot
 - **Shared user-flow documentation sync**: shared user-flow contract or policy changes must update the mapped authoritative targets enforced by `toolkit/xtask` via `just ci-user-flow-policy`
 - **Shared user-flow contributor sync**: when shared UX policy checks change (Rust in `toolkit/xtask/src/checks/policy.rs` or shell wrappers in `scripts/check/`), keep `AGENTS.md` and the mapped local skills aligned with the updated contributor guidance in the same change
+- **Enrollment verifier custody**: quorum signature verification retains the
+  original approved native threshold policy or sealed issued/retained enrollment
+  owner. Raw verifier bytes and self-certified manifest fields cannot replace
+  that custody; typed trusted-key checks require exact owner/accessor origins
+  with negative regression coverage.
 - **Security boundary policy sync**: when adding or changing security-sensitive toolkit checks in `toolkit/xtask/src/checks/policy.rs`, keep this guidance aligned and run `just _policy-check check security-boundary-policy` before broader CI
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
@@ -158,6 +163,12 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   sanctioned terminal/browser submission boundaries; callback factories and
   bridge helpers must go through the exported submit helpers instead of
   allocating owners ad hoc
+- **Account creation handoff**: `CreateAccountCallback` requires a workflow
+  handoff owner. Runtime-free native staging delegates actual profile writes to
+  the app-owned producer and preserves its original operation instance through
+  runtime attachment. `just ci-frontend-handoff-boundary` rejects parsed
+  frontend-local submissions with `SemanticOperationKind::CreateAccount`;
+  comments, strings, and genuine test scopes do not authorize production bypasses.
 - **Shared frontend portability**: code under
   `aura-app::frontend_primitives` must stay wasm-safe and platform-neutral;
   do not introduce blocking locks, native thread primitives, platform-specific

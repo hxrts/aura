@@ -2314,10 +2314,15 @@ pub(crate) async fn recover_allocated_enrollment_registration(
 pub(crate) struct RetainedEnrollmentVmControl {
     runtime_owner: Arc<AuraEffectSystem>,
     manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    expected_request_verifier: Vec<u8>,
     digest: [u8; 32],
     canonical_invitation: super::Invitation,
 }
 impl RetainedEnrollmentVmControl {
+    pub(crate) fn expected_request_verifier(&self) -> &[u8] {
+        &self.expected_request_verifier
+    }
+
     pub(crate) fn canonical_invitation(&self) -> &super::Invitation {
         &self.canonical_invitation
     }
@@ -2413,7 +2418,47 @@ impl RetainedEnrollmentVmControl {
         {
             return Err(EnrollmentVerifierError::RecordBinding.into());
         }
+        if let Some(inventory) = &signed.manifest.final_inventory {
+            let root = inventory
+                .iter()
+                .find(|entry| entry.signing_node == aura_core::tree::NodeIndex(0))
+                .ok_or(EnrollmentVerifierError::RecordBinding)?;
+            let retained_verifier = match root.mode {
+                aura_core::crypto::single_signer::SigningMode::SingleSigner => {
+                    if root.threshold != 1 || root.participants.len() != 1 {
+                        return Err(EnrollmentVerifierError::RecordBinding.into());
+                    }
+                    aura_core::crypto::single_signer::SingleSignerPublicKeyPackage::from_bytes(
+                        &root.public_key_package,
+                    )
+                    .map_err(aura_core::AuraError::from)?
+                    .verifying_key
+                }
+                aura_core::crypto::single_signer::SigningMode::Threshold => {
+                    if root.threshold < 2 || usize::from(root.threshold) > root.participants.len() {
+                        return Err(EnrollmentVerifierError::RecordBinding.into());
+                    }
+                    let native = frost_ed25519::keys::PublicKeyPackage::deserialize(
+                        &root.public_key_package,
+                    )
+                    .map_err(|source| {
+                        aura_core::AuraError::crypto_with_source(
+                            "decode independently retained enrollment request public package",
+                            Arc::new(source),
+                        )
+                    })?;
+                    if native.verifying_shares().len() != root.participants.len() {
+                        return Err(EnrollmentVerifierError::RecordBinding.into());
+                    }
+                    native.verifying_key().serialize().to_vec()
+                }
+            };
+            if retained_verifier != stored.confirmation_verifier {
+                return Err(EnrollmentVerifierError::RecordBinding.into());
+            }
+        }
         Ok(Self {
+            expected_request_verifier: stored.confirmation_verifier,
             runtime_owner,
             manifest: signed.manifest,
             digest,

@@ -59,6 +59,18 @@ pub struct DeviceEnrollmentStart {
     pub manifest_transfer: Option<EnrollmentManifestTransferCodes>,
 }
 
+/// Observed identifiers for one still-owned issuer preparation. This DTO grants
+/// no signature, generation, time-window or runtime admission authority.
+#[derive(Debug, Clone)]
+pub struct PreparedDeviceEnrollmentSigning {
+    /// Identifier of the still-owned prepared issuer; this field grants no resume authority.
+    pub ceremony_id: CeremonyId,
+    /// Canonical public three-domain intent for explicit participant review and transfer.
+    pub signing_intent_code: String,
+    /// Original user-transferred setup proof required by participant admission.
+    pub setup_transfer_code: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct EnrollmentManifestTransferCodes {
     pub manifest_code: String,

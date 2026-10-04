@@ -127,7 +127,7 @@ struct AccountBootstrapPublicationFailure {
     publication: AuraError,
 }
 
-fn account_bootstrap_failure(error: &AuraError) -> SemanticOperationError {
+pub(super) fn account_bootstrap_failure(error: &AuraError) -> SemanticOperationError {
     let code=crate::workflows::runtime_error_classification::native_runtime_failure_code(error).unwrap_or_else(|| {
         use std::error::Error;
         let mut source=Some(error as &(dyn Error+'static));
@@ -149,7 +149,7 @@ fn account_bootstrap_failure(error: &AuraError) -> SemanticOperationError {
     SemanticOperationError::new(SemanticFailureDomain::Command, code).with_detail(error.to_string())
 }
 
-async fn fail_initialize_runtime_account<T>(
+pub(super) async fn fail_initialize_runtime_account<T>(
     owner: &SemanticWorkflowOwner,
     cause: AuraError,
 ) -> Result<T, AuraError> {

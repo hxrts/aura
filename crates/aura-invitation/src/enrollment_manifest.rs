@@ -79,6 +79,16 @@ impl SecurityTranscript for EnrollmentTrustManifest {
     fn transcript_payload(&self) -> Self {
         self.clone()
     }
+    fn required_transcript_bytes(
+        &self,
+    ) -> Result<Vec<u8>, aura_signature::RequiredTranscriptEncodingError> {
+        let domain = if self.version == 2 {
+            "aura.invitation.enrollment-trust-manifest.v2"
+        } else {
+            Self::DOMAIN_SEPARATOR
+        };
+        aura_signature::encode_transcript_required(domain, self.version, self)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -528,6 +538,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn required_manifest_encoding_preserves_legacy_and_current_domain_bytes() {
+        for version in [1, 2] {
+            let mut original = manifest(Vec::new());
+            original.version = version;
+            let diagnostic = original
+                .transcript_bytes()
+                .unwrap_or_else(|error| panic!("encode original manifest schema: {error}"));
+            let required = original
+                .required_transcript_bytes()
+                .unwrap_or_else(|error| panic!("encode required manifest schema: {error}"));
+            assert_eq!(
+                diagnostic, required,
+                "manifest schema {version} must retain exact domain/version bytes"
+            );
+        }
+    }
+
     fn manifest(verifier: Vec<u8>) -> EnrollmentTrustManifest {
         let device = DeviceId::new_from_entropy([91; 32]);
         EnrollmentTrustManifest {
@@ -596,7 +624,7 @@ mod tests {
                 4 => changed.parents[0].public_key_package[0] ^= 1,
                 5 => {
                     changed.parents[0].participants[0] =
-                        ParticipantIdentity::device(DeviceId::new_from_entropy([105; 32]))
+                        ParticipantIdentity::device(DeviceId::new_from_entropy([105; 32]));
                 }
                 6 => changed.parents[0].agreement = AgreementMode::Provisional,
                 7 => changed.baseline_digest[0] ^= 1,

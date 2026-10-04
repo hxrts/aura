@@ -98,7 +98,8 @@ enum ShareableInvitationCodePayload {
     Legacy(ShareableInvitation),
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ShareableInvitationTranscriptPayload {
     version: u8,
     invitation_id: InvitationId,
@@ -108,6 +109,100 @@ pub struct ShareableInvitationTranscriptPayload {
     expires_at: Option<u64>,
     message: Option<String>,
     transport: ShareableInvitationTransportMetadata,
+}
+
+/// Untrusted public signing data. It identifies an exact v3 transport transcript
+/// without disclosing the new physical device's private pending key package.
+/// Only independently approved native runtime custody may authorize signing.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicEnrollmentTransportSigningIntent {
+    payload: ShareableInvitationTranscriptPayload,
+}
+
+impl PublicEnrollmentTransportSigningIntent {
+    /// Public routing fields bound by the exact explicit signing approval.
+    pub fn transport_metadata(&self) -> &ShareableInvitationTransportMetadata {
+        &self.payload.transport
+    }
+    /// Extract the exact public v3 enrollment transport transcript after size and metadata validation.
+    pub fn from_invitation(
+        invitation: &ShareableInvitation,
+        transport: &ShareableInvitationTransportMetadata,
+    ) -> Result<Self, ShareableInvitationError> {
+        if invitation.version != ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+        invitation.validate_size_limits()?;
+        validate_transport_metadata(transport)?;
+        Ok(Self {
+            payload: invitation
+                .signing_transcript_with_transport(transport)
+                .transcript_payload(),
+        })
+    }
+
+    /// Require exact manifest/transport agreement without promoting public data to native approval.
+    pub fn require_manifest(
+        &self,
+        manifest: &crate::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> Result<(), ShareableInvitationError> {
+        let InvitationType::DeviceEnrollment {
+            subject_authority,
+            invitee_authority,
+            initiator_device_id,
+            device_id,
+            ceremony_id,
+            pending_epoch,
+            setup_binding,
+            key_package,
+            public_key_package,
+            threshold_config,
+            baseline_tree_ops,
+            ..
+        } = &self.payload.invitation_type
+        else {
+            return Err(ShareableInvitationError::InvalidFormat);
+        };
+        let baseline = aura_core::util::serialization::to_vec(baseline_tree_ops)
+            .map_err(|_| ShareableInvitationError::SerializationFailed)?;
+        if self.payload.version != ShareableInvitation::ENROLLMENT_QUORUM_VERSION
+            || self.payload.invitation_id != manifest.invitation
+            || self.payload.sender_id != manifest.subject
+            || self.payload.transport.sender_device_id != Some(manifest.initiator_device)
+            || *subject_authority != manifest.subject
+            || *invitee_authority != Some(manifest.invitee_authority)
+            || *initiator_device_id != manifest.initiator_device
+            || *device_id != manifest.invitee_device
+            || *ceremony_id != manifest.ceremony
+            || *pending_epoch != manifest.pending_epoch
+            || setup_binding.as_ref() != Some(&manifest.setup)
+            || key_package.as_slice() != manifest.pending_share_digest.as_slice()
+            || hash(public_key_package) != manifest.pending_public_key_package_digest
+            || aura_core::Hash32::from_bytes(threshold_config)
+                != manifest.pending_threshold_config_digest
+            || baseline_tree_ops.len() != manifest.baseline_count as usize
+            || hash(&baseline) != manifest.baseline_digest
+        {
+            return Err(ShareableInvitationError::InvalidSenderProof);
+        }
+        validate_transport_metadata(&self.payload.transport)?;
+        ensure_len(
+            "message",
+            self.payload.message.as_ref().map_or(0, String::len),
+            ShareableInvitation::MAX_MESSAGE_BYTES,
+        )?;
+        Ok(())
+    }
+}
+
+impl SecurityTranscript for PublicEnrollmentTransportSigningIntent {
+    type Payload = ShareableInvitationTranscriptPayload;
+    const DOMAIN_SEPARATOR: &'static str = "aura.invitation.enrollment-shareable-code.v3";
+    const SCHEMA_VERSION: u16 = 3;
+    fn transcript_payload(&self) -> Self::Payload {
+        self.payload.clone()
+    }
 }
 
 pub struct ShareableInvitationTranscript<'a> {
@@ -139,13 +234,41 @@ impl SecurityTranscript for ShareableInvitationTranscript<'_> {
 
     const DOMAIN_SEPARATOR: &'static str = "aura.invitation.shareable-code";
 
+    fn transcript_bytes(&self) -> aura_signature::Result<Vec<u8>> {
+        let (domain, version) =
+            if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
+                ("aura.invitation.enrollment-shareable-code.v3", 3)
+            } else {
+                (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
+            };
+        aura_signature::encode_transcript(domain, version, &self.transcript_payload())
+    }
+
+    fn required_transcript_bytes(
+        &self,
+    ) -> Result<Vec<u8>, aura_signature::RequiredTranscriptEncodingError> {
+        let (domain, version) =
+            if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
+                ("aura.invitation.enrollment-shareable-code.v3", 3)
+            } else {
+                (Self::DOMAIN_SEPARATOR, Self::SCHEMA_VERSION)
+            };
+        aura_signature::encode_transcript_required(domain, version, &self.transcript_payload())
+    }
+
     fn transcript_payload(&self) -> Self::Payload {
+        let mut invitation_type = self.invitation.invitation_type.clone();
+        if self.invitation.version == ShareableInvitation::ENROLLMENT_QUORUM_VERSION {
+            if let InvitationType::DeviceEnrollment { key_package, .. } = &mut invitation_type {
+                *key_package = hash(key_package).to_vec();
+            }
+        }
         ShareableInvitationTranscriptPayload {
             version: self.invitation.version,
             invitation_id: self.invitation.invitation_id.clone(),
             sender_id: self.invitation.sender_id,
             context_id: self.invitation.context_id,
-            invitation_type: self.invitation.invitation_type.clone(),
+            invitation_type,
             expires_at: self.invitation.expires_at,
             message: self.invitation.message.clone(),
             transport: self.transport.clone(),
@@ -154,6 +277,20 @@ impl SecurityTranscript for ShareableInvitationTranscript<'_> {
 }
 
 impl ShareableInvitation {
+    /// Only this enrollment format has a public commitment transcript. V1/v2
+    /// signatures retain their original bytes and remain independently verified.
+    pub const ENROLLMENT_QUORUM_VERSION: u8 = 3;
+
+    pub fn with_enrollment_quorum_transcript(mut self) -> Result<Self, ShareableInvitationError> {
+        if !matches!(
+            self.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+        self.version = Self::ENROLLMENT_QUORUM_VERSION;
+        Ok(self)
+    }
     /// Decoding a legacy code permits inspection; it does not authorize an
     /// addressed enrollment with no device-issued setup nonce.
     pub fn require_enrollment_setup_binding(&self) -> Result<(), ShareableInvitationError> {
@@ -298,7 +435,10 @@ impl ShareableInvitation {
             .parse()
             .map_err(|_| ShareableInvitationError::InvalidFormat)?;
 
-        if version != 1 && version != Self::CURRENT_VERSION {
+        if version != 1
+            && version != Self::CURRENT_VERSION
+            && version != Self::ENROLLMENT_QUORUM_VERSION
+        {
             return Err(ShareableInvitationError::UnsupportedVersion(version));
         }
 
@@ -331,6 +471,14 @@ impl ShareableInvitation {
                 ),
             };
         invitation.validate_size_limits()?;
+        if invitation.version == Self::ENROLLMENT_QUORUM_VERSION
+            && !matches!(
+                invitation.invitation_type,
+                InvitationType::DeviceEnrollment { .. }
+            )
+        {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
         if invitation.version != version {
             return Err(ShareableInvitationError::UnsupportedVersion(
                 invitation.version,
@@ -718,5 +866,183 @@ impl ValidatedImportedInvitation {
     /// Return the verified import record without releasing its provenance.
     pub fn invitation(&self) -> &Invitation {
         &self.invitation
+    }
+}
+
+#[cfg(test)]
+mod enrollment_quorum_transport_tests {
+    use super::*;
+    use aura_core::effects::CryptoExtendedEffects;
+    use aura_effects::crypto::RealCryptoHandler;
+
+    fn invitation() -> ShareableInvitation {
+        ShareableInvitation {
+            version: ShareableInvitation::ENROLLMENT_QUORUM_VERSION,
+            invitation_id: InvitationId::new("approved actual enrollment transport"),
+            sender_id: AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.sender-authority")),
+            context_id: Some(ContextId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.context"))),
+            invitation_type: InvitationType::DeviceEnrollment {
+                setup_binding: Some(crate::enrollment_setup::DeviceEnrollmentSetupBinding {
+                    nonce: [203; 32],
+                    digest: [204; 32],
+                }),
+                subject_authority: AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.sender-authority")),
+                invitee_authority: Some(AuthorityId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.invitee-authority"))),
+                initiator_device_id: DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.initiator-device")),
+                device_id: DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.invitee-device")),
+                nickname_suggestion: Some("Actual next device".into()),
+                ceremony_id: aura_core::CeremonyId::new("actual transport quorum"),
+                pending_epoch: 3,
+                key_package: (0u8..128).collect(),
+                threshold_config: vec![208; 128],
+                public_key_package: vec![209; 128],
+                baseline_tree_ops: vec![vec![210; 64]],
+            },
+            expires_at: Some(300),
+            message: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn actual_threshold_transport_signature_uses_public_commitment_and_binds_private_payload()
+    {
+        let first = RealCryptoHandler::for_simulation_seed(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.first-crypto-owner"));
+        let second = RealCryptoHandler::for_simulation_seed(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.second-crypto-owner"));
+        let keys = first.generate_signing_keys(2, 2).await.unwrap();
+        assert_eq!(
+            keys.mode,
+            aura_core::effects::crypto::SigningMode::Threshold
+        );
+        let invitation = invitation();
+        let transport = ShareableInvitationTransportMetadata {
+            sender_hint: Some("public locator".into()),
+            sender_device_id: Some(DeviceId::new_from_entropy(aura_core::hash::hash(b"aura-invitation.enrollment-quorum-transport.actual-threshold-public-commitment.initiator-device"))),
+        };
+        let public_intent =
+            PublicEnrollmentTransportSigningIntent::from_invitation(&invitation, &transport)
+                .unwrap();
+        let message = public_intent.transcript_bytes().unwrap();
+        assert_eq!(
+            message,
+            public_intent.required_transcript_bytes().unwrap(),
+            "required public transport encoding preserves exact original v3 bytes"
+        );
+        assert_eq!(
+            message,
+            invitation
+                .signing_transcript_with_transport(&transport)
+                .transcript_bytes()
+                .unwrap()
+        );
+        assert_eq!(
+            message,
+            invitation
+                .signing_transcript_with_transport(&transport)
+                .required_transcript_bytes()
+                .unwrap(),
+            "required native transport encoding preserves exact original v3 bytes"
+        );
+        let mut legacy = invitation.clone();
+        legacy.version = 2;
+        let legacy_transcript = legacy.signing_transcript_with_transport(&transport);
+        assert_eq!(
+            legacy_transcript.transcript_bytes().unwrap(),
+            legacy_transcript.required_transcript_bytes().unwrap(),
+            "required native transport encoding preserves exact legacy bytes"
+        );
+        let private_payload: Vec<u8> = (0u8..128).collect();
+        assert!(!message
+            .windows(private_payload.len())
+            .any(|window| window == private_payload));
+        let first_nonce = first
+            .frost_generate_nonces(&keys.key_packages[0])
+            .await
+            .unwrap();
+        let second_nonce = second
+            .frost_generate_nonces(&keys.key_packages[1])
+            .await
+            .unwrap();
+        let commitments = [
+            first
+                .frost_public_commitment(1, &first_nonce)
+                .await
+                .unwrap(),
+            second
+                .frost_public_commitment(2, &second_nonce)
+                .await
+                .unwrap(),
+        ];
+        let package = first
+            .frost_create_public_signing_package(
+                &message,
+                &commitments,
+                &keys.public_key_package,
+                2,
+            )
+            .await
+            .unwrap();
+        let first_share = first
+            .frost_sign_share_for_message(
+                &package,
+                &keys.key_packages[0],
+                &first_nonce,
+                &message,
+                &keys.public_key_package,
+                2,
+            )
+            .await
+            .unwrap();
+        let second_share = second
+            .frost_sign_share_for_message(
+                &package,
+                &keys.key_packages[1],
+                &second_nonce,
+                &message,
+                &keys.public_key_package,
+                2,
+            )
+            .await
+            .unwrap();
+        let signature = first
+            .frost_aggregate_signatures(&package, &[first_share, second_share])
+            .await
+            .unwrap();
+        let public = aura_core::crypto::tree_signing::public_key_package_from_bytes(
+            &keys.public_key_package,
+        )
+        .unwrap()
+        .group_public_key;
+        assert!(aura_signature::verify_ed25519_transcript(
+            &first,
+            &invitation.signing_transcript_with_transport(&transport),
+            &signature,
+            &public
+        )
+        .await
+        .unwrap());
+        let mut changed = invitation.clone();
+        if let InvitationType::DeviceEnrollment { key_package, .. } = &mut changed.invitation_type {
+            key_package[0] ^= 1;
+        }
+        assert!(!aura_signature::verify_ed25519_transcript(
+            &first,
+            &changed.signing_transcript_with_transport(&transport),
+            &signature,
+            &public
+        )
+        .await
+        .unwrap());
+        let changed_transport = ShareableInvitationTransportMetadata {
+            sender_hint: Some("substituted locator".into()),
+            ..transport
+        };
+        assert!(!aura_signature::verify_ed25519_transcript(
+            &first,
+            &invitation.signing_transcript_with_transport(&changed_transport),
+            &signature,
+            &public
+        )
+        .await
+        .unwrap());
     }
 }

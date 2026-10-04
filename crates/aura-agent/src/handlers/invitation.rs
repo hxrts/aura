@@ -146,6 +146,7 @@ mod enrollment_terminal_notice;
 pub(crate) use enrollment_terminal_notice::execute_recovered_cancelled_notice;
 pub(crate) mod enrollment_trust;
 mod enrollment_vm_admission;
+pub(super) use enrollment_vm_admission::retain_quorum_initial_request;
 mod required_channel_read;
 pub(crate) use enrollment_trust::VerifiedEnrollmentResponse;
 pub(crate) use enrollment_vm_admission::{
@@ -3759,6 +3760,57 @@ fn unpolled_invitation_command_dispatch_caller_frame_is_bounded() {
     );
     assert!(bytes <= 16 * 1024,
         "invitation command dispatch caller frame is {bytes} bytes; bounded lexical delegation is required");
+}
+
+impl InvitationHandler {
+    /// Pure preview under the actual borrowed reservation. Enrollment has no
+    /// context lookup: the handler's original effect context is authoritative.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "ReservedInvitationIssuance",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn preview_reserved_device_enrollment(
+        &self,
+        effects: &AuraEffectSystem,
+        reserved: &ReservedInvitationIssuance,
+        invitation_type: InvitationType,
+    ) -> AgentResult<Invitation> {
+        HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        let sender = self.context.authority.authority_id();
+        let InvitationType::DeviceEnrollment {
+            subject_authority,
+            invitee_authority: Some(receiver),
+            initiator_device_id,
+            ..
+        } = &invitation_type
+        else {
+            return Err(AgentError::invalid(
+                "owned preview requires addressed device enrollment",
+            ));
+        };
+        if !reserved.owns_effects(effects)
+            || reserved.issuer_binding() != (sender, effects.device_id())
+            || *subject_authority != sender
+            || *initiator_device_id != effects.device_id()
+        {
+            return Err(AgentError::invalid(
+                "owned enrollment preview reservation binding changed",
+            ));
+        }
+        Ok(Invitation {
+            invitation_id: reserved.invitation_id().clone(),
+            context_id: self.context.effect_context.context_id(),
+            sender_id: sender,
+            receiver_id: *receiver,
+            invitation_type,
+            status: InvitationStatus::Pending,
+            created_at: reserved.created_at_ms(),
+            expires_at: None,
+            message: None,
+            receiver_nickname: None,
+        })
+    }
 }
 
 #[cfg(test)]

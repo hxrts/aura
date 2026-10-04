@@ -150,3 +150,21 @@ Required flow-budget guard denial has the stable `budget_exceeded` native and
 semantic category. It remains distinct from authorization denial and retains the
 structural required/remaining policy reason. Frontends and harness observers do
 not infer either category from operation text or automatically retry it.
+
+### Bootstrap account operation continuity
+
+Runtime-free account creation transfers its original operation instance to the
+application owner before storage production. A successful terminal outcome
+requires acknowledgment of both pending bootstrap and account configuration.
+The first runtime attachment preserves that original authoritative operation
+history. Frontend-local observations and pending-file reconciliation cannot mint
+account creation success. Shared parity compares that retained terminal outcome
+across terminal and browser surfaces.
+
+### Explicit quorum initiation consent
+
+An enrollment signing intent is identification data. Receiving, displaying, or
+parsing it does not approve signing. Local consent binds the original runtime and
+exact three-domain intent; historical consent cannot be upgraded to new control
+authority. A pending code-issuance outcome is distinct from committed enrollment
+and activation, and shared scenarios cannot infer the latter from code export.

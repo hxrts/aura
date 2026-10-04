@@ -139,7 +139,25 @@ const SYNC_NATIVE_SOURCE_SUITES: &[LifecycleSuite] = &[
         filter: "core::wire::required_source_tests::",
     },
 ];
-const AGENT_SUITES: &[LifecycleSuite] = &[
+const AGENT_SUITES: &[LifecycleSuite] = &[LifecycleSuite {
+    source: "crates/aura-agent/src/runtime/services/threshold_signing/enrollment_transcript_signing.rs",
+    functions: &["malformed_native_package_retains_original_codec_cause"],
+    harness_prefix: "runtime::services::threshold_signing::enrollment_transcript_signing::native_commitment_tests::",
+    filter: "runtime::services::threshold_signing::enrollment_transcript_signing::native_commitment_tests::malformed_native_package_retains_original_codec_cause",
+},
+LifecycleSuite {
+    source: "crates/aura-agent/src/runtime/services/ceremony_tracker.rs",
+    functions: &["original_completion_observation_releases_execution_lease_without_renewing_clock"],
+    harness_prefix: "runtime::services::ceremony_tracker::tests::",
+    filter: "runtime::services::ceremony_tracker::tests::original_completion_observation_releases_execution_lease_without_renewing_clock",
+},
+LifecycleSuite {
+    source: "crates/aura-agent/src/handlers/invitation/enrollment_vm_admission.rs",
+    functions: &["actual_admitted_vm_control_and_acceptance_reject_foreign_decisions"],
+    harness_prefix: "handlers::invitation::enrollment_vm_admission::tests::",
+    filter: "handlers::invitation::enrollment_vm_admission::tests::actual_admitted_vm_control_and_acceptance_reject_foreign_decisions",
+},
+
     LifecycleSuite {
         source: "crates/aura-agent/src/runtime/time_handler.rs",
         functions: &["required_absolute_deadline_keeps_actual_configured_provider_and_native_failure"],
@@ -1109,6 +1127,45 @@ mod tests {
             assert!(require_tests(source, &["target"]).is_err(), "{source}");
         }
     }
+    #[test]
+    fn required_quorum_window_and_control_evidence_rejects_missing_ignored_or_zero_execution() {
+        for name in [
+            "original_completion_observation_releases_execution_lease_without_renewing_clock",
+            "actual_admitted_vm_control_and_acceptance_reject_foreign_decisions",
+            "malformed_native_package_retains_original_codec_cause",
+        ] {
+            let suite = AGENT_SUITES
+                .iter()
+                .find(|suite| suite.functions.contains(&name))
+                .expect("actual quorum boundary fixture must remain required");
+            let exact = format!("{}{name}", suite.harness_prefix);
+            assert_eq!(suite.filter, exact);
+            assert!(require_tests(
+                &format!("#[tokio::test] async fn {name}() {{}}"),
+                suite.functions
+            )
+            .is_ok());
+            assert!(require_tests(
+                &format!("#[tokio::test] #[ignore] async fn {name}() {{}}"),
+                suite.functions
+            )
+            .is_err());
+            assert!(
+                require_tests("#[tokio::test] async fn unrelated() {}", suite.functions).is_err()
+            );
+            let required = vec![exact.clone()];
+            assert!(require_executed_tests("test result: ok. 0 passed", &required).is_err());
+            assert!(
+                require_executed_tests(&format!("test {exact} ... ignored"), &required).is_err()
+            );
+            assert!(
+                require_executed_tests(&format!("test {exact}_lookalike ... ok"), &required)
+                    .is_err()
+            );
+            assert!(require_executed_tests(&format!("test {exact} ... ok"), &required).is_ok());
+        }
+    }
+
     #[test]
     fn inventory_rejects_missing_ignored_and_fabricated_test_attributes() {
         assert!(require_tests("#[test] fn target() {}", &["target"]).is_ok());

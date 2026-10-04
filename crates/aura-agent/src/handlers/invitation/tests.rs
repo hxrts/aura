@@ -4042,6 +4042,19 @@ pub(crate) fn actual_pinned_device_enrollment_fixture(
     ))
 }
 
+/// Retain the actual transport owner across a same-profile native restart.
+/// Configuration comes from each constructed runtime's actual effects.config().
+pub(crate) fn actual_pinned_device_enrollment_fixture_with_transport(
+    label: &str,
+    transport: crate::SharedTransport,
+) -> impl std::future::Future<Output = ActualDeviceEnrollmentFixture> + '_ {
+    Box::pin(actual_pinned_device_enrollment_fixture_owned(
+        label,
+        None,
+        Some(transport),
+    ))
+}
+
 pub(crate) fn actual_pinned_device_enrollment_fixture_with_clock(
     label: &str,
     clock: Arc<dyn aura_core::effects::PhysicalTimeEffects>,

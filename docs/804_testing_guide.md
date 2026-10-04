@@ -1887,3 +1887,62 @@ regression verifies that four seconds spent exiting leaves one second to drain;
 workspace unit CI runs this test alongside the actual shared parity scenarios.
 The sender-clearing failure regression verifies that a later drain timeout
 retains both native causes even when the bounded future is dropped.
+
+## Runtime-free account creation ownership
+
+The configured native staging adapter delegates actual pending-bootstrap and encrypted account-profile writes to the app-owned staging workflow. The original operation instance transfers before the first awaited producer step. Only acknowledged writes mint app-owned terminal success; frontend callbacks observe completion and request bootstrap reload. The retained AppCore supplies that original history to the new runtime signal graph. Runtime attachment rejects replacement, and pending-file reconciliation cannot manufacture account-create success.
+
+Regression coverage must exercise actual storage production and observe the original operation after runtime attachment; manually seeded semantic facts do not establish producer ownership. The CreateAccount callback requires a workflow handoff owner, preventing submission with a local terminal owner.
+
+### Account creation submission enforcement
+
+Run `just ci-frontend-handoff-boundary` after changing account creation callbacks
+or submission ownership. Its parsed Rust guard rejects local-terminal submission
+with the actual `SemanticOperationKind::CreateAccount` argument. Preserve the
+callback's workflow handoff type and the original operation instance before the
+first awaited native staging step. The guard's positive/negative Syn fixtures
+cover helper/direct calls, qualified paths, unrelated strings/types, and proven
+lexical test scopes. These syntax checks supplement actual storage-producer
+regressions; seeded operation history alone does not prove production lifecycle
+publication or continuity after runtime attachment.
+
+### Required native enrollment quorum evidence
+
+After quorum signing-owner, prepared issuer, packet authentication, retained
+initial Request or restricted completion observer changes, run the serialized
+`just ci-vm-session-lifecycle`, ownership/annotation and security-boundary lanes.
+Required fixtures must be nonignored, discovered by the actual selected harness,
+and individually reported as successfully executed. A zero-match green Cargo
+process or compile-fail import alone does not prove runtime custody.
+
+The real confirmation fixture activates and reopens the original enrolled
+physical profile before explicit approval on both actual native threshold devices.
+It must retain all archive, immutable envelope, replay and corruption assertions,
+then prove genuine next issuance with no local aggregation of remote shares.
+Initial Request signature substitution, old intent replay, current package/epoch
+mismatch, expired original window, actor cancellation and native drain failure
+need adversarial execution evidence. Initial issuance is not later confirmation
+quorum, profile restart continuity or complete service disposal evidence.
+
+Public approval compile-fail guards cover construction, Clone and serde rejection.
+The completion observer public opacity guard is distinct from native internal
+regressions proving permit release, protected-clock continuity and the absence of
+arbitrary execution/child/raw-clock authority. Keep exact required names in the
+typed VM lifecycle inventory and retain its discovery/execution validator tests.
+
+The required native
+`real_committed_confirmation_is_durable_and_reverified_before_activation_capability`
+fixture also checks actual repeated confirmed handoff, preservation of signed raw
+share/configuration bytes, unchanged original activation envelope, refusal to
+recreate a lost envelope after birth, and the native codec source for a corrupt
+envelope. Fault injection uses the selected provider's test boundary and restores
+only the captured original bytes before the existing profile reopen and actual
+explicit two-runtime quorum issuance assertions. These cases do not establish
+profile WAL or process restart continuity.
+
+Confirmed wrapping evidence must also exercise the actual allocation manager:
+original birth, read and positive sealing under the verified import receipt,
+exact scope/reference substitution refusal, and interrupted publication refusing
+a second allocation for an already born scope. An unchanged envelope alone does
+not establish managed secret lifetime custody. Preserve native provider sources
+and distinguish these assertions from legacy envelope encryption coverage.

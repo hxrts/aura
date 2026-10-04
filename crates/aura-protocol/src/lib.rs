@@ -81,9 +81,11 @@ pub mod facades;
 pub mod handlers;
 pub mod messages;
 pub mod prelude;
+pub mod public_transcript_signing;
 pub mod session;
 pub mod state;
 pub mod termination;
+pub mod transcript_round_packet;
 pub mod types;
 
 pub use aura_guards::{

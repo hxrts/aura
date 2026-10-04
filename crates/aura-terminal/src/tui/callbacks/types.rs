@@ -153,4 +153,4 @@ pub(crate) type SetModeratorCallback =
 #[doc(hidden)]
 #[allow(private_interfaces)]
 pub(crate) type CreateAccountCallback =
-    Arc<dyn Fn(String, LocalTerminalOperationOwner) + Send + Sync>;
+    Arc<dyn Fn(String, WorkflowHandoffOperationOwner) + Send + Sync>;

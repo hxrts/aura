@@ -1220,3 +1220,48 @@ checkpoint retain that same fixed endpoint and selected provider. Expired,
 unsupported or failed provider observations cannot publish successful cleanup.
 Frontends and observers cannot substitute another clock, allocate a replacement
 window, or turn timeout diagnostics into domain completion evidence.
+
+### Prepared enrollment quorum ownership
+
+Preparation retains the original issuer generation/tree reservation and protected
+physical window while explicit participants approve the exact versioned intent.
+An approved participant belongs to its actual active runtime/profile and current
+native ordered signing policy. Provisional or merely matching authority ids
+cannot provide participant custody; missing, malformed and foreign material
+remain typed failures.
+
+The issuer transfers only a restricted `HeldIssuerCompletionObserver` to its
+registered completion holder. This move-only observer retains the original
+protected clock/checkpoint continuation and exact result/task observation; it
+carries no execution permit, arbitrary executor, child, nonce or raw-clock API.
+The actual issuer task keeps execution custody. Participant and issuer task
+handles remain owned by bounded runtime ingress until actual group destruction
+acknowledgment under their original windows. Capacity is admitted before spawning.
+Registry collisions and shutdown failures preserve original concrete causes and
+never treat dropped handles as successful drainage.
+
+A retained initial Request signature is immutable, independently reverified and
+bound to the exact issued manifest, original runtime and current native signing
+policy. Required execution eligibility expires with the original protected
+window; cached signatures cannot renew it. Successful initial quorum initiation
+does not prove later confirmation quorum, complete enrollment or restart custody.
+
+### Confirmed import activation custody
+
+Only the original durable confirmed enrollment capability can publish its
+activation envelope. Key readers retain that original receipt or the reverified
+committed profile receipt; raw authority, epoch and participant identifiers only
+check the held reference. A committed profile may supply read custody for its
+original device before reopening, but active subject signing still requires the
+actual adopted runtime identity and explicit original-device approval.
+The separate envelope leaves immutable signed import bytes unchanged. The
+original birth anchor prevents missing-envelope recovery from refreshing nonce
+or key custody. Repeated handoff reuses and verifies the exact original envelope,
+and required readers preserve provider and codec sources.
+
+Confirmed activation wrapping custody uses the same native allocation manager
+as issuer generation custody, with distinct confirmed import origins on the
+sealed birth and positive capabilities. Required reads verify the original
+receipt, imported generation and exact allocation reference. A recovered original
+scope without its required envelope is a storage failure; retry or reopening
+cannot allocate a replacement wrapping secret for that scope.
