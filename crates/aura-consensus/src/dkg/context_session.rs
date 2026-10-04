@@ -20,11 +20,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Seals and opens round-two packages between participants.
-pub trait DkgSealer {
+#[async_trait::async_trait]
+pub trait DkgSealer: Send + Sync {
     /// Seal `plaintext` so only `recipient` can open it.
-    fn seal(&self, recipient: AuthorityId, plaintext: &[u8]) -> Result<Vec<u8>>;
+    async fn seal(&self, recipient: AuthorityId, plaintext: &[u8]) -> Result<Vec<u8>>;
     /// Open a package `sender` sealed to this participant.
-    fn open(&self, sender: AuthorityId, sealed: &[u8]) -> Result<Vec<u8>>;
+    async fn open(&self, sender: AuthorityId, sealed: &[u8]) -> Result<Vec<u8>>;
 }
 
 /// A DKG message on the wire, bound to the DKG it belongs to.
@@ -132,7 +133,7 @@ impl ContextDkgSession {
     /// Consume a received message. Returns messages to send and, once all
     /// rounds complete, the output. Messages for another epoch, from a
     /// non-participant, duplicated, or addressed to someone else are rejected.
-    pub fn receive(
+    pub async fn receive(
         &mut self,
         message: ContextDkgMessage,
         sealer: &dyn DkgSealer,
@@ -151,7 +152,7 @@ impl ContextDkgSession {
                 }
                 let package = round1::Package::deserialize(&bytes).map_err(codec)?;
                 self.round_one.insert(sender, package);
-                self.advance(sealer)
+                self.advance(sealer).await
             }
             ContextDkgBody::RoundTwo { to, .. } if to != self.me => Err(AuraError::invalid(
                 "round-two package addressed to another participant",
@@ -162,13 +163,13 @@ impl ContextDkgSession {
                     self.pending_round_two.push(message);
                     return Ok((Vec::new(), None));
                 }
-                self.accept_round_two(sender, message, sealer)?;
-                self.advance(sealer)
+                self.accept_round_two(sender, message, sealer).await?;
+                self.advance(sealer).await
             }
         }
     }
 
-    fn accept_round_two(
+    async fn accept_round_two(
         &mut self,
         sender: Identifier,
         message: ContextDkgMessage,
@@ -180,13 +181,13 @@ impl ContextDkgSession {
         if self.round_two.contains_key(&sender) {
             return Err(AuraError::invalid("duplicate round-two package"));
         }
-        let opened = sealer.open(message.from, &sealed)?;
+        let opened = sealer.open(message.from, &sealed).await?;
         let package = round2::Package::deserialize(&opened).map_err(codec)?;
         self.round_two.insert(sender, package);
         Ok(())
     }
 
-    fn advance(
+    async fn advance(
         &mut self,
         sealer: &dyn DkgSealer,
     ) -> Result<(Vec<Outgoing>, Option<ContextDkgOutput>)> {
@@ -210,7 +211,9 @@ impl ContextDkgSession {
                     .ok_or_else(|| {
                         AuraError::invalid("round-two recipient is not a participant")
                     })?;
-                let sealed = sealer.seal(recipient, &package.serialize().map_err(codec)?)?;
+                let sealed = sealer
+                    .seal(recipient, &package.serialize().map_err(codec)?)
+                    .await?;
                 outgoing.push(Outgoing {
                     to: vec![recipient],
                     message: ContextDkgMessage {
@@ -226,7 +229,7 @@ impl ContextDkgSession {
             self.phase = Phase::AwaitingRoundTwo(secret);
             for pending in std::mem::take(&mut self.pending_round_two) {
                 let sender = participant_identifier(&self.config, pending.from)?;
-                self.accept_round_two(sender, pending, sealer)?;
+                self.accept_round_two(sender, pending, sealer).await?;
             }
         }
         if let Phase::AwaitingRoundTwo(secret) = &self.phase {
@@ -265,13 +268,14 @@ mod tests {
         a.to_bytes()[0] ^ b.to_bytes()[0] ^ 0x5a
     }
 
+    #[async_trait::async_trait]
     impl DkgSealer for PairSealer {
-        fn seal(&self, recipient: AuthorityId, plaintext: &[u8]) -> Result<Vec<u8>> {
+        async fn seal(&self, recipient: AuthorityId, plaintext: &[u8]) -> Result<Vec<u8>> {
             let mut out = recipient.to_bytes()[..4].to_vec();
             out.extend(plaintext.iter().map(|byte| byte ^ pad(self.me, recipient)));
             Ok(out)
         }
-        fn open(&self, sender: AuthorityId, sealed: &[u8]) -> Result<Vec<u8>> {
+        async fn open(&self, sender: AuthorityId, sealed: &[u8]) -> Result<Vec<u8>> {
             if sealed.len() < 4 || sealed[..4] != self.me.to_bytes()[..4] {
                 return Err(AuraError::crypto("sealed to another participant"));
             }
@@ -299,7 +303,7 @@ mod tests {
 
     /// Deliver messages through an in-memory bus, optionally reversing each
     /// delivery batch to exercise out-of-order arrival.
-    fn run(config: &DkgConfig, reverse: bool) -> Vec<ContextDkgOutput> {
+    async fn run(config: &DkgConfig, reverse: bool) -> Vec<ContextDkgOutput> {
         let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(7);
         let mut sessions = BTreeMap::new();
         let mut bus: VecDeque<(AuthorityId, ContextDkgMessage)> = VecDeque::new();
@@ -322,6 +326,7 @@ mod tests {
                 .get_mut(&to)
                 .unwrap()
                 .receive(message, &sealer)
+                .await
                 .unwrap();
             for out in outgoing {
                 for recipient in out.to {
@@ -339,10 +344,10 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn every_member_finishes_with_the_same_group_key() {
+    #[tokio::test]
+    async fn every_member_finishes_with_the_same_group_key() {
         for reverse in [false, true] {
-            let outputs = run(&config(2, 3), reverse);
+            let outputs = run(&config(2, 3), reverse).await;
             let group = outputs[0].public_key_package.verifying_key();
             assert!(outputs
                 .iter()
@@ -350,8 +355,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn foreign_epoch_duplicate_and_misaddressed_messages_are_rejected() {
+    #[tokio::test]
+    async fn foreign_epoch_duplicate_and_misaddressed_messages_are_rejected() {
         let config = config(2, 3);
         let mut rng = rand_chacha::ChaCha20Rng::seed_from_u64(9);
         let (a, b) = (config.participants[0], config.participants[1]);
@@ -361,11 +366,14 @@ mod tests {
 
         let mut wrong_epoch = from_b.message.clone();
         wrong_epoch.epoch += 1;
-        assert!(session.receive(wrong_epoch, &sealer).is_err());
+        assert!(session.receive(wrong_epoch, &sealer).await.is_err());
 
-        session.receive(from_b.message.clone(), &sealer).unwrap();
+        session
+            .receive(from_b.message.clone(), &sealer)
+            .await
+            .unwrap();
         assert!(
-            session.receive(from_b.message, &sealer).is_err(),
+            session.receive(from_b.message, &sealer).await.is_err(),
             "duplicate"
         );
 
@@ -377,13 +385,13 @@ mod tests {
                 sealed: vec![0; 8],
             },
         };
-        assert!(session.receive(misaddressed, &sealer).is_err());
+        assert!(session.receive(misaddressed, &sealer).await.is_err());
 
         let outsider = ContextDkgMessage {
             epoch: config.epoch,
             from: AuthorityId::new_from_entropy([99; 32]),
             body: ContextDkgBody::RoundOne(vec![1, 2, 3]),
         };
-        assert!(session.receive(outsider, &sealer).is_err());
+        assert!(session.receive(outsider, &sealer).await.is_err());
     }
 }
