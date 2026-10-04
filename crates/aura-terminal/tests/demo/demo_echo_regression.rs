@@ -1,4 +1,3 @@
-#![cfg(feature = "development")]
 //! Regression test for demo mode echo functionality.
 //!
 //! This test mimics the exact TUI flow:
@@ -26,7 +25,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_terminal::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, EchoPeer};
+use aura_terminal::demo::{spawn_amp_inbox_listener, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
@@ -114,9 +113,10 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
         .expect("init signals");
 
     // Get demo hints (invite codes) - this is how the TUI gets them
-    let hints = DemoHints::new(seed);
-    eprintln!("[Test] Alice invite code: {}", hints.alice_invite_code);
-    eprintln!("[Test] Carol invite code: {}", hints.carol_invite_code);
+    let (alice_code, carol_code) = simulator
+        .signed_contact_invite_codes()
+        .await
+        .expect("demo peers create signed contact codes");
 
     // Start demo AMP echo listener (like TUI does)
     let peers = vec![
@@ -139,27 +139,29 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     // Step 1: import_invitation_details parses the code and returns InvitationInfo with invitation_id
     // Step 2: accept_invitation uses that invitation_id to accept
     eprintln!("[Test] Importing Alice via invite code...");
-    let alice_info = invitation::import_invitation_details(&app_core, &hints.alice_invite_code)
+    let alice_info = invitation::import_invitation_details(&app_core, &alice_code)
         .await
         .expect("Alice import should succeed");
     eprintln!(
         "[Test] Alice imported: invitation_id={}, sender_id={}",
-        alice_info.invitation_id, alice_info.sender_id
+        alice_info.invitation_id(),
+        alice_info.info().sender_id
     );
-    let alice_accept = invitation::accept_invitation(&app_core, &alice_info.invitation_id).await;
-    eprintln!("[Test] Alice accept result: {:?}", alice_accept);
+    let alice_accept = invitation::accept_invitation(&app_core, alice_info).await;
+    eprintln!("[Test] Alice accept result: {alice_accept:?}");
 
     // Import and accept Carol as a contact
     eprintln!("[Test] Importing Carol via invite code...");
-    let carol_info = invitation::import_invitation_details(&app_core, &hints.carol_invite_code)
+    let carol_info = invitation::import_invitation_details(&app_core, &carol_code)
         .await
         .expect("Carol import should succeed");
     eprintln!(
         "[Test] Carol imported: invitation_id={}, sender_id={}",
-        carol_info.invitation_id, carol_info.sender_id
+        carol_info.invitation_id(),
+        carol_info.info().sender_id
     );
-    let carol_accept = invitation::accept_invitation(&app_core, &carol_info.invitation_id).await;
-    eprintln!("[Test] Carol accept result: {:?}", carol_accept);
+    let carol_accept = invitation::accept_invitation(&app_core, carol_info).await;
+    eprintln!("[Test] Carol accept result: {carol_accept:?}");
 
     // Allow time for contact imports to complete
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -193,10 +195,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
         );
     }
 
-    eprintln!(
-        "[Test] Creating channel with members from contacts list: {:?}",
-        members
-    );
+    eprintln!("[Test] Creating channel with members from contacts list: {members:?}");
 
     // Also log what the echo listener expects
     eprintln!(
@@ -207,7 +206,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
 
     let channel_result =
         messaging::create_channel(&app_core, "test-channel", None, &members, 0, 1).await;
-    eprintln!("[Test] Channel creation result: {:?}", channel_result);
+    eprintln!("[Test] Channel creation result: {channel_result:?}");
     // Now returns typed ChannelId, not String - this enforces type safety!
     let channel_id = channel_result.expect("create channel");
 
@@ -227,7 +226,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
             .expect("chat signal should be registered")
     };
 
-    eprintln!("[Test] Sending message to channel {}...", channel_id);
+    eprintln!("[Test] Sending message to channel {channel_id}...");
     // Using typed ChannelId ensures we send to the EXACT channel we created
     messaging::send_message(&app_core, channel_id, content, 2)
         .await

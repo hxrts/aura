@@ -527,6 +527,7 @@ async fn test_invalid_invitation_code_rejection() {
     assert!(result.is_err(), "Invalid base64 should fail");
 
     // Test 4: Valid base64 but invalid JSON
+    use base64::Engine as _;
     println!("\nTest 4: Valid base64 but invalid JSON");
     let invalid_json =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("not json at all".as_bytes());

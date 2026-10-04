@@ -22,7 +22,7 @@ use aura_core::hash;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
-use aura_terminal::demo::{DemoHints, DemoSimulator};
+use aura_terminal::demo::DemoSimulator;
 use aura_terminal::handlers::tui::create_account;
 use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::{handlers::tui::TuiMode, ids};
@@ -67,9 +67,9 @@ async fn demo_refresh_account_reports_two_online_contacts() {
 
     // Match the demo-mode authority/context derivation used by the TUI handler.
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
     let authority_id = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
+    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
     let context_id = ContextId::new_from_entropy(bob_context_entropy);
 
     // Use a unique data dir so this test is hermetic.
@@ -233,20 +233,20 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
     let alice_id = simulator.alice_authority();
     let carol_id = simulator.carol_authority();
 
-    let hints = DemoHints::new(seed);
+    let (alice_code, carol_code) = simulator
+        .signed_contact_invite_codes()
+        .await
+        .expect("demo peers create signed contact codes");
 
-    for code in [&hints.alice_invite_code, &hints.carol_invite_code] {
+    for code in [&alice_code, &carol_code] {
         let invitation =
             aura_app::ui::workflows::invitation::import_invitation_details(initialized.raw(), code)
                 .await
                 .expect("import_invitation_details should succeed");
 
-        aura_app::ui::workflows::invitation::accept_invitation(
-            initialized.raw(),
-            invitation.invitation_id(),
-        )
-        .await
-        .expect("accept_invitation should succeed");
+        aura_app::ui::workflows::invitation::accept_invitation(initialized.raw(), invitation)
+            .await
+            .expect("accept_invitation should succeed");
     }
 
     wait_for_contacts(initialized.raw(), &[alice_id, carol_id]).await;

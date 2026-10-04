@@ -194,7 +194,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .await
         .expect("import device enrollment code should succeed");
     runtime_b
-        .accept_invitation(invitation_b.invitation_id().as_str())
+        .accept_invitation(invitation_b.invitation_id.as_str())
         .await
         .expect("accept device enrollment invitation should succeed");
 
@@ -259,7 +259,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .await
         .expect("import device enrollment code should succeed");
     runtime_c
-        .accept_invitation(invitation_c.invitation_id().as_str())
+        .accept_invitation(invitation_c.invitation_id.as_str())
         .await
         .expect("accept device enrollment invitation should succeed");
 

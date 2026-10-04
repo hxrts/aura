@@ -436,7 +436,19 @@ async fn build_demo_peer_agent(
             aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}"))
         })?;
 
-    Ok(Arc::new(agent))
+    // Give the peer a signing identity the way account creation does, so it
+    // can sign invitation responses and ceremony messages.
+    let agent = Arc::new(agent);
+    agent
+        .clone()
+        .as_runtime_bridge()
+        .bootstrap_signing_keys()
+        .await
+        .map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to bootstrap {name} signing keys: {e}"))
+        })?;
+
+    Ok(agent)
 }
 
 async fn establish_contact_exchange(
@@ -605,6 +617,11 @@ async fn process_peer_transport_messages(
     // Keep per-tick processing bounded so a single requeued envelope cannot
     // monopolize the loop and starve other traffic (e.g. AMP echoes).
     const MAX_ENVELOPES_PER_TICK: usize = 128;
+
+    // Envelopes the demo does not answer itself (contact acceptances,
+    // invitation responses, ...) go back to the agent's own runtime
+    // handlers after this tick instead of being dropped.
+    let mut deferred = Vec::new();
 
     for _ in 0..MAX_ENVELOPES_PER_TICK {
         let envelope = match effects.receive_envelope().await {
@@ -981,9 +998,24 @@ async fn process_peer_transport_messages(
                         continue;
                     }
                 }
-                _ => {}
+                _ => deferred.push(envelope),
             }
+        } else {
+            deferred.push(envelope);
         }
+    }
+    for envelope in deferred {
+        effects.requeue_envelope(envelope);
+    }
+    // Process them the way a real client's maintenance loop does (contact
+    // acceptances, invitation responses, rendezvous handshakes).
+    if let Err(err) = agent
+        .clone()
+        .as_runtime_bridge()
+        .process_ceremony_messages()
+        .await
+    {
+        tracing::debug!("{name} inbox processing failed: {err}");
     }
 
     // Auto-accept pending channel invitations for demo peers.
@@ -1213,7 +1245,7 @@ mod tests {
                     .enable_all()
                     .build()
                     .unwrap()
-                    .block_on(signed_contact_invite_codes_body())
+                    .block_on(signed_contact_invite_codes_body());
             })
             .unwrap()
             .join()
