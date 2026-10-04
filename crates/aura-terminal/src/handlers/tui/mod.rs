@@ -721,7 +721,7 @@ async fn handle_tui_launch(
                                 ))
                             })?;
                         sim.start().await.map_err(|error| {
-                            AuraError::internal(format!("Failed to start simulator: {}", error))
+                            AuraError::internal(format!("Failed to start simulator: {error}"))
                         })?;
 
                         stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
@@ -918,8 +918,7 @@ async fn handle_tui_launch(
         stdio.println(format_args!("Stopping demo simulator..."));
         if let Err(error) = sim.stop().await {
             stdio.eprintln(format_args!(
-                "Warning: Failed to stop simulator cleanly: {}",
-                error
+                "Warning: Failed to stop simulator cleanly: {error}"
             ));
         }
     }

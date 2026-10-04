@@ -85,6 +85,8 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+    use crate::ids;
+    use base64::Engine as _;
 
     #[test]
     fn test_demo_hints_creation() {

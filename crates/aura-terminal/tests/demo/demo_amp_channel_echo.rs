@@ -157,8 +157,6 @@ async fn demo_amp_channel_echoes_peer_message() {
 
     assert!(
         missing.is_empty(),
-        "Expected echo messages from both Alice and Carol, missing: {:?} within {:?}",
-        missing,
-        timeout
+        "Expected echo messages from both Alice and Carol, missing: {missing:?} within {timeout:?}"
     );
 }

@@ -32,7 +32,7 @@ use aura_journal::fact::{
 };
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
-use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
+use aura_recovery::guardian_ceremony::CeremonyProposal;
 use aura_relational::ContactFact;
 
 use super::identities::{demo_authority_id, demo_context_id, demo_device_id, GuardianAcceptance};
@@ -392,8 +392,10 @@ async fn build_demo_peer_agent(
     storage_dir: PathBuf,
     shared_transport: SharedTransport,
 ) -> TerminalResult<Arc<AuraAgent>> {
-    let mut config = AgentConfig::default();
-    config.device_id = device_id;
+    let mut config = AgentConfig {
+        device_id,
+        ..AgentConfig::default()
+    };
     config.storage.base_path = storage_dir;
 
     let ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
@@ -453,9 +455,33 @@ async fn establish_contact_exchange(
 }
 
 /// Peer-side automation: currently only guardian setup auto-acceptance.
+/// Register queued guardian ceremony proposals and approve each through the
+/// runtime bridge, the same path a guardian takes from Notifications.
+async fn approve_guardian_proposals(name: &str, agent: &Arc<AuraAgent>) {
+    let Ok(recovery) = agent.recovery() else {
+        return;
+    };
+    let ceremonies = match recovery.discover_guardian_ceremony_proposals().await {
+        Ok(ceremonies) => ceremonies,
+        Err(err) => {
+            tracing::warn!("{name} failed to discover guardian ceremony proposals: {err}");
+            return;
+        }
+    };
+    let bridge = agent.clone().as_runtime_bridge();
+    for ceremony_id in ceremonies {
+        if let Err(err) = bridge
+            .respond_to_guardian_ceremony(&ceremony_id, true, None)
+            .await
+        {
+            tracing::warn!("{name} failed to approve guardian ceremony {ceremony_id}: {err}");
+        }
+    }
+}
+
 async fn process_peer_transport_messages(
     name: &str,
-    agent: &AuraAgent,
+    agent: &Arc<AuraAgent>,
     bob_authority: AuthorityId,
 ) -> TerminalResult<Vec<PeerObservedMessage>> {
     let effects = agent.runtime().effects();
@@ -643,7 +669,17 @@ async fn process_peer_transport_messages(
                         }
                     };
 
-                    if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                    if matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+                        // Demo peers accept guardian bindings through the same
+                        // invitation service a person uses from Notifications.
+                        if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
+                        {
+                            tracing::warn!(
+                                "{name} failed to accept guardian invitation {}: {err}",
+                                invitation.invitation_id
+                            );
+                        }
+                    } else if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                         accept_channel_invitation(
                             name,
                             agent,
@@ -833,60 +869,17 @@ async fn process_peer_transport_messages(
 
                     // Try to deserialize as CeremonyProposal (bincode format)
                     if let Ok(proposal) = from_slice::<CeremonyProposal>(&envelope.payload) {
+                        // Leave the proposal queued for this agent's guardian session
+                        // and approve it as a person would (Notifications `r`):
+                        // discovery registers it, then the runtime bridge responds
+                        // and the session signs the real response.
                         tracing::info!(
                             "{name} received guardian ceremony proposal for ceremony {}",
                             proposal.ceremony_id
                         );
-
-                        // Create response accepting the ceremony
-                        let response_msg = CeremonyResponseMsg {
-                            ceremony_id: proposal.ceremony_id,
-                            guardian_id: agent.authority_id(),
-                            response: CeremonyResponse::Accept,
-                            encrypted_key_package_hash: proposal.encrypted_key_package_hash,
-                            signature: Vec::new(), // Signature would be added in production
-                        };
-
-                        // Serialize response in bincode format (same as choreography uses)
-                        let payload = match to_vec(&response_msg) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!("{name} failed to serialize ceremony response: {e}");
-                                continue;
-                            }
-                        };
-
-                        // Include choreography metadata so the response is routed correctly
-                        let mut response_metadata = std::collections::HashMap::new();
-                        response_metadata.insert(
-                            "content-type".to_string(),
-                            "application/aura-choreography".to_string(),
-                        );
-                        if let Some(session_id) = envelope.metadata.get("session-id") {
-                            response_metadata.insert("session-id".to_string(), session_id.clone());
-                        }
-
-                        let response = aura_core::effects::TransportEnvelope {
-                            destination: envelope.source,
-                            source: agent.authority_id(),
-                            context: envelope.context,
-                            payload,
-                            metadata: response_metadata,
-                            receipt: None,
-                        };
-
-                        if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
-                        {
-                            tracing::warn!(
-                                "{name} failed to send choreography ceremony response: {e}"
-                            );
-                        } else {
-                            tracing::info!(
-                                "{name} sent guardian ceremony acceptance for ceremony {}",
-                                proposal.ceremony_id
-                            );
-                        }
+                        effects.requeue_envelope(envelope);
+                        approve_guardian_proposals(name, agent).await;
+                        continue;
                     } else if let Ok(enrollment_request) =
                         from_slice::<DeviceEnrollmentRequest>(&envelope.payload)
                     {
@@ -1167,6 +1160,7 @@ pub fn spawn_amp_inbox_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids;
 
     #[tokio::test]
     async fn demo_simulator_builds_peers() {

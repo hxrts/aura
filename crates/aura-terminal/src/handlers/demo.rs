@@ -44,15 +44,12 @@ impl DemoHandler {
         let directory = directory.unwrap_or_else(|| PathBuf::from("scenarios"));
         println!("Running Bob recovery workflow via scenario runner");
         println!("Scenario root: {}", directory.display());
-        println!("Seed: {}", seed);
-        println!("Detailed report: {}", detailed_report);
+        println!("Seed: {seed}");
+        println!("Detailed report: {detailed_report}");
 
         // Build a CLI handler with a deterministic device/authority context
-        let handler =
-            create_cli_handler(ids::device_id(&format!("demo:recovery-workflow:{}", seed)))
-                .map_err(|e| {
-                    AuraError::internal(format!("Failed to create demo handler: {}", e))
-                })?;
+        let handler = create_cli_handler(ids::device_id(&format!("demo:recovery-workflow:{seed}")))
+            .map_err(|e| AuraError::internal(format!("Failed to create demo handler: {e}")))?;
 
         // Execute the cli_recovery_demo scenario via existing scenario machinery
         handler
@@ -65,7 +62,7 @@ impl DemoHandler {
                 detailed_report,
             })
             .await
-            .map_err(|e| AuraError::internal(format!("Recovery workflow failed: {}", e)))
+            .map_err(|e| AuraError::internal(format!("Recovery workflow failed: {e}")))
     }
 
     /// Handle TUI demo command
@@ -84,7 +81,7 @@ impl DemoHandler {
             DemoScenarioArg::Interactive => ("demo:bob:interactive", "interactive"),
         };
 
-        println!("Starting demo scenario: {}", scenario_name);
+        println!("Starting demo scenario: {scenario_name}");
 
         // Construct TuiArgs with demo mode enabled
         // data_dir: None means resolve_storage_path will use $AURA_PATH/.aura-demo
@@ -98,6 +95,6 @@ impl DemoHandler {
         // Route to TUI handler - it uses the same code path for demo and production
         handle_tui(&tui_args)
             .await
-            .map_err(|e| AuraError::internal(format!("TUI demo failed: {}", e)))
+            .map_err(|e| AuraError::internal(format!("TUI demo failed: {e}")))
     }
 }

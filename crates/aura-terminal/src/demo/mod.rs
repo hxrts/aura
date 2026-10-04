@@ -1160,20 +1160,20 @@ impl SimulatedBridge {
                 };
                 let _ = self.agent_event_tx.send(event);
             }
-            EffectCommand::InviteGuardian { contact_id } => {
+            EffectCommand::InviteGuardian {
+                contact_id: Some(contact_id),
+            } => {
                 // Bob invited a contact to become a guardian - trigger ceremony
-                if let Some(contact_id) = contact_id {
-                    let context_id = ids::context_id(&format!("demo-guardian-{}", contact_id));
-                    tracing::info!(
-                        "Demo: Bob inviting {} to be guardian, initiating ceremony",
-                        contact_id
-                    );
-                    let event = AgentEvent::GuardianCeremonyStarted {
-                        account: self.bob_authority,
-                        context_id,
-                    };
-                    let _ = self.agent_event_tx.send(event);
-                }
+                let context_id = ids::context_id(&format!("demo-guardian-{contact_id}"));
+                tracing::info!(
+                    "Demo: Bob inviting {} to be guardian, initiating ceremony",
+                    contact_id
+                );
+                let event = AgentEvent::GuardianCeremonyStarted {
+                    account: self.bob_authority,
+                    context_id,
+                };
+                let _ = self.agent_event_tx.send(event);
             }
             _ => {
                 // Other commands don't need agent routing

@@ -101,3 +101,29 @@ pub fn unique_test_dir(prefix: &str) -> PathBuf {
 
     root.join(prefix)
 }
+
+/// Stack size of the terminal binary's tokio workers (`main.rs`).
+pub const TERMINAL_WORKER_STACK_SIZE_BYTES: usize = 32 * 1024 * 1024;
+
+/// Run an async test body on a multi-thread runtime whose worker and calling
+/// threads have the terminal binary's stack size. Ceremony paths build deep
+/// futures that overflow the default 2 MiB test thread.
+pub fn run_with_terminal_stack<F>(body: impl FnOnce() -> F + Send + 'static)
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    let handle = std::thread::Builder::new()
+        .stack_size(TERMINAL_WORKER_STACK_SIZE_BYTES)
+        .spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(TERMINAL_WORKER_STACK_SIZE_BYTES)
+                .build()
+                .expect("build terminal-stack runtime")
+                .block_on(body());
+        })
+        .expect("spawn terminal-stack test thread");
+    if let Err(panic) = handle.join() {
+        std::panic::resume_unwind(panic);
+    }
+}

@@ -27,7 +27,7 @@ pub async fn execute_scenarios(
     let mut scenario_files = collect_scenario_files(base_dir)?;
 
     if let Some(pat) = pattern {
-        println!("Filtering scenarios by pattern: {}", pat);
+        println!("Filtering scenarios by pattern: {pat}");
         scenario_files.retain(|p| p.to_string_lossy().contains(pat));
     }
 
@@ -153,10 +153,10 @@ async fn run_scenario_file(
 
     if let Some(meta) = parsed.get("metadata") {
         if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
-            log_line(effects_ref, &mut lines, &format!("Name: {}", name)).await;
+            log_line(effects_ref, &mut lines, &format!("Name: {name}")).await;
         }
         if let Some(desc) = meta.get("description").and_then(|v| v.as_str()) {
-            log_line(effects_ref, &mut lines, &format!("Description: {}", desc)).await;
+            log_line(effects_ref, &mut lines, &format!("Description: {desc}")).await;
         }
     }
 
@@ -242,12 +242,11 @@ async fn run_scenario_file(
                 log_line(
                     effects_ref,
                     &mut lines,
-                    &format!("Simulator execution error: {}", e),
+                    &format!("Simulator execution error: {e}"),
                 )
                 .await;
                 return Err(TerminalError::Operation(format!(
-                    "Simulator execution failed: {}",
-                    e
+                    "Simulator execution failed: {e}"
                 )));
             }
         }
@@ -301,13 +300,13 @@ async fn execute_action(
         "run_choreography" => execute_run_choreography(action, sim_handler, &mut summary).await?,
         "verify_property" => execute_verify_property(action, sim_handler, &mut summary)?,
         "simulate_data_loss" => {
-            execute_simulate_data_loss(action, sim_handler, &mut summary, effects_ref, lines).await
+            execute_simulate_data_loss(action, sim_handler, &mut summary, effects_ref, lines).await;
         }
         "apply_network_condition" => {
-            execute_apply_network_condition(action, sim_handler, &mut summary)
+            execute_apply_network_condition(action, sim_handler, &mut summary);
         }
         "inject_byzantine" | "inject_failure" => {
-            execute_inject_fault(action, action_type, sim_handler)
+            execute_inject_fault(action, action_type, sim_handler);
         }
         "create_checkpoint" => execute_create_checkpoint(action, sim_handler, &mut summary),
         "export_choreo_trace" => execute_export_trace(action, sim_handler),
@@ -333,12 +332,12 @@ async fn execute_run_choreography(
     summary: &mut String,
 ) -> TerminalResult<()> {
     if let Some(name) = action.get("choreography").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " choreo={}", name);
+        let _ = write!(summary, " choreo={name}");
     }
     if let Some(parts) = action.get("participants").and_then(|v| v.as_array()) {
         let names: Vec<_> = parts.iter().filter_map(|p| p.as_str()).collect();
         if !names.is_empty() {
-            let _ = write!(summary, " participants={:?}", names);
+            let _ = write!(summary, " participants={names:?}");
         }
     }
     let participants: Vec<String> = action
@@ -382,10 +381,10 @@ fn execute_verify_property(
     summary: &mut String,
 ) -> TerminalResult<()> {
     if let Some(prop) = action.get("property").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " property={}", prop);
+        let _ = write!(summary, " property={prop}");
     }
     if let Some(expected) = action.get("expected") {
-        let _ = write!(summary, " expected={}", expected);
+        let _ = write!(summary, " expected={expected}");
     }
     let property = action
         .get("property")
@@ -406,10 +405,10 @@ async fn execute_simulate_data_loss(
     lines: &mut ScenarioLog,
 ) {
     if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " target={}", target);
+        let _ = write!(summary, " target={target}");
     }
     if let Some(loss) = action.get("loss_type").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " loss_type={}", loss);
+        let _ = write!(summary, " loss_type={loss}");
     }
     let target = action
         .get("target")
@@ -427,7 +426,7 @@ async fn execute_simulate_data_loss(
         log_line(
             effects_ref,
             lines,
-            &format!("Simulator data loss error for {}: {}", target, e),
+            &format!("Simulator data loss error for {target}: {e}"),
         )
         .await;
     }
@@ -439,12 +438,12 @@ fn execute_apply_network_condition(
     summary: &mut String,
 ) {
     if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
-        let _ = write!(summary, " condition={}", cond);
+        let _ = write!(summary, " condition={cond}");
     }
     if let Some(parts) = action.get("participants").and_then(|v| v.as_array()) {
         let names: Vec<_> = parts.iter().filter_map(|p| p.as_str()).collect();
         if !names.is_empty() {
-            let _ = write!(summary, " participants={:?}", names);
+            let _ = write!(summary, " participants={names:?}");
         }
     }
     let duration_ticks = action
@@ -491,7 +490,7 @@ fn execute_create_checkpoint(
         .and_then(|v| v.as_str())
         .unwrap_or("checkpoint");
     if let Ok(id) = sim_handler.create_checkpoint(label) {
-        let _ = write!(summary, " id={}", id);
+        let _ = write!(summary, " id={id}");
     }
 }
 
@@ -544,7 +543,7 @@ fn execute_wait_ticks(
     summary: &mut String,
 ) {
     if let Some(ticks) = action.get("ticks").and_then(|v| v.as_integer()) {
-        let _ = write!(summary, " ticks={}", ticks);
+        let _ = write!(summary, " ticks={ticks}");
         let _ = sim_handler.wait_ticks(ticks as u64);
     }
 }
@@ -555,14 +554,14 @@ fn execute_wait_ms(
     summary: &mut String,
 ) {
     if let Some(ms) = action.get("duration").and_then(|v| v.as_integer()) {
-        let _ = write!(summary, " duration_ms={}", ms);
+        let _ = write!(summary, " duration_ms={ms}");
         let _ = sim_handler.wait_ms(ms as u64);
     }
 }
 
 fn execute_generic_action(action: &toml::Value, summary: &mut String) {
     if let Some(target) = action.get("target").and_then(|t| t.as_str()) {
-        let _ = write!(summary, " target={}", target);
+        let _ = write!(summary, " target={target}");
     }
     if let Some(params) = action.get("params") {
         let _ = write!(
@@ -570,7 +569,7 @@ fn execute_generic_action(action: &toml::Value, summary: &mut String) {
             " params={}",
             params
                 .as_table()
-                .map(|t| format!("{:?}", t))
+                .map(|t| format!("{t:?}"))
                 .unwrap_or_else(|| params.to_string())
         );
     }

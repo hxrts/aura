@@ -438,7 +438,7 @@ impl CliHandler {
     pub async fn handle_demo(&self, command: &DemoCommands) -> TerminalResult<()> {
         demo::DemoHandler::handle_demo_command(command.clone())
             .await
-            .map_err(|e| TerminalError::Operation(format!("Demo command failed: {}", e)))
+            .map_err(|e| TerminalError::Operation(format!("Demo command failed: {e}")))
     }
 
     /// Handle TUI commands for production terminal interface

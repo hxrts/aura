@@ -281,12 +281,12 @@ async fn async_main() -> Result<(), AuraError> {
         Commands::Scenarios { action } => cli_handler
             .handle_scenarios(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         #[cfg(feature = "development")]
         Commands::Demo { command } => cli_handler
             .handle_demo(&command)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Snapshot { action } => cli_handler
             .handle_snapshot(&action)
             .await

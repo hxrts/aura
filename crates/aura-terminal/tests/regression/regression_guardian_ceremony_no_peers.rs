@@ -62,9 +62,9 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 
     // === Setup: Create authority/context matching demo pattern ===
     let device_id_str = "demo:bob";
-    let authority_entropy = hash::hash(format!("authority:{}", device_id_str).as_bytes());
+    let authority_entropy = hash::hash(format!("authority:{device_id_str}").as_bytes());
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
-    let context_entropy = hash::hash(format!("context:{}", device_id_str).as_bytes());
+    let context_entropy = hash::hash(format!("context:{device_id_str}").as_bytes());
     let context_id = ContextId::new_from_entropy(context_entropy);
 
     let agent_config = AgentConfig {
@@ -175,8 +175,12 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 ///
 /// This test currently FAILS because DemoSimulator does not automatically respond
 /// to guardian ceremony requests. This is the next issue to fix.
-#[tokio::test]
-async fn control_guardian_ceremony_works_with_demo_peers() {
+#[test]
+fn control_guardian_ceremony_works_with_demo_peers() {
+    support::run_with_terminal_stack(control_guardian_ceremony_works_with_demo_peers_body);
+}
+
+async fn control_guardian_ceremony_works_with_demo_peers_body() {
     use aura_core::hash;
     use aura_core::types::identifiers::ContextId;
     use aura_journal::DomainFact;
@@ -188,10 +192,10 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
 
     // Match the demo-mode authority/context derivation
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
     let bob_authority =
         aura_core::types::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
+    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 
     // Start demo peers WITH shared transport
