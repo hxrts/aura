@@ -82,6 +82,15 @@ pub(super) async fn enforce_home_moderation_for_sender(
         ));
     }
 
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    if let Some(home) = homes.home_state(&channel_id) {
+        if !home.allows_access_capability(&sender_id, "send_message") {
+            return Err(AuraError::permission_denied(
+                "Your access level in this home does not allow sending messages",
+            ));
+        }
+    }
+
     Ok(())
 }
 

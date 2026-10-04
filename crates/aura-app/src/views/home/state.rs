@@ -174,6 +174,28 @@ impl HomeState {
         self.access_overrides.get(authority_id).copied()
     }
 
+    /// Effective access level of an authority in this home, when it can be
+    /// determined from home-local state: an explicit override wins, otherwise
+    /// a member of the home has Full (same-home) access. Returns `None` for a
+    /// non-member without an override, whose hop-based level is not local.
+    pub fn effective_access_level(&self, authority_id: &AuthorityId) -> Option<AccessLevel> {
+        self.access_override(authority_id)
+            .or_else(|| self.member(authority_id).map(|_| AccessLevel::Full))
+    }
+
+    /// Whether the home's capability config grants `capability` to the
+    /// authority's effective access level. Undetermined levels are not
+    /// restricted here.
+    pub fn allows_access_capability(&self, authority_id: &AuthorityId, capability: &str) -> bool {
+        let Some(level) = self.effective_access_level(authority_id) else {
+            return true;
+        };
+        match &self.access_level_capabilities {
+            Some(config) => config.allows(level, capability),
+            None => AccessLevelCapabilityConfig::default().allows(level, capability),
+        }
+    }
+
     pub fn set_access_override(&mut self, authority_id: AuthorityId, access_level: AccessLevel) {
         self.access_overrides.insert(authority_id, access_level);
     }
@@ -367,5 +389,53 @@ impl HomesState {
     /// Select a home explicitly. `None` means no current selection.
     pub fn select_home(&mut self, id: Option<ChannelId>) {
         self.current_home_id = id;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn home_with(owner: AuthorityId) -> HomeState {
+        HomeState::new(
+            ChannelId::from_bytes([7u8; 32]),
+            Some("home".to_string()),
+            owner,
+            0,
+            ContextId::new_from_entropy([8u8; 32]),
+        )
+    }
+
+    #[test]
+    fn limited_override_removes_capability_granted_by_default_level() {
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let mut home = home_with(owner);
+        assert_eq!(home.effective_access_level(&owner), Some(AccessLevel::Full));
+        assert!(home.allows_access_capability(&owner, "send_message"));
+
+        home.set_access_override(owner, AccessLevel::Limited);
+        assert!(!home.allows_access_capability(&owner, "send_message"));
+        assert!(home.allows_access_capability(&owner, "send_dm"));
+    }
+
+    #[test]
+    fn capability_config_change_takes_effect() {
+        let owner = AuthorityId::new_from_entropy([2u8; 32]);
+        let mut home = home_with(owner);
+        home.set_access_override(owner, AccessLevel::Partial);
+        assert!(!home.allows_access_capability(&owner, "pin_content"));
+
+        let mut config = AccessLevelCapabilityConfig::default();
+        config.partial.insert("pin_content".to_string());
+        home.set_access_level_capabilities(config);
+        assert!(home.allows_access_capability(&owner, "pin_content"));
+    }
+
+    #[test]
+    fn undetermined_level_is_not_restricted_locally() {
+        let home = home_with(AuthorityId::new_from_entropy([3u8; 32]));
+        let stranger = AuthorityId::new_from_entropy([4u8; 32]);
+        assert_eq!(home.effective_access_level(&stranger), None);
+        assert!(home.allows_access_capability(&stranger, "send_message"));
     }
 }

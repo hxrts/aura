@@ -35,6 +35,47 @@ impl ModerationCapability {
     }
 }
 
+impl ModerationCapability {
+    /// Access-level capability (`aura_social::AccessLevelCapabilityConfig`)
+    /// that must also be granted to the actor's effective access level.
+    fn access_capability(&self) -> &'static str {
+        match self {
+            Self::Kick => "moderate:kick",
+            Self::Ban => "moderate:ban",
+            Self::Mute => "moderate:mute",
+            Self::Pin => "pin_content",
+        }
+    }
+}
+
+/// Enforce the home's access-level capability config for the local actor.
+pub(super) async fn require_access_capability(
+    app_core: &Arc<RwLock<AppCore>>,
+    scope: &ModerationScope,
+    capability: ModerationCapability,
+) -> Result<(), AuraError> {
+    let actor = {
+        let core = app_core.read().await;
+        core.runtime()
+            .map(|runtime| runtime.authority_id())
+            .or_else(|| core.authority().copied())
+    };
+    let Some(actor) = actor else {
+        return Ok(());
+    };
+    let homes = homes_signal_snapshot(app_core).await?;
+    let allowed = homes
+        .home_state(&scope.home_id)
+        .is_none_or(|home| home.allows_access_capability(&actor, capability.access_capability()));
+    if allowed {
+        Ok(())
+    } else {
+        Err(AuraError::permission_denied(
+            "Your access level in this home does not allow this action",
+        ))
+    }
+}
+
 pub(super) fn require_capability(
     scope: &ModerationScope,
     capability: ModerationCapability,

@@ -525,6 +525,13 @@ pub fn NeighborhoodScreen(
 
     let is_detail = props.view.mode == NeighborhoodMode::Detail;
     let is_entered = props.view.entered_home_id.is_some();
+    // Once entered, show the depth the workflow granted (clamped to the
+    // viewer's access level), not the requested one.
+    let effective_depth = if is_entered {
+        reactive_depth.get()
+    } else {
+        props.view.enter_depth
+    };
 
     let current_home_name = homes
         .get(props.view.selected_home)
@@ -536,8 +543,7 @@ pub fn NeighborhoodScreen(
         .unwrap_or_default();
     // Only expose channel/member detail when full access is active.
     // This keeps Limited/Partial traversal views from leaking full-only data.
-    let full_entered =
-        is_detail && is_entered && matches!(props.view.enter_depth, AccessLevel::Full);
+    let full_entered = is_detail && is_entered && matches!(effective_depth, AccessLevel::Full);
     let show_detail_lists = !is_detail || full_entered;
     let display_channels = if show_detail_lists {
         channels
@@ -644,7 +650,7 @@ pub fn NeighborhoodScreen(
                         neighborhood_name: neighborhood_name,
                         selected_home_name: current_home_name,
                         selected_home_id: selected_home_id,
-                        enter_depth: props.view.enter_depth,
+                        enter_depth: effective_depth,
                         entered_home: is_entered,
                         homes_count: homes_count,
                         channel_count: channel_count,

@@ -499,12 +499,16 @@ pub(super) fn NeighborhoodScreen(
                                                     )
                                                     .await
                                                     {
-                                                        Ok(_) => {
+                                                        Ok(granted) => {
                                                             operation.succeed(None);
                                                             controller.complete_runtime_enter_home(
                                                                 &target_home_id,
                                                                 &home_name,
-                                                                depth,
+                                                                match granted {
+                                                                    2 => AccessDepth::Full,
+                                                                    1 => AccessDepth::Partial,
+                                                                    _ => AccessDepth::Limited,
+                                                                },
                                                             );
                                                         }
                                                         Err(error) => {

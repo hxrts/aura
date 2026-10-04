@@ -123,12 +123,13 @@ fn allowed_entry_depth(
 }
 
 /// Move position in neighborhood view. The requested depth is clamped to the
-/// viewer's allowed access level for the target home.
+/// viewer's allowed access level for the target home; returns the granted depth
+/// (0 limited, 1 partial, 2 full).
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
     depth: &str,
-) -> Result<(), AuraError> {
+) -> Result<u32, AuraError> {
     let depth_value = match depth.to_lowercase().as_str() {
         "limited" => 0,
         "partial" => 1,
@@ -137,6 +138,7 @@ pub async fn move_position(
     };
 
     let mut homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let granted_depth;
     let mut publish_homes = false;
     let neighborhood = {
         let mut core = app_core.write().await;
@@ -160,10 +162,11 @@ pub async fn move_position(
             .or_else(|| core.authority().copied());
         let allowed_depth =
             allowed_entry_depth(&neighborhood, &homes, &target_home_id, viewer.as_ref());
+        granted_depth = depth_value.min(allowed_depth);
         neighborhood.position = Some(TraversalPosition {
             current_home_id: target_home_id,
             current_home_name: home_name,
-            depth: depth_value.min(allowed_depth),
+            depth: granted_depth,
             path: vec![target_home_id],
         });
 
@@ -180,7 +183,8 @@ pub async fn move_position(
         publish_homes_projection(app_core, homes).await?;
     }
 
-    publish_neighborhood_projection(app_core, neighborhood).await
+    publish_neighborhood_projection(app_core, neighborhood).await?;
+    Ok(granted_depth)
 }
 
 /// Create a neighborhood joined by the active home and return its id.

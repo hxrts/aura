@@ -1,7 +1,8 @@
 use super::scope::{current_moderation_scope, scope_for_message};
 use super::support::{
-    apply_local_home_projection, commit_and_fanout, moderation_timestamp, require_capability,
-    resolve_channel_hint, resolve_target_id, ModerationCapability,
+    apply_local_home_projection, commit_and_fanout, moderation_timestamp,
+    require_access_capability, require_capability, resolve_channel_hint, resolve_target_id,
+    ModerationCapability,
 };
 use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
 use crate::AppCore;
@@ -46,6 +47,7 @@ pub async fn kick_user_resolved(
         ));
     }
     require_capability(&scope, ModerationCapability::Kick)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Kick).await?;
 
     let runtime = require_runtime(app_core).await?;
     let fact = HomeKickFact::new_ms(
@@ -99,6 +101,7 @@ pub async fn ban_user_resolved(
 ) -> Result<(), AuraError> {
     let scope = current_moderation_scope(app_core).await?;
     require_capability(&scope, ModerationCapability::Ban)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Ban).await?;
 
     let runtime = require_runtime(app_core).await?;
     let fact = HomeBanFact::new_ms(
@@ -144,6 +147,7 @@ pub async fn unban_user_resolved(
 ) -> Result<(), AuraError> {
     let scope = current_moderation_scope(app_core).await?;
     require_capability(&scope, ModerationCapability::Ban)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Ban).await?;
 
     let runtime = require_runtime(app_core).await?;
     let now_ms =
@@ -185,6 +189,7 @@ pub async fn mute_user_resolved(
 ) -> Result<(), AuraError> {
     let scope = current_moderation_scope(app_core).await?;
     require_capability(&scope, ModerationCapability::Mute)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Mute).await?;
 
     let runtime = require_runtime(app_core).await?;
     let expires_at_ms =
@@ -233,6 +238,7 @@ pub async fn unmute_user_resolved(
 ) -> Result<(), AuraError> {
     let scope = current_moderation_scope(app_core).await?;
     require_capability(&scope, ModerationCapability::Mute)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Mute).await?;
 
     let runtime = require_runtime(app_core).await?;
     let now_ms = moderation_timestamp(
@@ -265,6 +271,7 @@ pub async fn pin_message(
 ) -> Result<(), AuraError> {
     let scope = scope_for_message(app_core, message_id).await?;
     require_capability(&scope, ModerationCapability::Pin)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Pin).await?;
 
     let runtime = require_runtime(app_core).await?;
     let fact = HomePinFact::new_ms(
@@ -287,6 +294,7 @@ pub async fn unpin_message(
 ) -> Result<(), AuraError> {
     let scope = scope_for_message(app_core, message_id).await?;
     require_capability(&scope, ModerationCapability::Pin)?;
+    require_access_capability(app_core, &scope, ModerationCapability::Pin).await?;
 
     let runtime = require_runtime(app_core).await?;
     let fact = HomeUnpinFact::new_ms(
