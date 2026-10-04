@@ -696,6 +696,7 @@ fn classification_to_semantic_error(
         CommandTerminalReasonCode::Banned => SemanticFailureCode::Banned,
         CommandTerminalReasonCode::Unavailable => SemanticFailureCode::Unavailable,
         CommandTerminalReasonCode::CryptoFailure => SemanticFailureCode::CryptoFailure,
+        CommandTerminalReasonCode::BudgetExceeded => SemanticFailureCode::BudgetExceeded,
         CommandTerminalReasonCode::SerializationFailure => {
             SemanticFailureCode::SerializationFailure
         }

@@ -8,21 +8,33 @@ use std::collections::HashMap;
 #[async_trait]
 impl ConsoleEffects for AuraEffectSystem {
     async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        if let Some(provider) = &self.custom_console {
+            return provider.log_info(message).await;
+        }
         tracing::info!("{}", message);
         Ok(())
     }
 
     async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        if let Some(provider) = &self.custom_console {
+            return provider.log_warn(message).await;
+        }
         tracing::warn!("{}", message);
         Ok(())
     }
 
     async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        if let Some(provider) = &self.custom_console {
+            return provider.log_error(message).await;
+        }
         tracing::error!("{}", message);
         Ok(())
     }
 
     async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        if let Some(provider) = &self.custom_console {
+            return provider.log_debug(message).await;
+        }
         tracing::debug!("{}", message);
         Ok(())
     }

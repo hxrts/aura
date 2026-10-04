@@ -47,6 +47,7 @@ simulation = []
 transparent_onion = []
 
 [dev-dependencies]
+aura-build-support = { path = "../../toolkit/test-support" }
 proptest = { workspace = true }
 trybuild = { workspace = true }
 async-trait = { workspace = true }

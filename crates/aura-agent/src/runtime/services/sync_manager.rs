@@ -7,7 +7,9 @@ use super::config_profiles::impl_service_config_profiles;
 use super::service_actor::{
     validate_actor_transition, ActorLifecyclePhase, ActorOwnedServiceRoot, ServiceActorHandle,
 };
-use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
+use super::traits::{
+    RuntimeService, RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth,
+};
 use super::{ReconfigurationManager, ReconfigurationManagerError, SessionDelegationTransfer};
 use crate::core::default_context_id_for_authority;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
@@ -50,6 +52,10 @@ pub struct SyncManagerConfig {
     /// Maximum concurrent sync sessions
     pub max_concurrent_syncs: usize,
 
+    /// Actual journal/anti-entropy resource and retry policy. This cannot extend
+    /// the admitted caller's original operation deadline.
+    pub journal_sync: aura_sync::protocols::journal::JournalSyncConfig,
+
     /// Initial peers to sync with (can be empty if using discovery)
     pub initial_peers: Vec<DeviceId>,
 
@@ -73,6 +79,7 @@ impl Default for SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(60),
             max_concurrent_syncs: 5,
             initial_peers: Vec::new(),
+            journal_sync: Default::default(),
             maintenance_enabled: true,
             maintenance_interval: Duration::from_secs(60),
             peer_state_ttl: Duration::from_secs(6 * 60 * 60),
@@ -89,6 +96,7 @@ impl_service_config_profiles!(SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(5),
             max_concurrent_syncs: 3,
             initial_peers: Vec::new(),
+            journal_sync: Default::default(),
             maintenance_enabled: true,
             maintenance_interval: Duration::from_secs(5),
             peer_state_ttl: Duration::from_secs(60),
@@ -103,6 +111,7 @@ impl_service_config_profiles!(SyncManagerConfig {
             auto_sync_interval: Duration::from_secs(60),
             max_concurrent_syncs: 5,
             initial_peers: Vec::new(),
+            journal_sync: Default::default(),
             maintenance_enabled: true,
             maintenance_interval: Duration::from_secs(60),
             peer_state_ttl: Duration::from_secs(6 * 60 * 60),
@@ -134,6 +143,12 @@ pub enum SyncManagerError {
     NotStarted,
     #[error("sync operation failed: {0}")]
     Sync(String),
+    #[error("sync operation failed: {0}")]
+    NativeSync(#[source] aura_core::AuraError),
+    #[error("required sync physical observation failed")]
+    RequiredClock(#[source] aura_core::effects::time::TimeError),
+    #[error("journal sync backing off after authenticated authorization denial")]
+    AuthorizationBackoff,
     #[error("epoch rotation delegation requires bundle evidence")]
     DelegationRequiresBundleEvidence,
     #[error("epoch rotation delegation failed")]
@@ -199,6 +214,8 @@ fn next_denial_backoff(previous: u32) -> u32 {
 struct SyncManagerShared {
     owner: ActorOwnedServiceRoot<SyncServiceManager, SyncCommand, SyncManagerState>,
     configured_peers: Mutex<Vec<DeviceId>>,
+    /// Actual created service retained before any awaited start/publication.
+    startup_service: Mutex<Option<Arc<SyncService>>>,
     /// Remaining sync attempts to skip after an authorization denial.
     denial_skip_remaining: std::sync::atomic::AtomicU32,
     /// Current backoff window (attempts), doubled on each consecutive denial.
@@ -336,11 +353,17 @@ impl SyncServiceManager {
                     .request(|reply| SyncCommand::SnapshotState { reply })
                     .await
             }
-            Err(_) => Ok(SyncStateSnapshot {
-                service: None,
-                status: self.shared.owner.state().await,
-                peers: self.shared.configured_peers.lock().await.clone(),
-            }),
+            Err(source) => {
+                let state = self.shared.owner.state().await;
+                if state != SyncManagerState::Stopped {
+                    return Err(source);
+                }
+                Ok(SyncStateSnapshot {
+                    service: None,
+                    status: state,
+                    peers: self.shared.configured_peers.lock().await.clone(),
+                })
+            }
         }
     }
 
@@ -348,6 +371,7 @@ impl SyncServiceManager {
         Arc::new(SyncManagerShared {
             owner: ActorOwnedServiceRoot::new(SyncManagerState::Stopped),
             configured_peers: Mutex::new(config.initial_peers.clone()),
+            startup_service: Mutex::new(None),
             denial_skip_remaining: std::sync::atomic::AtomicU32::new(0),
             denial_backoff: std::sync::atomic::AtomicU32::new(0),
             recent_peer_syncs: Mutex::new(HashMap::new()),
@@ -402,6 +426,23 @@ impl SyncServiceManager {
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
+        let max_concurrent_syncs =
+            u32::try_from(self.config.max_concurrent_syncs).map_err(|source| {
+                ServiceError::new(
+                    self.name(),
+                    ServiceErrorKind::InvalidConfiguration,
+                    "sync concurrent capacity cannot be represented",
+                )
+                .with_cause(source)
+            })?;
+        if max_concurrent_syncs == 0 {
+            return Err(ServiceError::new(
+                self.name(),
+                ServiceErrorKind::InvalidConfiguration,
+                "sync concurrent capacity must be positive",
+            ));
+        }
+
         let _lifecycle_guard = self.shared.owner.lifecycle().lock().await;
         let current_state = self.shared.owner.state().await;
         if current_state == SyncManagerState::Running {
@@ -422,7 +463,8 @@ impl SyncServiceManager {
         let sync_config = SyncServiceConfig {
             auto_sync_enabled: self.config.auto_sync_enabled,
             auto_sync_interval: self.config.auto_sync_interval,
-            max_concurrent_syncs: self.config.max_concurrent_syncs as u32,
+            max_concurrent_syncs,
+            journal_sync: self.config.journal_sync.clone(),
             ..Default::default()
         };
 
@@ -433,32 +475,37 @@ impl SyncServiceManager {
             Ok(service) => service,
             Err(error) => {
                 self.shared.owner.set_state(SyncManagerState::Failed).await;
-                return Err(ServiceError::startup_failed(
-                    "sync_service",
-                    error.to_string(),
-                ));
+                return Err(
+                    ServiceError::startup_failed("sync_service", error.to_string())
+                        .with_cause(error),
+                );
             }
         };
 
+        let service = Arc::new(service);
+        *self.shared.startup_service.lock().await = Some(service.clone());
         // Start the service
         if let Err(error) = service.start(now_instant).await {
             self.shared.owner.set_state(SyncManagerState::Failed).await;
-            return Err(ServiceError::startup_failed(
-                "sync_service",
-                error.to_string(),
-            ));
+            return Err(
+                ServiceError::startup_failed("sync_service", error.to_string()).with_cause(error),
+            );
         }
 
         let initial_peers = self.shared.configured_peers.lock().await.clone();
         let maintenance_group = context.tasks().group(self.name());
+        self.shared
+            .owner
+            .install_tasks(maintenance_group.clone())
+            .await;
         let command_handle = self.spawn_command_actor(
             &maintenance_group,
-            SyncState::new_running(Arc::new(service), initial_peers),
+            SyncState::new_running(service, initial_peers),
         );
         self.shared.owner.install_commands(command_handle).await;
         self.spawn_maintenance_task(maintenance_group.clone(), context.time_effects());
         self.shared.owner.set_state(SyncManagerState::Running).await;
-        self.shared.owner.install_tasks(maintenance_group).await;
+        // The actual group was installed before any task spawn.
 
         tracing::info!(
             event = "runtime.service.sync.started",
@@ -468,82 +515,103 @@ impl SyncServiceManager {
         Ok(())
     }
 
+    pub(crate) fn shares_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "SyncCommandStopCapability", capability_type = super::sync_command_registry::SyncCommandStopCapability,
+        family = "runtime_helper")]
+    pub(crate) async fn stop_registered_command(
+        &self,
+        original: &super::sync_command_registry::SyncCommandStopCapability<'_>,
+    ) -> Result<(), ServiceError> {
+        original.require_manager(self)?;
+        self.stop_managed_with_command(Some(original)).await
+    }
+
     async fn stop_managed(&self) -> Result<(), ServiceError> {
-        let _lifecycle_guard = self.shared.owner.lifecycle().lock().await;
-        let current_state = self.shared.owner.state().await;
-        if current_state == SyncManagerState::Stopped {
+        self.stop_managed_with_command(None).await
+    }
+
+    async fn stop_managed_with_command(
+        &self,
+        original: Option<&super::sync_command_registry::SyncCommandStopCapability<'_>>,
+    ) -> Result<(), ServiceError> {
+        let _lifecycle = self.shared.owner.lifecycle().lock().await;
+        let state = self.shared.owner.state().await;
+        if state == SyncManagerState::Stopped {
             return Ok(());
         }
-        validate_actor_transition(
-            self.name(),
-            current_state.phase(),
-            ActorLifecyclePhase::Stopping,
-        )?;
-
+        if matches!(state, SyncManagerState::Starting | SyncManagerState::Failed) {
+            // Only the actual registered command owner may clean an interrupted
+            // start. This is resource retirement, not a new running admission.
+            let original = original.ok_or_else(|| {
+                ServiceError::shutdown_failed(
+                    self.name(),
+                    "partial startup requires retained registered command owner",
+                )
+            })?;
+            original.require_manager(self)?;
+        } else {
+            validate_actor_transition(self.name(), state.phase(), ActorLifecyclePhase::Stopping)?;
+        }
         self.shared
             .owner
             .set_state(SyncManagerState::Stopping)
             .await;
-
-        let snapshot = self.state_snapshot().await.ok();
-        if let Some(snapshot) = snapshot.as_ref() {
-            *self.shared.configured_peers.lock().await = snapshot.peers.clone();
+        let service = self.shared.startup_service.lock().await.clone();
+        let mut failures = Vec::new();
+        if let Some(service) = service {
+            if let Err(source) = service.stop(SyncService::monotonic_now()).await {
+                failures.push(
+                    ServiceError::shutdown_failed(self.name(), "underlying sync stop failed")
+                        .with_cause(source),
+                );
+            }
         }
-        let service = snapshot.and_then(|snapshot| snapshot.service);
+        // Actual owner retains the service separately; no failed actor snapshot
+        // can manufacture an absent service and skip required retirement.
         self.shared.owner.take_commands().await;
-
-        let maintenance_shutdown_error =
-            if let Some(task_group) = self.shared.owner.take_tasks().await {
-                match task_group
+        if let Some(group) = self.shared.owner.retained_tasks().await {
+            let completion = match original {
+                Some(original) => original.shutdown_tasks(&group).await,
+                None => group
                     .shutdown_with_timeout(Duration::from_secs(2))
                     .await
-                {
-                    Ok(()) => None,
-                    Err(crate::task_registry::TaskSupervisionError::ForcedAbort {
-                        aborted_tasks,
-                        ..
-                    }) => {
-                        tracing::warn!(
-                            service = self.name(),
-                            aborted_tasks = ?aborted_tasks,
-                            "Sync service stop force-aborted owned background tasks"
-                        );
-                        None
-                    }
-                    Err(error) => Some(ServiceError::shutdown_failed(
-                        self.name(),
-                        format!("failed to stop maintenance task group: {error}"),
-                    )),
-                }
-            } else {
-                None
+                    .map_err(|source| {
+                        ServiceError::shutdown_failed(
+                            self.name(),
+                            "standalone sync workers did not acknowledge completion",
+                        )
+                        .with_cause(source)
+                    }),
             };
-
-        // Stop the underlying service
-        if let Some(service) = service.as_ref() {
-            let now_instant = SyncService::monotonic_now();
-            if let Err(error) = service.stop(now_instant).await {
-                self.shared.owner.set_state(SyncManagerState::Failed).await;
-                return Err(ServiceError::shutdown_failed(
-                    self.name(),
-                    error.to_string(),
-                ));
+            match completion {
+                Ok(()) => {
+                    self.shared.owner.take_tasks().await;
+                }
+                Err(source) => failures.push(source),
             }
         }
-
-        self.shared.owner.set_state(SyncManagerState::Stopped).await;
-
-        tracing::info!(
-            event = "runtime.service.sync.stopped",
-            service = self.name(),
-            "Sync service manager stopped"
-        );
-        match maintenance_shutdown_error {
-            Some(error) => {
-                self.shared.owner.set_state(SyncManagerState::Failed).await;
-                Err(error)
+        if failures.is_empty() {
+            self.shared.owner.set_state(SyncManagerState::Stopped).await;
+            Ok(())
+        } else {
+            self.shared.owner.set_state(SyncManagerState::Failed).await;
+            let primary = failures.remove(0);
+            if failures.is_empty() {
+                Err(primary)
+            } else {
+                Err(ServiceError::shutdown_failed(
+                    self.name(),
+                    "sync stop failed at multiple required boundaries",
+                )
+                .with_cause(SyncStopFailures {
+                    primary,
+                    cleanup: failures,
+                }))
             }
-            None => Ok(()),
         }
     }
 
@@ -563,7 +631,7 @@ impl SyncServiceManager {
         let max_peer_states = self.config.max_peer_states;
         let manager = self.clone();
 
-        let _maintenance_task_handle = tasks.spawn_interval_until_named(
+        let _maintenance_task_handle = tasks.spawn_try_interval_until_named(
             "sync.maintenance",
             time_effects.clone(),
             interval,
@@ -571,48 +639,48 @@ impl SyncServiceManager {
                 let manager = manager.clone();
                 let time_effects = time_effects.clone();
                 async move {
-                    let snapshot = match manager.state_snapshot().await {
-                        Ok(snapshot) => snapshot,
-                        Err(error) => {
-                            tracing::debug!(
-                                error = %error,
-                                "Sync maintenance skipped because command actor is unavailable"
-                            );
-                            return false;
+                    let snapshot = manager.state_snapshot().await.map_err(|source| {
+                        aura_core::AuraError::Internal {
+                            message: "required sync maintenance actor read failed".into(),
+                            source: Some(Arc::new(source)),
                         }
-                    };
-                    let status = snapshot.status;
+                    })?;
                     if matches!(
-                        status,
-                        SyncManagerState::Stopped
-                            | SyncManagerState::Stopping
-                            | SyncManagerState::Failed
+                        snapshot.status,
+                        SyncManagerState::Stopped | SyncManagerState::Stopping
                     ) {
-                        return false;
+                        return Ok(false);
                     }
-
-                    let now_ms = match time_effects.physical_time().await {
-                        Ok(t) => t.ts_ms,
-                        Err(e) => {
-                            tracing::warn!("Sync maintenance: failed to get time: {}", e);
-                            return true;
-                        }
-                    };
-
-                    if let Some(service) = snapshot.service {
-                        if let Err(e) = service
-                            .maintenance_cleanup(
-                                now_ms,
-                                peer_state_ttl.as_millis() as u64,
-                                max_peer_states,
-                            )
-                            .await
-                        {
-                            tracing::warn!("Sync maintenance failed: {}", e);
-                        }
+                    if snapshot.status == SyncManagerState::Failed {
+                        return Err(aura_core::AuraError::Internal {
+                            message: "sync maintenance owner entered failed state".into(),
+                            source: Some(Arc::new(SyncManagerReadinessError::ManagerFailed)),
+                        });
                     }
-
-                    true
+                    let now = time_effects.physical_time().await.map_err(|source| {
+                        aura_core::AuraError::Internal {
+                            message: "required sync maintenance physical observation failed".into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+                    let ttl_ms = u64::try_from(peer_state_ttl.as_millis()).map_err(|source| {
+                        aura_core::AuraError::Invalid {
+                            message: "sync maintenance TTL cannot be represented".into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+                    let service =
+                        snapshot
+                            .service
+                            .ok_or_else(|| aura_core::AuraError::Internal {
+                                message: "running sync maintenance owner lost backing service"
+                                    .into(),
+                                source: Some(Arc::new(SyncManagerReadinessError::MissingService)),
+                            })?;
+                    service
+                        .maintenance_cleanup(now.ts_ms, ttl_ms, max_peer_states)
+                        .await?;
+                    Ok(true)
                 }
             },
         );
@@ -646,15 +714,55 @@ impl SyncServiceManager {
                 );
             }
             Ok(None) => {}
-            Err(error) => {
-                tracing::warn!(
-                    event = "runtime.service.sync.authorization_unavailable",
-                    error = %error,
-                    "Biscuit frontier unavailable for journal sync"
-                );
-            }
+            Err(error) => return Err(SyncManagerError::NativeSync(error)),
         }
         Ok(())
+    }
+
+    pub(crate) async fn required_tracked_peers(&self) -> Result<Vec<DeviceId>, SyncManagerError> {
+        let snapshot = self
+            .state_snapshot()
+            .await
+            .map_err(SyncManagerError::from)?;
+        if snapshot.status != SyncManagerState::Running {
+            return Err(SyncManagerError::NotStarted);
+        }
+        Ok(snapshot.peers)
+    }
+
+    /// Required requested-peer execution keeps the actual caller's original
+    /// resource window. Recent-sync observation cannot turn requested work into
+    /// an unperformed successful result.
+    pub(crate) async fn sync_requested_peers_in_original_window<E>(
+        &self,
+        effects: &E,
+        peers: Vec<DeviceId>,
+        original: &aura_core::time::timeout::TimeoutBudget,
+    ) -> Result<(), SyncManagerError>
+    where
+        E: aura_core::effects::JournalEffects
+            + aura_core::effects::NetworkEffects
+            + aura_core::effects::PhysicalTimeEffects
+            + aura_protocol::effects::TreeEffects
+            + aura_guards::GuardContextProvider
+            + Send
+            + Sync,
+    {
+        let service = self
+            .state_snapshot()
+            .await
+            .map_err(SyncManagerError::from)?
+            .service
+            .ok_or(SyncManagerError::NotStarted)?;
+        service
+            .sync_with_peers_in_original_window(
+                effects,
+                peers,
+                SyncService::monotonic_now(),
+                original,
+            )
+            .await
+            .map_err(SyncManagerError::NativeSync)
     }
 
     /// Perform a manual sync with specific peers
@@ -692,16 +800,14 @@ impl SyncServiceManager {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1))
             .is_ok()
         {
-            return Err(SyncManagerError::Sync(
-                "journal sync backing off after authorization denial".to_string(),
-            ));
+            return Err(SyncManagerError::AuthorizationBackoff);
         }
 
         let now_ms = effects
             .physical_time()
             .await
             .map(|time| time.ts_ms)
-            .unwrap_or_default();
+            .map_err(SyncManagerError::RequiredClock)?;
         let peers = take_due_peers(
             &mut *self.shared.recent_peer_syncs.lock().await,
             peers,
@@ -715,12 +821,9 @@ impl SyncServiceManager {
         let result = service
             .sync_with_peers(effects, peers, now_instant)
             .await
-            .map_err(|error| SyncManagerError::Sync(error.to_string()));
+            .map_err(SyncManagerError::NativeSync);
         match &result {
-            Err(SyncManagerError::Sync(message))
-                if message.contains("Permission denied")
-                    || message.contains("Authorization required") =>
-            {
+            Err(SyncManagerError::NativeSync(source)) if sync_authorization_denial(source) => {
                 let next = next_denial_backoff(self.shared.denial_backoff.load(Ordering::Acquire));
                 self.shared.denial_backoff.store(next, Ordering::Release);
                 self.shared
@@ -810,6 +913,29 @@ impl SyncServiceManager {
             .await
             .ok()
             .and_then(|snapshot| snapshot.service.map(|s| s.get_metrics()))
+    }
+
+    /// Required startup readiness reads the actual actor/service; observed
+    /// optional health and metrics do not repair missing running custody.
+    pub(crate) async fn required_running_health(&self) -> Result<ServiceHealth, ServiceError> {
+        let snapshot = self.state_snapshot().await?;
+        let service = snapshot.service.ok_or_else(|| {
+            ServiceError::unavailable(self.name(), "required running sync service is absent")
+                .with_cause(SyncManagerReadinessError::MissingService)
+        })?;
+        let health = service.get_health();
+        use aura_sync::services::HealthStatus;
+        match health.status {
+            HealthStatus::Healthy => Ok(ServiceHealth::Healthy),
+            HealthStatus::Degraded => Ok(ServiceHealth::Degraded {
+                reason: "actual underlying sync health degraded".into(),
+            }),
+            status
+            @ (HealthStatus::Starting | HealthStatus::Unhealthy | HealthStatus::Stopping) => Err(
+                ServiceError::unavailable(self.name(), "required sync service is not operational")
+                    .with_cause(SyncManagerReadinessError::NonOperational { status }),
+            ),
+        }
     }
 
     /// Get the configuration
@@ -1193,6 +1319,41 @@ fn epoch_rotation_session_id(rotation_id: &str) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
+/// Only an actual retained authorization outcome may activate denial backoff.
+fn sync_authorization_denial(error: &aura_core::AuraError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(cause) = source {
+        if matches!(
+            cause.downcast_ref::<aura_core::AuraError>(),
+            Some(aura_core::AuraError::PermissionDenied { .. })
+        ) {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{primary}; {} additional sync cleanup failures", cleanup.len())]
+struct SyncStopFailures {
+    #[source]
+    primary: ServiceError,
+    cleanup: Vec<ServiceError>,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SyncManagerReadinessError {
+    #[error("actual sync manager entered failed lifecycle state")]
+    ManagerFailed,
+    #[error("actual running sync actor has no backing service")]
+    MissingService,
+    #[error("actual sync service status is {status:?}")]
+    NonOperational {
+        status: aura_sync::services::HealthStatus,
+    },
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_types)]
 mod tests {
@@ -1235,10 +1396,21 @@ mod tests {
     use aura_effects::time::PhysicalTimeHandler;
     use std::sync::Mutex;
 
-    fn test_service_context() -> RuntimeServiceContext {
+    async fn test_service_context() -> RuntimeServiceContext {
+        let time: Arc<dyn aura_core::effects::PhysicalTimeEffects + Send + Sync> =
+            Arc::new(PhysicalTimeHandler::new());
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &time
+                .physical_time()
+                .await
+                .expect("actual service fixture startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original actual service fixture window");
         RuntimeServiceContext::new(
             Arc::new(crate::runtime::TaskSupervisor::new()),
-            Arc::new(PhysicalTimeHandler::new()),
+            time,
+            original,
         )
     }
 
@@ -1354,7 +1526,7 @@ mod tests {
     async fn test_sync_manager_lifecycle() {
         let config = SyncManagerConfig::for_testing();
         let manager = SyncServiceManager::new(config);
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         // Start
         RuntimeService::start(&manager, &context).await.unwrap();
@@ -1368,7 +1540,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_manager_concurrent_lifecycle_transitions_are_idempotent() {
         let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         let start_a = RuntimeService::start(&manager, &context);
         let start_b = RuntimeService::start(&manager, &context);
@@ -1388,7 +1560,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_manager_stop_drains_owned_tasks() {
         let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         RuntimeService::start(&manager, &context).await.unwrap();
         let task_group = manager
@@ -1444,7 +1616,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_manager_health_when_running() {
         let manager = SyncServiceManager::new(SyncManagerConfig::for_testing());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         RuntimeService::start(&manager, &context).await.unwrap();
 
@@ -1509,5 +1681,65 @@ mod tests {
         // Legacy proofless fact verification is fail-closed.
         let result = manager.verify_facts(vec![fact], root).await;
         assert!(result.is_none());
+    }
+    #[test]
+    fn required_sync_authorization_backoff_uses_typed_original_source_only() {
+        let denial = aura_core::AuraError::PermissionDenied {
+            message: "actual domain denial".into(),
+            source: None,
+        };
+        assert!(sync_authorization_denial(&denial));
+        let nested = aura_core::AuraError::Internal {
+            message: "operation wrapper".into(),
+            source: Some(Arc::new(denial)),
+        };
+        assert!(sync_authorization_denial(&nested));
+        let diagnostic = aura_core::AuraError::Internal {
+            message: "Permission denied; Authorization required".into(),
+            source: None,
+        };
+        assert!(
+            !sync_authorization_denial(&diagnostic),
+            "diagnostic text cannot authorize retry policy"
+        );
+    }
+
+    #[tokio::test]
+    async fn required_manual_sync_clock_failure_retains_original_source_without_time_zero() {
+        use std::error::Error;
+        let clock = aura_testkit::time::ManualPhysicalClock::new(1000);
+        let effects =
+            crate::testing::simulation_effect_system(&crate::core::AgentConfig::default())
+                .with_physical_time_provider(Arc::new(clock.clone()));
+        let tasks = Arc::new(crate::runtime::TaskSupervisor::new());
+        let context = RuntimeServiceContext::test_original(tasks, Arc::new(clock.clone())).await;
+        let mut config = SyncManagerConfig::manual_only();
+        config.maintenance_enabled = false;
+        let manager = SyncServiceManager::with_indexed_journal(
+            config,
+            effects.indexed_journal(),
+            Arc::new(clock.clone()),
+        );
+        manager
+            .start(&context)
+            .await
+            .expect("actual owned manager starts before injected clock failure");
+        clock
+            .fail_next_observation(aura_core::effects::time::TimeError::OperationFailed {
+                reason: "actual manual sync observation fault".into(),
+            })
+            .await;
+        let failure = manager
+            .sync_with_peers(&effects, vec![DeviceId::new_from_entropy([69; 32])])
+            .await
+            .expect_err("required clock failure cannot fabricate a peer-sync start timestamp");
+        assert!(matches!(&failure, SyncManagerError::RequiredClock(_)));
+        assert!(
+            matches!(failure.source().and_then(|cause| cause.downcast_ref::<aura_core::effects::time::TimeError>()), Some(aura_core::effects::time::TimeError::OperationFailed { reason }) if reason == "actual manual sync observation fault")
+        );
+        manager
+            .stop()
+            .await
+            .expect("actual started manager cleanup acknowledges command actor completion");
     }
 }

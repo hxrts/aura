@@ -541,3 +541,7 @@ Context isolation prevents unauthorized authorities from reading descriptors. Tr
 ## 13. Summary
 
 Rendezvous provides encrypted peer discovery and channel establishment scoped to relational contexts. Descriptors propagate through journal synchronization with guard chain enforcement. Secure channels use Noise IKpsk2 and QUIC. All behavior remains private to the context and reveals no structural information. The architecture uses standard Aura primitives: domain facts, guard chains, MPST choreographies, and effect interpretation.
+
+### Required Contact response state
+
+A verified Contact response is bound to the retained imported invitation, its issuer point and the exact acknowledged acceptance digest. The response owner carries that complete state through materialization. Missing, malformed, oversized or mismatched required backing metadata cannot be replaced by a cached Pending state. Invalid signatures remain distinct from failures of the cryptographic provider.

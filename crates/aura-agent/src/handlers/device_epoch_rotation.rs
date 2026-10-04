@@ -33,8 +33,10 @@ use aura_sync::protocols::device_epoch_rotation::{
     decrypt_device_epoch_key_package, device_epoch_commit_attested_op_hash,
     device_epoch_proposal_hash, encrypt_device_epoch_key_package,
     verify_device_epoch_authority_signature, verify_device_epoch_proposal_hashes,
-    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochCommitTranscript, DeviceEpochProposal,
-    DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage,
+    DeviceEnrollmentEpochCommitTranscript, DeviceEnrollmentEpochCommitTranscriptPayload,
+    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochCommitTranscript,
+    DeviceEpochCommitTranscriptPayload, DeviceEpochProposal, DeviceEpochProposalTranscript,
+    EncryptedDeviceEpochKeyPackage, MAX_DEVICE_EPOCH_COMMIT_BYTES,
 };
 use aura_sync::protocols::DeviceEpochRotationKind;
 use std::{collections::BTreeMap, fmt};
@@ -46,6 +48,8 @@ const COMMIT_STORAGE_NAMESPACE: &str = "device_epoch_rotation_commit";
 const COMMIT_STATUS_POLL_MS: u64 = 100;
 const COMMIT_STATUS_TIMEOUT_MS: u64 = 10_000;
 const PROPOSAL_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.proposal";
+const ENROLLMENT_COMMIT_SIGNING_DOMAIN: &str =
+    "aura.sync.device_epoch_rotation.enrollment_commit.v2";
 const COMMIT_SIGNING_DOMAIN: &str = "aura.sync.device_epoch_rotation.commit";
 
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -352,6 +356,7 @@ impl DeviceEpochRotationService {
         &self,
         proposal: &DeviceEpochProposal,
         attested_leaf_op: Option<AttestedOp>,
+        attested_epoch_op: Option<AttestedOp>,
     ) -> AgentResult<DeviceEpochCommit> {
         let committed_at_ms = self
             .effects
@@ -359,26 +364,63 @@ impl DeviceEpochRotationService {
             .await
             .map_err(map_internal_error)?
             .ts_ms;
-        let mut commit = DeviceEpochCommit {
+        let proposal_hash = device_epoch_proposal_hash(proposal).map_err(map_internal_error)?;
+        let attested_leaf_op_hash = attested_leaf_op
+            .as_ref()
+            .map(Hash32::from_value)
+            .transpose()
+            .map_err(map_internal_error)?;
+        let attested_epoch_op_hash = attested_epoch_op
+            .as_ref()
+            .map(Hash32::from_value)
+            .transpose()
+            .map_err(map_internal_error)?;
+        let authority_signature = match proposal.kind {
+            DeviceEpochRotationKind::Enrollment => {
+                let transcript = DeviceEnrollmentEpochCommitTranscript::new(
+                    DeviceEnrollmentEpochCommitTranscriptPayload {
+                        ceremony_id: proposal.ceremony_id.clone(),
+                        new_epoch: proposal.pending_epoch,
+                        proposal_hash,
+                        committed_at_ms,
+                        attested_leaf_op_hash: attested_leaf_op_hash.ok_or_else(|| {
+                            enrollment_fence_failure(EnrollmentEpochFenceError::Binding)
+                        })?,
+                        attested_epoch_op_hash: attested_epoch_op_hash.ok_or_else(|| {
+                            enrollment_fence_failure(EnrollmentEpochFenceError::LegacyMissingFence)
+                        })?,
+                    },
+                );
+                self.sign_authority_transcript(ENROLLMENT_COMMIT_SIGNING_DOMAIN, &transcript)
+                    .await?
+            }
+            DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
+                if attested_epoch_op.is_some() {
+                    return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+                }
+                let transcript =
+                    DeviceEpochCommitTranscript::from_payload(DeviceEpochCommitTranscriptPayload {
+                        ceremony_id: proposal.ceremony_id.clone(),
+                        new_epoch: proposal.pending_epoch,
+                        proposal_hash,
+                        committed_at_ms,
+                        attested_leaf_op_hash,
+                    });
+                self.sign_authority_transcript(COMMIT_SIGNING_DOMAIN, &transcript)
+                    .await?
+            }
+        };
+        Ok(DeviceEpochCommit {
             ceremony_id: proposal.ceremony_id.clone(),
             new_epoch: proposal.pending_epoch,
-            proposal_hash: device_epoch_proposal_hash(proposal).map_err(map_internal_error)?,
+            proposal_hash,
             committed_at_ms,
-            attested_leaf_op_hash: None,
-            authority_signature: aura_core::threshold::ThresholdSignature::single_signer(
-                Vec::new(),
-                Vec::new(),
-                0,
-            ),
+            attested_leaf_op_hash,
+            attested_epoch_op_hash,
+            authority_signature,
             attested_leaf_op,
-        };
-        commit.attested_leaf_op_hash =
-            device_epoch_commit_attested_op_hash(&commit).map_err(map_internal_error)?;
-        let transcript = DeviceEpochCommitTranscript::new(&commit);
-        commit.authority_signature = self
-            .sign_authority_transcript(COMMIT_SIGNING_DOMAIN, &transcript)
-            .await?;
-        Ok(commit)
+            attested_epoch_op,
+        })
     }
 
     async fn sign_authority_transcript<T: aura_signature::SecurityTranscript + ?Sized>(
@@ -537,17 +579,39 @@ impl DeviceEpochRotationService {
 
         let (expected_epoch, trusted_public_key_package) =
             self.current_authority_signature_material().await?;
-        let verified: bool = verify_device_epoch_authority_signature::<AuraEffectSystem, _>(
-            self.effects.as_ref(),
-            self.authority_id,
-            COMMIT_SIGNING_DOMAIN,
-            &DeviceEpochCommitTranscript::new(commit),
-            &commit.authority_signature,
-            &trusted_public_key_package,
-            expected_epoch,
-        )
-        .await
-        .map_err(map_internal_error)?;
+        let verified = match proposal.kind {
+            DeviceEpochRotationKind::Enrollment => {
+                let transcript = DeviceEnrollmentEpochCommitTranscript::from_commit(commit)
+                    .map_err(map_internal_error)?;
+                verify_device_epoch_authority_signature::<AuraEffectSystem, _>(
+                    self.effects.as_ref(),
+                    self.authority_id,
+                    ENROLLMENT_COMMIT_SIGNING_DOMAIN,
+                    &transcript,
+                    &commit.authority_signature,
+                    &trusted_public_key_package,
+                    expected_epoch,
+                )
+                .await
+                .map_err(map_internal_error)?
+            }
+            DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
+                if commit.attested_epoch_op.is_some() || commit.attested_epoch_op_hash.is_some() {
+                    return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+                }
+                verify_device_epoch_authority_signature::<AuraEffectSystem, _>(
+                    self.effects.as_ref(),
+                    self.authority_id,
+                    COMMIT_SIGNING_DOMAIN,
+                    &DeviceEpochCommitTranscript::new(commit),
+                    &commit.authority_signature,
+                    &trusted_public_key_package,
+                    expected_epoch,
+                )
+                .await
+                .map_err(map_internal_error)?
+            }
+        };
         if !verified {
             return Err(AgentError::invalid(
                 "device epoch commit authority signature verification failed".to_string(),
@@ -654,6 +718,9 @@ impl DeviceEpochRotationService {
                         "device epoch acceptance requires signed participant device proof; unsigned acceptances are disabled".to_string(),
                     ));
                 } else {
+                    if blocked.payload.len() > MAX_DEVICE_EPOCH_COMMIT_BYTES {
+                        return Err(AgentError::invalid("oversized device epoch commit"));
+                    }
                     let commit: DeviceEpochCommit =
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
                     let proposal = staged_proposal
@@ -731,11 +798,15 @@ impl DeviceEpochRotationService {
                 let owned = prepared_activation
                     .as_ref()
                     .ok_or_else(|| enrollment_fence_failure(EnrollmentEpochFenceError::Binding))?;
-                self.build_signed_commit(proposal, Some(owned.stored.attested.clone()))
-                    .await?
+                self.build_signed_commit(
+                    proposal,
+                    Some(owned.stored.attested.clone()),
+                    owned.stored.epoch_fence.clone(),
+                )
+                .await?
             }
             DeviceEpochRotationKind::Rotation | DeviceEpochRotationKind::Removal => {
-                self.build_signed_commit(proposal, None).await?
+                self.build_signed_commit(proposal, None, None).await?
             }
         };
 
@@ -960,6 +1031,11 @@ impl DeviceEpochRotationService {
         proposal: &DeviceEpochProposal,
         commit: &DeviceEpochCommit,
     ) -> AgentResult<()> {
+        // Existing-device peer activation requires its own held signing/tree
+        // custody. The old generic path must never discard the signed fence.
+        if proposal.kind == DeviceEpochRotationKind::Enrollment {
+            return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+        }
         self.verify_device_epoch_commit(proposal, commit).await?;
         if let Some(attested_op) = commit.attested_leaf_op.clone() {
             self.effects
@@ -1091,6 +1167,7 @@ impl DeviceEpochRotationService {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "enrollment_activation",
+        capability_type = EnrollmentActivationCapability,
         family = "runtime_helper"
     )]
     async fn finalize_enrollment<'a>(
@@ -1099,6 +1176,9 @@ impl DeviceEpochRotationService {
     ) -> AgentResult<PreparedEnrollmentActivationCapability<'a>> {
         activation
             .require_tracker(&self.ceremony_tracker)
+            .map_err(AgentError::from)?;
+        activation
+            .require_effects(self.effects.as_ref())
             .map_err(AgentError::from)?;
         let ceremony_id = activation.ceremony_id();
         let tree = self.effects.lock_tree_decision().await;
@@ -1397,6 +1477,9 @@ impl DeviceEpochRotationService {
 
     async fn store_commit(&self, commit: &DeviceEpochCommit) -> AgentResult<()> {
         let payload = to_vec(commit).map_err(map_encode_error)?;
+        if payload.len() > MAX_DEVICE_EPOCH_COMMIT_BYTES {
+            return Err(AgentError::invalid("oversized device epoch commit"));
+        }
         self.effects
             .secure_store(
                 &commit_storage_location(self.authority_id, &commit.ceremony_id),
@@ -1420,6 +1503,9 @@ impl DeviceEpochRotationService {
             )
             .await
             .map_err(map_internal_error)?;
+        if bytes.len() > MAX_DEVICE_EPOCH_COMMIT_BYTES {
+            return Err(AgentError::invalid("oversized device epoch commit"));
+        }
         from_slice(&bytes).map_err(map_decode_error)
     }
 
@@ -1825,6 +1911,10 @@ mod tests {
             acceptor_device_id: service.effects.device_id(),
             proposal_hash: device_epoch_proposal_hash(&proposal).expect("proposal hash"),
             accepted_at_ms: 1,
+            signing_epoch: None,
+            signing_mode: None,
+            signing_index: None,
+            signing_package_digest: None,
             signature: vec![1; 64],
         };
 
@@ -1851,7 +1941,7 @@ mod tests {
             .await
             .expect("signed proposal");
         let mut commit = service
-            .build_signed_commit(&proposal, None)
+            .build_signed_commit(&proposal, None, None)
             .await
             .expect("signed commit");
         commit.authority_signature.signature[0] ^= 0x55;
@@ -1894,7 +1984,7 @@ mod tests {
             .expect("proposal should verify");
 
         let commit = service
-            .build_signed_commit(&proposal, None)
+            .build_signed_commit(&proposal, None, None)
             .await
             .expect("signed commit");
         service

@@ -30,6 +30,7 @@ impl FilesystemStorageHandler {
         }
     }
 
+    /// Attach the actual lease for this selected logical profile before writes.
     pub fn retain_profile_owner(
         mut self,
         owner: std::sync::Arc<crate::profile_storage::OwnedProfileLease>,

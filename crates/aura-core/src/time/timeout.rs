@@ -10,7 +10,7 @@ use crate::{
     effects::{BackoffStrategy, JitterMode, PhysicalTimeEffects, RetryPolicy, TimeError},
     AuraError, ProtocolErrorCode,
 };
-use futures::{future::Either, pin_mut};
+use futures::future::Either;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::future::Future;
@@ -703,6 +703,77 @@ impl TimeoutBudget {
         Ok(())
     }
 
+    /// Pure deadline attenuation. Original start and clock owner are preserved;
+    /// child exhaustion is separate and cannot rewrite the original interval.
+    /// The caller still owns authenticated policy, checkpoint and admission.
+    ///
+    /// ```compile_fail
+    /// use aura_core::{TimeoutBudget, types::window::{WindowPosition, ReceiptGeneration}};
+    /// fn cannot_use_receipt_generation(budget: &TimeoutBudget) {
+    ///     budget.attenuate_deadline_at(WindowPosition::<ReceiptGeneration>::new(200));
+    /// }
+    /// ```
+    pub fn attenuate_deadline_at(
+        &self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> TimeoutBudgetResult<Self> {
+        let end = deadline.value().min(self.deadline_at_ms());
+        if end <= self.started_at_ms() {
+            return Err(TimeoutBudgetError::invalid_policy(
+                "attenuated deadline precedes original start",
+            ));
+        }
+        let (_, _, already_exhausted) = self.checkpoint_history()?;
+        let interval = WindowInterval::from_bounds(self.interval.start(), WindowPosition::new(end))
+            .map_err(|_| TimeoutBudgetError::invalid_policy("invalid attenuated interval"))?;
+        Ok(Self {
+            interval,
+            clock: self.clock.clone(),
+            expired_at_ms: std::sync::Arc::new(futures::lock::Mutex::new(already_exhausted)),
+        })
+    }
+
+    /// Rebind an authenticated persisted child to this restored parent owner.
+    /// Both snapshots must come from the same acknowledged checkpoint. This
+    /// pure continuity check cannot establish storage or admission provenance.
+    pub fn restore_attenuated_deadline_at(
+        &self,
+        durable_child: &Self,
+        deadline: WindowPosition<PhysicalMillis>,
+    ) -> TimeoutBudgetResult<Self> {
+        let expected = self.attenuate_deadline_at(deadline)?;
+        let discontinuity = |detail: &str| TimeoutBudgetError::CheckpointDiscontinuity {
+            detail: detail.into(),
+        };
+        if durable_child.interval != expected.interval {
+            return Err(discontinuity("persisted child attenuation changed"));
+        }
+        let parent = self.checkpoint_history()?;
+        let child = durable_child.checkpoint_history()?;
+        if parent.0 != child.0 || parent.1 != child.1 {
+            return Err(discontinuity(
+                "parent and child do not share acknowledged clock history",
+            ));
+        }
+        let expired = match (parent.2, child.2) {
+            (Some(parent), Some(child)) if child > parent => {
+                return Err(discontinuity(
+                    "child exhaustion follows original exhaustion",
+                ));
+            }
+            (_, Some(child)) => Some(child),
+            (Some(_), None) => {
+                return Err(discontinuity("child lost original exhaustion evidence"));
+            }
+            (None, None) => None,
+        };
+        Ok(Self {
+            interval: durable_child.interval,
+            clock: self.clock.clone(),
+            expired_at_ms: std::sync::Arc::new(futures::lock::Mutex::new(expired)),
+        })
+    }
+
     pub fn clamp_to_remaining(
         &self,
         now: &PhysicalTime,
@@ -988,12 +1059,13 @@ where
     };
     let sleep_ms = duration_to_ms(remaining).map_err(TimeoutRunError::Timeout)?;
 
-    let operation_future = operation();
-    let sleep_future = time.sleep_ms(sleep_ms);
-    pin_mut!(operation_future);
-    pin_mut!(sleep_future);
+    // The select must own each future, not just a Pin<&mut _>; dropping a
+    // borrowed pin leaves the hidden stack future and its leases alive.
+    let operation_future = Box::pin(operation());
+    let sleep_future = Box::pin(time.sleep_ms(sleep_ms));
     match futures::future::select(operation_future, sleep_future).await {
-        Either::Left((result, _sleep_future)) => {
+        Either::Left((result, sleep_future)) => {
+            drop(sleep_future);
             let _observation = budget.acquire_observation().await;
             let observed = current_physical_time(time)
                 .await
@@ -1003,7 +1075,10 @@ where
             observation.map_err(TimeoutRunError::Timeout)?;
             result.map_err(TimeoutRunError::Operation)
         }
-        Either::Right((sleep, _operation_future)) => {
+        Either::Right((sleep, operation_future)) => {
+            // Cancellation must release any observation lease held by the
+            // losing operation before the timeout owner reacquires that lease.
+            drop(operation_future);
             sleep.map_err(|error| TimeoutRunError::Timeout(time_error(error)))?;
             let _observation = budget.acquire_observation().await;
             let observed = current_physical_time(time)
@@ -1115,6 +1190,7 @@ mod tests {
         RetryBudgetPolicy, RetryRunError, TimeoutBudget, TimeoutBudgetError, TimeoutExecutionClass,
         TimeoutExecutionProfile, TimeoutRunError, TimeoutTimeSemantics,
     };
+    use crate::types::window::WindowPosition;
     use crate::{
         effects::{JitterMode, PhysicalTimeEffects, TimeError},
         time::{PhysicalTime, TimeDomain},
@@ -1177,6 +1253,102 @@ mod tests {
                 }
             }
         }
+    }
+
+    struct CancelledQueryObservation {
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl Drop for CancelledQueryObservation {
+        fn drop(&mut self) {
+            self.cancelled
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    struct TimeoutWhileQueryOwnsObservation {
+        reads: std::sync::atomic::AtomicUsize,
+        query: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+        sleep: Mutex<Option<futures::channel::oneshot::Receiver<()>>>,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    }
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for TimeoutWhileQueryOwnsObservation {
+        async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+            match self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                0 => Ok(physical_time(100)),
+                1 => {
+                    let wait = { self.query.lock().take().expect("one actual delayed query") };
+                    let _query_owner = CancelledQueryObservation {
+                        cancelled: self.cancelled.clone(),
+                    };
+                    wait.await
+                        .expect("only explicit fixture release can complete this query");
+                    Ok(physical_time(200))
+                }
+                _ => Ok(physical_time(500)),
+            }
+        }
+        async fn sleep_ms(&self, duration: u64) -> Result<(), TimeError> {
+            assert_eq!(duration, 400, "original deadline delay is unchanged");
+            let wait = {
+                self.sleep
+                    .lock()
+                    .take()
+                    .expect("one original deadline watcher")
+            };
+            wait.await
+                .expect("fixture releases actual original deadline sleep");
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn required_timeout_drops_cancelled_query_before_reacquiring_observation_owner() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let (_query_release, query) = futures::channel::oneshot::channel();
+        let (deadline_release, sleep) = futures::channel::oneshot::channel();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let time = TimeoutWhileQueryOwnsObservation {
+            reads: AtomicUsize::new(0),
+            query: Mutex::new(Some(query)),
+            sleep: Mutex::new(Some(sleep)),
+            cancelled: cancelled.clone(),
+        };
+        let original =
+            TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(400))
+                .expect("actual original test interval");
+        let mut execution = Box::pin(execute_with_timeout_budget(&time, &original, || async {
+            let _observation = original.acquire_observation().await;
+            time.physical_time().await?;
+            Ok::<(), TimeError>(())
+        }));
+        assert!(futures::poll!(execution.as_mut()).is_pending());
+        assert_eq!(time.reads.load(Ordering::SeqCst), 2);
+        assert!(!cancelled.load(Ordering::SeqCst));
+        deadline_release
+            .send(())
+            .expect("actual original timeout fires");
+        let terminal = futures::poll!(execution.as_mut());
+        assert!(
+            matches!(
+                terminal,
+                std::task::Poll::Ready(Err(TimeoutRunError::Timeout(
+                    TimeoutBudgetError::DeadlineExceeded { .. }
+                )))
+            ),
+            "timeout must not wait for a lease held by its own cancelled future: {terminal:?}"
+        );
+        assert!(
+            cancelled.load(Ordering::SeqCst),
+            "actual query future was dropped before timeout observation"
+        );
+        assert_eq!(time.reads.load(Ordering::SeqCst), 3);
+        assert!(
+            matches!(
+                original.remaining_at(&physical_time(500)),
+                Err(TimeoutBudgetError::DeadlineExceeded { .. })
+            ),
+            "original exhaustion remains sticky"
+        );
     }
 
     struct InterleavedObservationTime {
@@ -1312,6 +1484,86 @@ mod tests {
             500,
             "cancellation never renews the deadline"
         );
+    }
+
+    #[test]
+    fn attenuation_preserves_original_start_and_does_not_observe_it_again() {
+        let original =
+            TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(900))
+                .expect("original");
+        original
+            .remaining_at(&physical_time(150))
+            .expect("actual observation");
+        let child = original
+            .attenuate_deadline_at(WindowPosition::new(200))
+            .expect("pure attenuation");
+        assert_eq!(child.started_at_ms(), 100);
+        assert_eq!(child.deadline_at_ms(), 200);
+        assert_eq!(original.deadline_at_ms(), 1000);
+        child.expire_at(&physical_time(200)).expect("child expires");
+        original
+            .remaining_at(&physical_time(210))
+            .expect("original remains live");
+        assert!(matches!(
+            child.remaining_at(&physical_time(210)),
+            Err(TimeoutBudgetError::DeadlineExceeded { .. })
+        ));
+    }
+    #[test]
+    fn restored_attenuation_keeps_child_exhaustion_and_shared_clock_owner() {
+        let original =
+            TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(900))
+                .expect("original");
+        let child = original
+            .attenuate_deadline_at(WindowPosition::new(200))
+            .expect("attenuation");
+        child.expire_at(&physical_time(200)).expect("child expires");
+        original
+            .remaining_at(&physical_time(210))
+            .expect("original remains live");
+        let bytes = serde_json::to_vec(&(original, child)).expect("one acknowledged pair");
+        let (original, child): (TimeoutBudget, TimeoutBudget) =
+            serde_json::from_slice(&bytes).expect("restore snapshots");
+        let restored = original
+            .restore_attenuated_deadline_at(&child, WindowPosition::new(200))
+            .expect("same checkpoint");
+        assert!(matches!(
+            restored.remaining_at(&physical_time(210)),
+            Err(TimeoutBudgetError::DeadlineExceeded { .. })
+        ));
+        assert!(matches!(
+            original.restore_attenuated_deadline_at(&child, WindowPosition::new(300)),
+            Err(TimeoutBudgetError::CheckpointDiscontinuity { .. })
+        ));
+        original
+            .remaining_at(&physical_time(220))
+            .expect("advance actual parent");
+        assert!(matches!(
+            restored.remaining_at(&physical_time(215)),
+            Err(TimeoutBudgetError::ClockRollback { .. })
+        ));
+    }
+    #[test]
+    fn rebind_rejects_unacknowledged_parent_child_highwater_difference() {
+        let original =
+            TimeoutBudget::from_start_and_timeout(&physical_time(100), Duration::from_millis(900))
+                .expect("original");
+        let child = original
+            .attenuate_deadline_at(WindowPosition::new(200))
+            .expect("attenuation");
+        let bytes = serde_json::to_vec(&(original, child)).expect("pair");
+        let (original, child): (TimeoutBudget, TimeoutBudget) =
+            serde_json::from_slice(&bytes).expect("restore snapshots");
+        original
+            .remaining_at(&physical_time(150))
+            .expect("unacknowledged one-sided update");
+        assert!(matches!(
+            original.restore_attenuated_deadline_at(&child, WindowPosition::new(200)),
+            Err(TimeoutBudgetError::CheckpointDiscontinuity { .. })
+        ));
+        assert!(original
+            .attenuate_deadline_at(WindowPosition::new(100))
+            .is_err());
     }
 
     #[test]
@@ -2074,7 +2326,7 @@ mod checkpoint_executor_tests {
         let mut future = Box::pin(execute_with_timeout_budget_and_checkpoint(
             &time,
             &budget,
-            || futures::future::pending::<TimeoutBudgetResult<()>>(),
+            futures::future::pending::<TimeoutBudgetResult<()>>,
             || async {
                 polls.fetch_add(1, Ordering::SeqCst);
                 Ok::<_, std::io::Error>(())

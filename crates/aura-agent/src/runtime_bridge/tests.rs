@@ -518,10 +518,12 @@ fn amp_list_channel_participants_includes_transported_channel_acceptance() {
             Arc::new(sender_effects.time_effects().clone()),
         );
         sender_effects.attach_rendezvous_manager(sender_manager.clone());
-        let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
-            Arc::new(crate::runtime::TaskSupervisor::new()),
-            Arc::new(sender_effects.time_effects().clone()),
-        );
+        let sender_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(sender_effects.time_effects().clone()),
+            )
+            .await;
         crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
             .await
             .expect("start sender rendezvous manager");
@@ -545,10 +547,12 @@ fn amp_list_channel_participants_includes_transported_channel_acceptance() {
             Arc::new(receiver_effects.time_effects().clone()),
         );
         receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
-        let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
-            Arc::new(crate::runtime::TaskSupervisor::new()),
-            Arc::new(receiver_effects.time_effects().clone()),
-        );
+        let receiver_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(receiver_effects.time_effects().clone()),
+            )
+            .await;
         crate::runtime::services::RuntimeService::start(
             &receiver_manager,
             &receiver_service_context,
@@ -1397,10 +1401,11 @@ async fn is_peer_online_requires_current_context_descriptor() {
         Arc::new(effects.time_effects().clone()),
     );
     effects.attach_rendezvous_manager(manager.clone());
-    let service_context = crate::runtime::services::RuntimeServiceContext::new(
+    let service_context = crate::runtime::services::RuntimeServiceContext::test_original(
         Arc::new(crate::runtime::TaskSupervisor::new()),
         Arc::new(effects.time_effects().clone()),
-    );
+    )
+    .await;
     crate::runtime::services::RuntimeService::start(&manager, &service_context)
         .await
         .expect("start rendezvous manager");
@@ -1594,6 +1599,14 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
         );
         let bridge = AgentRuntimeBridge::new(agent.clone());
         let effects = agent.runtime().effects();
+        let started = aura_core::effects::PhysicalTimeEffects::physical_time(effects.as_ref())
+            .await
+            .expect("actual original projection test observation");
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &started,
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original bounded projection scenario");
         let context = ContextId::new_from_entropy([72u8; 32]);
         let channel = ChannelId::from_bytes(hash(b"leave-removes-channel"));
         bridge
@@ -1627,7 +1640,10 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
             .commit_relational_facts(std::slice::from_ref(&created))
             .await
             .expect("commit channel");
-        effects.await_next_view_update().await;
+        effects
+            .await_reactive_publications_in_original_window(&original)
+            .await
+            .expect("exact original processing barrier");
         let listed = |chat: aura_app::views::chat::ChatState| chat.channel(&channel).is_some();
         let chat = effects
             .reactive_handler()
@@ -1644,7 +1660,10 @@ fn leaving_a_channel_removes_it_from_the_chat_projection() {
             })
             .await
             .expect("leave channel");
-        effects.await_next_view_update().await;
+        effects
+            .await_reactive_publications_in_original_window(&original)
+            .await
+            .expect("exact original processing barrier");
         let chat = effects
             .reactive_handler()
             .read(&*aura_app::signal_defs::CHAT_SIGNAL)
@@ -2314,6 +2333,10 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
             issuer.context().default_context_id(),
             ExecutionMode::Testing,
         );
+        AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect("genuine cancellation publishes before shutting down its sink");
         issuer
             .runtime()
             .tasks()
@@ -2325,8 +2348,10 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
             .effects()
             .fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
         let bridge = AgentRuntimeBridge::new(issuer.clone());
-        let error = bridge
-            .cancel_key_rotation_ceremony(&start.ceremony_id)
+        let error = issuer
+            .runtime()
+            .ceremony_tracker()
+            .retire_failed_enrollment_generation(&start.ceremony_id)
             .await
             .expect_err("required secure deletion must fail");
         assert!(std::error::Error::source(&error).is_some());
@@ -2426,6 +2451,10 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
                 "orphan-retirement",
             )
             .await;
+        AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&first.ceremony_id)
+            .await
+            .expect("genuine cancellation publishes before shutting down its sink");
         issuer
             .runtime()
             .tasks()
@@ -2439,10 +2468,6 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
             issuer.context().default_context_id(),
             ExecutionMode::Testing,
         );
-        AgentRuntimeBridge::new(issuer.clone())
-            .cancel_key_rotation_ceremony(&first.ceremony_id)
-            .await
-            .unwrap();
         let setup_code = AgentRuntimeBridge::new(invitee.clone())
             .export_device_enrollment_setup_request()
             .await
@@ -2468,7 +2493,7 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
         let ceremony = aura_core::CeremonyId::new(format!("unissued:{}", reserved.invitation_id()));
         let effects = issuer.runtime().effects();
         let plan = effects
-            .prepare_authenticated_enrollment_rotation(&setup)
+            .prepare_authenticated_enrollment_rotation(&setup, issuer.runtime().ceremony_tracker())
             .await
             .expect("actual authenticated current roster");
         let (epoch, _packages, _public, allocation) = effects
@@ -2616,4 +2641,177 @@ async fn required_moderation_rejects_corrupt_committed_ban_with_native_codec_sou
     assert!(native_identity_has_source::<
         aura_social::RequiredModerationQueryError,
     >(&error));
+}
+
+#[test]
+fn runtime_enrollment_cancellation_uses_original_issued_owner_and_window() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, _invitee, invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "runtime-issued-cancellation-owner",
+            )
+            .await;
+        // Required fact publication must retain its live service owner. The
+        // invitee has not accepted, so this real live initiator cannot commit.
+        let tracker = issuer.ceremony_tracker().await;
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect("public selector acquires original protected issuer control");
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("cancelled registration");
+        assert_eq!(
+            after.terminal_outcome,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ),)
+        );
+        assert_eq!(after.started_at, before.started_at);
+        assert_eq!(after.timeout, before.timeout);
+        assert_eq!(
+            after.timeout_budget.deadline_at_ms(),
+            before.timeout_budget.deadline_at_ms()
+        );
+        assert!(
+            issuer
+                .runtime()
+                .effects()
+                .secure_exists(
+                    &crate::runtime::effects::enrollment_generation_profile_location(
+                        &issuer.authority_id(),
+                        start.pending_epoch.value(),
+                    ),
+                )
+                .await
+                .expect("required pending signing profile"),
+            "cancellation does not delete the signer before signed terminal notification"
+        );
+        issuer
+            .invitations()
+            .expect("original invitation owner")
+            .cancel(&invitation.invitation_id)
+            .await
+            .expect("same genuine cancellation is idempotent");
+    });
+}
+
+#[test]
+fn runtime_enrollment_selector_rejects_foreign_runtime_before_terminal_mutation() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, invitee, _invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "runtime-foreign-cancellation-selector",
+            )
+            .await;
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("drain original execution owner");
+        let before = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        let failure = invitee
+            .invitations()
+            .expect("foreign invitation service")
+            .cancel_original_device_enrollment_ceremony(&start.ceremony_id)
+            .await
+            .expect_err("foreign runtime has no original protected issuer artifact");
+        assert!(
+            std::error::Error::source(&failure).is_some(),
+            "required secure read failure retains its original source"
+        );
+        let after = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration remains readable");
+        assert_eq!(after.terminal_outcome, before.terminal_outcome);
+        assert_eq!(
+            after.timeout_budget.deadline_at_ms(),
+            before.timeout_budget.deadline_at_ms()
+        );
+    });
+}
+
+#[test]
+fn runtime_enrollment_closed_sink_retains_native_cause_after_cancelled_decision() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, _invitee, _invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "runtime-closed-cancellation-sink",
+            )
+            .await;
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("deliberately close the actual publication owner");
+        let tracker = issuer.ceremony_tracker().await;
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original window");
+        let failure = AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect_err("a closed publication sink cannot report full cancellation success");
+        let mut current: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut found = false;
+        while let Some(error) = current {
+            if matches!(
+                error.downcast_ref::<crate::runtime::subsystems::journal::JournalSubsystemError>(),
+                Some(crate::runtime::subsystems::journal::JournalSubsystemError::SinkClosed { .. })
+            ) {
+                found = true;
+                break;
+            }
+            current = error.source();
+        }
+        assert!(
+            found,
+            "native bridge retains the actual journal sink cause end to end"
+        );
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("durable terminal decision");
+        assert_eq!(
+            after.terminal_outcome,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ),)
+        );
+        assert_eq!(
+            after.timeout_budget.deadline_at_ms(),
+            before.timeout_budget.deadline_at_ms()
+        );
+        assert_eq!(after.started_at, before.started_at);
+        let repeated = AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect_err("same closed owner still prevents required publication");
+        assert!(std::error::Error::source(&repeated).is_some());
+        assert_eq!(
+            tracker
+                .get(&start.ceremony_id)
+                .await
+                .expect("unchanged terminal")
+                .terminal_outcome,
+            after.terminal_outcome,
+            "publication failure does not overwrite the first real decision"
+        );
+    });
 }

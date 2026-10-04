@@ -316,8 +316,9 @@ where
                 16,
             )
             .await
-            .map_err(|e| StorageError::EncryptionFailed {
-                reason: format!("Opaque key derivation failed: {e}"),
+            .map_err(|source| StorageError::BackendFailure {
+                operation: "derive opaque storage key".into(),
+                source,
             })?;
 
         // Encode as hex for filesystem-safe name
@@ -351,10 +352,16 @@ where
                 32,
             )
             .await
-            .map_err(|e| StorageError::EncryptionFailed {
-                reason: format!("Key derivation failed: {e}"),
+            .map_err(|source| StorageError::BackendFailure {
+                operation: "derive storage encryption key".into(),
+                source,
             })?;
 
+        if derived.len() != 32 {
+            return Err(StorageError::EncryptionFailed {
+                reason: "configured KDF returned an invalid encryption key length".into(),
+            });
+        }
         let mut key = [0u8; 32];
         key.copy_from_slice(&derived);
         Ok(key)
@@ -383,8 +390,9 @@ where
             .crypto
             .chacha20_encrypt(data, &encryption_key, &nonce)
             .await
-            .map_err(|e| StorageError::EncryptionFailed {
-                reason: e.to_string(),
+            .map_err(|source| StorageError::BackendFailure {
+                operation: "encrypt storage record".into(),
+                source,
             })?;
 
         // Build blob: version || nonce || ciphertext
@@ -429,8 +437,9 @@ where
         self.crypto
             .chacha20_decrypt(ciphertext, &encryption_key, &nonce)
             .await
-            .map_err(|e| StorageError::DecryptionFailed {
-                reason: e.to_string(),
+            .map_err(|source| StorageError::BackendFailure {
+                operation: "decrypt storage record".into(),
+                source,
             })
     }
 
@@ -703,9 +712,7 @@ mod tests {
             .ok_or("missing actual ciphertext")?;
         drop(original);
         let key = SecureStorageLocation::new(MASTER_KEY_NAMESPACE, MASTER_KEY_ID);
-        secure
-            .secure_delete(&key, &[SecureStorageCapability::Delete])
-            .await?;
+        secure.fault_remove_selected_record_for_test(&key).await?;
         let reopened = EncryptedStorage::new(
             storage.clone(),
             crypto,

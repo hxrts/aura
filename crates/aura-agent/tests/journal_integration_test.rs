@@ -56,11 +56,15 @@ impl FactRecordingView {
 }
 
 impl ReactiveView for FactRecordingView {
-    fn update<'a>(&'a self, facts: &'a [Fact]) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    fn update<'a>(
+        &'a self,
+        facts: &'a [Fact],
+    ) -> Pin<Box<dyn Future<Output = Result<(), aura_core::AuraError>> + Send + 'a>> {
         Box::pin(async move {
             self.update_count.fetch_add(1, Ordering::SeqCst);
             let mut stored = self.received_facts.write().await;
             stored.extend_from_slice(facts);
+            Ok(())
         })
     }
 
@@ -124,13 +128,13 @@ fn scheduler_with_registry(
     config: SchedulerConfig,
 ) -> (
     ReactiveScheduler,
-    mpsc::Sender<FactSource>,
+    aura_agent::reactive::FactIngress,
     mpsc::Sender<()>,
 ) {
     use aura_effects::time::PhysicalTimeHandler;
     use std::sync::Arc;
     let time_effects = Arc::new(PhysicalTimeHandler);
-    let (scheduler, fact_tx, shutdown_tx, _update_tx) =
+    let (scheduler, fact_tx, shutdown_tx) =
         ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects);
     (scheduler, fact_tx, shutdown_tx)
 }
@@ -148,7 +152,9 @@ async fn test_scheduler_receives_journal_facts() {
     scheduler.register_view(view.clone());
 
     // Spawn scheduler
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send facts from journal source
     let facts = vec![make_guardian_fact(1, 2, 1), make_guardian_fact(1, 3, 2)];
@@ -162,7 +168,14 @@ async fn test_scheduler_receives_journal_facts() {
     let received = view.get_facts().await;
     assert_eq!(received.len(), 2, "View should receive 2 facts");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -173,7 +186,9 @@ async fn test_scheduler_receives_network_facts() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send facts from network source
     let facts = vec![make_guardian_fact(1, 2, 1)];
@@ -184,7 +199,14 @@ async fn test_scheduler_receives_network_facts() {
     let received = view.get_facts().await;
     assert_eq!(received.len(), 1, "View should receive 1 network fact");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -195,7 +217,9 @@ async fn test_fact_ordering_preserved() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send ordered facts
     let facts = vec![
@@ -219,7 +243,14 @@ async fn test_fact_ordering_preserved() {
         );
     }
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -230,7 +261,9 @@ async fn test_multiple_fact_batches() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send multiple batches
     for i in 0..5 {
@@ -248,7 +281,14 @@ async fn test_multiple_fact_batches() {
         "Should have at least 1 update"
     );
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -259,7 +299,9 @@ async fn test_empty_fact_batch() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send empty batch
     fact_tx.send(FactSource::Journal(vec![])).await.unwrap();
@@ -269,7 +311,14 @@ async fn test_empty_fact_batch() {
     let received = view.get_facts().await;
     assert!(received.is_empty(), "No facts should be received");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 // =============================================================================
@@ -289,7 +338,9 @@ async fn test_multiple_views_receive_same_facts() {
     scheduler.register_view(view2.clone());
     scheduler.register_view(view3.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     let facts = vec![make_guardian_fact(1, 2, 1), make_guardian_fact(1, 3, 2)];
     fact_tx.send(FactSource::Journal(facts)).await.unwrap();
@@ -305,7 +356,14 @@ async fn test_multiple_views_receive_same_facts() {
     assert_eq!(received2.len(), 2);
     assert_eq!(received3.len(), 2);
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 // =============================================================================
@@ -320,7 +378,9 @@ async fn test_mixed_fact_sources() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send from journal
     fact_tx
@@ -345,7 +405,14 @@ async fn test_mixed_fact_sources() {
     let received = view.get_facts().await;
     assert_eq!(received.len(), 3, "Should receive facts from all sources");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 // =============================================================================
@@ -360,7 +427,9 @@ async fn test_guardian_binding_facts_preserved() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     let original = make_guardian_fact(42, 99, 1);
     fact_tx
@@ -388,7 +457,14 @@ async fn test_guardian_binding_facts_preserved() {
         panic!("Expected GuardianBinding fact");
     }
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -399,7 +475,9 @@ async fn test_generic_facts_preserved() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     let original = make_generic_fact("test_binding_type", 1);
     fact_tx
@@ -420,7 +498,14 @@ async fn test_generic_facts_preserved() {
         panic!("Expected Generic fact");
     }
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 // =============================================================================
@@ -435,7 +520,9 @@ async fn test_high_volume_facts() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send 100 facts
     let facts: Vec<Fact> = (0..100)
@@ -448,7 +535,14 @@ async fn test_high_volume_facts() {
     let received = view.get_facts().await;
     assert_eq!(received.len(), 100, "All 100 facts should be received");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -459,7 +553,9 @@ async fn test_rapid_fact_updates() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Rapidly send individual facts
     for i in 0..50 {
@@ -472,7 +568,14 @@ async fn test_rapid_fact_updates() {
     let received = view.get_facts().await;
     assert_eq!(received.len(), 50, "All 50 rapid facts should be received");
 
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 }
 
 // =============================================================================
@@ -487,7 +590,9 @@ async fn test_graceful_shutdown() {
     let view = Arc::new(FactRecordingView::new("test_view"));
     scheduler.register_view(view.clone());
 
-    let handle = tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Send some facts
     fact_tx
@@ -498,9 +603,18 @@ async fn test_graceful_shutdown() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Graceful shutdown
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 
     // Verify scheduler exits cleanly
-    let result = tokio::time::timeout(Duration::from_secs(1), handle).await;
-    assert!(result.is_ok(), "Scheduler should exit gracefully");
+    assert!(
+        scheduler_owner.terminal_failure().is_none(),
+        "genuine owned graceful completion has no retained scheduler failure"
+    );
 }

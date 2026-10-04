@@ -282,13 +282,14 @@ pub use runtime::services::{
     SessionDelegationTransfer,
 };
 #[cfg(feature = "choreo-backend-telltale-machine")]
-pub use runtime::SessionOwnerCapabilityScope;
+pub use runtime::{SessionOwnerCapability, SessionOwnerCapabilityScope};
 
 // Re-export core types for convenience
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use aura_core::effects::ExecutionMode;
 
 // Effect system types
+pub use runtime::system::AdmittedRuntimeEffectsCapability;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 pub use runtime::AuraEffectSystem;
 
@@ -334,3 +335,7 @@ pub fn create_simulation_agent(authority_id: AuthorityId, seed: u64) -> AgentRes
         .with_authority(authority_id)
         .build_simulation(seed)
 }
+
+/// Move-owned control of an actual runtime-registered sync command.
+#[cfg(feature = "choreo-backend-telltale-machine")]
+pub use runtime::services::sync_command_registry::AdmittedSyncCommandCapability;

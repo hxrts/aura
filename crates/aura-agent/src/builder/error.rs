@@ -27,6 +27,13 @@ pub enum BuildError {
         effect: &'static str,
         message: String,
     },
+    /// Required effect initialization retains its native failure.
+    EffectInitSource {
+        /// Effect whose initialization failed.
+        effect: &'static str,
+        /// Original process-local error.
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
     /// Runtime construction failed
     RuntimeConstruction(String),
@@ -55,6 +62,9 @@ impl fmt::Display for BuildError {
             Self::EffectInit { effect, message } => {
                 write!(f, "failed to initialize {} effect: {}", effect, message)
             }
+            Self::EffectInitSource { effect, source } => {
+                write!(f, "failed to initialize {effect} effect: {source}")
+            }
             Self::RuntimeConstructionSource(source) => {
                 write!(f, "runtime construction failed: {source}")
             }
@@ -72,6 +82,7 @@ impl std::error::Error for BuildError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::RuntimeConstructionSource(source) => Some(source.as_ref()),
+            Self::EffectInitSource { source, .. } => Some(source.as_ref()),
             _ => None,
         }
     }
@@ -79,7 +90,10 @@ impl std::error::Error for BuildError {
 
 impl From<BuildError> for crate::AgentError {
     fn from(e: BuildError) -> Self {
-        if matches!(&e, BuildError::RuntimeConstructionSource(_)) {
+        if matches!(
+            &e,
+            BuildError::RuntimeConstructionSource(_) | BuildError::EffectInitSource { .. }
+        ) {
             crate::AgentError::from(aura_core::AuraError::Internal {
                 message: "runtime construction failed".into(),
                 source: Some(std::sync::Arc::new(e)),

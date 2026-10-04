@@ -175,14 +175,32 @@ impl ChatServiceApi {
 
     async fn commit_chat_fact_and_wait(
         &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
         context_id: ContextId,
         fact: &aura_chat::ChatFact,
     ) -> AgentResult<()> {
-        self.effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), fact.to_bytes())
+        operation.require_runtime_owner(self.effects.as_ref())?;
+        let bytes = aura_core::util::serialization::to_vec(fact).map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "encode required Chat fact".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        })?;
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: CHAT_FACT_TYPE_ID.into(),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+            payload: bytes,
+        };
+        let committed = self
+            .effects
+            .commit_relational_facts_required(vec![aura_journal::fact::RelationalFact::Generic {
+                context_id,
+                envelope,
+            }])
             .await
             .map_err(AgentError::from)?;
-        self.effects.await_next_view_update().await;
+        committed.await_processed(operation).await?;
         Ok(())
     }
 
@@ -373,7 +391,11 @@ impl ChatServiceApi {
         .with_moderation_status(sender_is_banned, sender_is_muted))
     }
 
-    async fn execute_outcome(&self, outcome: GuardOutcome) -> AgentResult<()> {
+    async fn execute_outcome(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        outcome: GuardOutcome,
+    ) -> AgentResult<()> {
         let ChatEffectExecutionPlan {
             journal_appends,
             tracked_flow_costs,
@@ -393,7 +415,7 @@ impl ChatServiceApi {
         }
 
         for fact in journal_appends {
-            self.commit_chat_fact_and_wait(fact.context_id(), &fact)
+            self.commit_chat_fact_and_wait(operation, fact.context_id(), &fact)
                 .await?;
         }
 
@@ -429,9 +451,8 @@ impl ChatServiceApi {
                 continue;
             }
 
-            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
-                continue;
-            };
+            let chat_fact = aura_chat::ChatFact::try_from_envelope(&envelope)
+                .map_err(crate::core::AgentError::from)?;
 
             // Restrict to the single channel for this group mapping.
             match &chat_fact {
@@ -481,9 +502,8 @@ impl ChatServiceApi {
                 continue;
             }
 
-            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
-                continue;
-            };
+            let chat_fact = aura_chat::ChatFact::try_from_envelope(&envelope)
+                .map_err(crate::core::AgentError::from)?;
 
             let matched_context = match &chat_fact {
                 aura_chat::ChatFact::MessageSentSealed {
@@ -741,6 +761,28 @@ impl ChatServiceApi {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.create_group_under_original_operation(
+                    &operation,
+                    name,
+                    creator_id,
+                    initial_members,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn create_group_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        name: &str,
+        creator_id: AuthorityId,
+        initial_members: Vec<AuthorityId>,
+    ) -> AgentResult<ChatGroup> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let policy =
             aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::GroupHomeCreation);
         if !policy.allows_mode(aura_core::threshold::AgreementMode::Provisional) {
@@ -772,7 +814,7 @@ impl ChatServiceApi {
         let outcome =
             self.facts
                 .prepare_create_channel(&snapshot, channel_id, name.to_string(), None, false);
-        self.execute_outcome(outcome).await?;
+        self.execute_outcome(operation, outcome).await?;
 
         if policy.allows_mode(AgreementMode::ConsensusFinalized) {
             self.propose_and_finalize_amp_bump(
@@ -829,6 +871,25 @@ impl ChatServiceApi {
         sender_id: AuthorityId,
         content: String,
     ) -> AgentResult<ChatMessage> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.send_message_under_original_operation(
+                    &operation, group_id, sender_id, content,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn send_message_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        sender_id: AuthorityId,
+        content: String,
+    ) -> AgentResult<ChatMessage> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -861,7 +922,7 @@ impl ChatServiceApi {
             None,
             epoch_hint,
         );
-        self.execute_outcome(outcome).await?;
+        self.execute_outcome(operation, outcome).await?;
 
         Ok(ChatMessage::new_text(
             ChatMessageId(message_uuid),
@@ -941,9 +1002,8 @@ impl ChatServiceApi {
             if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
                 continue;
             }
-            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
-                continue;
-            };
+            let chat_fact = aura_chat::ChatFact::try_from_envelope(&envelope)
+                .map_err(crate::core::AgentError::from)?;
             let aura_chat::ChatFact::ChannelCreated {
                 context_id: fact_ctx,
                 name,
@@ -1020,6 +1080,25 @@ impl ChatServiceApi {
         _requester: AuthorityId,
         new_member: AuthorityId,
     ) -> AgentResult<()> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.add_member_under_original_operation(
+                    &operation, group_id, _requester, new_member,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn add_member_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        _requester: AuthorityId,
+        new_member: AuthorityId,
+    ) -> AgentResult<()> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -1059,6 +1138,28 @@ impl ChatServiceApi {
         _requester: AuthorityId,
         member_to_remove: AuthorityId,
     ) -> AgentResult<()> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.remove_member_under_original_operation(
+                    &operation,
+                    group_id,
+                    _requester,
+                    member_to_remove,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn remove_member_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        _requester: AuthorityId,
+        member_to_remove: AuthorityId,
+    ) -> AgentResult<()> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -1114,6 +1215,30 @@ impl ChatServiceApi {
         message_id: &ChatMessageId,
         new_content: &str,
     ) -> AgentResult<ChatMessage> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.edit_message_under_original_operation(
+                    &operation,
+                    group_id,
+                    editor,
+                    message_id,
+                    new_content,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn edit_message_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        editor: AuthorityId,
+        message_id: &ChatMessageId,
+        new_content: &str,
+    ) -> AgentResult<ChatMessage> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -1134,9 +1259,8 @@ impl ChatServiceApi {
             now.ts_ms,
         );
 
-        self.commit_chat_fact_and_wait(context_id, &edit_fact)
-            .await
-            .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
+        self.commit_chat_fact_and_wait(operation, context_id, &edit_fact)
+            .await?;
 
         self.get_message(message_id).await?.ok_or_else(|| {
             AgentError::effects("Edited message was committed but could not be reduced")
@@ -1154,6 +1278,25 @@ impl ChatServiceApi {
         requester: AuthorityId,
         message_id: &ChatMessageId,
     ) -> AgentResult<()> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.delete_message_under_original_operation(
+                    &operation, group_id, requester, message_id,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn delete_message_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        requester: AuthorityId,
+        message_id: &ChatMessageId,
+    ) -> AgentResult<()> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -1173,9 +1316,8 @@ impl ChatServiceApi {
             now.ts_ms,
         );
 
-        self.commit_chat_fact_and_wait(context_id, &delete_fact)
-            .await
-            .map_err(|e| AgentError::effects(format!("Failed to commit delete fact: {e}")))?;
+        self.commit_chat_fact_and_wait(operation, context_id, &delete_fact)
+            .await?;
 
         Ok(())
     }
@@ -1202,6 +1344,32 @@ impl ChatServiceApi {
         description: Option<String>,
         _metadata: Option<std::collections::HashMap<String, String>>,
     ) -> AgentResult<ChatGroup> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(self.update_group_details_under_original_operation(
+                    &operation,
+                    group_id,
+                    requester,
+                    name,
+                    description,
+                    _metadata,
+                ))
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn update_group_details_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        group_id: &ChatGroupId,
+        requester: AuthorityId,
+        name: Option<String>,
+        description: Option<String>,
+        _metadata: Option<std::collections::HashMap<String, String>>,
+    ) -> AgentResult<ChatGroup> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let context_id = Self::context_id_for_group(group_id);
         let channel_id = Self::channel_id_for_group(group_id);
 
@@ -1225,9 +1393,8 @@ impl ChatServiceApi {
             requester,
         );
 
-        self.commit_chat_fact_and_wait(context_id, &update_fact)
-            .await
-            .map_err(|e| AgentError::effects(format!("Failed to commit update fact: {e}")))?;
+        self.commit_chat_fact_and_wait(operation, context_id, &update_fact)
+            .await?;
 
         self.get_group(group_id).await?.ok_or_else(|| {
             AgentError::effects("Updated group was committed but could not be reduced")
@@ -1257,6 +1424,32 @@ impl ChatServiceApi {
         context_id: ContextId,
         message: AmpMessage,
     ) -> AgentResult<()> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(
+                    self.execute_amp_transport_as_sender_under_original_operation(
+                        &operation,
+                        sender_id,
+                        receiver_id,
+                        context_id,
+                        message,
+                    ),
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn execute_amp_transport_as_sender_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        context_id: ContextId,
+        message: AmpMessage,
+    ) -> AgentResult<()> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let session_uuid = amp_session_uuid(&context_id, &sender_id, &receiver_id);
         self.run_amp_transport_vm(
             session_uuid,
@@ -1296,6 +1489,36 @@ impl ChatServiceApi {
         chan_epoch: u64,
         ratchet_gen: u64,
     ) -> AgentResult<()> {
+        let operation = self.effects.admit_bounded_runtime_operation().await?;
+        operation
+            .execute(|| {
+                Box::pin(
+                    self.execute_amp_transport_as_receiver_under_original_operation(
+                        &operation,
+                        sender_id,
+                        receiver_id,
+                        context_id,
+                        channel_id,
+                        chan_epoch,
+                        ratchet_gen,
+                    ),
+                )
+            })
+            .await
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = crate::runtime::effects::RuntimeBoundedOperationCapability, family = "runtime_helper")]
+    async fn execute_amp_transport_as_receiver_under_original_operation(
+        &self,
+        operation: &crate::runtime::effects::RuntimeBoundedOperationCapability<'_>,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        chan_epoch: u64,
+        ratchet_gen: u64,
+    ) -> AgentResult<()> {
+        operation.require_runtime_owner(self.effects.as_ref())?;
         let receipt = AmpReceipt {
             context: context_id,
             channel: channel_id,
@@ -1332,7 +1555,6 @@ mod tests {
     use aura_chat::capabilities::ChatCapability;
     use aura_core::CapabilityName;
     use aura_guards::GuardContextProvider;
-    use aura_journal::DomainFact;
     use base64::Engine;
     use std::sync::Arc;
 
@@ -1344,16 +1566,55 @@ mod tests {
         ChatGroupId::from_uuid(Uuid::from_bytes([byte; 16]))
     }
 
+    async fn start_chat_pipeline(
+        effects: &Arc<AuraEffectSystem>,
+    ) -> crate::reactive::ReactivePipeline {
+        aura_app::signal_defs::register_app_signals(&effects.reactive_handler())
+            .await
+            .expect("chat fixture registers actual shared signal graph");
+        let pipeline = crate::reactive::ReactivePipeline::start_for_test(
+            crate::reactive::SchedulerConfig {
+                batch_window: std::time::Duration::ZERO,
+                ..crate::reactive::SchedulerConfig::default()
+            },
+            effects.fact_registry(),
+            Arc::new(effects.time_effects().clone()),
+            effects.clone(),
+            effects.authority_id(),
+            effects.reactive_handler(),
+        );
+        effects
+            .attach_fact_sink(pipeline.fact_sender())
+            .expect("pipeline ingress belongs to actual fixture runtime");
+        pipeline
+    }
+
     async fn commit_chat_fact(
         effects: &Arc<AuraEffectSystem>,
         context_id: ContextId,
         fact: aura_chat::ChatFact,
     ) {
-        effects
-            .commit_generic_fact_bytes(context_id, CHAT_FACT_TYPE_ID.into(), fact.to_bytes())
+        let operation = effects
+            .admit_bounded_runtime_operation()
             .await
-            .unwrap();
-        effects.await_next_view_update().await;
+            .expect("fixture retains actual public chat operation");
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: CHAT_FACT_TYPE_ID.into(),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+            payload: aura_core::util::serialization::to_vec(&fact).expect("fixture fact encoding"),
+        };
+        let committed = effects
+            .commit_relational_facts_required(vec![aura_journal::fact::RelationalFact::Generic {
+                context_id,
+                envelope,
+            }])
+            .await
+            .expect("fixture canonical commit and accepted scheduler target");
+        committed
+            .await_processed(&operation)
+            .await
+            .expect("fixture exact processing target under original owner");
     }
 
     fn install_biscuit_cache(effects: &Arc<AuraEffectSystem>, capabilities: Vec<CapabilityName>) {
@@ -1374,7 +1635,8 @@ mod tests {
     async fn build_snapshot_uses_evaluated_chat_capability_frontier() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let creator = authority(11);
         let group_id = group_id(12);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
@@ -1397,7 +1659,8 @@ mod tests {
     async fn build_snapshot_without_biscuit_frontier_has_empty_chat_capabilities() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let creator = authority(21);
         let group_id = group_id(22);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
@@ -1417,7 +1680,8 @@ mod tests {
     async fn build_snapshot_with_mismatched_biscuit_issuer_has_empty_chat_capabilities() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let creator = authority(31);
         let group_id = group_id(32);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
@@ -1448,7 +1712,8 @@ mod tests {
     async fn get_history_reduces_edits_and_deletes_from_committed_facts() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let group_id = group_id(7);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
         let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
@@ -1540,7 +1805,8 @@ mod tests {
     async fn edit_message_returns_refetched_fact_backed_message() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let group_id = group_id(11);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
         let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
@@ -1601,7 +1867,8 @@ mod tests {
     async fn update_group_details_returns_refetched_fact_backed_group() {
         let config = AgentConfig::default();
         let effects = crate::testing::simulation_effect_system_arc(&config);
-        let service = ChatServiceApi::new(effects.clone()).unwrap();
+        let _pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service fixture");
         let group_id = group_id(15);
         let context_id = ChatServiceApi::context_id_for_group(&group_id);
         let channel_id = ChatServiceApi::channel_id_for_group(&group_id);
@@ -1661,5 +1928,301 @@ mod tests {
             service.get_group(&group_id).await.unwrap().unwrap(),
             updated
         );
+    }
+    #[tokio::test]
+    async fn required_chat_processing_closed_original_sink_preserves_native_cause() {
+        use std::error::Error;
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual chat service");
+        let group = group_id(52);
+        let context = ChatServiceApi::context_id_for_group(&group);
+        let channel = ChatServiceApi::channel_id_for_group(&group);
+        let creator = authority(53);
+        commit_chat_fact(
+            &effects,
+            context,
+            aura_chat::ChatFact::channel_created_ms(
+                context,
+                channel,
+                "actual".into(),
+                None,
+                false,
+                100,
+                creator,
+            ),
+        )
+        .await;
+        let cleanup = effects
+            .admit_bounded_runtime_operation()
+            .await
+            .expect("actual original cleanup resource owner");
+        pipeline
+            .shutdown_with_original_budget(effects.as_ref(), cleanup.original_window())
+            .await
+            .expect("original pipeline acknowledges normal shutdown");
+        let failure = service
+            .update_group_details(&group, creator, Some("changed".into()), None, None)
+            .await
+            .expect_err("closed processing owner cannot report required chat success");
+        let mut source: Option<&(dyn Error + 'static)> = Some(&failure);
+        let mut found = false;
+        while let Some(cause) = source {
+            if let Some(crate::reactive::FactProcessingError::SinkClosed { source }) =
+                cause.downcast_ref::<crate::reactive::FactProcessingError>()
+            {
+                // The retained failure is the original queue producer, carrying
+                // actual failed enqueue custody, rather than a string marker.
+                assert!(matches!(
+                    &source.0,
+                    crate::reactive::FactSource::Published(_)
+                ));
+                found = true;
+                break;
+            }
+            source = cause.source();
+        }
+        assert!(
+            found,
+            "native original mpsc publication source must survive public chat boundary: {failure}"
+        );
+    }
+    #[test]
+    fn required_chat_public_admission_caller_future_stays_bounded_before_first_poll() {
+        fn frame_size<F, Fut>(_factory: F) -> usize
+        where
+            F: FnOnce() -> Fut,
+        {
+            std::mem::size_of::<Fut>()
+        }
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let service = ChatServiceApi::new(effects).expect("actual chat service type");
+        let group = group_id(60);
+        let creator = authority(61);
+        let bytes = frame_size(|| service.update_group_details(&group, creator, None, None, None));
+        assert!(
+            bytes <= 16 * 1024,
+            "public caller must allocate its owned delegate before polling; frame={bytes}"
+        );
+    }
+    #[tokio::test]
+    async fn required_chat_pipeline_attachment_rejects_foreign_and_standalone_ingress() {
+        let original = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let foreign = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let pipeline = start_chat_pipeline(&original).await;
+        assert!(matches!(
+            foreign.attach_fact_sink(pipeline.fact_sender()),
+            Err(crate::reactive::FactProcessingError::ForeignOwner)
+        ));
+        let (_scheduler, standalone, _) = crate::reactive::ReactiveScheduler::new(
+            crate::reactive::SchedulerConfig::default(),
+            foreign.fact_registry(),
+            Arc::new(foreign.time_effects().clone()),
+        );
+        assert!(matches!(
+            foreign.attach_fact_sink(standalone),
+            Err(crate::reactive::FactProcessingError::RuntimeOwnerAbsent)
+        ));
+        let cleanup = original
+            .admit_bounded_runtime_operation()
+            .await
+            .expect("actual original cleanup resource owner");
+        pipeline
+            .shutdown_with_original_budget(original.as_ref(), cleanup.original_window())
+            .await
+            .expect("original pipeline retains actual cleanup owner");
+    }
+    #[tokio::test]
+    async fn required_chat_admission_retains_actual_clock_failure_before_mutation() {
+        use std::error::Error;
+        let clock = aura_testkit::time::ManualPhysicalClock::new(9000);
+        let effects = Arc::new(
+            crate::testing::simulation_effect_system(&AgentConfig::default())
+                .with_physical_time_provider(Arc::new(clock.clone())),
+        );
+        let service = ChatServiceApi::new(effects.clone()).expect("actual runtime Chat facade");
+        clock
+            .fail_next_observation(aura_core::effects::time::TimeError::OperationFailed {
+                reason: "actual Chat admission provider failure".into(),
+            })
+            .await;
+        let failure = service
+            .update_group_details(
+                &group_id(61),
+                authority(62),
+                Some("changed".into()),
+                None,
+                None,
+            )
+            .await
+            .expect_err("required admission failure precedes group selection/mutation");
+        let mut source: Option<&(dyn Error + 'static)> = Some(&failure);
+        let mut retained = false;
+        while let Some(cause) = source {
+            if let Some(aura_core::effects::time::TimeError::OperationFailed { reason }) =
+                cause.downcast_ref::<aura_core::effects::time::TimeError>()
+            {
+                retained = reason == "actual Chat admission provider failure";
+                break;
+            }
+            source = cause.source();
+        }
+        assert!(
+            retained,
+            "actual native clock cause survives public operation: {failure}"
+        );
+    }
+
+    #[tokio::test]
+    async fn required_chat_runtime_without_ingress_cannot_mint_processing_success() {
+        use std::error::Error;
+        let effects = crate::testing::simulation_effect_system_arc(&AgentConfig::default());
+        let failure = match effects.commit_relational_facts_required(Vec::new()).await {
+            Ok(_) => panic!(
+                "absent required ingress cannot issue completed canonical processing custody"
+            ),
+            Err(failure) => failure,
+        };
+        let mut source: Option<&(dyn Error + 'static)> = Some(&failure);
+        let mut retained = false;
+        while let Some(cause) = source {
+            if matches!(
+                cause.downcast_ref::<crate::reactive::FactProcessingError>(),
+                Some(crate::reactive::FactProcessingError::IngressAbsent)
+            ) {
+                retained = true;
+                break;
+            }
+            source = cause.source();
+        }
+        assert!(
+            retained,
+            "actual structural absent-ingress cause survives canonical boundary: {failure}"
+        );
+    }
+    fn native_read_source<'a, E: std::error::Error + 'static>(
+        failure: &'a (dyn std::error::Error + 'static),
+    ) -> Option<&'a E> {
+        let mut current = Some(failure);
+        while let Some(cause) = current {
+            if let Some(native) = cause.downcast_ref::<E>() {
+                return Some(native);
+            }
+            current = cause.source();
+        }
+        None
+    }
+
+    async fn assert_required_corrupt_chat_reads(
+        envelope: aura_core::types::facts::FactEnvelope,
+        fixture_salt: u64,
+        schema_failure: bool,
+    ) {
+        let authority = authority(if schema_failure { 92 } else { 91 });
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &config,
+                authority,
+                fixture_salt,
+            )
+            .expect("distinct explicit original corruption fixture seed"),
+        );
+        let pipeline = start_chat_pipeline(&effects).await;
+        let service = ChatServiceApi::new(effects.clone()).expect("actual required Chat reader");
+        let group = group_id(93);
+        let context = ChatServiceApi::context_id_for_group(&group);
+        let issued_corruption = effects
+            .commit_relational_facts_required(vec![aura_journal::fact::RelationalFact::Generic {
+                context_id: context,
+                envelope,
+            }])
+            .await
+            .expect("actual persisted canonical record and accepted owned ingress");
+        let message = ChatMessageId::from_uuid(Uuid::from_bytes([94; 16]));
+        let failures = [
+            service
+                .get_group(&group)
+                .await
+                .expect_err("matching corrupted fact cannot become absent group"),
+            service
+                .load_message_facts(&message)
+                .await
+                .expect_err("matching corrupted fact cannot become absent message"),
+            service
+                .list_user_groups(&authority)
+                .await
+                .expect_err("matching corrupted fact cannot become empty group list"),
+        ];
+        for failure in failures {
+            if schema_failure {
+                assert!(
+                    native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
+                    "required schema admission retains original structured FactError"
+                );
+            } else {
+                assert!(
+                    native_read_source::<serde_json::Error>(&failure).is_some(),
+                    "actual malformed persisted JSON retains concrete codec cause"
+                );
+            }
+        }
+        let now = effects
+            .physical_time()
+            .await
+            .expect("actual fixture disposal observation");
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &now,
+            std::time::Duration::from_secs(5),
+        )
+        .expect("one actual fixture disposal resource window");
+        // Disposal still awaits the actual owned scheduler. If its required
+        // projection rejected the same corrupt record, retain that native fault;
+        // cancellation or an unrelated failure is not successful cleanup.
+        if let Err(failure) = pipeline
+            .shutdown_with_original_budget(effects.as_ref(), &original)
+            .await
+        {
+            assert!(
+                native_read_source::<serde_json::Error>(&failure).is_some()
+                    || native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
+                "scheduler rejection must retain the actual corruption source"
+            );
+        }
+        // The corruption-read fixture retains publication custody until its
+        // scheduler has ended; it does not claim projection readiness.
+        drop(issued_corruption);
+    }
+
+    #[tokio::test]
+    async fn required_chat_matching_malformed_committed_json_is_not_absence_or_empty_success() {
+        assert_required_corrupt_chat_reads(
+            aura_core::types::facts::FactEnvelope {
+                type_id: CHAT_FACT_TYPE_ID.into(),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::Json,
+                payload: b"{".to_vec(),
+            },
+            0x91_01,
+            false,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn required_chat_matching_unsupported_committed_schema_is_not_absence_or_empty_success() {
+        assert_required_corrupt_chat_reads(
+            aura_core::types::facts::FactEnvelope {
+                type_id: CHAT_FACT_TYPE_ID.into(),
+                schema_version: u16::MAX,
+                encoding: aura_core::types::facts::FactEncoding::Json,
+                payload: b"{}".to_vec(),
+            },
+            0x92_01,
+            true,
+        )
+        .await;
     }
 }

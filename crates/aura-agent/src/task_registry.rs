@@ -83,12 +83,12 @@ pub enum TaskSupervisionError {
     },
     Budget {
         group: String,
-        source: TimeoutBudgetError,
+        source: Box<TimeoutBudgetError>,
     },
     Timeout {
         group: String,
         active_tasks: Vec<String>,
-        source: TimeoutBudgetError,
+        source: Box<TimeoutBudgetError>,
     },
     ForcedAbort {
         group: String,
@@ -156,7 +156,7 @@ impl std::fmt::Display for TaskSupervisionError {
 impl std::error::Error for TaskSupervisionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Budget { source, .. } | Self::Timeout { source, .. } => Some(source),
+            Self::Budget { source, .. } | Self::Timeout { source, .. } => Some(source.as_ref()),
             Self::ForcedAbort { cause, .. } => cause
                 .as_deref()
                 .map(|cause| cause as &(dyn std::error::Error + 'static)),
@@ -193,6 +193,148 @@ struct TaskTreeState {
 }
 struct TaskTreeShared {
     state: Mutex<TaskTreeState>,
+}
+
+/// Observed identity of an actual registered task. Private fields and registry-
+/// private poll scopes prevent ids, wire values or caller snapshots from
+/// establishing this execution context. It is independent of executor task ids.
+#[derive(Clone)]
+pub(crate) struct OwnedRuntimeTaskIdentity {
+    tree: Arc<TaskTreeShared>,
+    group_id: u64,
+    task_id: u64,
+}
+impl std::fmt::Debug for OwnedRuntimeTaskIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OwnedRuntimeTaskIdentity")
+            .field("group_id", &self.group_id)
+            .field("task_id", &self.task_id)
+            .finish_non_exhaustive()
+    }
+}
+impl PartialEq for OwnedRuntimeTaskIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.tree, &other.tree)
+            && self.group_id == other.group_id
+            && self.task_id == other.task_id
+    }
+}
+impl Eq for OwnedRuntimeTaskIdentity {}
+impl std::hash::Hash for OwnedRuntimeTaskIdentity {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.tree).hash(state);
+        self.group_id.hash(state);
+        self.task_id.hash(state);
+    }
+}
+
+std::thread_local! {
+    static CURRENT_REGISTERED_TASK: std::cell::RefCell<Option<OwnedRuntimeTaskIdentity>> = const {
+        std::cell::RefCell::new(None)
+    };
+}
+
+/// Observation only: this cannot enter a scope or admit a task.
+pub(crate) fn current_owned_runtime_task() -> Option<OwnedRuntimeTaskIdentity> {
+    CURRENT_REGISTERED_TASK.with(|context| context.borrow().clone())
+}
+
+/// Retain a destructor failure in the actual registered task's existing health
+/// owner. This neither admits a task nor changes its completion outcome.
+pub(crate) fn retain_current_task_cleanup_failure(source: aura_core::AuraError) -> bool {
+    let Some(identity) = current_owned_runtime_task() else {
+        return false;
+    };
+    let shared = identity
+        .tree
+        .state
+        .lock()
+        .groups
+        .get(&identity.group_id)
+        .and_then(std::sync::Weak::upgrade);
+    let Some(shared) = shared else {
+        return false;
+    };
+    let task = shared
+        .tasks
+        .lock()
+        .get(&identity.task_id)
+        .map(|metadata| metadata.task_name.clone());
+    let Some(task) = task else {
+        return false;
+    };
+    let group = TaskGroup { shared };
+    group.propagate_failure(TaskSupervisionError::TaskFailed {
+        group: group.shared.name.clone(),
+        task,
+        source,
+    });
+    true
+}
+
+/// Lexical, synchronous scope for exactly one future poll or destructor. The
+/// previous caller scope is restored before control returns to the executor,
+/// including nested polling, Pending, panics and cancellation.
+struct RegisteredTaskPollScope {
+    previous: Option<OwnedRuntimeTaskIdentity>,
+}
+impl RegisteredTaskPollScope {
+    fn enter(identity: &OwnedRuntimeTaskIdentity) -> Self {
+        Self {
+            previous: CURRENT_REGISTERED_TASK
+                .with(|context| context.replace(Some(identity.clone()))),
+        }
+    }
+}
+impl Drop for RegisteredTaskPollScope {
+    fn drop(&mut self) {
+        CURRENT_REGISTERED_TASK.with(|context| context.replace(self.previous.take()));
+    }
+}
+
+struct RegisteredTaskCapability {
+    identity: OwnedRuntimeTaskIdentity,
+    abort_registration: futures::future::AbortRegistration,
+}
+impl RegisteredTaskCapability {
+    fn bind<F: Future + Unpin>(
+        self,
+        future: F,
+    ) -> (RegisteredTaskFuture<F>, futures::future::AbortRegistration) {
+        (
+            RegisteredTaskFuture {
+                identity: self.identity,
+                future: Some(future),
+            },
+            self.abort_registration,
+        )
+    }
+}
+struct RegisteredTaskFuture<F> {
+    identity: OwnedRuntimeTaskIdentity,
+    future: Option<F>,
+}
+impl<F: Future + Unpin> Future for RegisteredTaskFuture<F> {
+    type Output = F::Output;
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        context: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let this = self.get_mut();
+        let _scope = RegisteredTaskPollScope::enter(&this.identity);
+        std::pin::Pin::new(
+            this.future
+                .as_mut()
+                .expect("registered future remains owned until drop"),
+        )
+        .poll(context)
+    }
+}
+impl<F> Drop for RegisteredTaskFuture<F> {
+    fn drop(&mut self) {
+        let _scope = RegisteredTaskPollScope::enter(&self.identity);
+        drop(self.future.take());
+    }
 }
 
 /// Held inside the spawned future before its first poll. Native abort or local
@@ -419,6 +561,13 @@ impl TaskSupervisor {
         self.spawn_interval_until_named(name, time_effects, interval, f)
     }
 
+    /// Physical tree and original internal lineage establish this root scope.
+    /// Names and equal-valued task identifiers do not prove task ownership.
+    pub(crate) fn owns_group(&self, group: &TaskGroup) -> bool {
+        Arc::ptr_eq(&self.root.shared.tree, &group.shared.tree)
+            && group.shared.lineage.starts_with(&self.root.shared.lineage)
+    }
+
     pub fn request_cancellation(&self) {
         self.root.request_cancellation();
     }
@@ -440,6 +589,18 @@ impl TaskSupervisor {
         timeout: Duration,
     ) -> Result<(), TaskSupervisionError> {
         self.root.shutdown_with_timeout(timeout).await
+    }
+
+    /// Internal continuation of an already-owned original resource window.
+    /// No new timeout or clock origin is allocated at this handoff.
+    pub(crate) async fn shutdown_with_original_budget<T: PhysicalTimeEffects>(
+        &self,
+        time: &T,
+        original: &TimeoutBudget,
+    ) -> Result<(), TaskSupervisionError> {
+        self.root
+            .shutdown_with_original_budget(time, original)
+            .await
     }
 
     pub async fn shutdown_gracefully(&self, timeout: Duration) -> Result<(), TaskSupervisionError> {
@@ -516,6 +677,21 @@ impl TaskGroup {
     /// Retained first typed failure for the owning service's health observation.
     pub fn terminal_failure(&self) -> Option<TaskSupervisionError> {
         self.shared.first_failure.lock().clone()
+    }
+
+    /// Retain a required subsidiary failure after the primary operation has
+    /// already published its terminal result. This changes owned health and
+    /// drain, never the primary result, and admits no additional task.
+    pub(crate) fn record_subsidiary_failure(
+        &self,
+        operation: impl Into<String>,
+        source: aura_core::AuraError,
+    ) {
+        self.propagate_failure(TaskSupervisionError::TaskFailed {
+            group: self.shared.name.clone(),
+            task: operation.into(),
+            source,
+        });
     }
 
     pub fn group(&self, name: impl Into<String>) -> TaskGroup {
@@ -834,6 +1010,21 @@ impl TaskGroup {
         self.wait_for_idle_with_time(timeout, &time).await
     }
 
+    /// Observe actual owned completion without allocating another time window.
+    /// Runtime protocol owners bound this readiness future with their original
+    /// window. Cancellation completion follows destruction of the owned callback.
+    pub(crate) async fn await_owned_task_completion(&self) -> Result<(), TaskSupervisionError> {
+        loop {
+            let changed = self.shared.notify.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if self.active_tasks().is_empty() {
+                return self.terminal_failure().map_or(Ok(()), Err);
+            }
+            changed.await;
+        }
+    }
+
     async fn wait_for_idle_with_time<T: PhysicalTimeEffects>(
         &self,
         timeout: Duration,
@@ -845,13 +1036,13 @@ impl TaskGroup {
                 .await
                 .map_err(|error| TaskSupervisionError::Budget {
                     group: group_name.clone(),
-                    source: TimeoutBudgetError::time_source_failure(error),
+                    source: Box::new(TimeoutBudgetError::time_source_failure(error)),
                 })?;
         let budget =
             TimeoutBudget::from_start_and_timeout(&started_at, timeout).map_err(|source| {
                 TaskSupervisionError::Budget {
                     group: group_name.clone(),
-                    source,
+                    source: Box::new(source),
                 }
             })?;
         let result = execute_with_timeout_budget(time, &budget, || async {
@@ -873,12 +1064,12 @@ impl TaskGroup {
                 Err(TaskSupervisionError::Timeout {
                     group: group_name,
                     active_tasks: self.active_tasks(),
-                    source,
+                    source: Box::new(source),
                 })
             }
             Err(TimeoutRunError::Timeout(source)) => Err(TaskSupervisionError::Budget {
                 group: group_name,
-                source,
+                source: Box::new(source),
             }),
             Err(TimeoutRunError::Operation(error)) => Err(error),
         }
@@ -924,6 +1115,60 @@ impl TaskGroup {
 
     pub fn abort_remaining(&self) -> Result<(), TaskSupervisionError> {
         self.force_abort_remaining()
+    }
+
+    /// Called only by the runtime that retains the original bounded operation.
+    /// Completion observes actual callback destruction, including descendants.
+    pub(crate) async fn wait_with_original_budget<T: PhysicalTimeEffects>(
+        &self,
+        time: &T,
+        original: &TimeoutBudget,
+    ) -> Result<(), TaskSupervisionError> {
+        let group = self.shared.name.clone();
+        match execute_with_timeout_budget(time, original, || self.await_owned_task_completion())
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(TimeoutRunError::Operation(source)) => Err(source),
+            Err(TimeoutRunError::Timeout(source)) => {
+                let failure = match source {
+                    source @ TimeoutBudgetError::DeadlineExceeded { .. } => {
+                        TaskSupervisionError::Timeout {
+                            group,
+                            active_tasks: self.active_tasks(),
+                            source: Box::new(source),
+                        }
+                    }
+                    source => TaskSupervisionError::Budget {
+                        group,
+                        source: Box::new(source),
+                    },
+                };
+                // Abort requests never certify destruction or make handoff succeed.
+                match self.force_abort_remaining() {
+                    Ok(()) => Err(failure),
+                    Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        ..
+                    }) => Err(TaskSupervisionError::ForcedAbort {
+                        group,
+                        aborted_tasks,
+                        cause: Some(Box::new(failure)),
+                    }),
+                    Err(source) => Err(source),
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn shutdown_with_original_budget<T: PhysicalTimeEffects>(
+        &self,
+        time: &T,
+        original: &TimeoutBudget,
+    ) -> Result<(), TaskSupervisionError> {
+        self.request_cancellation();
+        self.wait_with_original_budget(time, original).await
     }
 
     pub async fn shutdown_with_timeout(
@@ -983,11 +1228,17 @@ impl TaskGroup {
         result
     }
 
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "registered_runtime_task",
+        capability_type = RegisteredTaskCapability,
+        family = "runtime_helper"
+    )]
     fn register_task(
         &self,
         task_id: u64,
         task_name: String,
-    ) -> Result<futures::future::AbortRegistration, TaskSupervisionError> {
+    ) -> Result<RegisteredTaskCapability, TaskSupervisionError> {
         let mut tree = self.shared.tree.state.lock();
         let rejection = if self.shared.closing.load(Ordering::Acquire)
             || self.cancellation_token().is_cancelled()
@@ -1021,7 +1272,14 @@ impl TaskGroup {
             },
         );
         tree.active_tasks += 1;
-        Ok(registration)
+        Ok(RegisteredTaskCapability {
+            identity: OwnedRuntimeTaskIdentity {
+                tree: self.shared.tree.clone(),
+                group_id: self.shared.group_id,
+                task_id,
+            },
+            abort_registration: registration,
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1090,9 +1348,11 @@ impl TaskGroup {
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
-        let abort_registration = self
+        let registered = self
             .register_task(task_id, task_name.clone())
             .map_err(|source| (task_id, source))?;
+        let (scoped, abort_registration) = registered.bind(fut);
+        let fut: BoxFuture<'static, Result<(), aura_core::AuraError>> = Box::pin(scoped);
         let mut completion = TaskCompletionGuard {
             future: Some(fut),
             group: self.clone(),
@@ -1198,9 +1458,11 @@ impl TaskGroup {
         external_token: Option<Arc<dyn CancellationToken>>,
     ) -> Result<OwnedTaskHandle<u64>, (u64, TaskSupervisionError)> {
         let task_id = self.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
-        let abort_registration = self
+        let registered = self
             .register_task(task_id, task_name.clone())
             .map_err(|source| (task_id, source))?;
+        let (scoped, abort_registration) = registered.bind(fut);
+        let fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>> = Box::pin(scoped);
         let mut completion = TaskCompletionGuard {
             future: Some(fut),
             group: self.clone(),
@@ -1574,6 +1836,42 @@ mod tests {
             .await;
     }
 
+    #[tokio::test]
+    async fn original_shutdown_window_preserves_required_clock_fault_without_claiming_drain(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let supervisor = TaskSupervisor::new();
+        let started = PhysicalTimeHandler::new().physical_time().await?;
+        let original = TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(30))?;
+        let result = supervisor
+            .shutdown_with_original_budget(&UnavailableSupervisorClock, &original)
+            .await;
+        let Err(error) = result else {
+            panic!("required clock outage cannot certify original-window drain")
+        };
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let mut found = false;
+        loop {
+            if matches!(
+                cause.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::ServiceUnavailable)
+            ) {
+                found = true;
+            }
+            match cause.source() {
+                Some(next) => cause = next,
+                None => break,
+            }
+        }
+        assert!(
+            found,
+            "original required provider failure remains observable"
+        );
+        assert!(!matches!(error, TaskSupervisionError::Timeout { .. }));
+        assert!(supervisor.active_tasks().is_empty());
+        // No record or handoff success is minted even if there were no tasks.
+        Ok(())
+    }
+
     struct UnavailableSupervisorClock;
 
     #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
@@ -1601,9 +1899,9 @@ mod tests {
         assert!(matches!(
             &clock,
             TaskSupervisionError::Budget {
-                source: TimeoutBudgetError::TimeSourceUnavailable { .. },
+                source,
                 ..
-            }
+            } if matches!(source.as_ref(), TimeoutBudgetError::TimeSourceUnavailable { .. })
         ));
         assert!(matches!(
             clock
@@ -1620,9 +1918,9 @@ mod tests {
         assert!(matches!(
             policy,
             TaskSupervisionError::Budget {
-                source: TimeoutBudgetError::InvalidPolicy { .. },
+                source,
                 ..
-            }
+            } if matches!(source.as_ref(), TimeoutBudgetError::InvalidPolicy { .. })
         ));
     }
 
@@ -1806,6 +2104,35 @@ mod descendant_supervision_tests {
     use super::*;
     use std::pin::Pin;
     use std::task::{Context, Poll};
+
+    #[tokio::test]
+    async fn original_shutdown_window_acknowledges_actual_descendant_destruction(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let supervisor = TaskSupervisor::new();
+        let child = supervisor.group("original-window-descendant");
+        let dropped = Arc::new(AtomicBool::new(false));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let owner = child.spawn_named(
+            "retained-original-callback",
+            PendingDropProbe {
+                dropped: dropped.clone(),
+                started: Some(started_tx),
+            },
+        );
+        started_rx.await?;
+        assert!(!dropped.load(Ordering::Acquire));
+        let time = PhysicalTimeHandler::new();
+        let started = time.physical_time().await?;
+        let original = TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(30))?;
+        supervisor
+            .shutdown_with_original_budget(&time, &original)
+            .await?;
+        assert!(dropped.load(Ordering::Acquire));
+        assert!(supervisor.active_tasks().is_empty());
+        assert!(child.active_tasks().is_empty());
+        drop(owner);
+        Ok(())
+    }
 
     struct PendingDropProbe {
         dropped: Arc<AtomicBool>,
@@ -2221,5 +2548,395 @@ mod required_task_admission_tests {
             Some(TaskSupervisionError::AdmissionClosed { .. })
         ));
         assert!(supervisor.active_tasks().is_empty());
+    }
+}
+#[cfg(test)]
+mod registered_task_context_tests {
+    use super::*;
+    use crate::runtime::subsystems::choreography::{
+        ChoreographyState, RuntimeChoreographySessionId,
+    };
+    use aura_core::{AuthorityId, ContextId, DeviceId};
+    use aura_protocol::effects::{ChoreographicRole, RoleIndex};
+    use futures::channel::oneshot;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    /// This helper mints only through actual registry admission. Manual polling
+    /// tests do not invent an identity or bypass the bounded registry state.
+    fn registered_fixture<F: Future + 'static>(
+        group: &TaskGroup,
+        name: &str,
+        future: F,
+    ) -> (RegisteredTaskFuture<Pin<Box<F>>>, u64) {
+        let id = group.shared.next_task_id.fetch_add(1, Ordering::Relaxed);
+        let admitted = group
+            .register_task(id, name.to_string())
+            .expect("actual bounded registration");
+        let (future, _abort) = admitted.bind(Box::pin(future));
+        (future, id)
+    }
+
+    #[test]
+    fn registered_context_restores_parent_after_nested_pending_and_panic_polls() {
+        let supervisor = TaskSupervisor::new();
+        let outer = supervisor.group("context.outer");
+        let inner = supervisor.group("context.inner");
+        let (mut nested, nested_id) = registered_fixture(
+            &inner,
+            "nested",
+            futures::future::poll_fn(|_| {
+                assert!(
+                    current_owned_runtime_task().is_some(),
+                    "actual nested registration is in scope"
+                );
+                Poll::<()>::Pending
+            }),
+        );
+        let inner_identity = nested.identity.clone();
+        let (mut parent, parent_id) = registered_fixture(
+            &outer,
+            "parent",
+            futures::future::poll_fn(move |cx| {
+                let before = current_owned_runtime_task().expect("registered parent scope");
+                assert_ne!(before, inner_identity);
+                assert!(Pin::new(&mut nested).poll(cx).is_pending());
+                assert_eq!(current_owned_runtime_task(), Some(before));
+                Poll::Ready(())
+            }),
+        );
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(Pin::new(&mut parent).poll(&mut cx).is_ready());
+        assert!(
+            current_owned_runtime_task().is_none(),
+            "scope ends before executor receives Ready"
+        );
+        drop(parent);
+        outer.complete_task(parent_id, "parent", TaskOutcome::Completed);
+        inner.complete_task(nested_id, "nested", TaskOutcome::Cancelled);
+        let (mut panicking, id) = registered_fixture(
+            &outer,
+            "panic",
+            futures::future::poll_fn(|_| -> Poll<()> {
+                assert!(current_owned_runtime_task().is_some());
+                panic!("deliberate actual poll panic");
+            }),
+        );
+        assert!(std::panic::catch_unwind(AssertUnwindSafe(
+            || Pin::new(&mut panicking).poll(&mut cx)
+        ))
+        .is_err());
+        assert!(
+            current_owned_runtime_task().is_none(),
+            "panic restores executor context lexically"
+        );
+        drop(panicking);
+        outer.complete_task(id, "panic", TaskOutcome::Panicked);
+    }
+
+    struct DropWithContext {
+        seen: Arc<Mutex<Option<OwnedRuntimeTaskIdentity>>>,
+    }
+    impl Future for DropWithContext {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            assert!(current_owned_runtime_task().is_some());
+            Poll::Pending
+        }
+    }
+    impl Drop for DropWithContext {
+        fn drop(&mut self) {
+            *self.seen.lock() = current_owned_runtime_task();
+        }
+    }
+
+    #[test]
+    fn registered_future_cancellation_and_unpolled_drop_keep_actual_identity_only_during_drop() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("context.drop");
+        for poll_first in [false, true] {
+            let seen = Arc::new(Mutex::new(None));
+            let (mut future, id) =
+                registered_fixture(&group, "drop", DropWithContext { seen: seen.clone() });
+            let expected = future.identity.clone();
+            if poll_first {
+                assert!(Pin::new(&mut future)
+                    .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
+                    .is_pending());
+                assert!(
+                    current_owned_runtime_task().is_none(),
+                    "Pending restores executor context"
+                );
+            }
+            drop(future);
+            assert_eq!(
+                *seen.lock(),
+                Some(expected),
+                "owned destructor sees original registered identity"
+            );
+            assert!(
+                current_owned_runtime_task().is_none(),
+                "cancelled destructor cannot leak task scope"
+            );
+            group.complete_task(id, "drop", TaskOutcome::Cancelled);
+        }
+    }
+
+    async fn local_registered_sibling_session_contract() {
+        let supervisor = TaskSupervisor::new();
+        let first_group = supervisor.group("context.local.first");
+        let second_group = supervisor.group("context.local.second");
+        let state = Arc::new(Mutex::new(ChoreographyState::new()));
+        let (first_ready_tx, first_ready) = oneshot::channel();
+        let (second_ready_tx, second_ready) = oneshot::channel();
+        let (release_first, released_first) = oneshot::channel();
+        let (release_second, released_second) = oneshot::channel();
+        let (first_done_tx, first_done) = oneshot::channel();
+        let (second_done_tx, second_done) = oneshot::channel();
+        let role = ChoreographicRole::new(
+            DeviceId::new_from_entropy([0xa1; 32]),
+            AuthorityId::new_from_entropy([0xa2; 32]),
+            RoleIndex::new(0).expect("fixed role"),
+        );
+        let first_session =
+            RuntimeChoreographySessionId::from_uuid(uuid::Uuid::from_bytes([0xa3; 16]));
+        let second_session =
+            RuntimeChoreographySessionId::from_uuid(uuid::Uuid::from_bytes([0xa4; 16]));
+        let first_state = state.clone();
+        let _first_handle = first_group.spawn_local_try_named("first", async move {
+            let identity = current_owned_runtime_task().expect("real local task registration");
+            first_state
+                .lock()
+                .start_session(
+                    first_session,
+                    Some("context.first".into()),
+                    ContextId::new_from_entropy([0xa5; 32]),
+                    vec![role],
+                    role,
+                    None,
+                    1,
+                )
+                .expect("first registered local session");
+            first_ready_tx
+                .send(identity.clone())
+                .expect("caller observes first owner");
+            released_first.await.expect("caller releases first owner");
+            assert_eq!(current_owned_runtime_task(), Some(identity));
+            assert_eq!(first_state.lock().current_session_id(), Some(first_session));
+            first_state
+                .lock()
+                .end_session_observed(Some(2))
+                .expect("first owner retires only own session");
+            first_done_tx
+                .send(())
+                .expect("caller observes first completion");
+            Ok(())
+        });
+        let first_identity = first_ready
+            .await
+            .expect("first registered future reaches await");
+        assert!(
+            current_owned_runtime_task().is_none(),
+            "awaiting caller cannot borrow child's ambient owner"
+        );
+        let second_state = state.clone();
+        let _second_handle = second_group.spawn_local_try_named("second", async move {
+            let identity = current_owned_runtime_task().expect("real second local registration");
+            second_state
+                .lock()
+                .start_session(
+                    second_session,
+                    Some("context.second".into()),
+                    ContextId::new_from_entropy([0xa6; 32]),
+                    vec![role],
+                    role,
+                    None,
+                    1,
+                )
+                .expect("sibling on same executor thread has an independent session owner");
+            second_ready_tx
+                .send(identity.clone())
+                .expect("caller observes second owner");
+            released_second.await.expect("caller releases second owner");
+            assert_eq!(current_owned_runtime_task(), Some(identity));
+            assert_eq!(
+                second_state.lock().current_session_id(),
+                Some(second_session)
+            );
+            second_state
+                .lock()
+                .end_session_observed(Some(2))
+                .expect("second owner retires only own session");
+            second_done_tx
+                .send(())
+                .expect("caller observes second completion");
+            Ok(())
+        });
+        let second_identity = second_ready
+            .await
+            .expect("second actual owner reaches await");
+        assert_eq!(
+            first_identity.task_id, second_identity.task_id,
+            "group-local ids intentionally collide"
+        );
+        assert_ne!(
+            first_identity, second_identity,
+            "actual group custody disambiguates identical ids"
+        );
+        release_second.send(()).expect("release second");
+        second_done.await.expect("second retires independently");
+        release_first.send(()).expect("release first");
+        first_done
+            .await
+            .expect("first retains original binding across sibling completion");
+        assert!(current_owned_runtime_task().is_none());
+        assert!(
+            supervisor.active_tasks().is_empty(),
+            "real registered callbacks finish before caller wakes"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_local_registered_siblings_keep_independent_session_bindings_across_await() {
+        tokio::task::LocalSet::new()
+            .run_until(local_registered_sibling_session_contract())
+            .await;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    async fn wasm_local_registered_siblings_keep_independent_session_bindings_across_await() {
+        local_registered_sibling_session_contract().await;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn native_send_registered_identity_is_stable_and_executor_observation_stays_unowned() {
+        let supervisor = TaskSupervisor::new();
+        let (completed_tx, completed) = oneshot::channel();
+        let _handle = supervisor.spawn_try_named("context.send", async move {
+            let before = current_owned_runtime_task().expect("actual native registration");
+            tokio::task::yield_now().await;
+            assert_eq!(current_owned_runtime_task(), Some(before));
+            completed_tx.send(()).expect("caller observes completion");
+            Ok(())
+        });
+        completed.await.expect("real registered task completes");
+        supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect("owned native task drains");
+        assert!(current_owned_runtime_task().is_none());
+    }
+    #[test]
+    fn destructor_failure_retains_actual_source_in_registered_service_health() {
+        struct RequiredCleanup;
+        impl Future for RequiredCleanup {
+            type Output = ();
+            fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+                Poll::Pending
+            }
+        }
+        impl Drop for RequiredCleanup {
+            fn drop(&mut self) {
+                let original = std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "required destructor fixture",
+                );
+                assert!(retain_current_task_cleanup_failure(
+                    aura_core::AuraError::Internal {
+                        message: "required cleanup".to_owned(),
+                        source: Some(Arc::new(original)),
+                    }
+                ));
+            }
+        }
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("required-cleanup");
+        let (future, id) = registered_fixture(&group, "actual-destructor", RequiredCleanup);
+        drop(future);
+        group.complete_task(id, "actual-destructor", TaskOutcome::Cancelled);
+        for failure in [group.terminal_failure(), supervisor.root.terminal_failure()] {
+            let Some(TaskSupervisionError::TaskFailed { source, .. }) = failure else {
+                panic!("registered destructor failure must reach owning service health");
+            };
+            let original = std::error::Error::source(&source)
+                .and_then(|cause| cause.downcast_ref::<std::io::Error>())
+                .expect("actual concrete cause survives cancellation publication");
+            assert_eq!(original.kind(), std::io::ErrorKind::PermissionDenied);
+        }
+        assert!(current_owned_runtime_task().is_none());
+    }
+    #[tokio::test]
+    async fn completed_primary_subsidiary_failure_retains_source_in_health_and_drain() {
+        use std::error::Error;
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("completed-primary");
+        let (primary_tx, primary_rx) = tokio::sync::oneshot::channel();
+        let _primary_task = group.spawn_try_named("primary-publication", async move {
+            primary_tx
+                .send("published-cancelled")
+                .expect("primary observer remains live");
+            Ok(())
+        });
+        let primary = primary_rx.await.expect("actual primary task publishes");
+        group
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect("primary task completes before subsidiary failure");
+        group.record_subsidiary_failure(
+            "negative-notice-preparation",
+            aura_core::AuraError::Storage {
+                message: "required retained checkpoint".into(),
+                source: Some(Arc::new(aura_core::effects::StorageError::WriteFailed(
+                    "actual controlled write failure".into(),
+                ))),
+            },
+        );
+        assert_eq!(primary, "published-cancelled");
+        let health = group
+            .terminal_failure()
+            .expect("subsidiary retained in owner health");
+        let drain = supervisor
+            .wait_for_idle(Duration::from_secs(1))
+            .await
+            .expect_err("required subsidiary fault remains observable during drain");
+        for retained in [&health, &drain] {
+            let mut source = retained.source();
+            let mut storage = false;
+            while let Some(error) = source {
+                storage |= error.is::<aura_core::effects::StorageError>();
+                source = error.source();
+            }
+            assert!(
+                storage,
+                "actual concrete storage cause survives standard source chain"
+            );
+        }
+        assert!(
+            supervisor.active_tasks().is_empty(),
+            "recording admits no diagnostic task"
+        );
+    }
+}
+
+#[cfg(test)]
+mod shutdown_scope_tests {
+    use super::*;
+    #[test]
+    fn actual_shutdown_task_root_rejects_equal_named_foreign_and_sibling_scopes() {
+        let first = TaskSupervisor::default();
+        let second = TaskSupervisor::default();
+        let child = first.group("same_service");
+        let foreign = second.group("same_service");
+        let sibling = first.group("other_service");
+        assert!(first.owns_group(&child));
+        assert!(!first.owns_group(&foreign));
+        let narrow = TaskSupervisor::with_root(child.clone());
+        assert!(narrow.owns_group(&child));
+        assert!(narrow.owns_group(&child.group("worker")));
+        assert!(!narrow.owns_group(&sibling));
+        assert!(!narrow.owns_group(&foreign));
     }
 }

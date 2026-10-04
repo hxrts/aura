@@ -16,5 +16,4 @@ pub(crate) struct DynamicState<T: Clone + Send + Sync + 'static> {
 pub(crate) struct SchedulerStats {
     pub(crate) batch_count: u64,
     pub(crate) facts_processed: u64,
-    pub(crate) total_batch_latency_ms: f64,
 }

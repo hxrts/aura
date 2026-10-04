@@ -92,7 +92,6 @@ pub enum VmBridgeSendError {
 ///     let second_owner = lease.clone();
 /// }
 /// ```
-
 pub trait VmBridgeSendLease: Send {
     /// Observe the oldest queued frame without removing it.
     fn pending(&self) -> Option<&VmBridgePendingSend>;
@@ -104,14 +103,14 @@ pub trait VmBridgeSendLease: Send {
     fn definitely_unsent(&mut self) -> Result<(), VmBridgeSendError>;
 }
 
-/// Synchronous session-local bridge operations used by the Telltale host boundary.///
+/// Synchronous session-local bridge operations used by the Telltale host boundary.
+///
 /// ```compile_fail
 /// use aura_core::effects::VmBridgeEffects;
 /// fn steal_frames(bridge: &dyn VmBridgeEffects) {
 ///     bridge.drain_pending_sends();
 /// }
 /// ```
-
 pub trait VmBridgeEffects: Send + Sync {
     /// Queue one outbound payload for the next VM send callback.
     fn enqueue_outbound_payload(&self, payload: Vec<u8>);

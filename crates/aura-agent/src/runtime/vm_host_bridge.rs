@@ -426,6 +426,23 @@ fn build_role_scoped_protocol_machine_code_image(
 }
 
 #[cfg(test)]
+pub(in crate::runtime) fn open_drop_fixture_vm_session() -> Result<
+    (
+        AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
+        Arc<AuraQueuedVmBridgeHandler>,
+        SessionId,
+    ),
+    String,
+> {
+    open_role_scoped_vm_session(
+        &["Role"],
+        "Role",
+        &GlobalType::End,
+        &BTreeMap::from([("Role".to_owned(), LocalTypeR::End)]),
+    )
+}
+
+#[cfg(test)]
 fn open_role_scoped_vm_session(
     role_names: &[&str],
     active_role: &str,
@@ -944,12 +961,9 @@ pub fn inject_vm_receive(
 pub fn close_and_reap_vm_session(
     engine: &mut AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     sid: SessionId,
-) -> Result<(), String> {
+) -> Result<(), super::choreo_engine::AuraChoreoEngineError> {
     let _ = collect_vm_session_artifacts(engine, sid);
-    engine
-        .close_session(sid)
-        .map_err(|error| format!("failed to close VM session: {error}"))?;
-    let _ = engine.vm_mut().reap_closed_sessions();
+    engine.close_session(sid)?;
     Ok(())
 }
 
@@ -994,7 +1008,6 @@ mod tests {
     use aura_testkit::stateful_effects::MockVmBridgeEffects;
     use std::sync::Arc;
     use telltale_machine::model::effects::EffectFailure;
-    use telltale_machine::model::state::SessionStatus;
     use uuid::Uuid;
 
     fn authority_device_role(authority_id: AuthorityId, role_index: u16) -> ChoreographicRole {
@@ -1115,8 +1128,12 @@ mod tests {
                     owners[index].0.vm().coroutines(),
                 ));
                 completed[index] = matches!(step, ProtocolMachineStepResult::AllDone);
-                let sends = owners[index].1.pending_send_snapshot();
-                for send in sends {
+                let bridge = owners[index].1.bridge_effects.clone();
+                let mut sends = bridge
+                    .lease_pending_sends()
+                    .expect("host owns pending send delivery");
+                while let Some(send) = sends.pending().cloned() {
+                    sends.begin_delivery().expect("delivery begins once");
                     delivered.push(send.payload.clone());
                     let peer = 1 - index;
                     let sid = owners[peer].2;
@@ -1134,6 +1151,9 @@ mod tests {
                         },
                     )
                     .expect("host injects peer message");
+                    sends
+                        .acknowledge()
+                        .expect("delivered frame is acknowledged");
                 }
             }
             if completed.iter().all(|done| *done) {
@@ -1261,24 +1281,108 @@ mod tests {
     }
 
     #[test]
-    fn close_and_reap_vm_session_removes_closed_session() {
+    fn threaded_close_reaps_exact_session_and_retains_actual_failure() {
+        use super::super::vm_hardening::{
+            apply_protocol_execution_policy, policy_for_protocol, vm_config_for_profile,
+            AuraVmHardeningProfile, AuraVmRuntimeSelector,
+        };
         let global = GlobalType::End;
         let locals = BTreeMap::from([("Sender".to_string(), LocalTypeR::End)]);
-        let (mut engine, _handler, sid) =
-            open_role_scoped_vm_session(&["Sender"], "Sender", &global, &locals)
-                .expect("session opens");
+        let image = ProtocolMachineCodeImage::from_local_types(&locals, &global);
+        let policy = policy_for_protocol("aura.sync.epoch_rotation", None)
+            .expect("real threaded protocol policy");
+        let mut config = vm_config_for_profile(AuraVmHardeningProfile::Prod);
+        apply_protocol_execution_policy(&mut config, policy);
+        let mut engine = AuraChoreoEngine::new_with_protocol_machine_contracts_and_selector(
+            config,
+            Arc::new(AuraQueuedVmBridgeHandler::default()),
+            Some(RuntimeContracts::full()),
+            AuraVmRuntimeSelector::for_policy(policy),
+        )
+        .expect("actual threaded engine");
+        let first = engine
+            .open_protocol_machine_session(&image)
+            .expect("target actual session");
+        let second = engine
+            .open_protocol_machine_session(&image)
+            .expect("surviving actual session");
+        close_and_reap_vm_session(&mut engine, first)
+            .expect("actual target backend acknowledges disposal");
+        assert!(!engine.active_sessions().contains(&first));
+        assert!(engine.active_sessions().contains(&second));
+        close_and_reap_vm_session(&mut engine, first)
+            .expect("actual archived disposal is idempotent");
+        engine
+            .run(8)
+            .expect("surviving same-role session executes after reaping");
+        let missing = second
+            .checked_add(100)
+            .expect("bounded missing session selector");
+        let original = close_and_reap_vm_session(&mut engine, missing)
+            .expect_err("actual required threaded producer rejects an absent session");
+        assert!(
+            matches!(&original, super::super::choreo_engine::AuraChoreoEngineError::ThreadedSessionLifecycle {
+            source: telltale_machine::ThreadedSessionLifecycleError::MissingSession { session }
+        } if *session == missing)
+        );
+        let native = crate::runtime::session_ingress::SessionIngressError::SessionClose {
+            session_id:
+                crate::runtime::subsystems::choreography::RuntimeChoreographySessionId::from_uuid(
+                    uuid::Uuid::nil(),
+                ),
+            owner_label: "actual-threaded-close-source-test".into(),
+            source: crate::runtime::session_ingress::SessionCloseFailure::Engine(original),
+        };
+        let boundary = std::error::Error::source(&native).expect("typed normal close source");
+        let engine_source = boundary.source().expect("actual engine boundary source");
+        let producer = engine_source
+            .source()
+            .expect("actual dependency source survives native boundary");
+        assert!(
+            matches!(producer.downcast_ref::<telltale_machine::ThreadedSessionLifecycleError>(), Some(telltale_machine::ThreadedSessionLifecycleError::MissingSession { session }) if *session == missing)
+        );
+        let original = close_and_reap_vm_session(&mut engine, missing)
+            .expect_err("forced close retains actual missing-session failure");
+        let forced = crate::runtime::session_ingress::SessionIngressError::ForcedRetirement {
+            session_id:
+                crate::runtime::subsystems::choreography::RuntimeChoreographySessionId::from_uuid(
+                    uuid::Uuid::nil(),
+                ),
+            source: crate::runtime::session_ingress::ForcedVmRetirementFailure::Vm {
+                source: original,
+                ownership: None,
+            },
+        };
+        let composite = std::error::Error::source(&forced).expect("typed forced-retirement source");
+        assert!(composite
+            .source()
+            .expect("engine failure survives successful ownership retirement")
+            .source()
+            .expect("actual dependency cause")
+            .downcast_ref::<telltale_machine::ThreadedSessionLifecycleError>()
+            .is_some());
+    }
 
-        assert!(engine.active_sessions().contains(&sid));
-        close_and_reap_vm_session(&mut engine, sid).expect("session closes");
-        assert!(!engine.active_sessions().contains(&sid));
-        assert!(matches!(
-            engine
-                .vm()
-                .sessions()
-                .get(sid)
-                .map(|session| &session.status),
-            Some(SessionStatus::Closed)
-        ));
+    #[test]
+    fn close_and_reap_vm_session_removes_exact_cooperative_target() {
+        let global = GlobalType::End;
+        let locals = BTreeMap::from([("Sender".to_string(), LocalTypeR::End)]);
+        let (mut engine, _handler, first) =
+            open_role_scoped_vm_session(&["Sender"], "Sender", &global, &locals)
+                .expect("actual first cooperative session");
+        let image = ProtocolMachineCodeImage::from_local_types(&locals, &global);
+        let second = engine
+            .open_protocol_machine_session(&image)
+            .expect("actual unrelated same-role session");
+        close_and_reap_vm_session(&mut engine, first).expect("target fully disposed");
+        assert!(!engine.active_sessions().contains(&first));
+        assert!(engine.vm().sessions().get(first).is_none());
+        assert!(engine.active_sessions().contains(&second));
+        assert!(engine.vm().sessions().get(second).is_some());
+        close_and_reap_vm_session(&mut engine, first).expect("actual archived ACK is idempotent");
+        engine
+            .run(8)
+            .expect("surviving session dispatches and completes");
     }
 
     #[test]

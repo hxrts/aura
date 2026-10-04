@@ -93,8 +93,8 @@ impl AppCore {
             .await
             .map_err(signals_runtime_boundary)?;
             if let Err(error) = replay {
-                if !matches!(error, IntentError::NoAgent { .. }) {
-                    return Err(RuntimeBridgeError::with_source(error.clone(), error));
+                if error.kind() != RuntimeBridgeErrorKind::NoAgent {
+                    return Err(error);
                 }
             }
         }

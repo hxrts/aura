@@ -7,7 +7,7 @@ static DEMO_RUNTIME_HELPER_CAPABILITY: std::sync::LazyLock<LifecyclePublicationC
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "demo-capability",
+    capability = "demo-capability", capability_type = LifecyclePublicationCapability,
     family = "capability_accessor"
 )]
 fn capability_surface() -> &'static LifecyclePublicationCapability {
@@ -18,7 +18,7 @@ fn capability_surface() -> &'static LifecyclePublicationCapability {
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "demo-readiness",
+    capability = "demo-readiness", capability_type = AuthorizedReadinessPublication<&'static str>,
     family = "authorizer"
 )]
 fn authorize_payload() -> AuthorizedReadinessPublication<&'static str> {
@@ -28,22 +28,22 @@ fn authorize_payload() -> AuthorizedReadinessPublication<&'static str> {
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "demo-proof",
+    capability = "demo-proof", capability_type = DemoProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
-fn issue_demo_proof(value: &str) -> String {
+fn issue_demo_proof(value: &str) -> DemoProof {
     let _ = &*DEMO_PROOF_CAPABILITY;
-    value.to_string()
+    DemoProof(value.to_string())
 }
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "demo-runtime-helper",
+    capability = "demo-runtime-helper", capability_type = LifecyclePublicationCapability,
     family = "runtime_helper"
 )]
-fn runtime_helper() -> Option<&'static str> {
-    let _ = &*DEMO_RUNTIME_HELPER_CAPABILITY;
+fn runtime_helper(original: &LifecyclePublicationCapability) -> Option<&'static str> {
+    let _ = original;
     None
 }
 
@@ -51,5 +51,7 @@ fn main() {
     let _ = capability_surface();
     let _ = authorize_payload();
     let _ = issue_demo_proof("ok");
-    let _ = runtime_helper();
+    let _ = runtime_helper(&DEMO_RUNTIME_HELPER_CAPABILITY);
 }
+
+struct DemoProof(String);

@@ -128,10 +128,39 @@ impl AuraAgent {
 
     /// Shutdown the agent
     pub async fn shutdown(self, ctx: &EffectContext) -> AgentResult<()> {
-        self.runtime
-            .shutdown_typed(ctx)
-            .await
-            .map_err(|error| AgentError::runtime(error.to_string()))
+        self.runtime.shutdown_typed(ctx).await.map_err(|source| {
+            let message = "runtime shutdown failed".to_owned();
+            let error = match source {
+                source @ (crate::runtime::system::RuntimeShutdownError::ForeignWindow(_)
+                | crate::runtime::system::RuntimeShutdownError::AdmissionClosed {
+                    ..
+                }) => aura_core::AuraError::PermissionDenied {
+                    message,
+                    source: Some(Arc::new(source)),
+                },
+                crate::runtime::system::RuntimeShutdownError::Budget(
+                    source @ aura_core::TimeoutBudgetError::DeadlineExceeded { .. },
+                ) => {
+                    return AgentError::TimeoutWithSource {
+                        message: "original runtime shutdown deadline exceeded".into(),
+                        source: aura_core::AuraError::Internal {
+                            message: "original runtime shutdown deadline exceeded".into(),
+                            source: Some(Arc::new(source)),
+                        },
+                    }
+                }
+                crate::runtime::system::RuntimeShutdownError::Lifecycle(source) => return source,
+                source @ (crate::runtime::system::RuntimeShutdownError::TaskTree(_)
+                | crate::runtime::system::RuntimeShutdownError::Service(_)
+                | crate::runtime::system::RuntimeShutdownError::Budget(_)) => {
+                    aura_core::AuraError::Internal {
+                        message,
+                        source: Some(Arc::new(source)),
+                    }
+                }
+            };
+            AgentError::from(error)
+        })
     }
 }
 
@@ -259,5 +288,61 @@ impl ServiceRegistry {
                 )
             })
             .cloned()
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod shutdown_admission_tests {
+    use super::*;
+    #[tokio::test]
+    async fn already_closed_runtime_does_not_publish_false_shutdown_completion() -> AgentResult<()>
+    {
+        let profile = tempfile::tempdir().map_err(aura_core::AuraError::from)?;
+        let authority = AuthorityId::new_from_entropy([237; 32]);
+        let mut config = crate::core::AgentConfig::default();
+        config.storage.base_path = profile.path().to_path_buf();
+        let context = EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy([238; 32]),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let agent = crate::core::AgentBuilder::new()
+            .with_authority(authority)
+            .with_config(config)
+            .build_testing_async(&context)
+            .await?;
+        let gate = agent.runtime().activity_gate();
+        assert_eq!(
+            gate.begin_shutdown(),
+            crate::runtime::system::RuntimeActivityState::Running
+        );
+        let error = match agent.shutdown(&context).await {
+            Err(error) => error,
+            Ok(()) => {
+                return Err(AgentError::internal(
+                    "already-closing runtime falsely completed shutdown",
+                ))
+            }
+        };
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(crate::runtime::system::RuntimeShutdownError::AdmissionClosed { state }) =
+                cause.downcast_ref::<crate::runtime::system::RuntimeShutdownError>()
+            {
+                assert_eq!(
+                    *state,
+                    crate::runtime::system::RuntimeActivityState::Stopping
+                );
+                break;
+            }
+            cause = cause
+                .source()
+                .ok_or_else(|| AgentError::internal("shutdown native source missing"))?;
+        }
+        assert_eq!(
+            gate.state(),
+            crate::runtime::system::RuntimeActivityState::Stopping
+        );
+        Ok(())
     }
 }

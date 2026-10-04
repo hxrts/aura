@@ -51,6 +51,21 @@ pub enum FriendshipFact {
 }
 
 impl FriendshipFact {
+    /// Decode required friendship evidence without treating corruption as absence.
+    ///
+    /// # Errors
+    /// Returns domain, schema, payload-bound or native declared-codec failures.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_decode_envelope(
+            &aura_core::types::facts::FactTypeId::from(FRIENDSHIP_FACT_TYPE_ID),
+            1,
+            1,
+            envelope,
+        )
+    }
+
     pub fn participants(&self) -> (AuthorityId, AuthorityId) {
         match self {
             Self::Proposed {

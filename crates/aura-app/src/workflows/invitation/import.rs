@@ -51,7 +51,7 @@ pub async fn import_invitation_details(
 fn invitation_import_failure(error: &AuraError) -> crate::ui_contract::SemanticOperationError {
     use crate::ui_contract::{SemanticFailureCode, SemanticFailureDomain, SemanticOperationError};
     let code = super::super::runtime_error_classification::native_runtime_failure_code(error)
-        .unwrap_or_else(|| match error {
+        .unwrap_or(match error {
             AuraError::Invalid { .. } | AuraError::Serialization { .. } => {
                 SemanticFailureCode::InvalidArgument
             }

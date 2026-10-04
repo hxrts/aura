@@ -116,3 +116,9 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Operation Categories](../../docs/109_operation_categories.md)
 
 Authoritative readers use `ChatFact::try_from_envelope`, which preserves type/schema/encoding/codec failures. The optional domain decoder remains available for observed reduction; corrupt committed chat facts cannot imply that a named canonical channel is absent. Encoding and required decoding share `CHAT_FACT_SCHEMA_VERSION`.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.

@@ -43,6 +43,10 @@ const PRODUCTION_STARTUP_DEFAULTS: &[(&str, &str)] = &[
         "aura.invitation.device_enrollment",
     ),
     (
+        "invitation_device_enrollment_terminal_notice.EnrollmentTerminalNotification",
+        "aura.invitation.device_enrollment_terminal_notice",
+    ),
+    (
         "guardian_ceremony.GuardianCeremony",
         "aura.recovery.guardian_ceremony",
     ),
@@ -531,6 +535,10 @@ mod tests {
             (
                 "invitation_device_enrollment.DeviceEnrollment",
                 "aura.invitation.device_enrollment",
+            ),
+            (
+                "invitation_device_enrollment_terminal_notice.EnrollmentTerminalNotification",
+                "aura.invitation.device_enrollment_terminal_notice",
             ),
             ("recovery_protocol.RecoveryProtocol", "aura.recovery.grant"),
             (

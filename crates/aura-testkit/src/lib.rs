@@ -216,3 +216,7 @@ pub async fn create_test_fixture_with_device_id(
     // ID should construct a custom TestFixture via the harness builder directly.
     infrastructure::harness::TestFixture::with_config(config).await
 }
+
+/// Native descriptor locks shared by compile-fail harnesses.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod process_lock;

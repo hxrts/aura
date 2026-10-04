@@ -82,6 +82,7 @@ pub mod relay; // Relay selection for message forwarding
 pub mod reliability;
 pub mod route_crypto;
 pub mod runtime_capability; // Runtime theorem-pack capability admission
+pub mod secret_lifetime;
 pub mod secure;
 pub mod storage;
 pub mod supertraits;

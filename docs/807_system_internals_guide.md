@@ -347,3 +347,20 @@ The instrumentation contract is specified in [Runtime](104_runtime.md). All long
 - [Authorization](106_authorization.md) - Guard chain specification
 - [System Architecture](001_system_architecture.md) - Layer boundaries
 - [CLI and TUI](117_user_interface.md) - Terminal specification
+
+### Legacy physical bootstrap migration validation
+
+Run the agent `proved_legacy_bootstrap_tests` filter after changing bootstrap
+representation recovery. The fixture uses actual cryptographic key generation,
+Guardian envelope/AAD encoding, retained signed physical creation, and service
+restart. Use selected backing-loss helpers for immutable-record negatives;
+generic protected overwrite/delete must remain rejected. Verify missing
+original decision and missing durable creation index both prevent signing or
+migration publication. Multi-device, other-epoch, and original unissued
+enrollment continuation require their separate owner paths.
+
+### Required publication processing
+
+Use the runtime's required canonical commit owner to retain its exact original scheduler target. Await that target under the existing operation or startup owner. Diagnostic Batch subscriptions are suitable for observation and instrumentation; they do not identify which canonical publication completed. Preserve the original owner through helper calls and retries. Startup context carries the original shared window into replay before a service publishes Running. Chat's local public operation resource policy is 30 seconds; startup uses a separate 30-second resource policy. Signed protocol intervals and retained continuation deadlines remain separately enforced and are attenuated rather than renewed.
+
+Run `just ci-vm-session-lifecycle` after modifying runtime processing custody. The native inventory validates source declarations, discovers exact test harness names and requires actual execution of closed/foreign ingress, lag/coalescing, cancelled backpressure, original deadline and scheduler clock faults, coupled Chat mutation and retained startup replay. Failed startup cleanup has its own effect-backed five-second local cleanup policy; this cannot extend protocol eligibility or turn cleanup completion into full runtime drainage. Keep any inherited construction owner through startup rather than replacing its original deadline.

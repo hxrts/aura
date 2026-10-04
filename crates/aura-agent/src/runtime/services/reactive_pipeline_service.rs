@@ -35,6 +35,7 @@ struct ReactivePipelineShared {
     pipeline: RwLock<Option<ReactivePipeline>>,
     state: RwLock<ReactivePipelineServiceState>,
     lifecycle: Mutex<()>,
+    startup_window: RwLock<Option<aura_core::TimeoutBudget>>,
 }
 
 #[derive(Clone)]
@@ -67,6 +68,7 @@ impl ReactivePipelineService {
                 pipeline: RwLock::new(None),
                 state: RwLock::new(ReactivePipelineServiceState::Stopped),
                 lifecycle: Mutex::new(()),
+                startup_window: RwLock::new(None),
             }),
         }
     }
@@ -75,38 +77,62 @@ impl ReactivePipelineService {
         *self.shared.state.write().await = next;
     }
 
-    /// Re-publish committed facts into the views. Frontends register their
-    /// signals after the runtime starts, so the startup replay can run before
-    /// those signals exist; replaying once they do lets views that emit into
-    /// them (homes, for example) rebuild their state. Views apply facts
-    /// idempotently. A no-op while the pipeline is not running.
-    pub async fn replay_committed_facts(&self) -> Result<(), String> {
-        let pipeline = self.shared.pipeline.read().await;
-        let Some(pipeline) = pipeline.as_ref() else {
-            return Ok(());
-        };
-        let facts = self
-            .effects
-            .load_committed_facts(self.authority_id)
+    /// Required post-registration replay consumes the original retained startup
+    /// window; absence/stoppage never represents successful readiness.
+    pub async fn replay_committed_facts(&self) -> Result<(), ServiceError> {
+        let window = self
+            .shared
+            .startup_window
+            .read()
             .await
-            .map_err(|error| format!("load committed facts: {error}"))?;
-        tracing::info!(
-            count = facts.len(),
-            "replaying committed facts after signal registration"
-        );
-        if facts.is_empty() {
-            return Ok(());
-        }
-        pipeline
-            .publish_journal_facts(facts)
-            .await
-            .map_err(|error| format!("replay committed facts: {error}"))
+            .clone()
+            .ok_or_else(|| {
+                ServiceError::unavailable(self.name(), "original startup window is absent")
+            })?;
+        aura_core::time::timeout::execute_with_timeout_budget(
+            self.effects.as_ref(),
+            &window,
+            || async {
+                let pipeline = self.shared.pipeline.read().await;
+                let pipeline = pipeline.as_ref().ok_or_else(|| {
+                    ServiceError::unavailable(self.name(), "required reactive pipeline is absent")
+                })?;
+                let facts = self
+                    .effects
+                    .load_committed_facts(self.authority_id)
+                    .await
+                    .map_err(|source| {
+                        ServiceError::startup_failed(self.name(), "required replay read failed")
+                            .with_cause(source)
+                    })?;
+                // An empty replay still produces a genuine accepted target; it validates
+                // the same running ingress and its processing acknowledgment.
+                pipeline
+                    .replay_required(facts, self.effects.as_ref(), &window)
+                    .await
+                    .map_err(|source| {
+                        ServiceError::startup_failed(
+                            self.name(),
+                            "required replay processing failed",
+                        )
+                        .with_cause(source)
+                    })
+            },
+        )
+        .await
+        .map_err(|source| super::traits::service_window_failure(self.name(), source))
     }
 
     pub async fn is_running(&self) -> bool {
         let state = *self.shared.state.read().await;
         state == ReactivePipelineServiceState::Running
-            && self.shared.pipeline.read().await.is_some()
+            && self
+                .shared
+                .pipeline
+                .read()
+                .await
+                .as_ref()
+                .is_some_and(|pipeline| pipeline.terminal_failure().is_none())
     }
 
     async fn start_managed(&self, context: &RuntimeServiceContext) -> Result<(), ServiceError> {
@@ -133,42 +159,53 @@ impl ReactivePipelineService {
             self.diagnostics.clone(),
         );
 
-        self.effects.attach_fact_sink(pipeline.fact_sender());
         self.effects
-            .attach_view_update_sender(pipeline.update_sender());
+            .attach_fact_sink(pipeline.fact_sender())
+            .map_err(|source| {
+                ServiceError::startup_failed(
+                    "reactive_pipeline",
+                    "attaching original pipeline ingress failed",
+                )
+                .with_cause(source)
+            })?;
 
-        let existing = match self.effects.load_committed_facts(self.authority_id).await {
-            Ok(existing) => existing,
-            Err(error) => {
-                let _ = pipeline.shutdown().await;
-                self.mark_state(ReactivePipelineServiceState::Failed).await;
-                return Err(ServiceError::startup_failed(
-                    self.name(),
-                    format!("failed to load committed facts: {error}"),
-                ));
-            }
-        };
-        tracing::info!(
-            count = existing.len(),
-            "replaying committed facts at pipeline startup"
-        );
-        if !existing.is_empty() {
-            if let Err(error) = pipeline.publish_journal_facts(existing).await {
-                let _ = pipeline.shutdown().await;
-                self.mark_state(ReactivePipelineServiceState::Failed).await;
-                return Err(ServiceError::startup_failed(
-                    self.name(),
-                    format!("failed to replay committed facts: {error}"),
-                ));
-            }
+        // Install before the required await: cancellation of startup leaves the
+        // actual pipeline owned by this service and included in caller cleanup.
+        *self.shared.pipeline.write().await = Some(pipeline);
+        *self.shared.startup_window.write().await = Some(context.startup_window().clone());
+        if let Err(source) = self.replay_committed_facts().await {
+            self.mark_state(ReactivePipelineServiceState::Failed).await;
+            return Err(source);
         }
 
-        *self.shared.pipeline.write().await = Some(pipeline);
         self.mark_state(ReactivePipelineServiceState::Running).await;
         Ok(())
     }
 
     async fn stop_managed(&self) -> Result<(), ServiceError> {
+        let started = self.effects.physical_time().await.map_err(|source| {
+            ServiceError::unavailable(self.name(), "required cleanup clock failed")
+                .with_cause(source)
+        })?;
+        let original =
+            aura_core::TimeoutBudget::from_start_and_timeout(&started, Self::SHUTDOWN_TIMEOUT)
+                .map_err(|source| {
+                    ServiceError::new(
+                        self.name(),
+                        super::traits::ServiceErrorKind::InvalidConfiguration,
+                        "invalid original pipeline cleanup window",
+                    )
+                    .with_cause(source)
+                })?;
+        self.stop_with_original_budget(&original).await
+    }
+
+    /// Whole-runtime drain supplies its already held original resource window.
+    /// It must settle admitted canonical publications before entering this path.
+    pub(crate) async fn stop_with_original_budget(
+        &self,
+        original: &aura_core::TimeoutBudget,
+    ) -> Result<(), ServiceError> {
         let _guard = self.shared.lifecycle.lock().await;
         let current = *self.shared.state.read().await;
         if current == ReactivePipelineServiceState::Stopped {
@@ -177,42 +214,23 @@ impl ReactivePipelineService {
         validate_actor_transition(self.name(), current.phase(), ActorLifecyclePhase::Stopping)?;
         self.mark_state(ReactivePipelineServiceState::Stopping)
             .await;
-
         let pipeline = self.shared.pipeline.write().await.take();
-        let shutdown_error = if let Some(pipeline) = pipeline {
-            let timeout_ms = Self::SHUTDOWN_TIMEOUT.as_millis() as u64;
-            let shutdown_fut = std::pin::pin!(pipeline.shutdown());
-            let sleep_fut = std::pin::pin!(self.effects.sleep_ms(timeout_ms));
-            match futures::future::select(shutdown_fut, sleep_fut).await {
-                futures::future::Either::Left((result, _)) => result
-                    .map_err(|error| {
-                        ServiceError::shutdown_failed(
-                            self.name(),
-                            format!("reactive pipeline shutdown failed: {error}"),
-                        )
-                    })
-                    .err(),
-                futures::future::Either::Right(_) => {
-                    return Err(ServiceError::shutdown_failed(
-                        self.name(),
-                        "reactive pipeline shutdown timed out".to_string(),
-                    ));
-                }
-            }
-        } else {
-            None
-        };
-
-        match shutdown_error {
-            Some(error) => {
+        if let Some(pipeline) = pipeline {
+            if let Err(source) = pipeline
+                .shutdown_with_original_budget(self.effects.as_ref(), original)
+                .await
+            {
                 self.mark_state(ReactivePipelineServiceState::Failed).await;
-                Err(error)
-            }
-            None => {
-                self.mark_state(ReactivePipelineServiceState::Stopped).await;
-                Ok(())
+                return Err(ServiceError::shutdown_failed(
+                    self.name(),
+                    "required owned pipeline disposal failed",
+                )
+                .with_cause(source));
             }
         }
+        *self.shared.startup_window.write().await = None;
+        self.mark_state(ReactivePipelineServiceState::Stopped).await;
+        Ok(())
     }
 }
 
@@ -240,7 +258,14 @@ impl RuntimeService for ReactivePipelineService {
                 reason: "reactive pipeline entered failed lifecycle state".to_string(),
             },
             ReactivePipelineServiceState::Running => {
-                if self.shared.pipeline.read().await.is_some() {
+                if self
+                    .shared
+                    .pipeline
+                    .read()
+                    .await
+                    .as_ref()
+                    .is_some_and(|pipeline| pipeline.terminal_failure().is_none())
+                {
                     ServiceHealth::Healthy
                 } else {
                     ServiceHealth::Unhealthy {
@@ -249,5 +274,129 @@ impl RuntimeService for ReactivePipelineService {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::{TimeoutBudget, TimeoutBudgetError};
+    use aura_guards::GuardContextProvider;
+    use aura_testkit::time::ManualPhysicalClock;
+    use std::error::Error;
+
+    fn source_of<'a, T: Error + 'static>(error: &'a (dyn Error + 'static)) -> Option<&'a T> {
+        let mut current = Some(error);
+        while let Some(cause) = current {
+            if let Some(original) = cause.downcast_ref::<T>() {
+                return Some(original);
+            }
+            current = cause.source();
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn required_startup_replay_retains_original_window_after_signal_registration() {
+        let config = crate::core::AgentConfig::default();
+        let clock = ManualPhysicalClock::new(1000);
+        let effects = Arc::new(
+            crate::testing::simulation_effect_system(&config)
+                .with_physical_time_provider(Arc::new(clock.clone())),
+        );
+        let supervisor = Arc::new(crate::runtime::TaskSupervisor::new());
+        let start = effects
+            .physical_time()
+            .await
+            .expect("actual startup observation");
+        let window = TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(30))
+            .expect("original startup resource policy");
+        let context =
+            RuntimeServiceContext::new(supervisor.clone(), Arc::new(clock.clone()), window.clone());
+        let service = ReactivePipelineService::new(
+            effects.clone(),
+            effects.authority_id(),
+            Arc::new(RuntimeDiagnosticSink::new()),
+        );
+        service
+            .start(&context)
+            .await
+            .expect("actual empty replay processing ACK");
+        assert!(service.is_running().await);
+        assert!(service
+            .shared
+            .startup_window
+            .read()
+            .await
+            .as_ref()
+            .expect("retained original startup owner")
+            .shares_observation_owner_with(&window));
+        // Frontend signal registration does not grant a fresh service deadline.
+        aura_app::signal_defs::register_app_signals(&effects.reactive_handler())
+            .await
+            .expect("actual frontend signal registration");
+        clock.set_time(31_000);
+        let failure = service
+            .replay_committed_facts()
+            .await
+            .expect_err("late replay cannot allocate a renewed startup window");
+        assert!(matches!(
+            source_of::<TimeoutBudgetError>(&failure),
+            Some(TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 31_000,
+                ..
+            })
+        ));
+        service
+            .stop()
+            .await
+            .expect("actual owned scheduler destruction");
+        assert!(!service.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn required_startup_replay_clock_failure_keeps_pipeline_for_owned_cleanup() {
+        let config = crate::core::AgentConfig::default();
+        let clock = ManualPhysicalClock::new(3000);
+        let effects = Arc::new(
+            crate::testing::simulation_effect_system(&config)
+                .with_physical_time_provider(Arc::new(clock.clone())),
+        );
+        let supervisor = Arc::new(crate::runtime::TaskSupervisor::new());
+        let start = effects
+            .physical_time()
+            .await
+            .expect("actual startup observation");
+        let window = TimeoutBudget::from_start_and_timeout(&start, Duration::from_secs(30))
+            .expect("original startup resource policy");
+        let context = RuntimeServiceContext::new(supervisor, Arc::new(clock.clone()), window);
+        let service = ReactivePipelineService::new(
+            effects.clone(),
+            effects.authority_id(),
+            Arc::new(RuntimeDiagnosticSink::new()),
+        );
+        clock
+            .fail_next_observation(aura_core::effects::time::TimeError::OperationFailed {
+                reason: "actual startup provider failure".into(),
+            })
+            .await;
+        let failure = service
+            .start(&context)
+            .await
+            .expect_err("required startup clock cannot report readiness");
+        assert!(
+            source_of::<aura_core::effects::time::TimeError>(&failure).is_some(),
+            "actual provider cause survives service error: {failure}"
+        );
+        assert!(!service.is_running().await);
+        assert!(
+            service.shared.pipeline.read().await.is_some(),
+            "partial pipeline stays owned for cleanup"
+        );
+        service
+            .stop()
+            .await
+            .expect("partial actual scheduler cleanup");
+        assert!(service.shared.pipeline.read().await.is_none());
     }
 }

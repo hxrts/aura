@@ -28,7 +28,6 @@ pub enum TaskSpawnError {
 }
 
 /// Task spawning contract for runtime implementations.
-
 pub trait TaskSpawner: Send + Sync {
     /// Spawn a background task.
     fn spawn(&self, fut: BoxFuture<'static, ()>);

@@ -1,71 +1,26 @@
 //! Compile-fail guards for ownership capability boundaries.
-
-struct TrybuildLock {
-    path: std::path::PathBuf,
-}
-
-impl Drop for TrybuildLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
-fn trybuild_available() -> bool {
-    std::env::var_os("CARGO").is_some()
-        || std::process::Command::new("cargo")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-}
-
-fn trybuild_root() -> std::path::PathBuf {
-    let workspace_root = match std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-    {
-        Some(path) => path.to_path_buf(),
-        None => panic!("workspace root"),
-    };
-    let preferred = workspace_root.join("target/tests");
-    if std::fs::create_dir_all(&preferred).is_ok() {
-        return preferred;
-    }
-
-    let fallback = std::env::temp_dir()
-        .join("aura-trybuild")
-        .join(env!("CARGO_PKG_NAME"));
-    std::fs::create_dir_all(&fallback).unwrap_or_else(|error| {
-        panic!(
-            "failed to create fallback trybuild root {}: {error}",
-            fallback.display()
-        )
-    });
-    fallback
-}
-
-fn acquire_trybuild_lock() -> TrybuildLock {
-    let lock_root = trybuild_root();
-    let lock_path = lock_root.join("trybuild-lock");
-    loop {
-        match std::fs::create_dir(&lock_path) {
-            Ok(()) => return TrybuildLock { path: lock_path },
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(error) => panic!("failed to acquire trybuild lock: {error}"),
-        }
-    }
-}
+use aura_build_support as process_lock;
 
 #[test]
 fn ownership_compile_fail_guards() {
-    if !trybuild_available() {
-        eprintln!("skipping trybuild ownership guards: cargo is unavailable");
-        return;
-    }
-    let _lock = acquire_trybuild_lock();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    assert!(
+        std::process::Command::new(cargo)
+            .arg("--version")
+            .status()
+            .expect("required Cargo must be invocable")
+            .success(),
+        "required Cargo must succeed"
+    );
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("workspace root");
+    let _lock = process_lock::TrybuildProcessLock::acquire_workspace(
+        workspace,
+        std::time::Duration::from_secs(900),
+    )
+    .expect("bounded shared compile-fail lock");
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/boundaries/*.rs");
 }

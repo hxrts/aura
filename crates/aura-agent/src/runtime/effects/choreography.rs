@@ -556,6 +556,80 @@ mod tests {
 
     struct SessionFaultClock(std::sync::atomic::AtomicBool);
 
+    struct ReceiveSleepFault;
+    #[async_trait::async_trait]
+    impl PhysicalTimeEffects for ReceiveSleepFault {
+        async fn physical_time(
+            &self,
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+            Ok(aura_core::time::PhysicalTime::exact(100))
+        }
+        async fn sleep_ms(&self, _: u64) -> Result<(), aura_core::effects::TimeError> {
+            Err(aura_core::effects::TimeError::OperationFailed {
+                reason: "required receive sleep fault".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn receive_required_sleep_failure_retains_original_source_without_timer() {
+        use std::error::Error;
+        let authority = AuthorityId::new_from_entropy([0x7a; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+            &AgentConfig::default(),
+            authority,
+            0x7a0,
+        )
+        .expect("actual effects")
+        .with_physical_time_provider(Arc::new(ReceiveSleepFault));
+        let role = authority_device_role(authority, 0);
+        effects
+            .start_session(Uuid::from_u128(0x7a0), vec![role])
+            .await
+            .expect("actual session");
+        let error = effects
+            .receive_from_role_bytes(role)
+            .await
+            .expect_err("required sleep cannot establish expiry");
+        assert!(matches!(
+            &error,
+            ChoreographyError::RequiredTime {
+                operation: "receive_timeout_wait",
+                ..
+            }
+        ));
+        let mut source: &(dyn Error + 'static) = &error;
+        loop {
+            if matches!(
+                source.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::OperationFailed { .. })
+            ) {
+                break;
+            }
+            source = source
+                .source()
+                .expect("original required sleep cause retained");
+        }
+        assert_eq!(
+            effects.time_handler.get_statistics().await.active_timeouts,
+            0
+        );
+        assert_eq!(
+            effects
+                .choreography_state
+                .read()
+                .current_session()
+                .expect("owned session remains")
+                .metrics
+                .messages_received,
+            0
+        );
+        effects
+            .end_session()
+            .await
+            .expect("required session retirement");
+    }
+
     #[async_trait::async_trait]
     impl PhysicalTimeEffects for SessionFaultClock {
         async fn physical_time(

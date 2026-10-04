@@ -768,12 +768,12 @@ fn build_active_session_ownership_receipt(
 ) -> OwnershipReceipt {
     OwnershipReceipt {
         session_id: vm_session_id,
-        claim_id: next_owner.capability.generation,
+        claim_id: next_owner.capability.generation(),
         from_owner_id: previous_owner.owner_label.clone(),
-        from_generation: previous_owner.capability.generation,
+        from_generation: previous_owner.capability.generation(),
         to_owner_id: next_owner.owner_label.clone(),
-        to_generation: next_owner.capability.generation,
-        scope: telltale_scope_for_capability_scope(&next_owner.capability.scope),
+        to_generation: next_owner.capability.generation(),
+        scope: telltale_scope_for_capability_scope(next_owner.capability.scope()),
     }
 }
 
@@ -920,8 +920,8 @@ mod tests {
 
         assert_eq!(active_session.owner().owner_label, "delegated-owner");
         assert_eq!(
-            active_session.owner().capability.scope,
-            SessionOwnerCapabilityScope::Fragments(StdBTreeSet::from([format!(
+            active_session.owner().capability.scope(),
+            &SessionOwnerCapabilityScope::Fragments(StdBTreeSet::from([format!(
                 "bundle:{bundle_id}"
             ),]))
         );
@@ -947,7 +947,7 @@ mod tests {
             );
             assert_eq!(
                 ownership_receipt.to_generation,
-                stale_owner.capability.generation.saturating_add(1)
+                stale_owner.capability.generation().saturating_add(1)
             );
         }
         assert_eq!(manager.verify_coherence().await, CoherenceStatus::Coherent);
@@ -1065,8 +1065,8 @@ mod tests {
             original_owner.owner_label
         );
         assert_eq!(
-            active_session.owner().capability.scope,
-            active_session.routing_boundary().capability_scope
+            active_session.owner().capability.scope(),
+            &active_session.routing_boundary().capability_scope
         );
         effects
             .assert_owned_choreography_boundary(

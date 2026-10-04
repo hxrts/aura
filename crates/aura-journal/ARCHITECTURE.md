@@ -214,3 +214,7 @@ cargo test -p aura-journal --lib               # inline unit tests
 ## AMP checkpoint evidence
 
 `ChannelEpochState::canonical_checkpoint` contains the reducer-selected checkpoint or is absent when only policies, bootstrap metadata, or transitions have arrived. Partial epoch entries remain staged observations and cannot establish channel materialization. Checkpoint data is observed journal content; it is not a capability or a journal-issued commit-provenance token.
+
+Required journal persistence and flow-budget reads preserve selected storage
+failures and codec causes. Runtime handler injection reaches the actual journal
+owner; contextual serialization diagnostics retain the original error source.

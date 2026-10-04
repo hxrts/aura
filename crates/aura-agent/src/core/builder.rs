@@ -140,9 +140,7 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
-        let runtime = builder
-            .build_sync()
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build_sync().map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -165,10 +163,7 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
-        let runtime = builder
-            .build(ctx)
-            .await
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -191,9 +186,7 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
-        let runtime = builder
-            .build_sync()
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build_sync().map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -220,10 +213,7 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
-        let runtime = builder
-            .build(ctx)
-            .await
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }
@@ -255,10 +245,7 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
-        let runtime = builder
-            .build(ctx)
-            .await
-            .map_err(|e| AgentError::runtime(e.to_string()))?;
+        let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
     }

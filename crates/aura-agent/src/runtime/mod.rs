@@ -15,6 +15,8 @@
 //! - **Testing**: Mock handlers with deterministic behavior
 //! - **Simulation**: Deterministic handlers with scenario injection, time control
 
+mod entropy;
+
 // Runtime builder and container
 pub mod builder;
 

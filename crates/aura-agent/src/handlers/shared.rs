@@ -56,14 +56,17 @@ impl HandlerUtilities {
         payload: &T,
     ) -> AgentResult<()> {
         let _ = authority; // Authority is implied by the effect system's configured identity.
-        let binding_data = serde_json::to_vec(payload).map_err(|e| {
-            crate::core::AgentError::effects(format!("serialize fact payload: {e}"))
+        let binding_data = serde_json::to_vec(payload).map_err(|source| {
+            crate::core::AgentError::from(aura_core::AuraError::Serialization {
+                message: format!("serialize fact payload: {source}"),
+                source: Some(std::sync::Arc::new(source)),
+            })
         })?;
         effects
             .commit_generic_fact_bytes(context_id, binding_type, binding_data)
             .await
             .map(|_| ())
-            .map_err(|e| crate::core::AgentError::effects(format!("commit fact: {e}")))
+            .map_err(crate::core::AgentError::from)
     }
 
     /// Append a generic fact (raw bytes) into the authority-scoped journal.
@@ -82,7 +85,7 @@ impl HandlerUtilities {
             .commit_generic_fact_bytes(context_id, binding_type, binding_data.to_vec())
             .await
             .map(|_| ())
-            .map_err(|e| crate::core::AgentError::effects(format!("commit fact: {e}")))
+            .map_err(crate::core::AgentError::from)
     }
 
     /// Validate authority context

@@ -77,7 +77,9 @@ pub use ota_transition::{
     staged_residency_for_compatibility, InFlightIncompatibilityAction, NewSessionAdmission,
     ScopedUpgradeState, SessionCompatibilityPlan,
 };
-pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};
+pub use sync::{
+    RequiredPeerSyncError, SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth,
+};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};

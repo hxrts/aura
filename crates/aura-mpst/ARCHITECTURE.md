@@ -132,3 +132,24 @@ cargo test -p aura-mpst --lib             # inline unit tests
 - [MPST and Choreography](../../docs/110_mpst_and_choreography.md)
 - [Choreography Guide](../../docs/803_choreography_guide.md)
 - [Theoretical Model](../../docs/002_theoretical_model.md)
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.

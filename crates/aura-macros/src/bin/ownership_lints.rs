@@ -989,10 +989,31 @@ fn has_marker_attr(attrs: &[syn::Attribute], name: &str) -> bool {
 }
 
 fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+    // Only configurations that logically require `test` exclude production code.
+    // In particular, not(test) and any(test, unix) are production configurations.
+    fn requires_test(meta: &syn::Meta) -> bool {
+        match meta {
+            syn::Meta::Path(path) => path.is_ident("test"),
+            syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
+                let Ok(items) = list.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, Token![,]>::parse_terminated,
+                ) else {
+                    return false;
+                };
+                if list.path.is_ident("all") {
+                    items.iter().any(requires_test)
+                } else {
+                    !items.is_empty() && items.iter().all(requires_test)
+                }
+            }
+            _ => false,
+        }
+    }
     attrs.iter().any(|attr| {
-        matches!(attr.style, AttrStyle::Outer)
-            && attr.path().is_ident("cfg")
-            && attr.to_token_stream().to_string().contains("test")
+        attr.path().is_ident("cfg")
+            && attr
+                .parse_args::<syn::Meta>()
+                .is_ok_and(|meta| requires_test(&meta))
     })
 }
 
@@ -2266,18 +2287,33 @@ fn scan_actor_owned_task_spawn(file: &Path, syntax: &File) -> Vec<String> {
 
     impl<'ast> Visit<'ast> for Visitor<'_> {
         fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
             self.visit_public_fn(node);
             visit::visit_item_fn(self, node);
         }
 
         fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
             self.visit_public_impl_fn(node);
             visit::visit_impl_item_fn(self, node);
         }
 
         fn visit_item_struct(&mut self, node: &'ast ItemStruct) {
+            if has_cfg_test_attr(&node.attrs) {
+                return;
+            }
             self.visit_public_struct(node);
             visit::visit_item_struct(self, node);
+        }
+
+        fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+            if !has_cfg_test_attr(&node.attrs) {
+                visit::visit_item_mod(self, node);
+            }
         }
 
         fn visit_expr_call(&mut self, node: &'ast ExprCall) {
@@ -2407,33 +2443,6 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
     ) {
         return Vec::new();
     }
-    fn is_explicit_test_only(attrs: &[syn::Attribute]) -> bool {
-        fn requires_test(meta: &syn::Meta) -> bool {
-            match meta {
-                syn::Meta::Path(path) => path.is_ident("test"),
-                syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
-                    let nested = list.parse_args_with(
-                        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                    );
-                    nested.is_ok_and(|nested| {
-                        !nested.is_empty()
-                            && if list.path.is_ident("all") {
-                                nested.iter().any(requires_test)
-                            } else {
-                                nested.iter().all(requires_test)
-                            }
-                    })
-                }
-                syn::Meta::List(_) | syn::Meta::NameValue(_) => false,
-            }
-        }
-        attrs.iter().any(|attr| {
-            attr.path().is_ident("cfg")
-                && attr
-                    .parse_args::<syn::Meta>()
-                    .is_ok_and(|meta| requires_test(&meta))
-        })
-    }
     struct WindowVisitor {
         file: PathBuf,
         violations: Vec<String>,
@@ -2464,20 +2473,20 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
     }
     impl<'ast> Visit<'ast> for WindowVisitor {
         fn visit_item_fn(&mut self, node: &'ast ItemFn) {
-            if !is_explicit_test_only(&node.attrs) && !has_test_attr(&node.attrs) {
+            if !has_cfg_test_attr(&node.attrs) && !has_test_attr(&node.attrs) {
                 self.check_attempt_signature(&node.sig);
                 visit::visit_item_fn(self, node);
             }
         }
         fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
-            if is_explicit_test_only(&node.attrs) || has_test_attr(&node.attrs) {
+            if has_cfg_test_attr(&node.attrs) || has_test_attr(&node.attrs) {
                 return;
             }
             self.check_attempt_signature(&node.sig);
             visit::visit_impl_item_fn(self, node);
         }
         fn visit_item_mod(&mut self, node: &'ast ItemMod) {
-            if !is_explicit_test_only(&node.attrs) {
+            if !has_cfg_test_attr(&node.attrs) {
                 visit::visit_item_mod(self, node);
             }
         }
@@ -2532,7 +2541,7 @@ fn scan_enrollment_durable_window_boundary(file: &Path, syntax: &File) -> Vec<St
             visit::visit_expr_method_call(self, node);
         }
         fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
-            if is_explicit_test_only(&node.attrs) {
+            if has_cfg_test_attr(&node.attrs) {
                 return;
             }
             struct RawImports {
@@ -3229,6 +3238,32 @@ mod tests {
     use super::scan_semantic_owner_stable_wrapper;
     use std::path::Path;
     use syn::parse_file;
+
+    #[test]
+    fn spawn_policy_excludes_only_proven_test_configurations() {
+        let path = Path::new("crates/aura-core/src/example.rs");
+        for cfg in ["test", "all(test, unix)", "any(test, all(test, unix))"] {
+            let source = format!(
+                "#[cfg({cfg})] mod model {{ fn run() {{ std::thread::spawn(|| {{}}); }} }}"
+            );
+            assert!(
+                super::scan_actor_owned_task_spawn(path, &parse_file(&source).unwrap()).is_empty()
+            );
+        }
+        for cfg in [
+            "not(test)",
+            "any(test, unix)",
+            "feature = \"test\"",
+            "all(unix, not(test))",
+        ] {
+            let source = format!(
+                "#[cfg({cfg})] mod production {{ fn run() {{ std::thread::spawn(|| {{}}); }} }}"
+            );
+            assert!(
+                !super::scan_actor_owned_task_spawn(path, &parse_file(&source).unwrap()).is_empty()
+            );
+        }
+    }
 
     #[test]
     fn durable_enrollment_window_rejects_raw_executor_and_aliased_import() {

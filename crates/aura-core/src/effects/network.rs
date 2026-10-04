@@ -49,6 +49,15 @@ impl From<String> for NetworkAddress {
 /// Network operation errors
 #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum NetworkError {
+    /// A required adapter failure retains the original native effect error.
+    #[error("network adapter {operation} failed: {source}")]
+    BackendFailure {
+        /// Required operation at the adapter boundary.
+        operation: String,
+        /// Actual provider or guard-chain cause.
+        #[source]
+        source: crate::AuraError,
+    },
     /// Failed to send a message to the destination
     #[error("Failed to send message to {peer_id:?}: {reason}")]
     SendFailed {

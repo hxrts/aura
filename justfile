@@ -483,6 +483,11 @@ ci-format:
 # Note: Nix clippy may not catch all implicit_clone cases; GitHub CI uses newer clippy
 ci-clippy:
     just toolkit-clippy-strict
+    just ci-policy-toolkit-clippy
+
+# The repo-local policy toolkit is excluded from the Aura Cargo workspace.
+ci-policy-toolkit-clippy:
+    cargo clippy --manifest-path toolkit/xtask/Cargo.toml --all-targets -- -D warnings
 
 # Build check
 ci-build:
@@ -643,6 +648,7 @@ ci-choreo-concurrency-contracts:
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 ci-agent-wasm:
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
     CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-machine"
 
@@ -746,6 +752,14 @@ ci-frontend-portability:
 
 ci-testkit-exception-boundary:
     just _policy-check check testing-exception-boundary
+
+# Required real backend/worker acknowledgment and exact drop custody tests.
+ci-vm-session-lifecycle:
+    just _policy-check check vm-session-lifecycle
+
+# Real FROST signatures, substitution rejection and public-only API guard.
+ci-public-frost-signing:
+    just _policy-check check public-frost-signing
 
 ci-ownership-policy:
     just _policy-check check ownership-policy

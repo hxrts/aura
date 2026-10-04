@@ -64,11 +64,18 @@ pub struct MockEffects {
 }
 
 #[derive(Debug)]
+struct MockSecureRecord {
+    bytes: Vec<u8>,
+    immutable: bool,
+}
+
+#[derive(Debug)]
 struct MockState {
     /// Deterministic RNG for reproducible tests
     rng: ChaCha20Rng,
     /// Mock storage backend
     storage: HashMap<String, Vec<u8>>,
+    secure_storage: HashMap<aura_core::effects::SecureStorageLocation, MockSecureRecord>,
     /// Logical clock state
     logical_clock: LogicalTime,
     /// Physical time counter (deterministic)
@@ -98,6 +105,7 @@ impl MockEffects {
             state: Arc::new(Mutex::new(MockState {
                 rng: ChaCha20Rng::from_seed(seed),
                 storage: HashMap::new(),
+                secure_storage: HashMap::new(),
                 logical_clock: LogicalTime {
                     vector: VectorClock::default(),
                     lamport: 0,
@@ -113,6 +121,7 @@ impl MockEffects {
     pub fn reset(&self) {
         let mut state = self.state.lock().unwrap();
         state.storage.clear();
+        state.secure_storage.clear();
         state.logical_clock = LogicalTime {
             vector: VectorClock::default(),
             lamport: 0,
@@ -498,6 +507,23 @@ impl CryptoExtendedEffects for MockEffects {
                  Use 1-of-1 for single-signer or threshold>=2 for multi-party."
             )))
         }
+    }
+
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
+        use rand::SeedableRng;
+        let seed = self.random_bytes_32().await;
+        let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+        aura_core::crypto::participant_proof::sign_participant_key_proof(
+            message,
+            key_package,
+            mode,
+            &mut rng,
+        )
     }
 
     async fn sign_with_key(
@@ -1000,17 +1026,20 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         #[derive(Debug, thiserror::Error)]
         #[error("mock secure storage state lock poisoned")]
         struct MockSecureStoragePoisoned;
-        let key = format!("secure_{}", location.full_path());
+        let key = location.clone();
         let mut state = self.state.lock().map_err(|_| AuraError::Storage {
             message: "publish immutable mock secure record".into(),
             source: Some(std::sync::Arc::new(MockSecureStoragePoisoned)),
         })?;
-        match state.storage.entry(key) {
+        match state.secure_storage.entry(key) {
             std::collections::hash_map::Entry::Occupied(_) => {
                 Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists)
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(data.to_vec());
+                entry.insert(MockSecureRecord {
+                    bytes: data.to_vec(),
+                    immutable: false,
+                });
                 Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::Created)
             }
         }
@@ -1025,17 +1054,21 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         #[derive(Debug, thiserror::Error)]
         #[error("mock secure storage state lock poisoned")]
         struct MockSecureStoragePoisoned;
-        let key = format!("secure_{}", location.full_path());
+        let key = location.clone();
         let mut state = self.state.lock().map_err(|_| AuraError::Storage {
             message: "publish immutable mock secure record".into(),
             source: Some(std::sync::Arc::new(MockSecureStoragePoisoned)),
         })?;
-        match state.storage.entry(key) {
-            std::collections::hash_map::Entry::Occupied(_) => {
+        match state.secure_storage.entry(key) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                entry.get_mut().immutable = true;
                 Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::AlreadyExists)
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(data.to_vec());
+                entry.insert(MockSecureRecord {
+                    bytes: data.to_vec(),
+                    immutable: true,
+                });
                 Ok(aura_core::effects::secure::ImmutableSecureStoreOutcome::Created)
             }
         }
@@ -1047,10 +1080,35 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         data: &[u8],
         _capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<(), AuraError> {
-        // Use regular storage with a secure_ prefix
-        let key = format!("secure_{}", location.full_path());
-        let mut state = self.state.lock().unwrap();
-        state.storage.insert(key, data.to_vec());
+        #[derive(Debug, thiserror::Error)]
+        #[error("mock secure storage state lock poisoned")]
+        struct MockSecureStoragePoisoned;
+        let mut state = self.state.lock().map_err(|_| AuraError::Storage {
+            message: "mock secure state lock poisoned".into(),
+            source: Some(std::sync::Arc::new(MockSecureStoragePoisoned)),
+        })?;
+
+        if state
+            .secure_storage
+            .get(location)
+            .is_some_and(|record| record.immutable)
+        {
+            return Err(AuraError::PermissionDenied {
+                message: "immutable mock secure record rejects replacement".into(),
+                source: Some(std::sync::Arc::new(
+                    aura_core::effects::secure::ImmutableSecureRecordMutation {
+                        operation: "secure_store",
+                    },
+                )),
+            });
+        }
+        state.secure_storage.insert(
+            location.clone(),
+            MockSecureRecord {
+                bytes: data.to_vec(),
+                immutable: false,
+            },
+        );
         Ok(())
     }
 
@@ -1059,13 +1117,14 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         location: &aura_core::effects::SecureStorageLocation,
         _required_capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<u8>, AuraError> {
-        let key = format!("secure_{}", location.full_path());
         let state = self.state.lock().unwrap();
         state
-            .storage
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| AuraError::storage(format!("Secure key not found: {key}")))
+            .secure_storage
+            .get(location)
+            .map(|record| record.bytes.clone())
+            .ok_or_else(|| {
+                AuraError::storage(format!("Secure key not found: {}", location.full_path()))
+            })
     }
 
     async fn secure_delete(
@@ -1073,9 +1132,22 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         location: &aura_core::effects::SecureStorageLocation,
         _required_capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<(), AuraError> {
-        let key = format!("secure_{}", location.full_path());
         let mut state = self.state.lock().unwrap();
-        state.storage.remove(&key);
+        if state
+            .secure_storage
+            .get(location)
+            .is_some_and(|record| record.immutable)
+        {
+            return Err(AuraError::PermissionDenied {
+                message: "immutable mock secure record rejects deletion".into(),
+                source: Some(std::sync::Arc::new(
+                    aura_core::effects::secure::ImmutableSecureRecordMutation {
+                        operation: "secure_delete",
+                    },
+                )),
+            });
+        }
+        state.secure_storage.remove(location);
         Ok(())
     }
 
@@ -1083,9 +1155,8 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         &self,
         location: &aura_core::effects::SecureStorageLocation,
     ) -> Result<bool, AuraError> {
-        let key = format!("secure_{}", location.full_path());
         let state = self.state.lock().unwrap();
-        Ok(state.storage.contains_key(&key))
+        Ok(state.secure_storage.contains_key(location))
     }
 
     async fn secure_list_keys(
@@ -1093,15 +1164,16 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         namespace: &str,
         _required_capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<String>, AuraError> {
-        let prefix = format!("secure_{namespace}/");
         let state = self.state.lock().unwrap();
-        let keys: Vec<String> = state
-            .storage
+        Ok(state
+            .secure_storage
             .keys()
-            .filter(|k| k.starts_with(&prefix))
-            .map(|k| k.strip_prefix(&prefix).unwrap_or(k).to_string())
-            .collect();
-        Ok(keys)
+            .filter(|location| location.namespace == namespace)
+            .map(|location| match &location.sub_key {
+                Some(sub) => format!("{}/{sub}", location.key),
+                None => location.key.clone(),
+            })
+            .collect())
     }
 
     async fn secure_generate_key(
@@ -1129,10 +1201,8 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
                 )));
             }
         };
-        // Store private key
-        let key = format!("secure_{}", location.full_path());
-        let mut state = self.state.lock().unwrap();
-        state.storage.insert(key, key_bytes);
+        self.secure_store(location, &key_bytes, _capabilities)
+            .await?;
         Ok(generated)
     }
 
@@ -1227,5 +1297,51 @@ mod tests {
         let time2 = effects.physical_time().await.unwrap();
 
         assert_eq!(time2.ts_ms - time1.ts_ms, 1000);
+    }
+}
+
+#[cfg(test)]
+mod secure_record_scope_tests {
+    use super::*;
+    use aura_core::effects::secure::ImmutableSecureStoreOutcome;
+    use aura_core::effects::{SecureStorageEffects, SecureStorageLocation};
+
+    #[tokio::test]
+    async fn immutable_secure_original_cannot_be_replaced_through_any_mock_storage_surface(
+    ) -> Result<(), AuraError> {
+        let effects = MockEffects::deterministic();
+        let location = SecureStorageLocation::new("first_decision", "original");
+        assert_eq!(
+            effects
+                .secure_create_mutable(&location, b"first", &[])
+                .await?,
+            ImmutableSecureStoreOutcome::Created
+        );
+        effects.secure_store(&location, b"checkpoint", &[]).await?;
+        assert_eq!(
+            effects
+                .secure_store_immutable(&location, b"replacement", &[])
+                .await?,
+            ImmutableSecureStoreOutcome::AlreadyExists
+        );
+        assert!(effects
+            .secure_store(&location, b"replacement", &[])
+            .await
+            .is_err());
+        assert!(effects.secure_delete(&location, &[]).await.is_err());
+        assert!(effects
+            .secure_generate_key(&location, "ed25519", &[])
+            .await
+            .is_err());
+        // Ordinary storage cannot collide with the old string prefix layout.
+        effects
+            .store("secure_first_decision/original", b"ordinary".to_vec())
+            .await?;
+        effects.clear_all().await?;
+        assert_eq!(
+            effects.secure_retrieve(&location, &[]).await?,
+            b"checkpoint"
+        );
+        Ok(())
     }
 }

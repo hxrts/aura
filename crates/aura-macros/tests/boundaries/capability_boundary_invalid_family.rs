@@ -2,7 +2,7 @@ use aura_core::LifecyclePublicationCapability;
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "demo-capability",
+    capability = "demo-capability", capability_type = LifecyclePublicationCapability,
     family = "not-a-real-family"
 )]
 fn capability_surface() -> &'static LifecyclePublicationCapability {

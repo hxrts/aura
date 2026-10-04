@@ -144,7 +144,14 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
-        self.take_inbound_envelope(|_| true)
+        match self.take_inbound_envelope(|_| true) {
+            Ok(envelope) => return Ok(envelope),
+            Err(TransportError::NoMessage) => {}
+            Err(error) => return Err(error),
+        }
+        let envelope = self.receive_configured_envelope().await?;
+        self.transport.record_receive();
+        Ok(envelope)
     }
 
     async fn receive_envelope_from(
@@ -152,44 +159,44 @@ impl TransportEffects for AuraEffectSystem {
         source: AuthorityId,
         context: ContextId,
     ) -> Result<TransportEnvelope, TransportError> {
-        let self_device_id = self.config.device_id.to_string();
-        let inbox = self.transport.inbox();
-        let maybe = {
-            let mut inbox = inbox.write();
-            // In shared transport mode, filter by destination AND source/context
-            inbox
-                .iter()
-                .position(|env| {
-                    let device_match = env
-                        .metadata
-                        .get("aura-destination-device-id")
-                        .is_some_and(|dst| dst == &self_device_id);
-
-                    if env.destination == self.authority_id {
-                        env.source == source
-                            && env.context == context
-                            && match env.metadata.get("aura-destination-device-id") {
-                                Some(dst) => dst == &self_device_id,
-                                None => true,
-                            }
-                    } else {
-                        env.source == source && env.context == context && device_match
-                    }
-                })
-                .map(|pos| inbox.remove(pos))
-        };
-
-        match maybe {
-            Some(env) => {
-                validate_inbound_transport_receipt(&env)?;
-                self.transport.record_receive();
-                Ok(env)
-            }
-            None => Err(TransportError::NoMessage),
+        match self.take_inbound_envelope(|envelope| {
+            envelope.source == source && envelope.context == context
+        }) {
+            Ok(envelope) => return Ok(envelope),
+            Err(TransportError::NoMessage) => {}
+            Err(error) => return Err(error),
         }
+        for provider in &self.custom_transports {
+            match provider.receive_envelope_from(source, context).await {
+                Ok(envelope) => {
+                    if envelope.source != source || envelope.context != context {
+                        return Err(TransportError::InvalidEnvelope {
+                        reason: "configured transport returned an envelope outside its requested source/context".into(),
+                    });
+                    }
+                    self.validate_configured_envelope(&envelope)?;
+                    self.transport.record_receive();
+                    return Ok(envelope);
+                }
+                Err(TransportError::NoMessage) => continue,
+                Err(error) => {
+                    self.transport.record_receive_failure();
+                    return Err(error);
+                }
+            }
+        }
+        Err(TransportError::NoMessage)
     }
 
     async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool {
+        if !self.custom_transports.is_empty() {
+            for provider in &self.custom_transports {
+                if provider.is_channel_established(context, peer).await {
+                    return true;
+                }
+            }
+            return false;
+        }
         if let Some(shared) = self.transport.shared_transport() {
             return shared.is_peer_online(peer);
         }
@@ -201,6 +208,15 @@ impl TransportEffects for AuraEffectSystem {
 
     async fn get_transport_stats(&self) -> TransportStats {
         let mut stats = self.transport.stats_snapshot();
+        if !self.custom_transports.is_empty() {
+            for provider in &self.custom_transports {
+                let selected = provider.get_transport_stats().await;
+                stats.active_channels = stats
+                    .active_channels
+                    .saturating_add(selected.active_channels);
+            }
+            return stats;
+        }
 
         if let Some(shared) = self.transport.shared_transport() {
             let active = shared.connected_peer_count(self.authority_id) as u32;
@@ -363,6 +379,12 @@ async fn send_planned_envelope(
     _route: &Route,
 ) -> Result<(), TransportError> {
     enforce_transport_payload_size(&envelope)?;
+    if !effects.custom_transports.is_empty() {
+        let selected = effects
+            .select_custom_transport(envelope.context, envelope.destination)
+            .await;
+        return selected.send_envelope(envelope).await;
+    }
     if let Some(shared) = effects.transport.shared_transport() {
         shared.route_envelope(envelope);
         return Ok(());
@@ -1107,9 +1129,18 @@ mod tests {
             Arc::new(effects.time_effects().clone()),
         );
         effects.attach_rendezvous_manager(manager.clone());
+        let original_startup = aura_core::TimeoutBudget::from_start_and_timeout(
+            &effects
+                .physical_time()
+                .await
+                .expect("actual transport fixture startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original transport fixture startup window");
         let service_context = RuntimeServiceContext::new(
             Arc::new(TaskSupervisor::new()),
             Arc::new(effects.time_effects().clone()),
+            original_startup,
         );
         RuntimeService::start(&manager, &service_context)
             .await
@@ -1157,9 +1188,18 @@ mod tests {
             Arc::new(effects.time_effects().clone()),
         );
         effects.attach_rendezvous_manager(manager.clone());
+        let original_startup = aura_core::TimeoutBudget::from_start_and_timeout(
+            &effects
+                .physical_time()
+                .await
+                .expect("actual transport fixture startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original transport fixture startup window");
         let service_context = RuntimeServiceContext::new(
             Arc::new(TaskSupervisor::new()),
             Arc::new(effects.time_effects().clone()),
+            original_startup,
         );
         RuntimeService::start(&manager, &service_context)
             .await
@@ -1402,5 +1442,60 @@ mod tests {
             error,
             TransportError::ReceiptValidationFailed { .. }
         ));
+    }
+}
+
+impl AuraEffectSystem {
+    /// Extract only physical configured ingress. Consumer APIs check their retained
+    /// matching inbox first; session-specific pumps cannot take/requeue an unrelated
+    /// retained frame repeatedly and starve the next physical frame.
+    pub(super) async fn receive_configured_envelope(
+        &self,
+    ) -> Result<TransportEnvelope, TransportError> {
+        for provider in &self.custom_transports {
+            match provider.receive_envelope().await {
+                Ok(envelope) => {
+                    self.validate_configured_envelope(&envelope)?;
+                    return Ok(envelope);
+                }
+                Err(TransportError::NoMessage) => continue,
+                Err(error) => {
+                    self.transport.record_receive_failure();
+                    return Err(error);
+                }
+            }
+        }
+        Err(TransportError::NoMessage)
+    }
+
+    fn validate_configured_envelope(
+        &self,
+        envelope: &TransportEnvelope,
+    ) -> Result<(), TransportError> {
+        let addressed_here = match envelope.metadata.get("aura-destination-device-id") {
+            Some(device) => device == &self.device_id().to_string(),
+            None => envelope.destination == self.authority_id,
+        };
+        if !addressed_here {
+            return Err(TransportError::InvalidEnvelope {
+                reason: "configured ingress belongs to another physical receiver".into(),
+            });
+        }
+        validate_inbound_transport_receipt(envelope)
+    }
+
+    /// Select one explicit provider before emission. A failed send never changes providers.
+    async fn select_custom_transport(
+        &self,
+        context: ContextId,
+        peer: AuthorityId,
+    ) -> &dyn TransportEffects {
+        for provider in &self.custom_transports {
+            if provider.is_channel_established(context, peer).await {
+                return provider.as_ref();
+            }
+        }
+        // Caller admits this branch only for the nonempty bounded configured inventory.
+        self.custom_transports[0].as_ref()
     }
 }

@@ -228,17 +228,8 @@ impl SetupCompletion {
     }
 }
 
-const GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY: &str = "guardian_setup_input_validation";
-const GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY: &str = "guardian_setup_completion_build";
-
 /// Validate the feature-level guardian setup parameter shape.
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "guardian_setup_input_validation",
-    family = "runtime_helper"
-)]
 pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Result<(), String> {
-    let _ = GUARDIAN_SETUP_INPUT_VALIDATION_CAPABILITY;
     if guardians.len() != 3 {
         return Err("Guardian setup requires exactly three guardians".to_string());
     }
@@ -259,26 +250,15 @@ pub fn validate_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> Resul
 }
 
 /// Build the final setup completion payload from guardian responses.
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "guardian_setup_completion_build",
-    family = "runtime_helper"
-)]
 pub fn build_setup_completion(
     setup_id: &str,
     threshold: u16,
     acceptances: Vec<GuardianAcceptance>,
 ) -> Result<SetupCompletion, String> {
-    let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     build_setup_completion_with_material(setup_id, threshold, acceptances, Vec::new(), Vec::new())
 }
 
 /// Build the final setup completion payload from verified guardian responses and generated shares.
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "guardian_setup_completion_build",
-    family = "runtime_helper"
-)]
 pub fn build_setup_completion_with_material(
     setup_id: &str,
     threshold: u16,
@@ -286,7 +266,6 @@ pub fn build_setup_completion_with_material(
     encrypted_shares: Vec<EncryptedKeyShare>,
     public_key_package: Vec<u8>,
 ) -> Result<SetupCompletion, String> {
-    let _ = GUARDIAN_SETUP_COMPLETION_BUILD_CAPABILITY;
     let accepted_guardians: Vec<AuthorityId> = acceptances
         .iter()
         .filter(|acceptance| acceptance.decision() == GuardianDecision::Accepted)

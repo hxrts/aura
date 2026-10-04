@@ -311,39 +311,39 @@ impl
 
         let physical_time_provider = self.time.0;
 
-        // Build the runtime system
-        // The supplied physical-time provider reaches the actual effect owner.
-        // Other custom provider wiring still requires independent integration.
-        let _ = (
-            self.crypto,
-            self.storage,
-            self.random,
-            self.console,
-            self.transports,
-        );
+        let providers = crate::runtime::effects::SelectedCustomProviders {
+            crypto: self.crypto.0,
+            storage: self.storage.0,
+            random: self.random.0,
+            console: self.console.0,
+            transports: self.transports,
+        };
 
         let runtime = match self.execution_mode {
             ExecutionMode::Testing => EffectSystemBuilder::testing()
                 .with_config(self.config)
+                .with_custom_providers(providers)
                 .with_authority(authority_id)
                 .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Production => EffectSystemBuilder::production()
                 .with_config(self.config)
+                .with_custom_providers(providers)
                 .with_authority(authority_id)
                 .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
+                .with_custom_providers(providers)
                 .with_authority(authority_id)
                 .with_physical_time_provider(physical_time_provider.clone())
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -351,6 +351,14 @@ impl
 
     /// Build the agent synchronously (for testing).
     pub fn build_sync(self) -> AgentResult<AuraAgent> {
+        let providers = crate::runtime::effects::SelectedCustomProviders {
+            crypto: self.crypto.0,
+            storage: self.storage.0,
+            random: self.random.0,
+            console: self.console.0,
+            transports: self.transports,
+        };
+
         let physical_time_provider = self.time.0;
         let authority_id = self.authority_id.ok_or(BuildError::BootstrapRequired {
             preset: "custom",
@@ -361,10 +369,11 @@ impl
         let runtime = match self.execution_mode {
             ExecutionMode::Testing => EffectSystemBuilder::testing()
                 .with_config(self.config)
+                .with_custom_providers(providers)
                 .with_authority(authority_id)
                 .with_physical_time_provider(physical_time_provider.clone())
                 .build_sync()
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Production => {
                 return Err(BuildError::RuntimeConstruction(
                     "production mode requires async build".to_string(),
@@ -373,10 +382,11 @@ impl
             }
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
+                .with_custom_providers(providers)
                 .with_authority(authority_id)
                 .with_physical_time_provider(physical_time_provider.clone())
                 .build_sync()
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))

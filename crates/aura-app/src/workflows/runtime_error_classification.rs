@@ -40,6 +40,7 @@ pub(crate) fn native_runtime_failure_code(
         K::Storage => C::StorageFailure,
         K::Journal => C::JournalFailure,
         K::Reactive => C::ReactiveFailure,
+        K::BudgetExceeded => C::BudgetExceeded,
         K::Unauthorized => C::PermissionDenied,
         K::Validation => C::InvalidArgument,
         K::NotFound | K::ContextNotFound => C::NotFound,
@@ -178,6 +179,9 @@ pub(crate) fn runtime_source_failure_code(
         }
         if let Some(budget) = cause.downcast_ref::<aura_core::TimeoutBudgetError>() {
             return Some(timeout_budget_failure_code(budget));
+        }
+        if cause.is::<aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable>() {
+            return Some(C::Unavailable);
         }
         if let Some(core) = cause.downcast_ref::<A>() {
             let code = match core {
@@ -593,4 +597,46 @@ mod tests {
         );
         assert_eq!(native_runtime_failure_code(&text), Some(C::InternalError));
     }
+}
+
+#[cfg(test)]
+mod required_budget_projection_tests {
+    #[test]
+    fn budget_and_authorization_have_distinct_canonical_codes() {
+        use crate::runtime_bridge::{RuntimeBridgeError, RuntimeBridgeErrorKind as K};
+        use crate::ui_contract::SemanticFailureCode as C;
+        for (kind, code) in [
+            (K::BudgetExceeded, C::BudgetExceeded),
+            (K::Unauthorized, C::PermissionDenied),
+        ] {
+            let native = RuntimeBridgeError::with_source(
+                crate::IntentError::service_error("opaque operation context"),
+                aura_core::AuraError::internal("same display text"),
+            )
+            .with_kind(kind);
+            assert_eq!(super::native_runtime_failure_code(&native), Some(code));
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn lifetime_provider_unavailability_has_stable_code_and_keeps_original_source() {
+    use crate::ui_contract::SemanticFailureCode as C;
+    use aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable as U;
+    for reason in [
+        U::UnsupportedSelectedProvider,
+        U::MissingSelectedCustody,
+        U::LegacyMigrationRequired,
+    ] {
+        let original = reason.into_aura_error();
+        assert_eq!(runtime_source_failure_code(&original), Some(C::Unavailable));
+        assert!(std::error::Error::source(&original)
+            .and_then(|source| source.downcast_ref::<U>())
+            .is_some());
+    }
+    assert_eq!(
+        runtime_source_failure_code(&aura_core::AuraError::storage("same message")),
+        Some(C::StorageFailure)
+    );
 }

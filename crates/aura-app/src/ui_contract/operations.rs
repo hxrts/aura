@@ -208,6 +208,8 @@ pub enum SemanticFailureDomain {
 pub enum SemanticFailureCode {
     UnsupportedCommand,
     PermissionDenied,
+    /// The actual required flow budget was insufficient.
+    BudgetExceeded,
     NotMember,
     NotFound,
     InvalidArgument,
@@ -921,6 +923,7 @@ mod tests {
     #[test]
     fn native_failure_codes_preserve_domain_across_foreign_snapshot_roundtrip() {
         for (code, wire) in [
+            (SemanticFailureCode::BudgetExceeded, "budget_exceeded"),
             (SemanticFailureCode::CryptoFailure, "crypto_failure"),
             (
                 SemanticFailureCode::SerializationFailure,

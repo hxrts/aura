@@ -4,6 +4,16 @@ This guide covers how to work with Aura's algebraic effect system. Use it when y
 
 For the full effect system specification, see [Effect System](103_effect_system.md).
 
+Keep native runtime construction failures source-bearing through preset builders.
+Use `BuildError::RuntimeConstructionSource` for an underlying error rather than
+copying its display text into `RuntimeConstruction`. A declared provider must
+reach its actual effect owner; typestate presence alone does not verify wiring.
+Exercise injected providers through the built runtime when testing composition.
+Required effect initialization uses `BuildError::EffectInitSource`, retaining the
+effect name and original cause through the native agent boundary. Directory
+creation and signal registration failures must not become string-only config
+errors. Plain configuration rejection can retain its explicit diagnostic shape.
+
 AMP lifecycle failures retain concrete effect causes through the native runtime boundary. Canonical checkpoint absence has a private producer in the AMP journal reader. Scoped duplicate diagnostics require an exact requested entity and an independent successful canonical read before reconciliation; diagnostic wording and error records alone cannot suppress mutation failures. `AmpChannelError` carries source-bearing `AuraError` values and no longer promises equality; compare typed variants or stable categories. Foreign diagnostics explicitly discard native causes only at the presentation adapter.
 
 ## Preserve Concrete Error Causes
@@ -373,3 +383,108 @@ the gate without moving the deadline.
 ### Held enrollment roster inputs
 
 Obtain `prepare_authenticated_enrollment_rotation` from the actual effect owner and transferred setup before deriving the enrollment ceremony. Use its read-only roster/prestate accessors for packaging, then consume that same plan in `prepare_pinned_enrollment_rotation`. Preserve generation → tree lock order and keep the returned reservation through manifest retention and canonical registration. Do not acquire either gate recursively or rebuild an issuer participant from an absent tree leaf. Original cleanup recovery uses its negative custody path; live recovery additionally checks the fresh authenticated decision and original clock.
+
+### Choosing secure publication
+
+Use `secure_create_mutable` for the first allocation of records that an existing domain owner must later checkpoint. Check `Created` versus `AlreadyExists` and validate retained original state; an existing result does not mean caller bytes match. Use `secure_store_immutable` for first decisions and durable evidence that must not be overwritten or deleted by generic storage calls. Sealing an existing legacy record preserves its original payload. See [the effect contract](103_effect_system.md) for publication and protection guarantees.
+
+Recover failed publication by retrieving and validating the actual original through the selected provider. Do not create replacement wrapping keys when prior encrypted records or provider allocation evidence exist. Treat an IndexedDB compare-and-swap conflict as a typed storage conflict; the domain owner decides a bounded recovery. Ordinary profile keys cannot address the infrastructure `secure_store` subtree, and ordinary clear does not remove secure evidence.
+
+### Required participant envelope recovery
+
+Select the participant from the validated signing context. Decrypt retained envelopes using required wrapping-key reads; never call a create-on-absence helper from decryption. Creation belongs to encryption under its actual material owner: use atomic absent-only publication and reread the stored winner. Missing or corrupt active policy, key material, or envelope codecs must preserve their native causes; layout compatibility may use fallible existence checks but must not retry a different layout after an arbitrary read failure.
+
+### Required issuer signing context
+
+Pass the sealed context selected by the actual local signing owner to required issuer-key readers. Initial issuance selects required active policy; later confirmation selects its original context through the retained issued-manifest owner while holding current membership custody. Do not search historical epochs or derive participant identity from encrypted envelope metadata. Revalidate explicit layout presence before selecting a same-context compatibility row, and preserve read/decode/decryption causes.
+
+### Bounding enrollment caller futures
+
+Use lexical `Box::pin` delegates at enrollment facade, whole-window selection,
+VM attempt and notice boundaries when nested futures exceed the caller budget.
+Keep the same capability, references, registered task and original time window;
+allocation does not grant another execution owner. The normal-stack actual
+enrollment fixture checks issuer and invitee caller futures against a 16 KiB
+budget. Do not replace that regression with an increased executor stack size.
+
+### Required VM disposal regression lane
+
+Run `just ci-vm-session-lifecycle` after changing a VM backend, targeted session
+close/reap, coroutine index ownership, worker acknowledgment or forced-drop
+custody. `just ci-ownership-policy` includes the same lane. The Rust inventory
+checks actual nonignored test declarations and published harness names before
+running the dependency and runtime suites in sequence. A renamed, absent,
+feature-excluded or ignored required fixture fails instead of producing a
+successful zero-test result.
+
+The dependency tests exercise targeted removal, same-role surviving sessions,
+new-session dispatch, genuine scoped worker acknowledgment, actual poison and
+epoch faults, natural terminal epoch preservation and cooperative deserialization
+index continuity. Runtime tests exercise both real backends, original error
+source chains, exact forced-drop owner retirement, stale-owner rejection and
+cleanup before supervisor idle publication.
+
+The dependency override is outside the workspace. This lane invokes its actual
+manifest with the multi-thread feature and shares the selected target directory
+with runtime validation. It does not run competing builds. Keep its original
+release provenance and license together with the patch record; update Cargo/Nix
+pins when replacing the override. Disposal acknowledgment is local cleanup;
+signed protocol outcome and remote delivery retain their separate owners.
+
+### Recovering a negative enrollment notification
+
+Use the existing post-bootstrap registration recovery owner. Retire the failed
+pending signing generation, then pass its independently retained issued control
+to the tracker's Cancelled-only notice producer. Transfer that sealed owner into
+the existing invitation-service task group. Keep required lookup bounded by the
+local ingress window and actual signing/delivery bounded by the original retained
+window intersected with signed manifest validity. A local ingress timeout cannot
+renew original signing eligibility. Propagate required lookup, checkpoint, signer,
+transport and teardown failures to the task supervisor. Do not replace the already
+retained Cancelled first decision when its notification fails or expires.
+
+### Implementing allocation lifetime providers
+
+Keep the selected physical-profile handoff separate from ordinary secure storage.
+Use bounded authenticated records, atomic publication and required directory or
+transaction acknowledgment. Keep pending original birth material until its
+handoff is acknowledged; recover that exact pending birth instead of generating
+a replacement. Record a final handoff phase before returning custody so an empty
+previously transferred profile cannot be mistaken for interrupted initialization.
+Use original backend objects for decisions and retirement, and retain real
+failure sources. See `docs/100_crypto.md` and `docs/103_effect_system.md`.
+
+
+### Allocation lifetime provider ownership
+
+Selected allocation lifetime factories and provider identities originate only
+from the actual exclusive physical profile owner. Native crypto retirement
+requires the held original negative decision capability; positive sealing
+requires the original activation capability. A serialized allocation locator
+is observation, never recovery or retirement authority. Trusted custom effect
+implementations are an explicit provider boundary.
+
+Run `just _policy-check check security-boundary-policy` before broader CI when
+changing these seams. Its Rust syntax check covers factory references, UFCS
+aliases and macro tokens, while private constructors, declaration attributes
+and compile-fail guards enforce actual capability custody. Keep immutable
+legacy secrets permanent; allocation tombstone ACK is not a physical or backup
+erasure guarantee.
+
+### Supplying custom runtime handlers
+
+Complete `AgentBuilder::custom()` typestate with crypto, ordinary storage,
+physical time, random and console handlers before building. Async and sync
+construction retain those same shared providers. Ordinary storage is wrapped
+by unified encrypted storage and cannot replace the secure profile owner. The
+configured random handler must satisfy the trait's cryptographic entropy
+contract; simulation mode does not substitute a different handler.
+
+An explicit transport inventory is bounded to sixteen providers. Declaration
+order selects the first established channel, otherwise the first provider,
+before sending. A send failure does not try another provider or native route.
+Receiving inspects configured providers in order and continues only on typed
+`NoMessage`. Return `NoMessage` when there is no matching envelope; a blocking
+provider can delay later entries. Required provider outages should retain a
+concrete native cause. Use the L8 custom-provider regression harness to verify
+actual dispatch, encrypted bytes, and source retention.

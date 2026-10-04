@@ -2,6 +2,21 @@
 
 This document describes the cryptographic architecture in Aura. It defines layer responsibilities, code organization patterns, security invariants, and compliance requirements for cryptographic operations.
 
+Distributed FROST package construction exchanges public signing commitments,
+never private nonce bundles. A participant signs only after matching the native
+and outer signing messages to its independently admitted intent, and matching
+the public package, complete selected participant inventory, local share and
+threshold to its admitted policy. The native public key package does not encode
+the threshold; its presence alone cannot establish quorum policy. Runtime
+ownership must additionally enforce durable one-use nonce consumption and the
+original admitted execution window. Public commitment data does not grant that
+ownership.
+
+FROST aggregation requires exactly one supplied signature share per selected
+participant. Extra shares cannot be ignored. The native commitment inventory
+and message must match the outer package; malformed shares and audited-library
+aggregation failures retain their concrete causes.
+
 ## 1. Overview
 
 Aura's cryptographic architecture follows the 8-layer system design with strict separation of concerns.
@@ -412,3 +427,220 @@ The enrollment manifest's pending configuration digest is a `Hash32` content has
 ### Enrollment signing roster and authenticated topology
 
 Enrollment keeps the original independently pinned signing quorum separate from the authenticated tree child topology. A signed AddLeaf changes observed child edges before the original signing key attests the RotateEpoch activation fence. Verification retains the exact signed quorum minimum and signer-roster upper bound while deriving topology cardinality solely from authenticated branch and leaf-parent edges. A verification projection does not materialize a canonical branch. A policy already materialized by authenticated tree operations remains an independent minimum; invalid or incompatible canonical policy metadata fails closed and requires an authenticated policy transition rather than a local repair. Missing node-specific verifier inventory cannot be replaced with the epoch root package.
+
+## Individual participant possession proofs
+
+An individual possession proof authenticates a transcript under one exact
+participant verifier from the independently authenticated current signing
+inventory. A FROST verifying share is distinct from the aggregate group key.
+Proof verification under a share does not satisfy the authority quorum or
+authorize an epoch transition. The signed transcript binds the protocol and
+version, subject ceremony and proposal, physical participant, active epoch,
+signing mode and index, and exact group package commitment. Legacy unbound
+responses cannot acquire current participant authority.
+
+The primitive preserves canonical FROST scalar encoding and uses the standard
+ciphersuite Schnorr nonce/challenge/signature operations. A scalar is never
+reinterpreted as an Ed25519 seed. Runtime authorization additionally requires
+held current generation and tree custody and canonical physical membership.
+
+### Required active signing material
+
+The runtime effect signer selects its epoch, policy, participant, and public
+package from required retained state under signing-generation custody. Missing
+or malformed state is a source-bearing failure. A solo signature additionally
+requires agreement between the retained public package and the public key
+derived by the cryptographic effect from the selected private package. A local
+share does not establish quorum; multi-party signing requires its owned
+threshold-agreement producer. Historical enrollment confirmation keys remain
+selected only by the retained original issuance witness.
+
+### Legacy bootstrap representation migration
+
+A legacy epoch-zero participant representation may change from the authority's
+Guardian identifier to its authenticated physical Device identifier only while
+preserving the original signing secret and public package. Admission requires
+the authenticated original creation operation and its durable commit evidence.
+The converted canonical policy binds an immutable original migration decision;
+required signing and recovery reject missing or contradictory decision evidence.
+This representation migration provides neither a new signing epoch nor quorum
+agreement and does not renew any enrollment validity window.
+
+### Final active enrollment verifier inventory
+
+Manifest v2 authenticates a final active exact-node verifier inventory separately from the historical parents that validate baseline operations. Each tuple binds the final epoch and tree commitment, signing node, mode, ordered participant roster, quorum, agreement and actual public package. Historical signatures do not promote an old package into a later epoch. Version-1 manifests preserve their original bytes and signature domain as historical evidence; a missing final inventory cannot authorize a new enrollment peer response.
+
+#### Imported historical public verifier continuity
+
+An imported authority's historical verifier inventory is evidence from its
+independently pinned enrollment manifest and authenticated committed transition.
+Its durable archive binds the physical profile/device, original admission,
+subject, invitation, manifest digest and committed history digest. Recovery
+revalidates the original admission and committed proof before granting access to
+archived verifier evidence. Possession of serialized public tuples is insufficient.
+The imported pending generation extends that evidence only when its exact public
+package and canonical provisional policy match the original signed commitments.
+Historical evidence does not certify absence of a later revocation, and it does
+not authorize substitution of an epoch root package for another signing node.
+
+Archive v2 retains the imported pending generation's exact public package and
+canonical provisional policy from the original authenticated invitation, at its
+verified committed head. Verification can therefore continue after private share
+retirement without reconstructing public trust from a missing native key record.
+An already verified extension at that same epoch may use the same exact root
+verifier at its authenticated parent head; this does not grant trust to another
+node or epoch. Immutable v1 archives retain their original bytes and do not confer
+v2 admission. V2 publication requires explicit revalidation of the original locally
+retained confirmed receipt and uses a separate versioned namespace.
+
+### Threshold enrollment issuer evidence
+
+A locally retained threshold participant package proves ownership of one exact share under the authenticated active policy. It is not a completed threshold signature and cannot authorize a solo enrollment manifest. Required issuer selection distinguishes missing quorum ownership from malformed signing policy, missing retained material, and private/public mismatch. Enrollment issuance after a threshold epoch requires a completed signature from the owned multi-party signing protocol, bound to the original allocation window and authenticated final verifier inventory.
+
+The threshold policy domain permits `k = 1` with multiple participants. The selected FROST backend requires at least two signers. A retained threshold package with `k = 1` therefore reports an explicit backend capability failure; it is never normalized to a solo package or a higher threshold. Native backend operations retain their actual `InvalidMinSigners` failure.
+
+### Public signature input provenance
+
+Bounded parsing of a public package and signature has typed input-encoding
+failures and does not establish signature validity, authority or quorum custody.
+Enrollment setup possession validates those encodings before invoking the
+verification effect. Malformed peer encodings and an invalid signature verdict
+are request rejection; an effect-provider verification failure retains its
+original required-runtime cause.
+
+Unified threshold verification accepts the canonical native FROST public key
+package. The low-level FROST verification primitive accepts the extracted group
+verifying point. These inputs are distinct and have no repair fallback.
+
+### Deterministic random stream custody
+
+Cloning a runtime crypto subsystem retains the same deterministic random stream owner. Draws through any clone consume that one stream in execution order; cloning cannot duplicate the next nonce or key-generation sequence. Separately constructed simulations with the same seed retain independent owners and reproduce the same sequence when their draw ordering matches. Concurrent scheduling does not imply a deterministic assignment of draws to individual callers.
+
+### Allocation-owned wrapping secrets
+
+Permanent immutable wrapping records retain their original protection. An
+allocation-owned wrapping secret has a separately acknowledged immutable birth
+and a first-decision lifetime. Positive and negative decisions are mutually
+exclusive. Negative retirement removes normal live access only after the original
+provider acknowledges its tombstone; copied old ciphertext and backup erasure
+are separate guarantees. Existing permanent records cannot be relabeled as
+retirable allocations.
+
+### Private allocation lifetime persistence encoding
+
+The selected filesystem lifetime provider serializes its private ledger record
+only to produce authenticated encrypted persistence. Serialized and decrypted
+plaintext buffers require zeroizing ownership; the decoded record zeroizes its
+secret field on drop. The codec does not provide logging, cloning, or public
+secret export. Its serialization derives require an explicit scoped security
+justification and the security policy gate. Retirement acknowledgement denies
+subsequent ledger reads; this does not prove cryptographic erasure of historical
+ciphertext copies decryptable under the retained profile key.
+
+Secret field decoding itself requires zeroizing ownership and a bounded byte
+sequence. This applies before complete record construction, including malformed
+secret elements and failures in subsequent fields; record-level Drop alone is
+insufficient. Existing authenticated JSON byte-array encoding remains compatible.
+
+Lifetime record plaintext serialization uses one zeroizing allocation from its
+first encoded byte. Encoding cannot release secret-bearing intermediate growth
+allocations. Authenticated envelope limits include magic, nonce and AEAD tag;
+codec failures retain their original serialization cause.
+
+### Participant envelope ownership across runtime consumers
+
+A participant package's version selects its canonical authenticated decoder.
+Legacy version 1 binds authority, epoch and participant; allocation version 2
+also requires the original selected-provider allocation custody. Retained setup
+verification and threshold-signing retrieval use that same decoder. A consumer
+cannot reinterpret an allocation envelope as a legacy package, accept raw
+package bytes as envelope evidence, or discard the concrete codec/provider
+failure while selecting an alternate identity.
+
+Protected initial lifetime publications retain recoverable target-bound staged
+ciphertext through process death. Recovery requires the original physical owner,
+authenticated ciphertext and independently retained original lifecycle binding
+before acknowledgment. Once-live target loss cannot be repaired from an old
+stage; conflicting first-decision evidence is retained and rejected.
+
+### Original invitation transfer signer
+
+A non-enrollment invitation transfer and its issuer response use the original
+locally retained physical signing identity. Its binding includes the original
+invitation identifier, recipient, context, creation time, canonical public
+payload, physical device, signing epoch and verifier. The binding is retained
+from fresh issuance before publication and is immutable. Restart and rotation
+recovery validate the original binding and exact original private package.
+Missing original evidence is a required failure; recovery cannot select an
+active replacement or infer an epoch from a peer-supplied public key. The
+retained identity selects signing material and does not authorize a response
+decision or establish current membership. Enrollment transfer remains governed
+by its separately pinned manifest and original-window authorization.
+
+### Required invitation response cryptography
+
+Canonical invitation response transcripts distinguish evaluated invalid
+signatures from cryptographic provider failures. Required signing, verification
+and response encoding failures preserve their original error source; provider
+failure does not prove that a response is invalid or absent.
+
+Selected-provider initialization inventories staged entries throughout its bounded
+record tree before allocating original lifetime evidence. Inventory memory and\nstructural depth are bounded; ordinary record count is not clamped. Only target-bound
+initialization candidates at their exact retained parent are eligible for
+subsequent cryptographic validation; names alone never authorize publication.
+Unknown staged evidence is retained and rejects initialization. Root handoff
+requires an exhausted stage inventory. A publication conflict discovered after
+observation retains the original ciphertext and native conflict cause.
+
+A post-link original publication can temporarily have exactly two names for
+one private ciphertext inode. Recovery recognizes that pair only at the exact
+original target and matching stage, verifies its original owner evidence and
+bytes, acknowledges the target, then removes the stage. Other aliases and
+missing once-live targets do not authorize restoration. Ordinary required
+readers remain unaliased; this exception is private to original initialization.
+
+### Required transcript codec failures
+
+Required local invitation signature boundaries retain the canonical transcript
+codec cause through a process-local error chain. The required encoder preserves
+the existing domain/schema/payload wire envelope; encoding failure occurs before
+signing or verification. Invalid signature results remain distinct from a failed
+cryptographic provider invocation.
+
+Guardian recovery key reads require the original private and public pair. A
+missing half or a mismatched pair cannot authorize replacement. Fresh allocation
+and required reads share the actual runtime's exclusive keypair lease, and fresh
+allocation publishes its identity capability only after both storage writes
+acknowledge. This lease does not itself establish restart authority for an
+interrupted fresh allocation or distinguish complete historical key loss from
+an unused profile; those require separate durable lifetime evidence.
+
+### Original initialization successor custody
+
+Interrupted initial checkpoint publication may complete only the original empty
+Preparing to Ready, Ready to Handed, and protected lifecycle Preparing to Handed
+transitions. Eligibility requires the actual selected profile owner, original
+immutable birth and phase-dependent seals. Observed ciphertext grants no mutation
+authority. Exposed allocations, pending decisions, foreign owners, or missing
+original proof prevent promotion.
+
+Before cutover, a bounded authenticated journal retains both exact original
+ciphertexts and physical inode identities. Acknowledged predecessor and successor
+custody precedes atomic exchange. Exchange preserves any displaced current target;
+conflicting source/target evidence is never deleted as repair. Success requires
+both installed and displaced identities to match, directory acknowledgment, and
+no-replace archival of original evidence. Historical transaction records remain
+authenticated against the original birth; they cannot authorize live checkpoint
+restoration or a new root. Ordinary secure records keep their existing alias rules;
+only closed private initialization custody admits the additional retained links.
+
+Recovery of mutable checkpoints after allocation exposure and a builder execution
+window around native profile IO are separate required contracts.
+
+Ready validation authenticates each archived journal and then requires its exact original and successor ciphertexts at the retained predecessor, successor and displaced paths, with the original device/inode identities. Same ciphertext under a foreign inode is rejected. Custody paths without an authenticated active or archived journal fail closed; native alias layout alone does not authorize readiness.
+
+Required archived-custody validation also rejects ciphertext corruption at each of the three retained paths, preserving the original birth and current root checkpoint bytes without replacement.
+
+### Runtime quorum custody
+
+Possession of retained dealer shares does not authorize a runtime to manufacture a quorum. A raw signing context cannot establish distributed signing ownership. Required local key material is validated before an unavailable quorum owner is reported; malformed and missing material remain distinct native failures. Each admitted distributed signing participant controls its own share and one-use nonce.

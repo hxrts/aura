@@ -1,0 +1,8 @@
+module invitation_device_enrollment_terminal_notice exposing (EnrollmentTerminalNotification)
+
+protocol EnrollmentTerminalNotification =
+  roles Initiator, Invitee
+
+  Initiator { guard_capability : "invitation:device:enroll"
+            , flow_cost : 1 }
+    -> Invitee : DeviceEnrollmentTerminalNotice of crate.DeviceEnrollmentTerminalNotice

@@ -29,6 +29,17 @@ record inventory and secure retrieval failures preserve their native causes.
 
 ## Invariants
 
+- Public FROST package construction accepts typed public commitments only.
+  Bound-message signing checks both native and DTO transcripts against the
+  independently admitted message, public package, threshold and participant
+  inventory before the audited library signs with one local key package.
+  `PublicFrostSigningError` preserves native and codec causes. Durable nonce
+  ownership and quorum admission belong to the runtime; these primitives do
+  not establish either. The `crypto::public_frost::tests` regressions verify a
+  genuine 2-of-3 signature and reject substituted intents and inventories.
+  Aggregation validates the complete selected inventory and exact share count;
+  it never ignores surplus shares or erases native aggregation causes.
+
 - Handlers must be stateless (no shared mutable state).
 - Handlers must be single-party (each handler independent).
 - Handlers must be context-free (no assumptions about caller context).
@@ -186,3 +197,139 @@ Independent encrypted-storage wrappers sharing one concrete owned profile admit 
 The test-support `CountingTestTaskSpawner` retains the first native required-task failure in asynchronous bounded state. This fixture exercises app hook health without discarding `Result` outcomes. Production supervision remains the runtime task registry; the unit `TestTaskSpawner` does not acknowledge required admission.
 
 The keyring namespace owner uses the actual OS user identity and root-owned sticky temporary directory, never caller HOME/TMPDIR/XDG selection. Private directory and descriptor ownership checks precede provider IO. Native source errors retain original keyring causes. Real child-process contention and process-death tests use private fixture service namespaces and do not read or mutate production keyring records. Keyring write acknowledgment follows the platform credential API; it does not claim filesystem fsync semantics. Lifetime immutable-record overwrite/delete protection is a separate required integration gate.
+
+### Secure record lifetime protection and physical scope
+
+Immutable secure publication seals the exact original record, including a legacy original, and rejects generic replacement, deletion, and key generation at that location. Provider-authenticated protection metadata is published in the same complete encrypted record. Atomic initial mutable publication is separate: required clock/profile checkpoints remain mutable under their own domain owner. Cooperating fallback writer views share the selected physical profile's record decision gate; platform keyring writers share the actual original service namespace owner; browser writes authenticate the original and compare exact ciphertext inside one strict IndexedDB transaction. Interrupted publication may have succeeded; an immutable retry acknowledges unchanged original bytes before reporting success.
+
+The native fallback and browser adapters read historical v1 encrypted records and seal original plaintext without using caller replacement bytes. Platform keyring records retain original service/key addresses. Provider-private wrapping-key/inventory addresses are unreachable through normal location mapping; a missing original key with prior inventory fails closed. A historical raw keyring value colliding with the reserved encrypted format is rejected rather than reinterpreted or repaired. Generic retirement cannot delete protected records; no unrestricted retirement escape is supplied.
+
+Ordinary filesystem IO, enumeration, statistics, and clear operations exclude the existing infrastructure secure-provider subtree before traversal. This prevents filename collisions and ordinary clear from bypassing secure-record protection. Existing physical data is not relocated. Real native child-process recreation and historical codec fixtures exercise the selected fallback provider. Browser multi-context/process-death and actual OS credential-provider loss/legacy-collision fixtures remain required validation for the platform paths; syntax validation alone establishes none of those runtime guarantees.
+
+Individual participant proof signing is an explicit crypto effect. Production
+entropy failures retain the native source; deterministic simulation uses its
+owned seeded source. The handler validates the actual share/verifier match and
+uses the FROST ciphersuite Schnorr API without custom nonce construction or
+Ed25519 seed reinterpretation. This single-party proof is distinct from group
+threshold signing, which continues to require the actual FROST quorum path.
+
+Required secure retrieval preserves logical record absence as the concrete
+`SecureStorageRecordMissing` cause within the storage category. Observational
+`secure_exists` still reports absence as `false`; native provider failures
+retain their original sources. Logical absence never manufactures an OS error
+and never grants authority to select replacement signing material.
+
+Selected backing-record corruption fixtures are available only under explicit
+native test support. They mutate actual encrypted bytes under the retained
+provider record owner and preserve acknowledgment failures. Production mutation
+and immutable-record protections remain required; fixture corruption supplies
+no plaintext access or retirement capability.
+
+Unified `verify_signature` decodes the exact mode-specific public package.
+Threshold mode extracts its native group point before the low-level
+`frost_verify` primitive; a serialized package is not a raw verifying point.
+The genuine public-only 2-of-3 primitive regression also exercises this unified
+verification path and rejects message substitution.
+
+The selected descriptor provider retains an authenticated original root birth,
+readiness seal and bounded birth inventory. Interrupted pre-live allocation may
+complete its retained original pending record; missing once-live checkpoint or
+leaf fails closed. Negative first-decision tombstones require atomic publication
+and directory ACK. Clearing current plaintext does not prove physical or backup
+erasure while the persistent wrapping root remains. Permanent legacy immutable
+records cannot acquire allocation retirement semantics.
+
+
+### Original selected-provider migration
+
+An exclusive selected filesystem provider authenticates canonical legacy records
+within 4096 entries, 8 MiB per record and 32 MiB cumulative encrypted bytes.
+Exceeding these bounds fails without truncation or profile mutation. Authentication
+uses its retained original wrapping key before anchoring an
+allocation lifetime root. Original permanent envelopes and their protection
+bits are unchanged. Separate protected immutable birth and completed-handoff
+anchors bind the root. Mandatory authenticated lifecycle state precedes birth,
+advances to Handed after every handoff ACK and never reconstructs from absence.
+Live use checks their exact acknowledged encrypted bytes
+as well as original ledger birth, marker, readiness and handoff seals. Missing
+live evidence fails closed; it does not trigger migration or reinitialization.
+This local custody proof grants no peer or identity trust.
+
+Native keyring and browser providers require their own transactional lifetime
+backend; absence is a typed unavailable result. Unknown staging artifacts and
+corrupt legacy records fail closed. Provider ACK/tombstones do not prove physical
+or backup erasure or detection of a complete filesystem backup rollback.
+
+The private allocation lifetime record has an explicitly justified serde codec
+for AEAD persistence only (docs/100_crypto.md). Plaintext buffers use Zeroizing;
+the decoded record erases its secret field on drop. No Debug/Clone or public
+export is provided. Required secret-wrapper and exception-metadata gates cover
+this codec alongside physical provider ciphertext/retirement regressions.
+
+Encrypted storage retains the actual selected crypto KDF/encryption/decryption
+source in `StorageError::BackendFailure`; operation context does not replace
+that cause with formatted text. An invalid configured KDF key length is rejected
+before copying into the fixed key buffer. Ordinary provider replacement does
+not bypass unified at-rest encryption or selected secure key custody.
+
+Protected lifetime JSON is counted without a plaintext buffer and then encoded
+into a single exactly sized zeroizing allocation through a non-growing slice
+writer. Both passes enforce the authenticated record's ciphertext budget,
+including its magic, nonce and AEAD tag. Partial codec failures zeroize the
+allocated plaintext and preserve their native serialization cause.
+
+Private profile staging binds its versioned name to the exact target and
+acknowledges the staged directory entry before publication. Initialization
+recovery bounds and authenticates original ciphertext, validates its protected
+origin and root/index bindings, then finishes only a missing initial target or
+identical publication. A differing acknowledged target, ambiguous stage, old
+anonymous stage or missing once-live evidence fails closed. Recovery never
+discards such evidence to create an apparently empty profile.
+
+Initial lifetime recovery checks a descriptor-relative provider-wide stage
+inventory with streaming depth-first retained descriptors. Memory is bounded by
+the eight candidate initialization targets and the native secure-location
+layout (namespace/key/optional-subkey), with two descendant directory levels.
+Ordinary leaves have no new total inventory cap; a maximum 4096 allocation ledger
+plus provider metadata and arbitrary ordinary records remain scannable. It permits only the
+exact initialization target families for later authenticated validation and
+requires no residual stage before root handoff. Recovery-specific publication
+proves equality on an existing target before removing its original stage; it
+never uses the general create-conflict cleanup path. Mutable successor recovery
+remains separate and differing retained checkpoints still fail closed.
+
+The native full inventory scan has linear IO latency. An original builder
+execution-window integration remains a separate obligation; this synchronous
+provider API does not claim an injected deadline or timeout proof.
+
+Private initialization reads distinguish canonical target presence from an
+observed stage and tolerate two links only for an exact original target/stage
+inode pair. The original physical selected provider and protected root binding
+stay held until target ACK and stage removal ACK. This does not relax generic
+secure-record alias checks or recover absent once-live records from a stage.
+
+### Initial mutable publication ownership
+
+`VerifiedOriginalInitializationSuccessor` is a private nonserializable witness
+minted by two declared proof issuers from the actual selected provider, retained
+publication and complete original phase proof. Private cutover consumers preserve
+bounded authenticated journals and exact predecessor/successor inode custody
+before atomic exchange. Displaced evidence and journals are archived without
+replacement or deletion. Recovery and archived-history validation retain original
+birth and reject allocated/pending state. Only Apple/Linux atomic exchange is
+supported; unavailable native operations return original errors with no rename
+fallback. No dependency change is needed: rustix1.1.4 already supplies exchange and
+no-replace operations.
+
+Actual native tests kill creator subprocesses at journal stage/ACK, each custody
+publication, exchange, ACK and archive, and inject both source and current-target
+substitution between verification and cutover. Additional tests cover consecutive
+initial index transitions, authenticated historical corruption, unknown metadata,
+foreign owner and an exposed positive first decision. Required source/discovery/
+execution inventory includes these cases. Live mutable checkpoint recovery and
+original builder IO-window/drain remain open; synchronous native IO is not
+preemptible merely because callers perform checkpoints.
+
+Archived initialization transactions require all three retained inode/ciphertext custody records on every Ready reopen. The native alias reader is observational: authenticated journal validation supplies the authority and exact expected identities. Unreferenced custody metadata cannot satisfy that validation.
+
+Required archived-custody validation also rejects ciphertext corruption at each of the three retained paths, preserving the original birth and current root checkpoint bytes without replacement.

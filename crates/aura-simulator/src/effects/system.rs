@@ -246,6 +246,17 @@ impl CryptoCoreEffects for SimulationEffectSystem {
 
 #[async_trait]
 impl CryptoExtendedEffects for SimulationEffectSystem {
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: aura_core::crypto::single_signer::SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .sign_participant_key_proof(message, key_package, mode)
+            .await
+    }
+
     async fn frost_generate_keys(
         &self,
         threshold: u16,
@@ -258,6 +269,54 @@ impl CryptoExtendedEffects for SimulationEffectSystem {
 
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         self.crypto.frost_generate_nonces(key_package).await
+    }
+
+    async fn frost_public_commitment(
+        &self,
+        participant_index: u16,
+        local_nonce_bundle: &[u8],
+    ) -> Result<aura_core::effects::crypto::FrostPublicCommitment, CryptoError> {
+        self.crypto
+            .frost_public_commitment(participant_index, local_nonce_bundle)
+            .await
+    }
+
+    async fn frost_create_public_signing_package(
+        &self,
+        message: &[u8],
+        commitments: &[aura_core::effects::crypto::FrostPublicCommitment],
+        public_key_package: &[u8],
+        threshold: u16,
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        self.crypto
+            .frost_create_public_signing_package(
+                message,
+                commitments,
+                public_key_package,
+                threshold,
+            )
+            .await
+    }
+
+    async fn frost_sign_share_for_message(
+        &self,
+        package: &FrostSigningPackage,
+        local_key_share: &[u8],
+        local_nonce_bundle: &[u8],
+        expected_message: &[u8],
+        expected_public_key_package: &[u8],
+        expected_threshold: u16,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .frost_sign_share_for_message(
+                package,
+                local_key_share,
+                local_nonce_bundle,
+                expected_message,
+                expected_public_key_package,
+                expected_threshold,
+            )
+            .await
     }
 
     async fn frost_create_signing_package(

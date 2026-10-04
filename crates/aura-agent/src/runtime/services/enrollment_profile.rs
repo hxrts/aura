@@ -162,6 +162,7 @@ fn final_account(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "durable_confirmed_enrollment",
+    capability_type = DurableConfirmedEnrollmentCapability,
     family = "runtime_helper"
 )]
 /// No caller-provided identity or timestamp is accepted.

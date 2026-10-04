@@ -1028,7 +1028,8 @@ mod tests {
         effects.attach_rendezvous_manager(manager.clone());
         let tasks = Arc::new(TaskSupervisor::new());
         let service_context =
-            RuntimeServiceContext::new(tasks, Arc::new(effects.time_effects().clone()));
+            RuntimeServiceContext::test_original(tasks, Arc::new(effects.time_effects().clone()))
+                .await;
         RuntimeService::start(&manager, &service_context)
             .await
             .unwrap();

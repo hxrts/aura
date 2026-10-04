@@ -165,3 +165,52 @@ and verifies the distinct signed decision transcripts against the independently
 transferred setup pin before advancing the choreography or settling a ceremony.
 The response message does not declare an unconditional accepted journal fact.
 Terminal failure remains separate from committed membership and activation.
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.
+
+Reserved invitation creation evaluates capabilities and budget at the current
+required guard clock, but emits the original canonical reservation creation and
+expiry times. Pure guard tests enforce this distinction and reject expired or
+future reservations. Required execution retains `InvitationGuardDenial` and its
+structural policy reason; display-only compatibility planning is observational.
+
+### Enrollment manifest v2
+
+The signed manifest has an explicit final active verifier inventory distinct from historical baseline parents. Its version-2 transcript and code prefix bind bounded exact epoch/head/node/mode/roster/quorum/package tuples. Legacy version-1 decoding omits the new field and preserves its original canonical signature bytes; missing inventory is never repaired from historical parents. Shape/signature evidence remains separate from runtime capture custody and independent transfer provenance.
+
+Enrollment setup possession parses bounded public signature encodings before
+calling the verification provider. `InputEncoding` retains native public-input
+decoder failures; `Crypto` retains provider failures. Neither shape validation
+nor parsing manufactures independent setup pin provenance.
+
+The enrollment-manifest domain owns `ENROLLMENT_ALLOCATION_TIMEOUT_MS`, the
+600,000-millisecond maximum original device-enrollment allocation policy.
+The runtime tracker consumes this value; signed quorum wire validation must
+consume the same policy rather than invent another timeout. Setup-code validity
+does not authorize a longer allocation. Actual quorum consumer integration
+remains required.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.

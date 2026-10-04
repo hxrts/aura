@@ -709,3 +709,114 @@ The common window primitive is `Pure`: sealed physical-millisecond and receipt-g
 A fixed physical execution window is `MoveOwned` at admission and shares one observation/exhaustion owner across clones and children. Its enclosing runtime is `ActorOwned`. An observed ceremony snapshot cannot mint that execution capability or replace its interval. The registered owner admits execution directly from its authoritative registry and retains the sealed allocation capability through subsequent checkpoints.
 
 Initial allocation and live admission are distinct lifecycle phases. Only an internally minted pre-live capability can retain a missing initial checkpoint from the exact original secure allocation, before canonical registration or immutable live-boundary evidence exists. The live boundary is retained before execution can observe the registry entry. After that boundary, missing observation history fails closed. A required checkpoint holds allocation continuity through its write, retains monotone durable history and preserves sticky failures; cancellation or storage failure prevents the required continuation/publication. A terminal outcome for the same allocation does not invalidate historical acknowledgment or renew execution.
+
+Supervised execution identity comes from successful bounded registry admission,
+not from a caller identifier or an executor thread. Each registered future poll
+and destructor has its original owned identity; nested scopes restore their
+caller and cancellation cannot leave an ambient owner installed. Identity is
+stable across suspension and executor migration and distinguishes sibling groups
+with identical local task counters. Native and browser choreography session
+bindings use that identity for supervised tasks. Identity observation grants no
+ability to admit a task or enter an execution scope, and identity carries no
+cryptographic peer, membership or signing authority.
+
+### Enrollment notification ownership
+
+An enrollment terminal-notice listener is a registered sibling in the existing
+invitation service task tree. The original admitted window and physical-device
+witness bind its admission; a cloned window shares observations, lease and
+checkpoint and grants no new duration. The listener owns its actual VM session
+slot across bounded selection. Explicit shutdown closes that slot before normal
+completion; forced drop retires exact owner generation and scope without
+claiming asynchronous close or signed terminal evidence. Required native causes
+remain in the owning task tree's health and terminal failure observation.
+
+### Cancellation observation custody
+
+The authoritative tracker mints cancellation preparation custody from its actual
+registered allocation and independently retained issuer control. Observed state,
+raw IDs and caller-selected timestamps cannot construct it. Preparation shares
+the original high-water and expiration owners and requires the original durable
+checkpoint to acknowledge observations. This custody authorizes bounded
+cancellation preparation, not VM admission, and does not acquire the execution
+semaphore a second time.
+
+A separately bounded ingress owner has no enrollment admission authority.
+Historical negative publication retains its genuine prior terminal capability;
+it cannot exchange that proof for a new active execution window. Required
+preparation, checkpoint or publication failure preserves native causes and does
+not report a successful completed handoff.
+
+### Targeted VM disposal custody
+
+Runtime session owner capabilities have private construction and read-only
+metadata. Authorization requires the actual issued claim identity in addition
+to matching session, generation, label and scope. Matching observations from a
+different runtime grant no ingress, transfer or retirement authority. A handoff
+invalidates every retained copy of the previous claim.
+
+Required VM retirement disposes only the owned target session, including live or
+blocked coroutines, scheduling eligibility, handoffs and scoped communication
+and resource state. Unrelated sessions remain usable. Host metadata removal
+follows the actual backend acknowledgment. The cooperative backend retains
+stable coroutine IDs through its existing index rebuild; the threaded backend
+validates and rebuilds its explicit ID index after removal.
+
+Threaded worker execution is joined by the engine's synchronous worker scope
+before exclusive disposal begins. Acknowledgment means no target job remains;
+it does not require destroying the shared pool or other sessions. Naturally
+terminal session status and epoch are preserved, and repeated disposal returns
+its original compact acknowledgment. New close epoch advancement is checked
+only for a genuinely active target.
+
+Concrete backend failure remains in the standard native source chain. Required
+closure cannot succeed by parsing or suppressing an unsupported error, merely
+removing host metadata, or disposing an entire engine containing other sessions.
+Historical compact summaries and diagnostic traces follow the dependency's
+explicit archive policy. Shared global guard state is not claimed as exclusively
+owned by the target session. VM disposal is local cleanup and does not establish
+remote delivery, a signed terminal decision or protocol completion.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.
+
+Configured capability types preserve their complete parsed path and generic
+arguments. A boundary for `Owner<Capability>` cannot be satisfied by
+`Owner<Other>` or an unparameterized owner with the same name.
+
+A nominal capability declaration may omit borrow lifetime arguments from its
+label. This permits an actual `Reservation<'a>` without erasing type or const
+parameters; configured type and const arguments still require exact matches.
+
+Canonical `AgentResult<T>` carries capability evidence only through its success
+value `T`, using the same rule as `Result<T, E>`. An error type does not provide
+custody. Actual production compilation and negative validator coverage enforce
+this supported result-alias contract.
+
+Qualified container names do not confer capability evidence by their final
+identifier alone. A foreign wrapper named Result, Arc or AgentResult cannot
+authorize a boundary by carrying an unrelated declaration parameter. Canonical
+container paths preserve declared value evidence; actual capability custody
+still requires opaque owner APIs and compiler-enforced ownership.
+
+### Contact confirmation continuation
+
+Required imported Contact metadata is read under a lease belonging to the actual
+runtime. The retained acceptance capability transfers into a move-only signed
+continuation only after the acceptance digest is acknowledged. Its confirmation
+child shares the original operation's fixed deadline and physical observation
+owner; retries cannot create a replacement interval.
+
+A verified response retains the complete required import and runtime decision
+lease through canonical contact publication and imported-status persistence.
+Materialization consumes this evidence directly. Observed caches and descriptor
+enrichment cannot select authoritative invitation state or delay the required
+terminal publication on an unrelated reactive batch. App readiness remains an
+independent authoritative observation contract.
+
+In-process continuation does not establish restart authority. Durable restoration
+requires the original parent and child checkpoints, signed payload and selected
+profile binding; a retained digest alone cannot authorize a new wait.

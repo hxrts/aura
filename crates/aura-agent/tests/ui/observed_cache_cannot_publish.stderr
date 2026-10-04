@@ -1,0 +1,11 @@
+error[E0599]: no method named `set_biscuit_cache` found for reference `&AuraEffectSystem` in the current scope
+ --> tests/ui/observed_cache_cannot_publish.rs:5:17
+  |
+5 |         effects.set_biscuit_cache(observed);
+  |                 ^^^^^^^^^^^^^^^^^
+  |
+help: there is a method `biscuit_cache` with a similar name, but with different arguments
+ --> src/runtime/effects.rs
+  |
+  |     pub fn biscuit_cache(&self) -> Option<BiscuitCache> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

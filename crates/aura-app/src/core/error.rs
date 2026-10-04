@@ -42,6 +42,13 @@ pub enum IntentError {
         reason: String,
     },
 
+    /// The required flow accounting budget was insufficient.
+    #[error("Flow budget exceeded: {reason}")]
+    BudgetExceeded {
+        /// Accounting denial detail; not authorization evidence.
+        reason: String,
+    },
+
     /// The intent failed validation
     #[error("Validation failed: {reason}")]
     ValidationFailed {
@@ -114,6 +121,13 @@ impl IntentError {
     /// Create an unauthorized error
     pub fn unauthorized(reason: impl Into<String>) -> Self {
         Self::Unauthorized {
+            reason: reason.into(),
+        }
+    }
+
+    /// Preserve required accounting denial at an explicit diagnostic boundary.
+    pub fn budget_exceeded(reason: impl Into<String>) -> Self {
+        Self::BudgetExceeded {
             reason: reason.into(),
         }
     }
@@ -194,14 +208,33 @@ impl From<IntentDispatchError> for IntentError {
         match err {
             IntentDispatchError::Unauthorized { reason } => Self::Unauthorized { reason },
             IntentDispatchError::ValidationFailed { reason } => Self::ValidationFailed { reason },
-            IntentDispatchError::FlowBudgetExceeded { reason } => Self::Unauthorized {
-                reason: format!("Flow budget exceeded: {reason}"),
-            },
+            IntentDispatchError::FlowBudgetExceeded { reason } => Self::BudgetExceeded { reason },
             IntentDispatchError::JournalError { reason } => Self::JournalError { reason },
             IntentDispatchError::ReactiveError { reason } => Self::InternalError {
                 reason: format!("Reactive error: {reason}"),
             },
             IntentDispatchError::InternalError { reason } => Self::InternalError { reason },
+        }
+    }
+}
+
+#[cfg(test)]
+mod required_budget_diagnostic_tests {
+    #[test]
+    fn dispatch_accounting_denial_remains_distinct_from_authorization() {
+        let converted = super::IntentError::from(
+            aura_core::effects::IntentDispatchError::FlowBudgetExceeded {
+                reason: "required accounting decision".into(),
+            },
+        );
+        assert!(
+            matches!(&converted, super::IntentError::BudgetExceeded { reason } if reason == "required accounting decision")
+        );
+        #[cfg(feature = "callbacks")]
+        {
+            let callback = crate::bridge::callback::CallbackError::from(converted);
+            assert_eq!(callback.code, "budget_exceeded");
+            assert!(!callback.recoverable);
         }
     }
 }

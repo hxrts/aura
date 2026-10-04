@@ -58,6 +58,7 @@ pub enum ModerationDenial {
 }
 
 impl ModerationDenial {
+    #[cfg(feature = "signals")]
     pub(crate) fn semantic_code(&self) -> crate::ui_contract::SemanticFailureCode {
         use crate::ui_contract::SemanticFailureCode as C;
         match self {
@@ -78,9 +79,10 @@ impl From<ModerationDenial> for aura_core::AuraError {
 }
 
 /// Find actual denial evidence retained through workflow/native error context.
-pub(crate) fn denial_from_error<'a>(
-    error: &'a (impl std::error::Error + 'static),
-) -> Option<&'a ModerationDenial> {
+#[cfg(feature = "signals")]
+pub(crate) fn denial_from_error(
+    error: &(impl std::error::Error + 'static),
+) -> Option<&ModerationDenial> {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
     while let Some(cause) = source {
         if let Some(denial) = cause.downcast_ref::<ModerationDenial>() {

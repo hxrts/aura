@@ -252,3 +252,78 @@ fn test_session_statistics() {
     assert_eq!(stats.timeout_sessions, 0);
     assert!((stats.success_rate_percent - 66.67).abs() < 0.1);
 }
+
+#[test]
+fn required_session_original_deadline_survives_activation_without_renewal() {
+    let now = test_time(1_000);
+    let original = aura_core::time::timeout::TimeoutBudget::from_start_and_timeout(
+        &now,
+        Duration::from_millis(100),
+    )
+    .expect("original caller resource interval");
+    let mut manager =
+        SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
+    let id = manager
+        .create_session_in_original_window(vec![test_device_id(41)], &now, &original)
+        .expect("actual admission in original window");
+    manager
+        .activate_session(
+            id,
+            TestProtocolState {
+                phase: "active".into(),
+                data: vec![],
+            },
+            &test_time(1_090),
+        )
+        .expect("activation before original deadline");
+    let session = manager
+        .get_session(&id)
+        .expect("actual retained original session");
+    assert!(!session.is_timed_out(&test_time(1_099)));
+    assert!(
+        session.is_timed_out(&test_time(1_100)),
+        "activation cannot renew caller interval"
+    );
+}
+
+#[test]
+fn required_session_endpoint_overflow_fails_before_allocation_with_native_cause() {
+    use std::error::Error;
+    let now = test_time(u64::MAX - 1);
+    let mut manager =
+        SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
+    let failure = manager
+        .create_session(vec![test_device_id(42)], &now)
+        .expect_err("unrepresentable endpoint cannot allocate");
+    assert_eq!(manager.get_statistics().total_sessions, 0);
+    assert!(failure
+        .source()
+        .expect("native interval cause")
+        .is::<aura_core::types::window::WindowIntervalError>());
+}
+
+#[test]
+fn required_session_original_rollback_fails_before_allocation_with_native_cause() {
+    use std::error::Error;
+    let now = test_time(1_000);
+    let original = aura_core::time::timeout::TimeoutBudget::from_start_and_timeout(
+        &now,
+        Duration::from_millis(100),
+    )
+    .expect("original resource policy");
+    original
+        .remaining_at(&test_time(1_050))
+        .expect("original progress");
+    let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
+    let failure = manager
+        .create_session_in_original_window(vec![test_device_id(43)], &test_time(1_040), &original)
+        .expect_err("rollback above start remains a required failure");
+    assert_eq!(manager.get_statistics().total_sessions, 0);
+    assert!(matches!(
+        failure
+            .source()
+            .expect("original budget cause")
+            .downcast_ref::<aura_core::TimeoutBudgetError>(),
+        Some(aura_core::TimeoutBudgetError::ClockRollback { .. })
+    ));
+}

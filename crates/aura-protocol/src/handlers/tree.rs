@@ -65,7 +65,7 @@ pub struct PersistentTreeHandler {
     ops_cache: RwLock<Vec<AttestedOp>>,
     /// Whether we've loaded from storage yet
     initialized: AtomicBool,
-    mutation_gate: tokio::sync::Mutex<()>,
+    mutation_gate: async_lock::Mutex<()>,
 }
 
 /// Exclusive current-tree decision custody. It excludes local tree writers,
@@ -76,7 +76,7 @@ pub struct PersistentTreeHandler {
 /// ```
 pub struct TreeDecisionLease<'a> {
     owner: &'a PersistentTreeHandler,
-    _guard: tokio::sync::MutexGuard<'a, ()>,
+    _guard: async_lock::MutexGuard<'a, ()>,
 }
 
 impl TreeDecisionLease<'_> {
@@ -136,7 +136,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(Vec::new()),
             initialized: AtomicBool::new(false),
-            mutation_gate: tokio::sync::Mutex::new(()),
+            mutation_gate: async_lock::Mutex::new(()),
         }
     }
 
@@ -149,7 +149,7 @@ impl PersistentTreeHandler {
             storage,
             ops_cache: RwLock::new(ops_cache),
             initialized: AtomicBool::new(true),
-            mutation_gate: tokio::sync::Mutex::new(()),
+            mutation_gate: async_lock::Mutex::new(()),
         })
     }
 

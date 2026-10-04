@@ -76,6 +76,14 @@ That rejection is fail-closed. Aura rejects stale or forged owner capabilities, 
 
 The host runtime may use actor services to supervise the surrounding work, but fragment ownership itself remains a singular move boundary with stale-owner rejection.
 
+Supervised local session bindings use the opaque execution identity issued by
+actual bounded runtime task registration. That identity remains stable across
+suspension and executor migration, and distinguishes sibling groups even when
+their local task counters coincide. Poll and destruction scopes restore their
+caller before returning to the executor. Observing the identity grants neither
+task admission nor fragment, peer, or signing authority. Browser siblings must
+not derive session ownership from their shared executor thread.
+
 Owner record and capability are also distinct here:
 
 - ownership answers which local runtime currently owns the fragment
@@ -221,3 +229,74 @@ receipt authorizes key activation, profile adoption, or current membership.
 Required verification, clock, storage, and VM-close failures retain their native
 causes. A missing invitee during the initial request may be retried only from the
 actual transport cause, within the original enrollment window.
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.
+
+### Required close error provenance
+
+A required session close preserves the native engine or choreography error as
+its cause. Session ownership retirement and VM close are distinct outcomes:
+retiring an owner cannot erase a failed close, and a combined failure retains
+both causes. Forced cleanup provides resource retirement evidence only; it
+cannot substitute for an acknowledged protocol terminal decision.
+
+### Required local session disposal
+
+Required VM retirement disposes only the owned target session, including live or
+blocked coroutines, scheduling eligibility, handoffs and scoped communication
+and resource state. Unrelated sessions remain usable. Host metadata removal
+follows the actual backend acknowledgment. The cooperative backend retains
+stable coroutine IDs through its existing index rebuild; the threaded backend
+validates and rebuilds its explicit ID index after removal.
+
+Threaded worker execution is joined by the engine's synchronous worker scope
+before exclusive disposal begins. Acknowledgment means no target job remains;
+it does not require destroying the shared pool or other sessions. Naturally
+terminal session status and epoch are preserved, and repeated disposal returns
+its original compact acknowledgment. New close epoch advancement is checked
+only for a genuinely active target.
+
+Concrete backend failure remains in the standard native source chain. Required
+closure cannot succeed by parsing or suppressing an unsupported error, merely
+removing host metadata, or disposing an entire engine containing other sessions.
+Historical compact summaries and diagnostic traces follow the dependency's
+explicit archive policy. Shared global guard state is not claimed as exclusively
+owned by the target session. VM disposal is local cleanup and does not establish
+remote delivery, a signed terminal decision or protocol completion.
+
+### Cancelled enrollment notification recovery
+
+Post-bootstrap recovery distinguishes a retained Cancelled first decision from an
+active enrollment registration. Pending generation secrets remain retired. A
+separate move-owned notice capability binds the independently retained issued
+manifest, actual runtime, immutable first decision, original clock checkpoint and
+original execution semaphore. It authorizes only the finite signed terminal-notice
+protocol; it grants no Request, Accept, Confirm, activation or membership authority.
+
+Notification eligibility ends at the earlier of the original registered deadline
+and the signed manifest expiry. Restoring a terminal decision does not renew either
+bound. Required observation and checkpoint acknowledgment precede signing and
+continuation. Signing uses the currently owned issuer identity only while its key
+still matches the independently retained issuer verifier. Known original or signed expiry completes the finite recovery owner with a typed
+eligibility-ended disposition and prevents further sends. Required clock,
+checkpoint, signer, transport and teardown faults retain their original typed
+cause through task failure and drain. Both preserve the Cancelled decision.

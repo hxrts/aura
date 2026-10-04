@@ -1,6 +1,6 @@
 //! Small shared wire-format and timestamp helpers for sync protocols.
 
-use crate::core::{sync_network_error, sync_serialization_error, sync_session_error, SyncResult};
+use crate::core::{sync_session_error, SyncResult};
 use aura_core::effects::NetworkEffects;
 use aura_core::time::PhysicalTime;
 use serde::de::DeserializeOwned;
@@ -23,10 +23,13 @@ pub fn json_serialize<T: Serialize + ?Sized>(
     value: &T,
 ) -> SyncResult<Vec<u8>> {
     serde_json::to_vec(value).map_err(|err| {
-        sync_serialization_error(
-            data_type,
-            format!("Failed to serialize {description}: {err}"),
-        )
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::serialization(
+                data_type,
+                format!("Failed to serialize {description}: {err}"),
+            )
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     })
 }
 
@@ -37,10 +40,13 @@ pub fn json_deserialize<T: DeserializeOwned>(
     bytes: &[u8],
 ) -> SyncResult<T> {
     serde_json::from_slice(bytes).map_err(|err| {
-        sync_serialization_error(
-            data_type,
-            format!("Failed to deserialize {description}: {err}"),
-        )
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::serialization(
+                data_type,
+                format!("Failed to deserialize {description}: {err}"),
+            )
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     })
 }
 
@@ -51,10 +57,13 @@ pub fn binary_serialize<T: Serialize>(
     value: &T,
 ) -> SyncResult<Vec<u8>> {
     aura_core::util::serialization::to_vec(value).map_err(|err| {
-        sync_serialization_error(
-            data_type,
-            format!("Failed to serialize {description}: {err}"),
-        )
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::serialization(
+                data_type,
+                format!("Failed to serialize {description}: {err}"),
+            )
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     })
 }
 
@@ -65,10 +74,13 @@ pub fn binary_deserialize<T: DeserializeOwned>(
     bytes: &[u8],
 ) -> SyncResult<T> {
     aura_core::util::serialization::from_slice(bytes).map_err(|err| {
-        sync_serialization_error(
-            data_type,
-            format!("Failed to deserialize {description}: {err}"),
-        )
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::serialization(
+                data_type,
+                format!("Failed to deserialize {description}: {err}"),
+            )
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     })
 }
 
@@ -85,9 +97,12 @@ where
     P: Display + ?Sized,
 {
     effects.send_to_peer(peer_id, bytes).await.map_err(|err| {
-        sync_network_error(format!(
-            "Failed to send {description} to peer {peer}: {err}"
-        ))
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::network(format!(
+                "Failed to send {description} to peer {peer}: {err}"
+            ))
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     })
 }
 
@@ -156,7 +171,13 @@ where
             continue;
         }
         return serde_json::from_value(frame.body).map_err(|err| {
-            sync_serialization_error(kind, format!("Failed to deserialize {description}: {err}"))
+            let diagnostic = {
+                crate::core::errors::SyncDiagnostic::serialization(
+                    kind,
+                    format!("Failed to deserialize {description}: {err}"),
+                )
+            };
+            crate::core::errors::sync_error_with_cause(diagnostic, err)
         });
     }
     Err(sync_session_error(format!(
@@ -175,9 +196,10 @@ where
     P: Display + ?Sized,
 {
     let receive_error = |err| {
-        sync_network_error(format!(
+        let diagnostic = crate::core::errors::SyncDiagnostic::network(format!(
             "Failed to receive {description} from peer {expected_peer}: {err}"
-        ))
+        ));
+        crate::core::errors::sync_error_with_cause(diagnostic, err)
     };
     match effects.receive_from(expected_peer_id).await {
         Ok(payload) => Ok(payload),
@@ -222,4 +244,32 @@ where
     .await?;
     receive_json_from_expected_peer(effects, peer_id, peer, response_type, response_description)
         .await
+}
+
+#[cfg(test)]
+mod required_source_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn required_sync_json_codec_retains_actual_malformed_payload_source() {
+        let failure =
+            json_deserialize::<serde_json::Value>("sync_request", "required sync request", b"{")
+                .expect_err("actual malformed JSON cannot become successful sync data");
+        assert!(matches!(
+            failure,
+            aura_core::AuraError::Serialization { .. }
+        ));
+        let original = failure
+            .source()
+            .expect("actual codec source")
+            .downcast_ref::<serde_json::Error>()
+            .expect("native JSON error directly downcasts");
+        assert!(original.is_eof());
+        let cloned = failure.clone();
+        assert!(cloned
+            .source()
+            .expect("clone retains original native cause")
+            .is::<serde_json::Error>());
+    }
 }

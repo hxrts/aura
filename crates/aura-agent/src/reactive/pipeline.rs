@@ -26,15 +26,24 @@ use crate::runtime::{
 };
 use crate::task_registry::TaskSupervisor;
 
+/// Original runtime binding minted only by actual pipeline assembly.
+pub(super) struct PipelineRuntimeOwnerCapability {
+    effects: std::sync::Weak<AuraEffectSystem>,
+}
+impl PipelineRuntimeOwnerCapability {
+    pub(super) fn into_runtime(self) -> std::sync::Weak<AuraEffectSystem> {
+        self.effects
+    }
+}
+
 /// Owns the running scheduler + the single fact publication mechanism.
 ///
 /// Intended integration:
 /// - Runtime journal commit / inbound sync calls `publish_journal_facts()` with typed facts
 /// - The scheduler processes them and drives view updates
 pub struct ReactivePipeline {
-    fact_tx: mpsc::Sender<FactSource>,
+    fact_tx: super::FactIngress,
     shutdown_tx: mpsc::Sender<()>,
-    update_tx: broadcast::Sender<ViewUpdate>,
     updates: broadcast::Receiver<ViewUpdate>,
     tasks: TaskGroup,
     diagnostics: Arc<RuntimeDiagnosticSink>,
@@ -44,7 +53,15 @@ pub struct ReactivePipeline {
 #[derive(Debug, thiserror::Error)]
 pub enum ReactivePipelineError {
     #[error("reactive fact sink is closed")]
-    FactSinkClosed,
+    FactSinkClosed {
+        #[source]
+        source: super::FactProcessingError,
+    },
+    #[error("required reactive shutdown failed")]
+    RequiredShutdown {
+        #[source]
+        source: crate::task_registry::TaskSupervisionError,
+    },
     #[error("reactive shutdown signal channel is unavailable")]
     ShutdownSignalUnavailable,
 }
@@ -117,8 +134,14 @@ impl ReactivePipeline {
         reactive: ReactiveHandler,
         diagnostics: Arc<RuntimeDiagnosticSink>,
     ) -> Self {
-        let (mut scheduler, fact_tx, shutdown_tx, update_tx) =
-            ReactiveScheduler::new(scheduler_config, fact_registry, time_effects.clone());
+        let (mut scheduler, fact_tx, shutdown_tx) = ReactiveScheduler::new_owned(
+            scheduler_config,
+            fact_registry,
+            time_effects.clone(),
+            PipelineRuntimeOwnerCapability {
+                effects: Arc::downgrade(&effects),
+            },
+        );
 
         // Register UI-facing signal views (scheduler → signals).
         scheduler.register_view(Arc::new(ChatSignalView::new(
@@ -142,21 +165,18 @@ impl ReactivePipeline {
 
         let updates = scheduler.subscribe();
 
-        let fut = async move {
-            scheduler.run().await;
-        };
+        let fut = async move { scheduler.run().await };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = tasks.spawn_local_named("scheduler", fut);
+                let _task_handle = tasks.spawn_local_try_named("scheduler", fut);
             } else {
-                let _task_handle = tasks.spawn_named("scheduler", fut);
+                let _task_handle = tasks.spawn_try_named("scheduler", fut);
             }
         }
 
         Self {
             fact_tx,
             shutdown_tx,
-            update_tx,
             updates,
             tasks,
             diagnostics,
@@ -172,7 +192,7 @@ impl ReactivePipeline {
         self.fact_tx
             .send(FactSource::Journal(facts))
             .await
-            .map_err(|_| {
+            .map_err(|source| {
                 self.diagnostics.emit(RuntimeDiagnostic {
                     severity: RuntimeDiagnosticSeverity::Error,
                     kind: RuntimeDiagnosticKind::ReactiveFactPublishFailed,
@@ -183,25 +203,64 @@ impl ReactivePipeline {
                     event = "runtime.reactive.fact_publish_failed",
                     "Reactive fact publication failed because the scheduler sink is closed"
                 );
-                ReactivePipelineError::FactSinkClosed
+                ReactivePipelineError::FactSinkClosed { source }
             })
     }
 
+    /// Publish replay facts and wait for this exact accepted target under the
+    /// service owner's original resource window. Diagnostic Batch events never
+    /// satisfy required replay readiness.
+    pub(crate) async fn replay_required<T: PhysicalTimeEffects + Sync>(
+        &self,
+        facts: Vec<Fact>,
+        time: &T,
+        window: &aura_core::TimeoutBudget,
+    ) -> Result<(), aura_core::time::timeout::TimeoutRunError<super::FactProcessingError>> {
+        let target = self
+            .fact_tx
+            .publish_required(facts)
+            .await
+            .map_err(aura_core::time::timeout::TimeoutRunError::Operation)?;
+        target.await_processed(&self.fact_tx, time, window).await
+    }
+
+    /// Actual owned scheduler failure, including a retained required clock cause.
+    pub(crate) fn terminal_failure(&self) -> Option<crate::task_registry::TaskSupervisionError> {
+        self.tasks.terminal_failure()
+    }
+
     /// Subscribe to scheduler view updates.
+
     pub fn subscribe(&self) -> broadcast::Receiver<ViewUpdate> {
         self.updates.resubscribe()
     }
 
     /// Direct sender for injecting facts (useful for tests).
-    pub fn fact_sender(&self) -> mpsc::Sender<FactSource> {
+    pub fn fact_sender(&self) -> super::FactIngress {
         self.fact_tx.clone()
     }
 
-    /// Get the view update sender for attaching to the effect system.
-    ///
-    /// This allows callers to subscribe to view updates and await fact processing.
-    pub fn update_sender(&self) -> broadcast::Sender<ViewUpdate> {
-        self.update_tx.clone()
+    /// Required disposal consumes this pipeline under the caller's original
+    /// drain owner. Cancellation, timer failure and forced abort are failures,
+    /// never evidence of completed descendant destruction.
+    pub(crate) async fn shutdown_with_original_budget<T: PhysicalTimeEffects>(
+        self,
+        time: &T,
+        original: &aura_core::TimeoutBudget,
+    ) -> Result<(), ReactivePipelineError> {
+        // The owned graceful signal wakes the scheduler without cancellation; the exact
+        // owned task group is still retained until descendant completion ACK.
+        match self.shutdown_tx.try_send(()) {
+            Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => {}
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                // A naturally finished scheduler still requires its actual task
+                // completion, including native failure consumption below.
+            }
+        }
+        self.tasks
+            .wait_with_original_budget(time, original)
+            .await
+            .map_err(|source| ReactivePipelineError::RequiredShutdown { source })
     }
 
     pub async fn shutdown(self) -> Result<(), ReactivePipelineError> {

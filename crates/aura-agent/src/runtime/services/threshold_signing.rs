@@ -19,6 +19,10 @@
 //! For single-device (threshold=1), signing is local without network.
 //! For multi-device (threshold>1), coordination happens via choreography.
 
+#[derive(Debug, thiserror::Error)]
+#[error("cached threshold context contradicts protected current signing mode")]
+struct UnownedThresholdContextModeError;
+
 use super::state::with_state_mut_validated;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::runtime::AuraEffectSystem;
@@ -62,6 +66,82 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyBootstrapMigrationDecision {
+    version: u16,
+    authority: AuthorityId,
+    device: aura_core::DeviceId,
+    original_policy_digest: [u8; 32],
+    original_envelope_digest: [u8; 32],
+    public_package_digest: [u8; 32],
+    creation_op_digest: [u8; 32],
+}
+
+/// Validate an explicit migration origin before using converted active policy.
+/// Protected original records, not a metadata string, prove this origin.
+pub(crate) async fn validate_bootstrap_migration_origin(
+    effects: &AuraEffectSystem,
+    authority: &AuthorityId,
+    epoch: u64,
+    origin: [u8; 32],
+) -> Result<(), AuraError> {
+    if epoch != 0 || *authority != effects.runtime_authority_id() {
+        return Err(BootstrapGenesisError::RecordMismatch.into());
+    }
+    let location = SecureStorageLocation::new(
+        "bootstrap_physical_participant_migration_v1",
+        authority.to_string(),
+    );
+    let bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await?;
+    if bytes.len() > 4096 || aura_core::hash::hash(&bytes) != origin {
+        return Err(BootstrapGenesisError::RecordMismatch.into());
+    }
+    let decision: LegacyBootstrapMigrationDecision = serde_json::from_slice(&bytes)?;
+    if serde_json::to_vec(&decision)? != bytes
+        || decision.version != 1
+        || decision.authority != *authority
+        || decision.device != effects.device_id()
+    {
+        return Err(BootstrapGenesisError::RecordMismatch.into());
+    }
+    let genesis_bytes = effects
+        .secure_retrieve(
+            &ThresholdSigningService::bootstrap_genesis_location(authority),
+            &[SecureStorageCapability::Read],
+        )
+        .await?;
+    if genesis_bytes.len() > 2048 {
+        return Err(BootstrapGenesisError::RecordSize.into());
+    }
+    let genesis: BootstrapGenesisRecord = serde_json::from_slice(&genesis_bytes)?;
+    if genesis.version != 1
+        || genesis.authority != *authority
+        || genesis.device != effects.device_id()
+        || genesis.epoch != 0
+        || genesis.public_package_digest != decision.public_package_digest
+        || !matches!(genesis.state, BootstrapGenesisState::Complete { creation_op_digest }
+            if creation_op_digest == decision.creation_op_digest)
+    {
+        return Err(BootstrapGenesisError::RecordMismatch.into());
+    }
+    let package = effects
+        .secure_retrieve(
+            &SecureStorageLocation::with_sub_key("threshold_pubkey", authority.to_string(), "0"),
+            &[SecureStorageCapability::Read],
+        )
+        .await?;
+    if package.is_empty() || package.len() > 65_536 {
+        return Err(BootstrapGenesisError::RecordSize.into());
+    }
+    if aura_core::hash::hash(&package) != decision.public_package_digest {
+        return Err(BootstrapGenesisError::RecordMismatch.into());
+    }
+    Ok(())
+}
 
 const PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION: u8 = 1;
 const PARTICIPANT_KEY_PACKAGE_AAD_DOMAIN: &str = "aura:participant-key-package-envelope:v1";
@@ -156,6 +236,9 @@ struct ThresholdConfigMetadata {
     /// Agreement mode for this epoch (A1/A2/A3)
     #[serde(default)]
     agreement_mode: AgreementMode,
+    /// Exact protected original bootstrap migration decision, absent for fresh keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bootstrap_migration_origin: Option<[u8; 32]>,
 }
 
 impl ThresholdConfigMetadata {
@@ -383,8 +466,10 @@ impl ThresholdSigningService {
                 self.runtime_capabilities
                     .require_capabilities(&[CapabilityKey::new("byzantine_envelope")])
                     .await?;
-                self.sign_threshold_local(&authority, &message, state)
-                    .await?
+                return Err(self
+                    .unowned_threshold_route_error(&authority, state.epoch)
+                    .await
+                    .into());
             }
         };
         let request = DeviceEnrollmentSetupRequest { statement, proof };
@@ -645,9 +730,19 @@ impl ThresholdSigningService {
         authority: &AuthorityId,
         new_epoch: u64,
         expected: Option<&VerifiedPendingSigningGeneration>,
+        held: Option<&crate::runtime::effects::EnrollmentGenerationCustodyCapability<'_>>,
     ) -> Result<(), AuraError> {
+        match (expected, held) {
+            (Some(_), Some(owner)) => owner.require_effects(self.effects.as_ref())?,
+            (None, None) => {}
+            _ => {
+                return Err(crate::runtime::effects::held_registration_error(
+                    crate::runtime::effects::HeldEnrollmentRegistrationError::RequiredOwner,
+                ))
+            }
+        }
         let _generic_generation = if expected.is_none() {
-            Some(self.effects.enrollment_retirement_generation_guard().await)
+            Some(self.effects.acquire_enrollment_generation_custody().await)
         } else {
             None
         };
@@ -660,11 +755,7 @@ impl ThresholdSigningService {
         if expected.is_none()
             && self
                 .effects
-                .secure_exists(
-                    &crate::runtime::effects::enrollment_generation_profile_location(
-                        authority, new_epoch,
-                    ),
-                )
+                .has_live_enrollment_generation(*authority, new_epoch)
                 .await?
         {
             return Err(AuraError::invalid(
@@ -786,6 +877,7 @@ impl ThresholdSigningService {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "verified_pending_signing_generation",
+        capability_type = EnrollmentActivationCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn commit_verified_pending_generation(
@@ -794,10 +886,25 @@ impl ThresholdSigningService {
         activation: &crate::runtime::services::ceremony_tracker::EnrollmentActivationCapability<'_>,
     ) -> Result<(), AuraError> {
         activation
+            .generation()
+            .require_effects(self.effects.as_ref())?;
+        activation
             .require_generation(expected.authority, expected.epoch)
             .await?;
-        self.activate_retained_generation(&expected.authority, expected.epoch, Some(expected))
-            .await
+        self.effects
+            .seal_owned_enrollment_wrapping_allocations(
+                activation,
+                expected.authority,
+                expected.epoch,
+            )
+            .await?;
+        self.activate_retained_generation(
+            &expected.authority,
+            expected.epoch,
+            Some(expected),
+            Some(activation.generation()),
+        )
+        .await
     }
 
     fn transcript_store(&self) -> StorageTranscriptStore<AuraEffectSystem> {
@@ -1059,9 +1166,241 @@ impl ThresholdSigningService {
         Ok(())
     }
 
-    fn capability_ref(key: &str) -> String {
-        let digest = aura_core::hash::hash(key.as_bytes());
-        hex::encode(&digest[..8])
+    /// Convert only a proved original physical-device bootstrap representation.
+    /// Caller already holds generation and signing-transition custody.
+    async fn migrate_proved_legacy_bootstrap(
+        &self,
+        authority: &AuthorityId,
+        mut restored: SigningContextState,
+    ) -> Result<SigningContextState, AuraError> {
+        let location = SecureStorageLocation::new(
+            "bootstrap_physical_participant_migration_v1",
+            authority.to_string(),
+        );
+        let legacy = ParticipantIdentity::guardian(*authority);
+        let physical = ParticipantIdentity::device(self.effects.device_id());
+        let prior = self.effects.secure_exists(&location).await?;
+        let config_location =
+            SecureStorageLocation::with_sub_key("threshold_config", authority.to_string(), "0");
+        let current = self
+            .effects
+            .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+            .await?;
+        if current.len() > 131_072 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        let metadata: ThresholdConfigMetadata = serde_json::from_slice(&current)?;
+        if let Some(origin) = metadata.bootstrap_migration_origin {
+            validate_bootstrap_migration_origin(self.effects.as_ref(), authority, 0, origin)
+                .await?;
+        }
+        if restored.participants != vec![legacy.clone()]
+            && !prior
+            && metadata.bootstrap_migration_origin.is_none()
+        {
+            return Ok(restored);
+        }
+        if restored.epoch != 0
+            || restored.mode != SigningMode::SingleSigner
+            || restored.config.threshold != 1
+            || restored.config.total_participants != 1
+            || restored.my_signer_index != Some(1)
+            || (restored.participants != vec![legacy.clone()]
+                && restored.participants != vec![physical.clone()])
+        {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        let _tree = self.effects.lock_tree_decision().await;
+        let operations =
+            self.effects
+                .export_tree_ops()
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "read original bootstrap migration history".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        self.effects
+            .collect_enrollment_parent_inventory(&operations)
+            .await?;
+        let state = aura_journal::commitment_tree::reduce(&operations).map_err(|source| {
+            AuraError::crypto_with_source(
+                "validate original bootstrap migration history",
+                Arc::new(source),
+            )
+        })?;
+        if state.epoch.value() != 0
+            || state.leaves.len() != 1
+            || state.leaves.values().any(|leaf| {
+                leaf.role != LeafRole::Device || leaf.device_id != self.effects.device_id()
+            })
+        {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        let creation_op_digest = self
+            .ensure_bootstrap_device_leaf(authority, &restored, false)
+            .await?;
+        let genesis_location = Self::bootstrap_genesis_location(authority);
+        let genesis_bytes = self
+            .effects
+            .secure_retrieve(&genesis_location, &[SecureStorageCapability::Read])
+            .await?;
+        if genesis_bytes.len() > 2048 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        let genesis: BootstrapGenesisRecord = serde_json::from_slice(&genesis_bytes)?;
+        let package_digest = aura_core::hash::hash(&restored.public_key_package);
+        if genesis.version != 1
+            || genesis.authority != *authority
+            || genesis.device != self.effects.device_id()
+            || genesis.epoch != 0
+            || genesis.public_package_digest != package_digest
+            || !matches!(genesis.state, BootstrapGenesisState::Complete { creation_op_digest: digest } if digest == creation_op_digest)
+        {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        let original_metadata = ThresholdConfigMetadata {
+            threshold_k: 1,
+            total_n: 1,
+            participants: vec![legacy.clone()],
+            mode: SigningMode::SingleSigner,
+            agreement_mode: restored.agreement_mode,
+            bootstrap_migration_origin: None,
+        };
+        let original_policy = serde_json::to_vec(&original_metadata)?;
+        let old_canonical = Self::participant_share_location(authority, 0, &legacy);
+        let old_location = if self.effects.secure_exists(&old_canonical).await? {
+            old_canonical
+        } else {
+            SecureStorageLocation::with_sub_key("signing_keys", format!("{authority}:0"), "1")
+        };
+        let old_envelope = self
+            .effects
+            .secure_retrieve(&old_location, &[SecureStorageCapability::Read])
+            .await?;
+        if old_envelope.len() > 131_072 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        let original_secret = zeroize::Zeroizing::new(
+            self.decrypt_participant_key_package(authority, 0, &legacy, &old_envelope)
+                .await?,
+        );
+        let original_package = SingleSignerKeyPackage::import_from_secure_storage(
+            &original_secret,
+            SecretExportContext::secure_storage("aura-agent::legacy-bootstrap-migration"),
+        )?;
+        let public = Self::group_public_key_bytes(&restored)?;
+        let derived = self
+            .effects
+            .ed25519_public_key(original_package.signing_key())
+            .await?;
+        if original_package.verifying_key() != public.as_slice()
+            || derived.as_slice() != public.as_slice()
+        {
+            return Err(BootstrapGenesisError::DeviceKeyMismatch.into());
+        }
+        let decision = LegacyBootstrapMigrationDecision {
+            version: 1,
+            authority: *authority,
+            device: self.effects.device_id(),
+            original_policy_digest: aura_core::hash::hash(&original_policy),
+            original_envelope_digest: aura_core::hash::hash(&old_envelope),
+            public_package_digest: package_digest,
+            creation_op_digest,
+        };
+        let decision_bytes = serde_json::to_vec(&decision)?;
+        let origin = aura_core::hash::hash(&decision_bytes);
+        let physical_metadata = ThresholdConfigMetadata {
+            participants: vec![physical.clone()],
+            bootstrap_migration_origin: Some(origin),
+            ..original_metadata
+        };
+        let converted = serde_json::to_vec(&physical_metadata)?;
+        if current != original_policy && current != converted {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        if decision_bytes.len() > 4096 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        self.effects
+            .secure_store_immutable(
+                &location,
+                &decision_bytes,
+                &[SecureStorageCapability::Write],
+            )
+            .await?;
+        let retained = self
+            .effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await?;
+        if retained.len() > 4096 || retained != decision_bytes {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        let target = Self::participant_share_location(authority, 0, &physical);
+        if !self.effects.secure_exists(&target).await? {
+            let envelope = self
+                .encrypt_participant_key_package(authority, 0, &physical, &original_secret)
+                .await?;
+            self.effects
+                .secure_store_immutable(&target, &envelope, &[SecureStorageCapability::Write])
+                .await?;
+        }
+        let target_bytes = self
+            .effects
+            .secure_retrieve(&target, &[SecureStorageCapability::Read])
+            .await?;
+        if target_bytes.len() > 131_072 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        let target_secret = zeroize::Zeroizing::new(
+            self.decrypt_participant_key_package(authority, 0, &physical, &target_bytes)
+                .await?,
+        );
+        if target_secret != original_secret {
+            return Err(BootstrapGenesisError::DeviceKeyMismatch.into());
+        }
+        if current != converted {
+            self.effects
+                .secure_store(
+                    &config_location,
+                    &converted,
+                    &[SecureStorageCapability::Write],
+                )
+                .await?;
+        }
+        if self
+            .effects
+            .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+            .await?
+            != converted
+        {
+            return Err(BootstrapGenesisError::RecordMismatch.into());
+        }
+        let completed = serde_json::to_vec(&(
+            1_u16,
+            aura_core::hash::hash(&decision_bytes),
+            aura_core::hash::hash(&target_bytes),
+        ))?;
+        let completion_location = SecureStorageLocation::new(
+            "bootstrap_physical_participant_migration_completed_v1",
+            authority.to_string(),
+        );
+        self.effects
+            .secure_store_immutable(
+                &completion_location,
+                &completed,
+                &[SecureStorageCapability::Write],
+            )
+            .await?;
+        if self
+            .effects
+            .secure_retrieve(&completion_location, &[SecureStorageCapability::Read])
+            .await?
+            != completed
+        {
+            return Err(BootstrapGenesisError::CompletionMismatch.into());
+        }
+        restored.participants = vec![physical];
+        Ok(restored)
     }
 
     fn participant_share_location(
@@ -1186,44 +1525,11 @@ impl ThresholdSigningService {
         participant: &ParticipantIdentity,
         envelope_bytes: &[u8],
     ) -> Result<Vec<u8>, AuraError> {
-        let envelope: ParticipantKeyPackageEnvelope = serde_json::from_slice(envelope_bytes)
-            .map_err(|source| AuraError::Serialization {
-                message: "decode participant key package envelope".into(),
-                source: Some(Arc::new(source)),
-            })?;
-        if envelope.version != PARTICIPANT_KEY_PACKAGE_ENVELOPE_VERSION
-            || envelope.authority != *authority
-            || envelope.epoch != epoch
-            || envelope.recipient != *participant
-            || envelope.nonce.len() != 12
-        {
-            return Err(AuraError::permission_denied(
-                "key package envelope metadata does not match storage location",
-            ));
-        }
-        let wrap_key: [u8; 32] = self
-            .effects
-            .secure_retrieve(
-                &Self::participant_wrap_key_location(authority, epoch, participant),
-                &[SecureStorageCapability::Read],
-            )
-            .await?
-            .try_into()
-            .map_err(|_| AuraError::storage("participant share wrapping key has invalid length"))?;
-        let cipher = ChaCha20Poly1305::new((&wrap_key).into());
-        let aad = Self::participant_key_package_aad(authority, epoch, participant);
-        cipher
-            .decrypt(
-                Nonce::from_slice(&envelope.nonce),
-                Payload {
-                    msg: &envelope.ciphertext,
-                    aad: &aad,
-                },
-            )
-            .map_err(|source| AuraError::Crypto {
-                message: "decrypt participant key package".into(),
-                source: Some(Arc::new(source)),
-            })
+        // The effect owner dispatches the versioned envelope and validates original
+        // allocation custody for v2; the service must not reinterpret it as v1.
+        self.effects
+            .decrypt_participant_key_package(authority, epoch, participant, envelope_bytes)
+            .await
     }
 
     async fn store_participant_key_package(
@@ -1277,19 +1583,37 @@ impl ThresholdSigningService {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "durable_confirmed_enrollment",
+        capability_type = DurableConfirmedEnrollmentCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn activate_confirmed_enrollment(
         &self,
         confirmed:crate::handlers::invitation::enrollment_manifest_admission::DurableConfirmedEnrollmentCapability,
     ) -> Result<(), AuraError> {
-        let _generation = self.effects.enrollment_retirement_generation_guard().await;
+        let _generation = self.effects.acquire_enrollment_generation_custody().await;
         crate::handlers::invitation::enrollment_manifest_admission::require_confirmed_import_generation(self.effects.as_ref(),&confirmed)
             .await.map_err(|source| AuraError::PermissionDenied { message:"import generation confirmation owner mismatch".into(),source:Some(Arc::new(source)) })?;
         // Keep the actual tree mutation lease through all durable key activation.
         let _current_tree = self
             .effects
             .install_confirmed_enrollment_transition(&confirmed)
+            .await?;
+        crate::handlers::invitation::enrollment_parent_archive::retain_confirmed_parent_archive(
+            self.effects.as_ref(),
+            &confirmed,
+        )
+        .await?;
+        let archive=crate::handlers::invitation::enrollment_parent_archive::load_confirmed_parent_archive_from_confirmed(self.effects.as_ref(),&confirmed).await?;
+        let history =
+            self.effects
+                .export_tree_ops()
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "read held confirmed imported parent history".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+        self.effects
+            .collect_imported_enrollment_parent_inventory(&archive, &history)
             .await?;
         let manifest = confirmed.confirmation().manifest();
         let authority = &manifest.subject;
@@ -1347,7 +1671,7 @@ impl ThresholdSigningService {
         // This owner holds the generation gate. The activation helper enforces
         // persisted/in-memory monotone epoch and exact generation checks, then
         // durably updates agreement+epoch before exposing signing context.
-        self.activate_retained_generation(authority, epoch, Some(&expected))
+        self.activate_retained_generation(authority, epoch, Some(&expected), Some(&_generation))
             .await
     }
 
@@ -1379,12 +1703,9 @@ impl ThresholdSigningService {
 
         match context.mode {
             SigningMode::SingleSigner => {
-                let participant = ParticipantIdentity::guardian(*authority);
-                let location = SecureStorageLocation::with_sub_key(
-                    "signing_keys",
-                    format!("{}:{}", authority, context.epoch),
-                    "1",
-                );
+                let (participant, location) = self
+                    .require_local_solo_share_location(authority, &context)
+                    .await?;
                 let key_package = self
                     .retrieve_participant_key_package(
                         authority,
@@ -1564,6 +1885,74 @@ impl ThresholdSigningService {
     ///
     /// This is the fast path for 1-of-1 configurations that uses direct Ed25519
     /// signing without any FROST protocol overhead.
+    fn require_local_solo_participant(
+        &self,
+        authority: &AuthorityId,
+        state: &SigningContextState,
+    ) -> Result<ParticipantIdentity, AuraError> {
+        if state.mode != SigningMode::SingleSigner
+            || state.config.threshold != 1
+            || state.config.total_participants != 1
+            || state.my_signer_index != Some(1)
+            || state.participants.len() != 1
+        {
+            return Err(AuraError::crypto(
+                "invalid authoritative local single-signer context",
+            ));
+        }
+        let participant = state.participants[0].clone();
+        match &participant {
+            ParticipantIdentity::Device(id) if *id == self.effects.device_id() => Ok(participant),
+            ParticipantIdentity::Guardian(id) if id == authority => Ok(participant),
+            _ => Err(AuraError::crypto(
+                "single-signer context does not own this physical signer",
+            )),
+        }
+    }
+    /// Select only the exact participant/epoch authorized by this owned context.
+    /// Canonical presence commits the required read to it, including corruption.
+    /// Explicit absence alone permits the historical solo-layout companion.
+    async fn require_local_solo_share_location(
+        &self,
+        authority: &AuthorityId,
+        state: &SigningContextState,
+    ) -> Result<(ParticipantIdentity, SecureStorageLocation), AuraError> {
+        let metadata_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            authority.to_string(),
+            state.epoch.to_string(),
+        );
+        let metadata_bytes = self
+            .effects
+            .secure_retrieve(&metadata_location, &[SecureStorageCapability::Read])
+            .await?;
+        if metadata_bytes.len() > 131_072 {
+            return Err(BootstrapGenesisError::RecordSize.into());
+        }
+        let metadata: ThresholdConfigMetadata = serde_json::from_slice(&metadata_bytes)?;
+        if let Some(origin) = metadata.bootstrap_migration_origin {
+            validate_bootstrap_migration_origin(
+                self.effects.as_ref(),
+                authority,
+                state.epoch,
+                origin,
+            )
+            .await?;
+        }
+        let participant = self.require_local_solo_participant(authority, state)?;
+        let canonical = Self::participant_share_location(authority, state.epoch, &participant);
+        let location = if self.effects.secure_exists(&canonical).await? {
+            canonical
+        } else {
+            SecureStorageLocation::with_sub_key(
+                "signing_keys",
+                format!("{}:{}", authority, state.epoch),
+                "1",
+            )
+        };
+        Ok((participant, location))
+    }
+
     async fn sign_solo_ed25519(
         &self,
         authority: &AuthorityId,
@@ -1572,26 +1961,19 @@ impl ThresholdSigningService {
     ) -> Result<ThresholdSignature, AuraError> {
         tracing::debug!(?authority, "Signing with Ed25519 single-signer");
 
-        // Load key package from secure storage
-        // Location: signing_keys/<authority>/<epoch>/1
-        let participant = ParticipantIdentity::guardian(*authority);
-        let location = SecureStorageLocation::with_sub_key(
-            "signing_keys",
-            format!("{}:{}", authority, state.epoch),
-            "1",
-        );
+        let (participant, location) = self
+            .require_local_solo_share_location(authority, state)
+            .await?;
 
         let key_package = self
             .retrieve_participant_key_package(authority, state.epoch, &participant, &location)
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to load key package: {e}")))?;
+            .await?;
 
         // Direct Ed25519 signing (no FROST overhead)
         let signature = self
             .effects
             .sign_with_key(message, &key_package, SigningMode::SingleSigner)
-            .await
-            .map_err(|e| AuraError::internal(format!("Ed25519 signing failed: {}", e)))?;
+            .await?;
 
         tracing::info!(?authority, "Ed25519 single-signer signing complete");
 
@@ -1672,109 +2054,27 @@ impl ThresholdSigningService {
         self.sign_solo_ed25519(authority, message, state).await
     }
 
-    /// Aggregate a threshold signature using locally available shares.
-    async fn sign_threshold_local(
+    /// Validate required native policy and the actual local share before denying a raw quorum route.
+    async fn unowned_threshold_route_error(
         &self,
         authority: &AuthorityId,
-        message: &[u8],
-        state: &SigningContextState,
-    ) -> Result<ThresholdSignature, AuraError> {
-        struct SignerMaterial {
-            signer_id: u16,
-            key_package: Vec<u8>,
-        }
-
-        let mut signers: Vec<SignerMaterial> = Vec::new();
-        let mut missing = Vec::new();
-
-        for participant in &state.participants {
-            let location = Self::participant_share_location(authority, state.epoch, participant);
-
-            match self
-                .retrieve_participant_key_package(authority, state.epoch, participant, &location)
-                .await
-            {
-                Ok(key_package) => {
-                    let share =
-                        tree_signing::share_from_key_package_bytes(&key_package).map_err(|e| {
-                            AuraError::internal(format!(
-                                "Failed to decode key package for {}: {e}",
-                                participant.debug_label()
-                            ))
-                        })?;
-                    signers.push(SignerMaterial {
-                        signer_id: share.identifier,
-                        key_package,
-                    });
-                }
-                Err(_) => missing.push(participant.debug_label()),
-            }
-        }
-
-        if signers.len() < state.config.threshold as usize {
-            return Err(AuraError::internal(format!(
-                "Insufficient local shares for threshold signing (need {}, have {}, missing: {})",
-                state.config.threshold,
-                signers.len(),
-                if missing.is_empty() {
-                    "none".to_string()
-                } else {
-                    missing.join(", ")
-                }
-            )));
-        }
-
-        signers.sort_by_key(|s| s.signer_id);
-        let participant_ids: Vec<u16> = signers.iter().map(|s| s.signer_id).collect();
-
-        let mut nonces = Vec::with_capacity(signers.len());
-        for signer in &signers {
-            let nonce = self
-                .effects
-                .frost_generate_nonces(&signer.key_package)
-                .await
-                .map_err(|e| {
-                    AuraError::internal(format!("Failed to generate FROST nonces: {e}"))
-                })?;
-            nonces.push(nonce);
-        }
-
-        let signing_package = self
+        epoch: u64,
+    ) -> AuraError {
+        // This required validator checks native public policy and the actual
+        // local encrypted participant package before QuorumOwnerRequired. It
+        // never loads another physical participant's private share.
+        match self
             .effects
-            .frost_create_signing_package(
-                message,
-                &nonces,
-                &participant_ids,
-                &state.public_key_package,
-            )
+            .require_local_physical_solo_identity_policy(authority, epoch)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to create signing package: {e}")))?;
-
-        let mut partials = Vec::with_capacity(signers.len());
-        for (signer, nonce) in signers.iter().zip(nonces.iter()) {
-            let partial = self
-                .effects
-                .frost_sign_share(&signing_package, &signer.key_package, nonce)
-                .await
-                .map_err(|e| {
-                    AuraError::internal(format!("Failed to sign share {}: {e}", signer.signer_id))
-                })?;
-            partials.push(partial);
+        {
+            Err(source) => source,
+            Ok(_) => AuraError::Crypto {
+                message: "cached threshold context contradicts protected current signing mode"
+                    .into(),
+                source: Some(Arc::new(UnownedThresholdContextModeError)),
+            },
         }
-
-        let signature = self
-            .effects
-            .frost_aggregate_signatures(&signing_package, &partials)
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to aggregate signatures: {e}")))?;
-
-        Ok(ThresholdSignature::new(
-            signature,
-            participant_ids.len() as u16,
-            participant_ids,
-            state.public_key_package.clone(),
-            state.epoch,
-        ))
     }
 }
 
@@ -1863,6 +2163,15 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 .effects
                 .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
                 .await?;
+            if let Some(origin) = metadata.bootstrap_migration_origin {
+                validate_bootstrap_migration_origin(
+                    self.effects.as_ref(),
+                    authority,
+                    epoch,
+                    origin,
+                )
+                .await?;
+            }
             let restored = SigningContextState {
                 config,
                 my_signer_index,
@@ -1900,11 +2209,19 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             }
             if epoch == 0
                 && restored.mode == SigningMode::SingleSigner
-                && restored.participants == vec![ParticipantIdentity::guardian(*authority)]
+                && (restored.participants == vec![ParticipantIdentity::guardian(*authority)]
+                    || restored.participants
+                        == vec![ParticipantIdentity::device(self.effects.device_id())])
             {
                 self.complete_bootstrap_genesis(authority, &restored)
                     .await?;
             }
+            let restored = if epoch == 0 {
+                self.migrate_proved_legacy_bootstrap(authority, restored)
+                    .await?
+            } else {
+                restored
+            };
             if !has_epoch {
                 self.effects
                     .secure_store(
@@ -1934,7 +2251,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             SecureStorageLocation::with_sub_key("threshold_config", authority.to_string(), "0");
         let initial_public =
             SecureStorageLocation::with_sub_key("threshold_pubkey", authority.to_string(), "0");
-        let initial_participant = ParticipantIdentity::guardian(*authority);
+        let initial_participant = ParticipantIdentity::device(self.effects.device_id());
         let initial_wrap = Self::participant_wrap_key_location(authority, 0, &initial_participant);
         let initial_share = Self::participant_share_location(authority, 0, &initial_participant);
         for location in [
@@ -1951,7 +2268,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             }
         }
         let epoch = 0u64;
-        let participant = ParticipantIdentity::guardian(*authority);
+        let participant = ParticipantIdentity::device(self.effects.device_id());
         let participants = vec![participant.clone()];
 
         // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
@@ -2038,6 +2355,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Persist epoch + threshold config metadata for consensus helpers.
         let config_metadata = ThresholdConfigMetadata {
+            bootstrap_migration_origin: None,
             threshold_k: 1,
             total_n: 1,
             participants,
@@ -2171,16 +2489,29 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         self.runtime_capabilities
             .require_capabilities(&[CapabilityKey::new("byzantine_envelope")])
             .await
-            .map_err(|_| {
-                AuraError::permission_denied(format!(
-                    "threshold signing denied: missing runtime capability ref={}",
-                    Self::capability_ref("byzantine_envelope")
-                ))
+            .map_err(|source| {
+                use aura_core::effects::AdmissionError;
+                match source {
+                    AdmissionError::InventoryUnavailable { .. }
+                    | AdmissionError::Internal { .. } => AuraError::Internal {
+                        message: "required threshold capability inventory failed".into(),
+                        source: Some(Arc::new(source)),
+                    },
+                    AdmissionError::MissingCapability { .. }
+                    | AdmissionError::MissingTheoremPack { .. }
+                    | AdmissionError::MissingTheoremPackCapability { .. }
+                    | AdmissionError::MissingRuntimeContracts => AuraError::PermissionDenied {
+                        message: "required threshold capability admission denied".into(),
+                        source: Some(Arc::new(source)),
+                    },
+                }
             })?;
 
-        // Threshold signing via local share aggregation (demo/prototyping path).
-        self.sign_threshold_local(&context.authority, &message, &state)
-            .await
+        // A raw context cannot authorize a distributed quorum round. Required
+        // local material is validated before reporting the missing owner.
+        Err(self
+            .unowned_threshold_route_error(&context.authority, state.epoch)
+            .await)
     }
 
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {
@@ -2382,6 +2713,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Store threshold config metadata for use in commit_key_rotation
         // This includes threshold_k, total_n, and participants
         let config_metadata = ThresholdConfigMetadata {
+            bootstrap_migration_origin: None,
             threshold_k: new_threshold,
             total_n: new_total_participants,
             participants: participants.to_vec(),
@@ -2443,7 +2775,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         authority: &AuthorityId,
         new_epoch: u64,
     ) -> Result<(), AuraError> {
-        self.activate_retained_generation(authority, new_epoch, None)
+        self.activate_retained_generation(authority, new_epoch, None, None)
             .await
     }
 
@@ -2737,6 +3069,33 @@ mod tests {
 
         service.bootstrap_authority(&authority).await.unwrap();
 
+        let metadata = effects
+            .require_threshold_config_metadata(&authority, 0)
+            .await
+            .expect("actual required bootstrap policy");
+        assert!(metadata.contains_participant(&ParticipantIdentity::device(effects.device_id())));
+        assert!(!metadata.contains_participant(&ParticipantIdentity::guardian(authority)));
+        let restarted = ThresholdSigningService::new(effects.clone());
+        assert_eq!(
+            restarted
+                .bootstrap_authority(&authority)
+                .await
+                .expect("actual physical bootstrap restart"),
+            service
+                .public_key_package(&authority)
+                .await
+                .expect("original public package")
+        );
+        assert_eq!(
+            restarted
+                .current_local_key_agreement_secret(&authority)
+                .await
+                .expect("restored contextual physical share"),
+            service
+                .current_local_key_agreement_secret(&authority)
+                .await
+                .expect("original contextual physical share")
+        );
         let ops = effects.export_tree_ops().await.unwrap();
         assert!(
             !ops.is_empty(),
@@ -3011,7 +3370,7 @@ mod tests {
         let location = ThresholdSigningService::participant_wrap_key_location(
             &authority,
             0,
-            &ParticipantIdentity::guardian(authority),
+            &ParticipantIdentity::device(effects.device_id()),
         );
         effects
             .secure_delete(&location, &[SecureStorageCapability::Delete])
@@ -3092,5 +3451,569 @@ mod tests {
             .await
             .expect("decrypt participant package");
         assert_eq!(decrypted, *raw_key_package);
+        let wrong_authority = AuthorityId::new_from_entropy([229; 32]);
+        let foreign = service
+            .decrypt_participant_key_package(&wrong_authority, new_epoch, participant, &stored)
+            .await
+            .expect_err("canonical envelope must reject another authority");
+        assert!(matches!(foreign, AuraError::PermissionDenied { .. }));
+
+        let raw = service
+            .decrypt_participant_key_package(&authority, new_epoch, participant, raw_key_package)
+            .await
+            .expect_err("raw package bytes are never an envelope compatibility path");
+        assert!(matches!(raw, AuraError::Serialization { .. }));
+        assert!(
+            std::error::Error::source(&raw)
+                .and_then(|source| source.downcast_ref::<serde_json::Error>())
+                .is_some(),
+            "actual envelope codec cause must survive"
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod proved_legacy_bootstrap_tests {
+    use super::*;
+    use crate::runtime_bridge::AgentRuntimeBridge;
+    use aura_app::runtime_bridge::RuntimeBridge;
+
+    async fn historical_original() -> (std::sync::Arc<crate::AuraAgent>, Vec<u8>) {
+        let authority = AuthorityId::new_from_entropy([232; 32]);
+        let config = crate::AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy([233; 32]),
+            storage: crate::core::config::StorageConfig {
+                base_path: tempfile::tempdir().expect("historical profile").keep(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let context = aura_core::context::EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy([234; 32]),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let agent = std::sync::Arc::new(
+            crate::AgentBuilder::new()
+                .with_authority(authority)
+                .with_config(config)
+                .build_testing_async(&context)
+                .await
+                .expect("actual runtime"),
+        );
+        AgentRuntimeBridge::new(agent.clone())
+            .bootstrap_signing_keys()
+            .await
+            .expect("original bootstrap");
+        let effects = agent.runtime().effects();
+        let encoder = ThresholdSigningService::new(effects.clone());
+        let physical = ParticipantIdentity::device(effects.device_id());
+        let physical_location =
+            ThresholdSigningService::participant_share_location(&authority, 0, &physical);
+        let bytes = effects
+            .secure_retrieve(&physical_location, &[SecureStorageCapability::Read])
+            .await
+            .expect("original physical secret envelope");
+        let secret = zeroize::Zeroizing::new(
+            encoder
+                .decrypt_participant_key_package(&authority, 0, &physical, &bytes)
+                .await
+                .expect("actual original decryption"),
+        );
+        let guardian = ParticipantIdentity::guardian(authority);
+        let legacy = encoder
+            .encrypt_participant_key_package(&authority, 0, &guardian, &secret)
+            .await
+            .expect("actual historical encryption/AAD producer");
+        let solo =
+            SecureStorageLocation::with_sub_key("signing_keys", format!("{authority}:0"), "1");
+        effects
+            .secure_store(&solo, &legacy, &[SecureStorageCapability::Write])
+            .await
+            .expect("historical mutable key row");
+        let legacy_location =
+            ThresholdSigningService::participant_share_location(&authority, 0, &guardian);
+        effects
+            .secure_store(&legacy_location, &legacy, &[SecureStorageCapability::Write])
+            .await
+            .expect("historical mutable participant row");
+        // Physical backing loss reproduces an old layout without introducing a
+        // generic delete exemption for lifetime-protected originals.
+        assert!(effects
+            .fault_remove_secure_record_for_test(&physical_location)
+            .await
+            .expect("selected old-layout backing removal"));
+        let config_location =
+            SecureStorageLocation::with_sub_key("threshold_config", authority.to_string(), "0");
+        let mut metadata: ThresholdConfigMetadata = serde_json::from_slice(
+            &effects
+                .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("original config"),
+        )
+        .expect("actual original metadata");
+        metadata.participants = vec![guardian];
+        effects
+            .secure_store(
+                &config_location,
+                &serde_json::to_vec(&metadata).expect("historical metadata encoding"),
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .expect("historical mutable policy");
+        let public = effects
+            .secure_retrieve(
+                &SecureStorageLocation::with_sub_key(
+                    "threshold_pubkey",
+                    authority.to_string(),
+                    "0",
+                ),
+                &[SecureStorageCapability::Read],
+            )
+            .await
+            .expect("original authenticated public package");
+        (agent, public)
+    }
+
+    #[tokio::test]
+    async fn proved_historical_encoding_migrates_without_regeneration_and_restarts() {
+        let (agent, public) = historical_original().await;
+        let effects = agent.runtime().effects();
+        let authority = agent.authority_id();
+        let restored = ThresholdSigningService::new(effects.clone());
+        assert_eq!(
+            restored
+                .bootstrap_authority(&authority)
+                .await
+                .expect("proved original migration"),
+            public
+        );
+        let config_location =
+            SecureStorageLocation::with_sub_key("threshold_config", authority.to_string(), "0");
+        let config_bytes = effects
+            .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+            .await
+            .expect("converted canonical metadata");
+        let metadata: ThresholdConfigMetadata =
+            serde_json::from_slice(&config_bytes).expect("converted metadata");
+        assert_eq!(
+            metadata.participants,
+            vec![ParticipantIdentity::device(effects.device_id())]
+        );
+        let origin = metadata
+            .bootstrap_migration_origin
+            .expect("required original provenance");
+        validate_bootstrap_migration_origin(effects.as_ref(), &authority, 0, origin)
+            .await
+            .expect("protected original proof");
+        let restarted = ThresholdSigningService::new(effects.clone());
+        assert_eq!(
+            restarted
+                .bootstrap_authority(&authority)
+                .await
+                .expect("same original service restart"),
+            public
+        );
+        assert_eq!(
+            effects
+                .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("stable original metadata"),
+            config_bytes
+        );
+        let proof = restarted
+            .sign(SigningContext::message(
+                authority,
+                "aura.migration.original-proof".into(),
+                vec![1],
+            ))
+            .await
+            .expect("actual migrated signature");
+        assert_eq!(proof.public_key_package, public);
+        let decision = SecureStorageLocation::new(
+            "bootstrap_physical_participant_migration_v1",
+            authority.to_string(),
+        );
+        assert!(effects
+            .fault_remove_secure_record_for_test(&decision)
+            .await
+            .expect("original proof physical loss"));
+        let failed = ThresholdSigningService::new(effects.clone())
+            .bootstrap_authority(&authority)
+            .await
+            .expect_err("converted metadata cannot be relabeled fresh after protected origin loss");
+        assert!(matches!(failed, AuraError::Storage { .. }));
+        assert!(std::error::Error::source(&failed).is_some());
+        let native_failure = effects
+            .sign(SigningContext::message(
+                authority,
+                "aura.migration.original-proof".into(),
+                vec![3],
+            ))
+            .await
+            .expect_err("required effect policy must retain original origin too");
+        assert!(matches!(native_failure, AuraError::Storage { .. }));
+        assert!(
+            restarted
+                .sign(SigningContext::message(
+                    authority,
+                    "aura.migration.original-proof".into(),
+                    vec![2]
+                ))
+                .await
+                .is_err(),
+            "live cached context cannot bypass protected origin loss"
+        );
+        assert_eq!(
+            effects
+                .secure_retrieve(&config_location, &[SecureStorageCapability::Read])
+                .await
+                .expect("no metadata repair after proof loss"),
+            config_bytes
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_durable_creation_proof_cannot_allocate_migration_decision() {
+        let (agent, _) = historical_original().await;
+        let effects = agent.runtime().effects();
+        let authority = agent.authority_id();
+        assert!(effects
+            .remove(aura_journal::commitment_tree::storage::TREE_OPS_INDEX_KEY)
+            .await
+            .expect("actual durable creation index loss"));
+        let failure = ThresholdSigningService::new(effects.clone())
+            .bootstrap_authority(&authority)
+            .await
+            .expect_err("cached history cannot replace original durable commit evidence");
+        assert!(matches!(failure, AuraError::Storage { .. }));
+        assert!(!effects
+            .secure_exists(&SecureStorageLocation::new(
+                "bootstrap_physical_participant_migration_v1",
+                authority.to_string()
+            ))
+            .await
+            .expect("required decision absence read"));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod original_stop_window_tests {
+    use super::super::traits::ServiceErrorKind;
+    use super::*;
+    use aura_testkit::time::ManualPhysicalClock;
+    use std::time::Duration;
+
+    fn timeout_cause(error: &ServiceError) -> Option<&aura_core::TimeoutBudgetError> {
+        let mut current: &(dyn std::error::Error + 'static) = error;
+        loop {
+            if let Some(cause) = current.downcast_ref::<aura_core::TimeoutBudgetError>() {
+                return Some(cause);
+            }
+            current = current.source()?;
+        }
+    }
+
+    #[tokio::test]
+    async fn required_service_health_retains_original_deadline_and_sticky_clock_rollback(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let authority = AuthorityId::new_from_entropy(aura_core::hash::hash(
+            b"work10-original-health-window-actual-authority",
+        ));
+        let context = crate::runtime::EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy(aura_core::hash::hash(
+                b"work10-original-health-window-actual-context",
+            )),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let config = crate::AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy(aura_core::hash::hash(
+                b"work10-original-health-window-actual-device",
+            )),
+            storage: crate::core::config::StorageConfig {
+                base_path: profile.path().to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let clock = Arc::new(ManualPhysicalClock::new(100));
+        let runtime = crate::runtime::builder::EffectSystemBuilder::testing()
+            .with_config(config)
+            .with_authority(authority)
+            .with_physical_time_provider(clock.clone())
+            .build(&context)
+            .await?;
+        runtime
+            .authorities()
+            .ensure_authority(authority, 100)
+            .await?;
+        runtime
+            .authorities()
+            .set_status(authority, super::super::AuthorityStatus::Active, 100)
+            .await?;
+        let original = runtime.close_for_shutdown_test().await?;
+        let service = runtime.threshold_signing();
+
+        // Hold the actual state while stop has published Stopping. Queue a
+        // writer behind stop's final lifecycle write, ahead of its health read.
+        let held_state = service.shared.state.write().await;
+        clock.set_time(29_000);
+        let stop = runtime.stop_runtime_service(&service, &original);
+        tokio::pin!(stop);
+        assert!(futures::poll!(stop.as_mut()).is_pending());
+        let lifecycle_reader = service.shared.lifecycle.read().await;
+        assert_eq!(*lifecycle_reader, ServiceHealth::Stopping);
+        drop(held_state);
+        assert!(futures::poll!(stop.as_mut()).is_pending());
+        let health_writer = service.shared.lifecycle.write();
+        tokio::pin!(health_writer);
+        assert!(futures::poll!(health_writer.as_mut()).is_pending());
+        drop(lifecycle_reader);
+        assert!(futures::poll!(stop.as_mut()).is_pending());
+        let held_health = match futures::poll!(health_writer.as_mut()) {
+            std::task::Poll::Ready(guard) => guard,
+            std::task::Poll::Pending => panic!("actual stop must precede queued health writer"),
+        };
+        assert_eq!(*held_health, ServiceHealth::Stopped);
+
+        // Service stop has finished; only its required actual health read is
+        // blocked. It cannot allocate a new window after successful stop.
+        clock.set_time(30_100);
+        let error = stop
+            .await
+            .expect_err("health ACK cannot renew original window");
+        assert_eq!(error.kind, ServiceErrorKind::Timeout);
+        assert!(matches!(
+            timeout_cause(&error),
+            Some(aura_core::TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms: 30_100,
+                observed_at_ms: 30_100,
+            })
+        ));
+        assert_eq!(
+            runtime.runtime_activity_state(),
+            crate::runtime::system::RuntimeActivityState::Stopping
+        );
+        assert_eq!(
+            runtime
+                .authorities()
+                .get_authority(authority)
+                .await?
+                .ok_or("actual authority")?
+                .status,
+            super::super::AuthorityStatus::Active
+        );
+        drop(held_health);
+
+        // The same original observation owner keeps rollback sticky even if
+        // physical time is later restored. No replacement cap is issued.
+        for now in [50, 30_100] {
+            clock.set_time(now);
+            let rollback = runtime
+                .stop_runtime_service(&service, &original)
+                .await
+                .expect_err("original clock rollback cannot be repaired by retry");
+            assert_eq!(rollback.kind, ServiceErrorKind::Internal);
+            assert!(matches!(
+                timeout_cause(&rollback),
+                Some(aura_core::TimeoutBudgetError::ClockRollback {
+                    previous_observed_at_ms: 30_100,
+                    observed_at_ms: 50,
+                })
+            ));
+            assert_eq!(service.health().await, ServiceHealth::Stopped);
+        }
+        runtime
+            .tasks()
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn required_service_stop_retains_original_shutdown_deadline_under_actual_state_contention(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let authority = AuthorityId::new_from_entropy(aura_core::hash::hash(
+            b"work10-original-stop-window-actual-authority",
+        ));
+        let context = crate::runtime::EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy(aura_core::hash::hash(
+                b"work10-original-stop-window-actual-context",
+            )),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let config = crate::AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy(aura_core::hash::hash(
+                b"work10-original-stop-window-actual-device",
+            )),
+            storage: crate::core::config::StorageConfig {
+                base_path: profile.path().to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let clock = Arc::new(ManualPhysicalClock::new(100));
+        let runtime = crate::runtime::builder::EffectSystemBuilder::testing()
+            .with_config(config)
+            .with_authority(authority)
+            .with_physical_time_provider(clock.clone())
+            .build(&context)
+            .await?;
+        runtime
+            .authorities()
+            .ensure_authority(authority, 100)
+            .await?;
+        runtime
+            .authorities()
+            .set_status(authority, super::super::AuthorityStatus::Active, 100)
+            .await?;
+        let original = runtime.close_for_shutdown_test().await?;
+        let service = runtime.threshold_signing();
+        clock
+            .fail_next_observation(aura_core::effects::TimeError::ServiceUnavailable)
+            .await;
+        let Err(provider_error) = runtime.stop_runtime_service(&service, &original).await else {
+            panic!("required provider fault cannot count as successful stop")
+        };
+        assert_eq!(provider_error.kind, ServiceErrorKind::Internal);
+        let mut cause: &(dyn std::error::Error + 'static) = &provider_error;
+        let mut provider_retained = false;
+        loop {
+            if matches!(
+                cause.downcast_ref::<aura_core::effects::TimeError>(),
+                Some(aura_core::effects::TimeError::ServiceUnavailable)
+            ) {
+                provider_retained = true;
+            }
+            match cause.source() {
+                Some(next) => cause = next,
+                None => break,
+            }
+        }
+        assert!(
+            provider_retained,
+            "original configured provider failure remains typed"
+        );
+        let held_state = service.shared.state.write().await;
+        clock.set_time(29_000);
+        let stop = runtime.stop_services(&original);
+        tokio::pin!(stop);
+        assert!(futures::poll!(stop.as_mut()).is_pending());
+        // A renewed five-second child would still be live at this observation.
+        clock.set_time(30_100);
+        let Err(error) = stop.await else {
+            panic!("original deadline cannot be renewed while state is held")
+        };
+        assert_eq!(error.kind, ServiceErrorKind::Timeout);
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        let mut actual_deadline = None;
+        loop {
+            if let Some(aura_core::TimeoutBudgetError::DeadlineExceeded {
+                deadline_at_ms,
+                observed_at_ms,
+            }) = cause.downcast_ref::<aura_core::TimeoutBudgetError>()
+            {
+                actual_deadline = Some((*deadline_at_ms, *observed_at_ms));
+            }
+            match cause.source() {
+                Some(next) => cause = next,
+                None => break,
+            }
+        }
+        assert_eq!(actual_deadline, Some((30_100, 30_100)));
+        assert_eq!(
+            runtime.runtime_activity_state(),
+            crate::runtime::system::RuntimeActivityState::Stopping
+        );
+        let authority_state = runtime
+            .authorities()
+            .get_authority(authority)
+            .await?
+            .ok_or_else(|| std::io::Error::other("actual authority registry missing"))?;
+        assert_eq!(
+            authority_state.status,
+            super::super::AuthorityStatus::Active,
+            "failed stop cannot publish authority termination before service ACK"
+        );
+        drop(held_state);
+        runtime
+            .tasks()
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await?;
+        Ok(())
+    }
+    #[tokio::test]
+    async fn required_prior_task_failure_withholds_whole_shutdown_authority_termination(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let authority = AuthorityId::new_from_entropy(aura_core::hash::hash(
+            b"work10-prior-task-failed-shutdown-actual-authority",
+        ));
+        let context = crate::runtime::EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy(aura_core::hash::hash(
+                b"work10-prior-task-failed-shutdown-actual-context",
+            )),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let config = crate::AgentConfig {
+            device_id: aura_core::DeviceId::new_from_entropy(aura_core::hash::hash(
+                b"work10-prior-task-failed-shutdown-actual-device",
+            )),
+            storage: crate::core::config::StorageConfig {
+                base_path: profile.path().to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let clock = Arc::new(ManualPhysicalClock::new(100));
+        let runtime = crate::runtime::builder::EffectSystemBuilder::testing()
+            .with_config(config)
+            .with_authority(authority)
+            .with_physical_time_provider(clock.clone())
+            .build(&context)
+            .await?;
+        runtime
+            .authorities()
+            .ensure_authority(authority, 100)
+            .await?;
+        runtime
+            .authorities()
+            .set_status(authority, super::super::AuthorityStatus::Active, 100)
+            .await?;
+        let observer = runtime.authorities().observe_status_for_test();
+        let gate = runtime.activity_gate();
+        let task = runtime
+            .tasks()
+            .spawn_try_named("required_prior_shutdown_task_failure", async {
+                Err(aura_core::AuraError::Internal {
+                    message: "actual failed runtime task".into(),
+                    source: None,
+                })
+            });
+        assert!(runtime
+            .tasks()
+            .wait_for_idle(Duration::from_secs(5))
+            .await
+            .is_err());
+        let Err(error) = runtime.shutdown_typed(&context).await else {
+            panic!("failed task tree cannot acknowledge whole shutdown")
+        };
+        assert!(matches!(
+            error,
+            crate::runtime::system::RuntimeShutdownError::TaskTree(_)
+        ));
+        assert_eq!(
+            gate.state(),
+            crate::runtime::system::RuntimeActivityState::Stopping
+        );
+        assert_eq!(observer.status(authority).await, Some(super::super::AuthorityStatus::Active),
+            "successful later service stops cannot erase prior task-tree failure or publish termination");
+        drop(task);
+        Ok(())
     }
 }

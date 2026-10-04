@@ -14,6 +14,7 @@ fn invitation_internal_error(prefix: &'static str, error: impl std::fmt::Display
 
 async fn publish_channel_acceptance_chat_projection(
     effects: &AuraEffectSystem,
+    original: &aura_core::TimeoutBudget,
     context_id: ContextId,
     home_id: ChannelId,
     home_name: &str,
@@ -32,11 +33,13 @@ async fn publish_channel_acceptance_chat_projection(
         now_ms,
         sender_id,
     );
-    effects
-        .commit_relational_facts(vec![fact.to_generic()])
+    let committed = effects
+        .commit_relational_facts_required(vec![fact.to_generic()])
         .await
-        .map_err(|error| AgentError::effects(error.to_string()))?;
-    effects.await_next_view_update().await;
+        .map_err(AgentError::from)?;
+    committed
+        .await_processed_in_original_window(original)
+        .await?;
     Ok(())
 }
 
@@ -230,6 +233,7 @@ impl InvitationHandler {
                             )?;
                             publish_channel_acceptance_chat_projection(
                                 effects.as_ref(),
+                                &budget,
                                 invitation.context_id,
                                 *home_id,
                                 &home_name,
@@ -470,24 +474,39 @@ impl InvitationHandler {
             .await
     }
 
-    pub(crate) async fn execute_device_enrollment_initiator(
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentWindowCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn execute_device_enrollment_initiator_owned(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+        budget: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
     ) -> AgentResult<()> {
-        InvitationDeviceEnrollmentHandler::new(self)
-            .execute_device_enrollment_initiator(effects, invitation, ceremony_runner)
-            .await
+        Box::pin(
+            InvitationDeviceEnrollmentHandler::new(self).execute_device_enrollment_initiator_owned(
+                effects,
+                invitation,
+                ceremony_runner,
+                budget,
+            ),
+        )
+        .await
     }
 
     pub(crate) async fn execute_device_enrollment_invitee(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
+        tasks: &crate::task_registry::TaskGroup,
     ) -> AgentResult<()> {
-        InvitationDeviceEnrollmentHandler::new(self)
-            .execute_device_enrollment_invitee(effects, invitation)
-            .await
+        Box::pin(
+            InvitationDeviceEnrollmentHandler::new(self)
+                .execute_device_enrollment_invitee(effects, invitation, tasks),
+        )
+        .await
     }
 }

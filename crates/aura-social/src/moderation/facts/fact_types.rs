@@ -5,6 +5,37 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
+macro_rules! required_moderation_decoder {
+    ($fact:ty, $type_id:ident) => {
+        impl $fact {
+            /// Decode the exact moderation domain and validate its committed wrapper context.
+            ///
+            /// # Errors
+            /// Returns structural, context or native declared-codec failures.
+            pub fn try_from_envelope_in_context(
+                envelope: &aura_core::types::facts::FactEnvelope,
+                outer: ContextId,
+            ) -> Result<Self, crate::moderation::query::RequiredModerationQueryError> {
+                crate::moderation::query::decode_required_moderation_fact(
+                    envelope,
+                    outer,
+                    super::$type_id,
+                )
+            }
+        }
+    };
+}
+
+required_moderation_decoder!(HomeBanFact, HOME_BAN_FACT_TYPE_ID);
+required_moderation_decoder!(HomeUnbanFact, HOME_UNBAN_FACT_TYPE_ID);
+required_moderation_decoder!(HomeMuteFact, HOME_MUTE_FACT_TYPE_ID);
+required_moderation_decoder!(HomeUnmuteFact, HOME_UNMUTE_FACT_TYPE_ID);
+required_moderation_decoder!(HomeKickFact, HOME_KICK_FACT_TYPE_ID);
+required_moderation_decoder!(HomePinFact, HOME_PIN_FACT_TYPE_ID);
+required_moderation_decoder!(HomeUnpinFact, HOME_UNPIN_FACT_TYPE_ID);
+required_moderation_decoder!(HomeGrantModeratorFact, HOME_GRANT_MODERATOR_FACT_TYPE_ID);
+required_moderation_decoder!(HomeRevokeModeratorFact, HOME_REVOKE_MODERATOR_FACT_TYPE_ID);
+
 fn physical_time(ts_ms: u64) -> PhysicalTime {
     PhysicalTime {
         ts_ms,

@@ -359,6 +359,23 @@ impl CryptoExtendedEffects for MockCryptoHandler {
         }
     }
 
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        use rand::SeedableRng;
+        let seed = self.random_bytes_32().await;
+        let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+        aura_core::crypto::participant_proof::sign_participant_key_proof(
+            message,
+            key_package,
+            mode,
+            &mut rng,
+        )
+    }
+
     async fn sign_with_key(
         &self,
         message: &[u8],

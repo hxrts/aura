@@ -143,3 +143,28 @@ domain crates, not in one central global enum. `ResourceScope` in
 `aura-core/src/types/scope.rs` defines authority-centric resource patterns.
 
 See [Transport and Information Flow](111_transport_and_information_flow.md) for flow budget details. See [Journal](105_journal.md) for fact commit semantics.
+
+### Persisted startup authorization
+
+Startup distinguishes confirmed absence of a persisted authority Biscuit from a
+failed required read. Absent credentials permit the explicit new-account
+bootstrap path; storage failure and malformed or unverifiable persisted tokens
+prevent runtime assembly. A restored cache is published only after bounded
+record validation and token verification against its retained root key. These
+checks preserve concrete verification and storage causes.
+
+Authorization cache publication is runtime-private. Observed cache snapshots
+cannot be submitted as authority to a public cache setter. Bootstrap and verified
+hydration retain the production publication path; deliberately malformed cache
+fixtures use a test-only crate-local adapter.
+
+### Guardian invitation first binding
+
+A Guardian acceptance is bound to the retained original issued invitation and
+its issuer verifier. Acceptance recording requires that invitation's owned
+identity evidence and its original runtime; response fields cannot substitute
+another issuer key, invitation type or subject. The recovery-key signature proves
+possession for this particular invitation. Recording that key establishes the
+Guardian recovery binding and does not authorize device membership. Original
+imported invitation continuity and local recovery-pair integrity are distinct
+verification roles.

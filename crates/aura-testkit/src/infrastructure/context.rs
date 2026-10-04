@@ -395,6 +395,17 @@ impl CryptoExtendedEffects for CompositeTestHandler {
             .await
     }
 
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        self.crypto
+            .sign_participant_key_proof(message, key_package, mode)
+            .await
+    }
+
     async fn sign_with_key(
         &self,
         message: &[u8],

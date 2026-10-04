@@ -148,3 +148,50 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
+
+### Enrollment epoch commit wire
+
+Enrollment peer commits use a distinct v2 signature transcript binding the
+canonical proposal and both the AddLeaf and original-parent-key RotateEpoch
+operation hashes. Missing legacy fences cannot authorize enrollment activation.
+Rotation/removal retain the original signature transcript byte for byte. Runtime
+commit ingress and retained records are bounded to one MiB. These wire proofs
+do not confer activation authority: peer acceptance and activation require the
+actual current participant signer and held generation/tree owners.
+
+### Existing participant response wire
+
+Enrollment peer acceptance v2 binds the exact active signing epoch, signing
+mode, participant index and original group-package digest to the ceremony,
+physical acceptor, proposal and acceptance timestamp. The individual signature
+is checked under the corresponding authenticated participant verifying share;
+a group signature does not identify that participant. These fields are optional
+only for historical wire decoding. Actual prior-schema binary fixtures preserve
+legacy bytes and verify that missing fields cannot authorize a v2 proof. Typed
+missing-context failures retain their native cause. A valid wire proof still
+requires runtime-owned original registration and current generation/tree custody
+before durable recording or activation. Durable response recovery and genuine
+multi-party quorum signing remain separate integration obligations.
+
+## Native sync failure provenance
+
+Required codec, transport, and journal/anti-entropy producer failures retain the original standard error source. A newly composed `SyncDiagnostic` contains only a source-free category and message; it cannot be constructed from an existing `AuraError` or terminal error. `sync_error_with_cause` attaches the original concrete error directly, preserving nested chains and Clone behavior. Diagnostic text does not authorize retries, peer trust, or terminal progress.
+
+The lifecycle gate requires the real codec and native-category regressions plus compile-fail guards through exact source inventory, discovery, and execution. Required requested-peer completeness and session/actor lifetime remain separate contracts from source retention.
+
+### Required requested-peer session custody
+
+The required requested-peer path admits every distinct requested peer or returns
+a typed fault. It retains exact sessions issued by the local manager across the
+protocol await. Initializing and terminating sessions consume admission
+capacity. Session activation cannot extend the original admitted deadline.
+Required session creation checks original physical observation and checked
+endpoint arithmetic before mutation. Failure or cancellation removes only the
+owned local session entries; this guarantee does not imply asynchronous remote
+transport closure. Legacy aggregate background discovery is a separate API.
+
+Required local session-custody tests observe actual retained allocation IDs,
+including initializing sessions. `SessionManagerStatistics::total_sessions`
+counts terminal outcomes and is not allocation or retirement evidence. Exact
+issued-owner Drop and cancellation must remove original records while retaining
+unrelated session records; partial failed admission must leave no issued subset.

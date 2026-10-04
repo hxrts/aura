@@ -209,11 +209,11 @@ pub use view::{CeremonyViewStatus, InvitationDelta, InvitationDirection, Invitat
 // Re-export protocol types
 pub use protocol::{
     DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRefusal,
-    DeviceEnrollmentRequest, DeviceEnrollmentResponse, DeviceEnrollmentState, GuardianAccept,
-    GuardianConfirm, GuardianDecline, GuardianInvitationState, GuardianRequest, InvitationAck,
-    InvitationAckStatus, InvitationExchangeState, InvitationOffer, InvitationResponse,
-    DEVICE_ENROLLMENT_PROTOCOL_ID, EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE,
-    PROTOCOL_VERSION,
+    DeviceEnrollmentRequest, DeviceEnrollmentResponse, DeviceEnrollmentState,
+    DeviceEnrollmentTerminalNotice, GuardianAccept, GuardianConfirm, GuardianDecline,
+    GuardianInvitationState, GuardianRequest, InvitationAck, InvitationAckStatus,
+    InvitationExchangeState, InvitationOffer, InvitationResponse, DEVICE_ENROLLMENT_PROTOCOL_ID,
+    EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
 };
 
 // Re-export consensus-based ceremony types

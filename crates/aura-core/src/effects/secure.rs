@@ -39,6 +39,34 @@ use serde::{Deserialize, Serialize};
 /// Secure storage operation error
 pub type SecureStorageError = AuraError;
 
+/// Logical absence reported by a required secure-record read.
+/// This evidence describes absence; it does not claim an operating-system fault.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("required secure record is absent")]
+pub struct SecureStorageRecordMissing {
+    location: SecureStorageLocation,
+}
+
+impl SecureStorageRecordMissing {
+    /// Construct the provider's structural absence diagnostic.
+    pub fn new(location: SecureStorageLocation) -> Self {
+        Self { location }
+    }
+
+    /// The exact requested record, without any replacement or fallback selection.
+    pub fn location(&self) -> &SecureStorageLocation {
+        &self.location
+    }
+
+    /// Preserve logical absence within the stable storage category.
+    pub fn into_storage_error(self) -> AuraError {
+        AuraError::Storage {
+            message: self.to_string(),
+            source: Some(std::sync::Arc::new(self)),
+        }
+    }
+}
+
 /// Linearized immutable publication. Existing never implies equal contents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImmutableSecureStoreOutcome {
@@ -55,6 +83,13 @@ pub struct ImmutableSecureStoreUnsupported;
 #[derive(Debug, thiserror::Error)]
 #[error("atomic initial mutable secure storage is unsupported by this backend")]
 pub struct MutableSecureCreateUnsupported;
+
+/// Generic storage capabilities cannot override authenticated lifetime protection.
+#[derive(Debug, thiserror::Error)]
+#[error("immutable secure record rejects {operation}")]
+pub struct ImmutableSecureRecordMutation {
+    pub operation: &'static str,
+}
 
 /// Location within secure storage
 
@@ -232,7 +267,10 @@ pub trait SecureStorageEffects: Send + Sync {
         capabilities: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError>;
 
-    /// Publish a complete encrypted record only if absent. Successful Created
+    /// Publish a complete lifetime-protected record if absent. Existing mutable
+    /// or legacy records are sealed without replacing their original bytes.
+    /// Generic store/delete/key-generation cannot override this protection.
+    /// Successful Created
     /// includes data and directory durability. A failure after publication may
     /// leave a complete record; callers recover by rereading/revalidating it.
     /// Never implement this using exists followed by ordinary store.
@@ -495,5 +533,23 @@ mod tests {
         assert_eq!(location.namespace, "amp_bootstrap_keys");
         assert_eq!(location.key, format!("{context}:{channel}"));
         assert_eq!(location.sub_key, Some(bootstrap_id.to_hex()));
+    }
+}
+
+#[cfg(test)]
+mod required_secure_absence_tests {
+    use super::*;
+
+    #[test]
+    fn required_absence_retains_exact_logical_cause_without_fabricated_io() {
+        let location = SecureStorageLocation::new("policy", "original");
+        let error = SecureStorageRecordMissing::new(location.clone()).into_storage_error();
+        assert!(matches!(error, AuraError::Storage { .. }));
+        let cause = std::error::Error::source(&error)
+            .expect("logical absence cause")
+            .downcast_ref::<SecureStorageRecordMissing>()
+            .expect("typed provider absence");
+        assert_eq!(cause.location(), &location);
+        assert!(std::error::Error::source(cause).is_none());
     }
 }

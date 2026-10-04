@@ -30,6 +30,8 @@
 mod bookkeeping;
 mod builder;
 mod health;
+mod required;
+pub use required::RequiredPeerSyncError;
 #[cfg(test)]
 mod tests;
 
@@ -50,7 +52,10 @@ use aura_core::effects::{PhysicalTimeEffects, TimeError};
 use aura_core::{AuraError, DeviceId};
 
 fn time_error_to_aura(err: TimeError) -> AuraError {
-    AuraError::internal(format!("time error: {err}"))
+    AuraError::Internal {
+        message: "required sync physical provider failed".into(),
+        source: Some(Arc::new(err)),
+    }
 }
 
 const JOURNAL_SYNC_OPERATION_ID: &str = "journal_sync";
@@ -129,6 +134,9 @@ pub struct SyncService {
     /// Metrics collector
     metrics: RwLock<MetricsCollector>,
 
+    /// Sticky actual exact-session retirement failure.
+    required_cleanup_failure: RwLock<Option<AuraError>>,
+
     /// Service start time
     started_at: RwLock<Option<MonotonicInstant>>,
 
@@ -165,7 +173,18 @@ impl SyncService {
             .physical_time()
             .await
             .map_err(time_error_to_aura)?;
-        let session_manager = SessionManager::new(SessionConfig::default(), now);
+        if config.max_concurrent_syncs == 0 {
+            return Err(aura_core::AuraError::invalid(
+                "sync concurrent session policy must be positive",
+            ));
+        }
+        let session_manager = SessionManager::new(
+            SessionConfig {
+                max_concurrent_sessions: config.max_concurrent_syncs,
+                ..SessionConfig::default()
+            },
+            now,
+        );
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
 
@@ -177,6 +196,7 @@ impl SyncService {
             session_manager: RwLock::new(session_manager),
             journal_sync: RwLock::new(journal_sync),
             metrics: RwLock::new(metrics),
+            required_cleanup_failure: RwLock::new(None),
             started_at: RwLock::new(None),
             time_effects,
         })
@@ -221,55 +241,35 @@ impl SyncService {
     where
         E: SyncProtocolEffects,
     {
-        if peers.is_empty() {
-            return Ok(());
-        }
+        // Compatibility entry births one local resource policy before work.
+        // Authoritative callers with an owner use the inherited entry below.
+        let started = effects.physical_time().await.map_err(time_error_to_aura)?;
+        let original = aura_core::time::timeout::TimeoutBudget::from_start_and_timeout(
+            &started,
+            self.session_manager.read().required_resource_timeout(),
+        )
+        .map_err(|source| AuraError::Internal {
+            message: "sync resource policy is invalid".into(),
+            source: Some(Arc::new(source)),
+        })?;
+        self.sync_with_peers_in_original_window(effects, peers, now_instant, &original)
+            .await
+    }
 
-        let authority_id = effects.authority_id();
-        tracing::info!(
-            operation_id = JOURNAL_SYNC_OPERATION_ID,
-            authority_id = %authority_id,
-            peer_count = peers.len(),
-            "Starting journal sync"
-        );
-
-        // 1. Check rate limits for each peer
-        let allowed_peers = self.check_rate_limits(&peers, now_instant).await?;
-
-        // 2. Create sessions for allowed peers
-        let session_peers =
-            Self::create_sync_sessions(&self.session_manager, &allowed_peers, &self.time_effects)
-                .await?;
-
-        // 3. Execute journal sync protocol
-        let sync_results = self
-            .execute_journal_sync_protocol(effects, &session_peers)
-            .await?;
-
-        // 4. Update metrics
-        self.update_sync_metrics(&sync_results).await?;
-
-        // 5. Update peer scores based on sync success/failure
-        let score_results: Vec<(DeviceId, bool)> = sync_results
-            .iter()
-            .map(|&(peer, ops)| (peer, ops.is_some())) // completed, even with nothing to move
-            .collect();
-        let now = effects.physical_time().await.map_err(time_error_to_aura)?;
-        Self::update_peer_scores_from_sync(&self.peer_manager, &score_results, &now).await?;
-
-        // 6. Log aggregate metrics
-        Self::update_auto_sync_metrics(&score_results).await?;
-
-        // 7. Clean up sessions
-        self.cleanup_sync_sessions(&session_peers).await?;
-
-        tracing::info!(
-            operation_id = JOURNAL_SYNC_OPERATION_ID,
-            authority_id = %authority_id,
-            synced_peer_count = sync_results.len(),
-            "Completed journal sync"
-        );
-        Ok(())
+    /// Preserve the caller's original resource owner for every requested peer.
+    /// The resource window supplies no peer authorization.
+    pub async fn sync_with_peers_in_original_window<E>(
+        &self,
+        effects: &E,
+        peers: Vec<DeviceId>,
+        now: MonotonicInstant,
+        original: &aura_core::time::timeout::TimeoutBudget,
+    ) -> SyncResult<()>
+    where
+        E: SyncProtocolEffects,
+    {
+        self.sync_requested_peers(effects, peers, now, original)
+            .await
     }
 
     /// Discover and sync with available peers

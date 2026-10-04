@@ -469,3 +469,20 @@ Verification code is in `aura-core/src/tree/verification.rs`. Type definitions a
 ### Enrollment roster decision custody
 
 Device enrollment key generation is authorized by a held authenticated current-tree decision and the independently granted invitee setup. The physical issuer is a current Device member, the new device is not yet a member, and active signing epoch/configuration agree with the verified tree. The complete ordered signing roster and prestate are derived within generation-before-tree custody and retained through original issuer registration. Raw identifiers, participant vectors, observed tree state, and missing-current-device repair do not authorize rotation. A historical allocation can authorize negative secret retirement without conferring current live enrollment authority.
+
+### Bootstrap participant consistency
+
+A new physical single-device authority bootstrap represents its sole signer as that actual Device participant and commits a matching signed Device genesis leaf. Authority identifiers and guardian participants do not substitute for physical membership. Historical guardian-labeled bootstrap configuration requires independently verified original genesis/device/key evidence before migration can confer physical signer representation; successful historical signing alone is insufficient enrollment authority.
+
+### Original enrollment reservation evidence
+
+An enrollment reservation retains the original invitation identifier, subject, physical issuer device and creation time before signing generation allocation. The original immutable reservation is operation identity and clock evidence, not an enrollment authorization. Recovery eligibility requires the retained independent setup grant, original allocated window and generation, and authenticated current membership. Recovery cannot replace the original creation time or deadline with a later observation.
+
+### Enrollment setup validity attenuation
+
+An issued enrollment manifest is bounded by its selected, independently
+verified setup grant. Its expiry must be strictly after that grant's issuance
+and no later than its expiry. Shortening validity is allowed; extending it is a
+typed `SetupValidity` rejection before signing. This bound complements the
+original registered execution interval and cannot renew that interval on retry
+or recovery.

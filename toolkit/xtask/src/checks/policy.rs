@@ -5,8 +5,19 @@ use std::{
     process::Command,
 };
 
+#[path = "runtime_entropy_scope.rs"]
+mod runtime_entropy_scope;
+#[path = "security_test_scope.rs"]
+mod security_test_scope;
 #[path = "trusted_key_scope.rs"]
 mod trusted_key_scope;
+
+pub(super) fn is_rust_test_only(attributes: &[syn::Attribute]) -> bool {
+    trusted_key_scope::cfg_test(attributes)
+}
+
+#[path = "lifetime_scope.rs"]
+mod lifetime_scope;
 
 use anyhow::{bail, Context, Result};
 use regex::Regex;
@@ -24,7 +35,7 @@ pub fn run_service_registry_ownership() -> Result<()> {
         bail!("service-registry-ownership: legacy rendezvous_cache_manager.rs must be removed");
     }
 
-    if !rg_exists(&vec![
+    if !rg_exists(&[
         "-n".into(),
         r"#\[aura_macros::actor_owned\(".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime/services/service_registry.rs")),
@@ -34,7 +45,7 @@ pub fn run_service_registry_ownership() -> Result<()> {
         );
     }
 
-    let legacy_hits = rg_lines(&vec![
+    let legacy_hits = rg_lines(&[
         "-n".into(),
         "RendezvousCacheManager|pending_channels|descriptor_cache".into(),
         repo_relative(repo_root.join("crates/aura-agent/src")),
@@ -50,7 +61,7 @@ pub fn run_service_registry_ownership() -> Result<()> {
         );
     }
 
-    let duplicate_stores = rg_lines(&vec![
+    let duplicate_stores = rg_lines(&[
         "-n".into(),
         r"HashMap<\(\s*ContextId,\s*AuthorityId\s*\),\s*RendezvousDescriptor>".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime/services")),
@@ -78,8 +89,7 @@ pub fn run_service_registry_ownership() -> Result<()> {
 
 pub fn run_runtime_error_boundary() -> Result<()> {
     let repo_root = repo_root()?;
-    let violations = rg_non_comment_lines(&vec![
-        "-n".into(),
+    let violations = rg_non_comment_lines(&["-n".into(),
         "AuraError::(internal|terminal|permission_denied|not_found|invalid_input)\\(format!|(?:crate::core::)?AgentError::(internal|runtime|effects|invalid|config)\\(format!|SemanticOperationError::[A-Za-z_]+\\(\\s*format!".into(),
         repo_relative(repo_root.join("crates/aura-app/src/workflows")),
         repo_relative(repo_root.join("crates/aura-agent/src/handlers/invitation")),
@@ -87,8 +97,7 @@ pub fn run_runtime_error_boundary() -> Result<()> {
         repo_relative(repo_root.join("crates/aura-terminal/src/tui")),
         repo_relative(repo_root.join("crates/aura-web/src")),
         "-g".into(),
-        "*.rs".into(),
-    ])?;
+        "*.rs".into()])?;
     if !violations.is_empty() {
         for hit in violations {
             eprintln!("{hit}");
@@ -124,7 +133,7 @@ pub fn run_testing_exception_boundary() -> Result<()> {
         .iter()
         .map(|entry| entry.split_once('|').unwrap().0.to_string())
         .collect();
-    let actual: BTreeSet<_> = rg_lines(&vec![
+    let actual: BTreeSet<_> = rg_lines(&[
         "-l".into(),
         r"^#!\[allow\(clippy::disallowed_types\)\]".into(),
         repo_relative(repo_root.join("crates/aura-testkit/src")),
@@ -536,7 +545,7 @@ fn boundary_annotation_attached_in_source(
 pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
     let repo_root = repo_root()?;
     let workflow_root = repo_root.join("crates/aura-app/src/workflows");
-    let legacy_hits = rg_lines(&vec![
+    let legacy_hits = rg_lines(&[
         "-n".into(),
         "OWNERSHIP: (view-write-legacy|view-read-for-decision|fallback-heuristic)".into(),
         repo_relative(&workflow_root),
@@ -547,7 +556,7 @@ pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
         }
         bail!("legacy workflow ownership tags are no longer allowed");
     }
-    let deprecated_hits = rg_lines(&vec![
+    let deprecated_hits = rg_lines(&[
         "-n".into(),
         "OWNERSHIP: deprecated-legacy-bridge".into(),
         repo_relative(&workflow_root),
@@ -559,11 +568,9 @@ pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
         bail!("deprecated workflow bridge tags are no longer allowed");
     }
 
-    let sensitive_hits = rg_lines(&vec![
-        "-n".into(),
+    let sensitive_hits = rg_lines(&["-n".into(),
         "with_(chat|homes|contacts|recovery|neighborhood)_state|views_mut\\(|chat_snapshot\\(|contacts_snapshot\\(|recovery_snapshot\\(|core\\.snapshot\\(|snapshot\\(\\)".into(),
-        repo_relative(&workflow_root),
-    ])?;
+        repo_relative(&workflow_root)])?;
     let final_re = Regex::new(
         r"OWNERSHIP: (observed|observed-display-update|authoritative-source|first-run-default|fact-backed|test-only-helper)",
     )?;
@@ -597,7 +604,7 @@ pub fn run_ownership_workflow_tag_ratchet() -> Result<()> {
         }
         bail!("workflow ownership tags are incomplete");
     }
-    let classified_count = rg_lines(&vec![
+    let classified_count = rg_lines(&[
         "-n".into(),
         final_re.as_str().into(),
         repo_relative(&workflow_root),
@@ -611,7 +618,7 @@ pub fn run_ignored_test_count_ratchet() -> Result<()> {
     const MAX_IGNORED_TEST_ANNOTATIONS: usize = 46;
 
     let repo_root = repo_root()?;
-    let ignore_hits = rg_lines(&vec![
+    let ignore_hits = rg_lines(&[
         "-n".into(),
         r#"^\s*#\[ignore(?:\s*=\s*"[^"]+")?\]"#.into(),
         repo_relative(repo_root.join("crates")),
@@ -688,14 +695,12 @@ pub fn run_runtime_boundary_allowlist(args: &[String]) -> Result<()> {
     let (label, matches, skip_pattern, approved_sites, fail_msg) = match mode {
         "instrumentation" => (
             "runtime instrumentation schema",
-            rg_non_comment_lines(&vec![
-                "-n".into(),
+            rg_non_comment_lines(&["-n".into(),
                 r#"event\s*=\s*"runtime\."#.into(),
                 repo_relative(repo_root.join("crates/aura-agent/src/runtime")),
                 repo_relative(repo_root.join("crates/aura-agent/src/task_registry.rs")),
                 "-g".into(),
-                "*.rs".into(),
-            ])?,
+                "*.rs".into()])?,
             Regex::new(r"^crates/aura-agent/src/runtime/instrumentation\.rs:")?,
             vec![
                 Regex::new(r"^crates/aura-agent/src/task_registry\.rs:")?,
@@ -709,13 +714,11 @@ pub fn run_runtime_boundary_allowlist(args: &[String]) -> Result<()> {
         ),
         "concurrency" => (
             "async concurrency envelope",
-            rg_non_comment_lines(&vec![
-                "-n".into(),
+            rg_non_comment_lines(&["-n".into(),
                 "AuraVmRuntimeMode::ThreadedReplayDeterministic|AuraVmRuntimeMode::ThreadedEnvelopeBounded|AuraVmRuntimeSelector::for_policy\\(|new_with_contracts_and_selector\\(|canonical_fallback_policy\\(".into(),
                 repo_relative(repo_root.join("crates/aura-agent/src")),
                 "-g".into(),
-                "*.rs".into(),
-            ])?,
+                "*.rs".into()])?,
             Regex::new(
                 r"^crates/aura-agent/src/runtime/(vm_hardening|vm_host_bridge|choreo_engine)\.rs:",
             )?,
@@ -801,7 +804,7 @@ pub fn run_protocol_choreo_wiring() -> Result<()> {
     }
     let mut violations = Vec::new();
     for protocol in protocols {
-        let hits = rg_lines(&vec![
+        let hits = rg_lines(&[
             "-n".into(),
             format!(r"\b{protocol}\b"),
             repo_relative(repo_root.join("crates/aura-agent")),
@@ -830,7 +833,7 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
         repo_root.join("crates/aura-agent/src/runtime/services/selection_manager.rs");
     let registry = repo_root.join("crates/aura-agent/src/runtime/services/service_registry.rs");
     let agent_arch = repo_root.join("crates/aura-agent/ARCHITECTURE.md");
-    if rg_exists(&vec![
+    if rg_exists(&[
         "-n".into(),
         r#"authoritative = ".*LocalSelectionProfile"#.into(),
         repo_relative(&selection_manager),
@@ -839,7 +842,7 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
             "adaptive-privacy-runtime-locality: LocalSelectionProfile must remain runtime-local, not an authoritative service-surface object"
         );
     }
-    if !rg_exists(&vec![
+    if !rg_exists(&[
         "-n".into(),
         r#"authoritative = """#.into(),
         repo_relative(&selection_manager),
@@ -848,7 +851,7 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
             "adaptive-privacy-runtime-locality: selection_manager service_surface must declare an empty authoritative set"
         );
     }
-    if !rg_exists(&vec![
+    if !rg_exists(&[
         "-n".into(),
         r#"runtime_local = ".*selection_profiles.*""#.into(),
         repo_relative(&selection_manager),
@@ -858,7 +861,7 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
         );
     }
 
-    let uses = rg_lines(&vec![
+    let uses = rg_lines(&[
         "-n".into(),
         "LocalSelectionProfile".into(),
         repo_relative(repo_root.join("crates/aura-agent/src")),
@@ -885,7 +888,7 @@ pub fn run_privacy_runtime_locality() -> Result<()> {
             "adaptive-privacy-runtime-locality: LocalSelectionProfile must not escape the runtime-owned selection service surface"
         );
     }
-    if !rg_exists(&vec![
+    if !rg_exists(&[
         "-n".into(),
         "SelectionState".into(),
         repo_relative(&registry),
@@ -914,13 +917,11 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
     run_privacy_runtime_locality()?;
     run_privacy_onion_quarantine()?;
 
-    let legacy_hits = rg_lines(&vec![
-        "-n".into(),
+    let legacy_hits = rg_lines(&["-n".into(),
         "TransportSelector|CandidateKind|ConnectionCandidate|on_candidates_changed\\(|select_establish_path(_with_probing)?\\(".into(),
         repo_relative(repo_root.join("crates/aura-rendezvous")),
         repo_relative(repo_root.join("crates/aura-protocol")),
-        repo_relative(repo_root.join("crates/aura-testkit")),
-    ])?;
+        repo_relative(repo_root.join("crates/aura-testkit"))])?;
     if !legacy_hits.is_empty() {
         for hit in legacy_hits {
             eprintln!("{hit}");
@@ -930,7 +931,7 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         );
     }
 
-    if rg_exists(&vec![
+    if rg_exists(&[
         "-n".into(),
         "upcoming runtime/app integration|upcoming.*land".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime/services/mod.rs")),
@@ -940,7 +941,7 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         );
     }
 
-    let setup_hits = rg_lines(&vec![
+    let setup_hits = rg_lines(&[
         "-n".into(),
         "TransparentAnonymousSetupLayer|TransparentAnonymousSetupObject".into(),
         repo_relative(repo_root.join("crates")),
@@ -991,7 +992,7 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         );
     }
 
-    let runtime_hits = rg_lines(&vec![
+    let runtime_hits = rg_lines(&[
         "-n".into(),
         "TransportHint::|tcp_direct\\(|quic_reflexive|fallback_direct_route".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime/services/move_manager.rs")),
@@ -1016,7 +1017,7 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
         "identity-addressed retrieval",
         "direct return channels",
     ] {
-        let hits = rg_lines(&vec![
+        let hits = rg_lines(&[
             "-n".into(),
             legacy_pattern.into(),
             repo_relative(repo_root.join("crates/aura-agent/src/runtime/services")),
@@ -1035,7 +1036,7 @@ pub fn run_privacy_legacy_sweep() -> Result<()> {
 
 pub fn run_harness_typed_semantic_errors() -> Result<()> {
     let repo_root = repo_root()?;
-    let violations = rg_non_comment_lines(&vec![
+    let violations = rg_non_comment_lines(&[
         "-n".into(),
         "OpError::Failed\\(format!|TerminalError::Operation\\(format!|AuraError::agent\\(format!"
             .into(),
@@ -1061,7 +1062,7 @@ pub fn run_harness_typed_semantic_errors() -> Result<()> {
 
 pub fn run_harness_typed_json_boundary() -> Result<()> {
     let repo_root = repo_root()?;
-    let violations = rg_non_comment_lines(&vec![
+    let violations = rg_non_comment_lines(&[
         "-n".into(),
         "serde_json::Value|serde_json::from_value\\(".into(),
         repo_relative(repo_root.join("crates/aura-harness/src/executor.rs")),
@@ -1087,15 +1088,13 @@ pub fn run_harness_typed_json_boundary() -> Result<()> {
 
 pub fn run_harness_authoritative_fact_boundary() -> Result<()> {
     let repo_root = repo_root()?;
-    let violations = rg_non_comment_lines(&vec![
-        "-n".into(),
+    let violations = rg_non_comment_lines(&["-n".into(),
         "AuthoritativeSemanticFact::(OperationStatus|PendingHomeInvitationReady|ContactLinkReady|ChannelMembershipReady|RecipientPeersResolved|PeerChannelReady|MessageDeliveryReady)".into(),
         repo_relative(repo_root.join("crates/aura-terminal/src")),
         repo_relative(repo_root.join("crates/aura-web/src")),
         repo_relative(repo_root.join("crates/aura-harness/src")),
         "-g".into(),
-        "*.rs".into(),
-    ])?;
+        "*.rs".into()])?;
     if !violations.is_empty() {
         for hit in violations {
             eprintln!("{hit}");
@@ -1142,7 +1141,7 @@ pub fn run_observed_layer_boundaries() -> Result<()> {
             repo_relative(repo_root.join("crates/aura-harness/src")),
         ],
     )?;
-    let ui_violations = rg_lines(&vec![
+    let ui_violations = rg_lines(&[
         "-n".into(),
         "publish_authoritative_|replace_authoritative_semantic_facts_of_kind\\(".into(),
         repo_relative(repo_root.join("crates/aura-ui/src")),
@@ -1326,7 +1325,7 @@ pub fn run_service_surface_declarations() -> Result<()> {
         repo_root.join("crates/aura-rendezvous/src/service.rs"),
         repo_root.join("crates/aura-agent/src/runtime/services/move_manager.rs"),
     ] {
-        if !rg_exists(&vec![
+        if !rg_exists(&[
             "-n".into(),
             r"#\[aura_macros::service_surface\(".into(),
             repo_relative(&file),
@@ -1342,7 +1341,7 @@ pub fn run_service_surface_declarations() -> Result<()> {
         repo_root.join("crates/aura-rendezvous/src/service.rs"),
         repo_root.join("crates/aura-agent/src/runtime/services/move_manager.rs"),
     ] {
-        let hits = rg_lines(&vec![
+        let hits = rg_lines(&[
             "-n".into(),
             r"\b(home|neighborhood|guardian|friend|fof)\b".into(),
             repo_relative(&file),
@@ -1357,7 +1356,7 @@ pub fn run_service_surface_declarations() -> Result<()> {
             );
         }
     }
-    let exceptions = rg_lines(&vec![
+    let exceptions = rg_lines(&[
         "-n".into(),
         "service_surface_(exception|allowlist|compat_alias)".into(),
         repo_relative(repo_root.join("crates")),
@@ -1473,18 +1472,6 @@ pub fn run_ownership_policy() -> Result<()> {
     let repo_root = repo_root()?;
     run_canonical_channel_witness_boundary()?;
     run_ownership_category_declarations()?;
-    run_ok(
-        "cargo",
-        &[
-            "test".into(),
-            "-p".into(),
-            "hxrts-aura-macros".into(),
-            "--test".into(),
-            "service_surface_compile_fail".into(),
-            "--".into(),
-            "--nocapture".into(),
-        ],
-    )?;
     run_service_surface_declarations()?;
     run_service_registry_ownership()?;
     for mode in ["semantic-owner", "actor-owned", "capability-boundary"] {
@@ -1513,6 +1500,8 @@ pub fn run_ownership_policy() -> Result<()> {
     )?;
     run_runtime_boundary_allowlist(&["concurrency".to_string()])?;
     run_runtime_shutdown_order()?;
+    super::vm_session_lifecycle::run()?;
+    super::public_frost_signing::run()?;
     run_runtime_boundary_allowlist(&["instrumentation".to_string()])?;
     run_ok(
         "cargo",
@@ -1526,18 +1515,7 @@ pub fn run_ownership_policy() -> Result<()> {
             "--nocapture".into(),
         ],
     )?;
-    run_ok(
-        "cargo",
-        &[
-            "test".into(),
-            "-p".into(),
-            "hxrts-aura-app".into(),
-            "--test".into(),
-            "compile_fail".into(),
-            "--".into(),
-            "--nocapture".into(),
-        ],
-    )?;
+    super::required_compile_fail::run()?;
     run_runtime_error_boundary()?;
     run_protocol_device_enrollment_contract()?;
     run_runtime_typed_lifecycle_bridge()?;
@@ -1650,6 +1628,7 @@ fn run_canonical_channel_witness_boundary() -> Result<()> {
 
 pub fn run_security_boundary_policy() -> Result<()> {
     run_security_boundary_policy_self_checks()?;
+    super::required_secret_lifetime::run()?;
     run_remote_ingress_boundary()?;
     run_canonical_remote_apply_boundary()?;
     run_journal_authorization_wiring_boundary()?;
@@ -1678,6 +1657,7 @@ pub fn run_security_boundary_policy() -> Result<()> {
 }
 
 fn run_security_boundary_policy_self_checks() -> Result<()> {
+    lifetime_scope::verify_rooted_path_boundary()?;
     let samples = [
         (
             "sync hard-coded Biscuit root",
@@ -2291,15 +2271,15 @@ pub fn run_biscuit_verifier_boundary() -> Result<()> {
                     idx + 1
                 ));
             }
-            if line.contains(".authorizer()")
-                && !(rel.ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
-                    && line.contains("self.token.authorizer()"))
-                && !local_window.contains("VerifiedBiscuitToken")
-                && !local_window.contains("verified_token")
-                && !local_window.contains("verified token")
-                && !line.contains("verified_token.authorizer()")
-                && !line.contains("verified.authorizer()")
-            {
+            let verified_authorizer = (rel
+                .ends_with("crates/aura-authorization/src/biscuit_evaluator.rs")
+                && line.contains("self.token.authorizer()"))
+                || local_window.contains("VerifiedBiscuitToken")
+                || local_window.contains("verified_token")
+                || local_window.contains("verified token")
+                || line.contains("verified_token.authorizer()")
+                || line.contains("verified.authorizer()");
+            if line.contains(".authorizer()") && !verified_authorizer {
                 violations.push(format!(
                     "{rel}:{} uses a Biscuit authorizer outside VerifiedBiscuitToken",
                     idx + 1
@@ -2494,6 +2474,13 @@ pub fn run_signed_transcript_boundary() -> Result<()> {
 
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
+        let source = read(&path)?;
+        let guardian_transcripts =
+            super::guardian_transcript_scope::analyze_in_repo(&repo_root, &path, &source)?;
+        violations.extend(guardian_transcripts.violations);
+        if !rel.contains("/tests/") && !rel.ends_with("/tests.rs") {
+            violations.extend(lifetime_scope::analyze_in_repo(&repo_root, &path, &source)?);
+        }
         if !is_security_critical_protocol_file(&rel) || is_approved_crypto_boundary(&rel) {
             continue;
         }
@@ -2510,7 +2497,8 @@ pub fn run_signed_transcript_boundary() -> Result<()> {
                 continue;
             }
             let local_window = lines[idx.saturating_sub(12)..=idx].join("\n");
-            let has_transcript_context = local_window.contains("SecurityTranscript")
+            let has_transcript_context = guardian_transcripts.lines.contains(&(idx + 1))
+                || local_window.contains("SecurityTranscript")
                 || local_window.contains("transcript_bytes")
                 || local_window.contains("encode_transcript")
                 || local_window.contains("sign_ed25519_transcript")
@@ -2632,11 +2620,11 @@ pub fn run_trusted_key_resolution_boundary() -> Result<()> {
 
     for path in rust_files_under(&crates_dir) {
         let rel = repo_relative(&path);
+        let source = std::fs::read_to_string(&path)?;
         if !is_security_critical_protocol_file(&rel) || is_approved_crypto_boundary(&rel) {
             continue;
         }
         let lines = read_lines(&path)?;
-        let source = read(&path)?;
         let scopes = trusted_key_scope::analyze(&rel, &source)?;
         violations.extend(scopes.violations.iter().cloned());
         let is_test_path = rel.contains("/tests/") || rel.ends_with("/tests.rs");
@@ -2885,8 +2873,8 @@ fn starts_signature_verification_api(line: &str) -> bool {
 
 fn deserializable_item_block(lines: &[String], derive_idx: usize) -> Option<(usize, String)> {
     let mut item_start = None;
-    for idx in derive_idx..lines.len().min(derive_idx + 8) {
-        let trimmed = lines[idx].trim_start();
+    for (idx, line) in lines.iter().enumerate().skip(derive_idx).take(8) {
+        let trimmed = line.trim_start();
         if trimmed.starts_with("pub struct ")
             || trimmed.starts_with("struct ")
             || trimmed.starts_with("pub enum ")
@@ -3107,13 +3095,18 @@ pub fn run_security_bypass_symbols() -> Result<()> {
             continue;
         }
 
-        let lines = read_lines(&path)?;
+        let source = read(&path)?;
+        let test_lines = security_test_scope::test_lines(&source)?;
+        let checked_entropy_lines =
+            runtime_entropy_scope::checked_seed_lines(&repo_root, &path, &source)?;
+        let seed_owner = runtime_entropy_scope::is_seed_owner_path(&repo_root, &path);
+        let lines: Vec<_> = source.lines().map(str::to_owned).collect();
         for (idx, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
             if trimmed.is_empty()
                 || trimmed.starts_with("//")
                 || trimmed.starts_with("#[cfg(test)]")
-                || line_is_test_scoped(&lines, idx)
+                || test_lines.contains(&(idx + 1))
             {
                 continue;
             }
@@ -3173,7 +3166,8 @@ pub fn run_security_bypass_symbols() -> Result<()> {
                 let rng_adapter_from_effect_entropy =
                     forbidden == "StdRng::from_seed(" && window.contains("random_bytes_32()");
                 if line.contains(forbidden)
-                    && !simulation_scoped
+                    && !checked_entropy_lines.contains(&(idx + 1))
+                    && (seed_owner || !simulation_scoped)
                     && !rng_adapter_from_effect_entropy
                 {
                     violations.push(format!(
@@ -3757,7 +3751,7 @@ pub fn run_raw_transport_send_boundary() -> Result<()> {
     let repo_root = repo_root()?;
     let crates_dir = repo_root.join("crates");
     let mut violations = Vec::new();
-    let boundary = read(&repo_root.join("crates/aura-agent/src/runtime/transport_boundary.rs"))?;
+    let boundary = read(repo_root.join("crates/aura-agent/src/runtime/transport_boundary.rs"))?;
     if !boundary.contains("struct GuardChainSendReceipt")
         || !boundary.contains("fn send_raw_transport_envelope")
         || !boundary.contains("send_guarded_transport_envelope")
@@ -4093,11 +4087,9 @@ fn run_privacy_onion_quarantine() -> Result<()> {
             "transparent-onion-quarantine: harness and shared-flow lanes must not enable or depend on transparent_onion"
         );
     }
-    let source_hits = rg_lines(&vec![
-        "-n".into(),
+    let source_hits = rg_lines(&["-n".into(),
         "TransparentAnonymousSetup|TransparentMoveEnvelope|TransparentMoveTrafficClass|transparent_headers|PathProtectionMode::TransparentDebug|feature *= *\"transparent_onion\"".into(),
-        repo_relative(repo_root.join("crates")),
-    ])?;
+        repo_relative(repo_root.join("crates"))])?;
     let allowed: HashSet<_> = [
         "crates/aura-core/src/service.rs",
         "crates/aura-core/src/lib.rs",
@@ -4216,12 +4208,6 @@ fn completeness_violations(repo_root: &Path, mode: &str) -> Result<Vec<String>> 
                 "crates/aura-agent/src/runtime_bridge/sync.rs:process_ceremony_messages",
                 "crates/aura-agent/src/runtime_bridge/sync.rs:sync_with_peer",
                 "crates/aura-agent/src/runtime_bridge/sync.rs:ensure_peer_channel",
-                "crates/aura-agent/src/reactive/app_signal_projection.rs:collect_moderation_homes",
-                "crates/aura-chat/src/guards.rs:plan_local_commit_execution",
-                "crates/aura-invitation/src/guards.rs:plan_accept_execution",
-                "crates/aura-invitation/src/guards.rs:plan_send_execution",
-                "crates/aura-recovery/src/guardian_setup.rs:validate_setup_inputs",
-                "crates/aura-recovery/src/guardian_setup.rs:build_setup_completion",
             ],
         )],
         "actor-owned" => &[("", &[])],
@@ -4364,8 +4350,7 @@ fn extract_ts_function(contents: &str, signature: &str) -> Option<String> {
     let next = body
         .match_indices("async function ")
         .map(|(idx, _)| idx)
-        .filter(|idx| *idx > 0)
-        .next();
+        .find(|idx| *idx > 0);
     Some(match next {
         Some(idx) => body[..idx].to_string(),
         None => body.to_string(),
@@ -7877,11 +7862,7 @@ pub fn run_tui_semantic_snapshot() -> Result<()> {
         if !src.contains("pub struct TuiSemanticInputs") {
             // Check in commands.rs instead
             let commands = repo_root.join("crates/aura-terminal/src/tui/harness_state/commands.rs");
-            if commands.exists() && !contains(&commands, "pub struct TuiSemanticInputs")? {
-                bail!(
-                    "harness-tui-semantic-snapshot: missing explicit TUI semantic input contract"
-                );
-            } else if !commands.exists() {
+            if !commands.exists() || !contains(&commands, "pub struct TuiSemanticInputs")? {
                 bail!(
                     "harness-tui-semantic-snapshot: missing explicit TUI semantic input contract"
                 );

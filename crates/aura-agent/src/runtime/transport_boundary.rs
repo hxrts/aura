@@ -58,7 +58,9 @@ pub(crate) async fn send_guarded_transport_envelope(
     if !effects.is_testing() {
         effects.verify_transport_flow_receipt(receipt.as_transport_receipt())?;
     }
-    effects.bind_transport_receipt_to_envelope(&mut receipt.receipt, &envelope)?;
+    effects
+        .bind_transport_receipt_to_envelope(&mut receipt.receipt, &envelope)
+        .await?;
     validate_receipt_matches_envelope(receipt.as_transport_receipt(), &envelope)?;
     envelope.receipt = Some(receipt.into_transport_receipt());
     send_raw_transport_envelope(effects, envelope).await

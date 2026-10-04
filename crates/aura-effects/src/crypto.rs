@@ -24,6 +24,9 @@ use std::sync::{
 };
 use zeroize::Zeroize;
 
+mod public_frost;
+pub use public_frost::PublicFrostSigningError;
+
 /// Derive an encryption key using the specified context and version
 ///
 /// This function provides secure key derivation with proper context separation
@@ -448,6 +451,39 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         }
     }
 
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: aura_core::crypto::single_signer::SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        use rand::{RngCore, SeedableRng};
+        let mut seed = zeroize::Zeroizing::new([0u8; 32]);
+        let mut context = message.to_vec();
+        context.extend_from_slice(&aura_core::hash::hash(key_package));
+        if let Some(simulation_seed) =
+            self.deterministic_seed(b"participant-key-proof-v1", &context)
+        {
+            *seed = simulation_seed;
+        } else {
+            rand::rngs::OsRng
+                .try_fill_bytes(seed.as_mut())
+                .map_err(|source| {
+                    aura_core::AuraError::crypto_with_source(
+                        "participant proof entropy failed",
+                        Arc::new(source),
+                    )
+                })?;
+        }
+        let mut rng = rand_chacha::ChaCha20Rng::from_seed(*seed);
+        aura_core::crypto::participant_proof::sign_participant_key_proof(
+            message,
+            key_package,
+            mode,
+            &mut rng,
+        )
+    }
+
     async fn sign_with_key(
         &self,
         message: &[u8],
@@ -513,7 +549,15 @@ impl CryptoExtendedEffects for RealCryptoHandler {
             SigningMode::Threshold => {
                 // For threshold signatures, we need to extract the group verifying key
                 // from the FROST PublicKeyPackage and verify
-                self.frost_verify(message, signature, public_key_package)
+                let package =
+                    frost_ed25519::keys::PublicKeyPackage::deserialize(public_key_package)
+                        .map_err(|source| {
+                            CryptoError::crypto_with_source(
+                                "decode canonical threshold verification package",
+                                std::sync::Arc::new(source),
+                            )
+                        })?;
+                self.frost_verify(message, signature, &package.verifying_key().serialize())
                     .await
             }
         }
@@ -656,6 +700,43 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         })
     }
 
+    async fn frost_public_commitment(
+        &self,
+        participant_index: u16,
+        local_nonce_bundle: &[u8],
+    ) -> Result<aura_core::effects::crypto::FrostPublicCommitment, CryptoError> {
+        public_frost::public_commitment(participant_index, local_nonce_bundle)
+    }
+
+    async fn frost_create_public_signing_package(
+        &self,
+        message: &[u8],
+        commitments: &[aura_core::effects::crypto::FrostPublicCommitment],
+        public_key_package: &[u8],
+        threshold: u16,
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        public_frost::create_package(message, commitments, public_key_package, threshold)
+    }
+
+    async fn frost_sign_share_for_message(
+        &self,
+        package: &FrostSigningPackage,
+        local_key_share: &[u8],
+        local_nonce_bundle: &[u8],
+        expected_message: &[u8],
+        expected_public_key_package: &[u8],
+        expected_threshold: u16,
+    ) -> Result<Vec<u8>, CryptoError> {
+        public_frost::sign_for_message(
+            package,
+            local_key_share,
+            local_nonce_bundle,
+            expected_message,
+            expected_public_key_package,
+            expected_threshold,
+        )
+    }
+
     async fn frost_create_signing_package(
         &self,
         message: &[u8],
@@ -776,44 +857,7 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         package: &FrostSigningPackage,
         signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
-        use frost_ed25519 as frost;
-        use std::collections::BTreeMap;
-
-        // Deserialize signing package using FROST's native method
-        let signing_package: frost::SigningPackage =
-            frost::SigningPackage::deserialize(&package.package)
-                .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {e}")))?;
-
-        // Deserialize public key package using FROST's native method
-        let pubkey_package: frost::keys::PublicKeyPackage =
-            frost::keys::PublicKeyPackage::deserialize(&package.public_key_package)
-                .map_err(|e| CryptoError::invalid(format!("Invalid public key package: {e}")))?;
-
-        // Deserialize signature shares using FROST's native method
-        let mut shares = BTreeMap::new();
-        for (i, share_bytes) in signature_shares.iter().enumerate() {
-            if let Some(&participant_id) = package.participants.get(i) {
-                // SignatureShare::deserialize takes the serialization type, convert Vec to array
-                let share_array: [u8; 32] = share_bytes
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| CryptoError::invalid("Signature share must be 32 bytes"))?;
-                let signature_share: frost::round2::SignatureShare =
-                    frost::round2::SignatureShare::deserialize(share_array).map_err(|e| {
-                        CryptoError::invalid(format!("Invalid signature share: {e}"))
-                    })?;
-                let identifier = frost::Identifier::try_from(participant_id)
-                    .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {e}")))?;
-                shares.insert(identifier, signature_share);
-            }
-        }
-
-        // Aggregate signatures using the proper FROST API with PublicKeyPackage
-        let group_signature = frost::aggregate(&signing_package, &shares, &pubkey_package)
-            .map_err(|e| CryptoError::invalid(format!("FROST aggregation failed: {e}")))?;
-
-        // Serialize the resulting signature
-        Ok(group_signature.serialize().to_vec())
+        public_frost::aggregate(package, signature_shares)
     }
 
     async fn frost_verify(
@@ -1065,43 +1109,11 @@ mod frost_tests {
         let threshold = 2;
         let max_signers = 3;
 
-        // Helper to retry key generation a few times to smooth over rare scalar failures
-        async fn generate(
-            crypto: &RealCryptoHandler,
-            threshold: u16,
-            max_signers: u16,
-        ) -> FrostKeyGenResult {
-            let mut last_err = None;
-            for attempt in 0..5 {
-                match crypto.frost_generate_keys(threshold, max_signers).await {
-                    Ok(res) => return res,
-                    Err(e) => {
-                        last_err = Some(e);
-                        tracing::warn!(
-                            "FROST key generation attempt {} failed in test: {}",
-                            attempt + 1,
-                            last_err.as_ref().unwrap()
-                        );
-                    }
-                }
-            }
-            // Deterministic fallback for test stability
-            tracing::error!(
-                "FROST key generation failed after retries: {:?}. Using deterministic fallback.",
-                last_err
-            );
-            let key_packages: Vec<Vec<u8>> = (0..max_signers)
-                .map(|i| vec![0xAA, threshold as u8, max_signers as u8, i as u8])
-                .collect();
-            let public_key_package = vec![0xBB, threshold as u8, max_signers as u8];
-            FrostKeyGenResult {
-                key_packages,
-                public_key_package,
-            }
-        }
-
         // 1. Generate FROST keys
-        let key_gen_result = generate(&crypto, threshold, max_signers).await;
+        let key_gen_result = crypto
+            .frost_generate_keys(threshold, max_signers)
+            .await
+            .expect("actual seeded dealer generation must succeed");
 
         // Verify structure
         assert_eq!(key_gen_result.key_packages.len(), max_signers as usize);
@@ -1123,7 +1135,10 @@ mod frost_tests {
         // Use a distinct deterministic seed to ensure output changes while
         // keeping the test reproducible.
         let crypto_alt = RealCryptoHandler::for_simulation_seed([0xA6; 32]);
-        let key_gen_result2 = generate(&crypto_alt, threshold, max_signers).await;
+        let key_gen_result2 = crypto_alt
+            .frost_generate_keys(threshold, max_signers)
+            .await
+            .expect("actual alternate seeded dealer generation must succeed");
 
         assert_eq!(
             key_gen_result2.key_packages.len(),

@@ -907,6 +907,9 @@ pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, AuraError> {
 pub enum RetainedThresholdKeyError {
     #[error("invalid retained threshold policy")]
     InvalidPolicy,
+    /// The domain permits this policy, but the selected FROST backend does not.
+    #[error("retained threshold {threshold} is unsupported by the FROST backend")]
+    BackendThresholdUnsupported { threshold: u16 },
     #[error("retained FROST package cannot be decoded: {0}")]
     Encoding(#[from] frost::Error),
     #[error("retained FROST package has the wrong signer or threshold")]
@@ -931,9 +934,17 @@ pub fn validate_retained_threshold_key_package(
     threshold: u16,
     participants: u16,
 ) -> Result<(), RetainedThresholdKeyError> {
-    if threshold < 2 || threshold > participants || signer_index == 0 || signer_index > participants
+    if threshold == 0
+        || threshold > participants
+        || signer_index == 0
+        || signer_index > participants
     {
         return Err(RetainedThresholdKeyError::InvalidPolicy);
+    }
+    // The domain accepts k=1, but frost-core 1.0.0 requires min_signers >= 2.
+    // Do not admit a hand-encoded package or silently reinterpret it as solo.
+    if threshold == 1 {
+        return Err(RetainedThresholdKeyError::BackendThresholdUnsupported { threshold });
     }
     let key = frost::keys::KeyPackage::deserialize(key_bytes)?;
     let public = frost::keys::PublicKeyPackage::deserialize(public_bytes)?;
@@ -1053,6 +1064,24 @@ impl SigningSession {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    #[test]
+    fn one_of_many_is_domain_valid_but_native_frost_backend_is_unavailable() {
+        use rand::SeedableRng;
+        assert!(matches!(
+            super::validate_retained_threshold_key_package(&[], &[], 1, 1, 2),
+            Err(super::RetainedThresholdKeyError::BackendThresholdUnsupported { threshold: 1 })
+        ));
+        assert!(matches!(
+            super::validate_retained_threshold_key_package(&[], &[], 1, 0, 2),
+            Err(super::RetainedThresholdKeyError::InvalidPolicy)
+        ));
+        let mut rng = rand::rngs::StdRng::from_seed([187; 32]);
+        let native =
+            frost::keys::generate_with_dealer(2, 1, frost::keys::IdentifierList::Default, &mut rng)
+                .expect_err("audited FROST backend does not support a one-signature policy");
+        assert!(matches!(native, frost::Error::InvalidMinSigners));
+    }
+
     use super::*;
 
     #[test]

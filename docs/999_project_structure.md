@@ -50,6 +50,15 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 ## Repo-Wide Ownership Categories
 
+### Pinned external runtime dependency
+
+Telltale packages are pinned to crates.io release `17.0.1`, which includes the
+required session lifecycle APIs. They are external dependencies and do not add
+an Aura architectural layer. No local protocol-machine override is needed.
+Dependency changes must preserve upstream attribution, regenerate `Cargo.nix`,
+and run dependency lifecycle regressions as well as Aura adapter tests described
+in [Testing Guide](804_testing_guide.md).
+
 Aura uses four ownership categories:
 
 - `Pure`
@@ -1561,3 +1570,19 @@ impl-method and actor declarations. Signature-only changes preserve their existi
 declarations even when an attribute is unchanged diff context. A nearby attribute
 or an annotated namesake does not authorize an unannotated boundary. Explicit
 semantic wrapper declarations continue to identify their corresponding owner.
+
+The ownership aggregate also runs `just ci-public-frost-signing`'s native check.
+It requires actual discovery and execution of audited public-commitment signing
+and substitution regressions, plus positive and negative public API consumers.
+This primitive lane complements the runtime ownership and recovery lanes.
+
+Compile-fail harness process custody lives in `aura-testkit::process_lock` (native test infrastructure). App, agent and explicitly enabled signals guards share one workspace-derived descriptor lock. The ownership aggregate runs these guards and the actual forced-process recovery regression sequentially; Cargo absence and bounded acquisition failure fail the gate. Contributor policy and workflow details are in docs/804_testing_guide.md.
+
+### Host compile-fail infrastructure
+
+`toolkit/test-support` is an unpublished host-only Cargo package outside the
+runtime workspace layers. It supplies the single process-scoped descriptor lock
+used by core/macros dev tests and reexported by native aura-testkit. It depends
+only on platform libraries, so foundation tests gain no upward Aura dependency.
+Keeping it a package also gives crate2nix a complete source root; cross-crate
+Rust path inclusion must not escape a crate's filtered source directory.

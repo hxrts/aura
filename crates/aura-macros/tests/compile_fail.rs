@@ -11,11 +11,8 @@ mod trybuild_support;
 /// clear errors with guidance toward the fix.
 #[test]
 fn choreography_annotation_validation() {
-    if !trybuild_support::trybuild_available() {
-        eprintln!("skipping trybuild macro guards: cargo is unavailable");
-        return;
-    }
-    let _lock = trybuild_support::acquire_trybuild_lock("trybuild-lock");
+    let _lock =
+        trybuild_support::acquire_trybuild_lock().expect("required shared compile-fail lock");
     let t = trybuild::TestCases::new();
     // Valid choreographies must compile
     t.pass("tests/boundaries/valid_annotations.rs");
@@ -64,6 +61,8 @@ fn choreography_annotation_validation() {
     t.compile_fail("tests/boundaries/capability_boundary_missing_family.rs");
     t.compile_fail("tests/boundaries/capability_boundary_invalid_family.rs");
     t.compile_fail("tests/boundaries/capability_boundary_non_capability_helper.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_decorative_bypasses.rs");
+    t.compile_fail("tests/boundaries/capability_boundary_foreign_receiver.rs");
     t.compile_fail("tests/boundaries/capability_boundary_proof_issuer_missing_source.rs");
     t.compile_fail("tests/boundaries/ownership_lifecycle_invalid_variant.rs");
 }

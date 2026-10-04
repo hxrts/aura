@@ -546,7 +546,7 @@ such as AES-GCM as ChaCha20Poly1305, which provide a high-level API
           "rand_core" = [ "crypto-common/rand_core" ];
           "std" = [ "alloc" "crypto-common/std" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "getrandom" "rand_core" ];
+        resolvedDefaultFeatures = [ "alloc" "getrandom" "rand_core" "std" ];
       };
       "aes" = rec {
         crateName = "aes";
@@ -1504,10 +1504,10 @@ with optional architecture-specific hardware acceleration
       };
       "async-recursion" = rec {
         crateName = "async-recursion";
-        version = "1.1.1";
+        version = "1.2.0";
         edition = "2018";
         description = "Recursion for async functions";
-        sha256 = "04ac4zh8qz2xjc79lmfi4jlqj5f92xjvfaqvbzwkizyqd4pl4hrv";
+        sha256 = "0lg4v61ax9wnfb5b5m11895qddcmq5a6h57cihf6n9mdp89br2jg";
         procMacro = true;
         libName = "async_recursion";
         authors = [
@@ -1526,7 +1526,7 @@ with optional architecture-specific hardware acceleration
           }
           {
             name = "syn";
-            packageId = "syn 2.0.119";
+            packageId = "syn 3.0.6";
             usesDefaultFeatures = false;
             features = [ "full" "visit-mut" "parsing" "printing" "proc-macro" "clone-impls" ];
           }
@@ -1831,6 +1831,26 @@ with optional architecture-specific hardware acceleration
         features = {
           "portable-atomic" = [ "dep:portable-atomic" ];
         };
+      };
+      "aura-build-support" = rec {
+        crateName = "aura-build-support";
+        version = "0.1.0";
+        edition = "2021";
+        description = "Host-only infrastructure for Aura repository test harnesses";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./toolkit/test-support; };
+        libName = "aura_build_support";
+        libPath = "process_lock.rs";
+        dependencies = [
+          {
+            name = "fs2";
+            packageId = "fs2";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror 2.0.21";
+          }
+        ];
+
       };
       "aura-harness" = rec {
         crateName = "aura-harness";
@@ -2159,6 +2179,11 @@ with optional architecture-specific hardware acceleration
             name = "hxrts-aura-amp";
             packageId = "hxrts-aura-amp";
             rename = "aura-amp";
+          }
+          {
+            name = "hxrts-aura-chat";
+            packageId = "hxrts-aura-chat";
+            rename = "aura-chat";
           }
           {
             name = "hxrts-aura-consensus";
@@ -2587,6 +2612,11 @@ with optional architecture-specific hardware acceleration
           {
             name = "async-trait";
             packageId = "async-trait";
+          }
+          {
+            name = "aura-build-support";
+            packageId = "aura-build-support";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
           }
           {
             name = "base64";
@@ -4177,13 +4207,13 @@ constant-time operation and embedded-friendly no_std support
       };
       "cc" = rec {
         crateName = "cc";
-        version = "1.5.1";
+        version = "1.6.0";
         edition = "2021";
         description = "A build-time dependency for Cargo build scripts to assist in invoking the native
 C compiler to compile native C code into a static archive to be linked into Rust
 code.
 ";
-        sha256 = "0h70pg4050i16fp5v62wqxj0h8ajzvagrwz7bvdj33pfji8i8q7k";
+        sha256 = "0c3n82hdi355xa6z9x4zgnpjwsh1szkkcs0zl8q8nl5ggk874j7p";
         dependencies = [
           {
             name = "find-msvc-tools";
@@ -4414,7 +4444,7 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
           "std" = [ "aead/std" "alloc" ];
           "stream" = [ "aead/stream" ];
         };
-        resolvedDefaultFeatures = [ "alloc" "default" "getrandom" "rand_core" ];
+        resolvedDefaultFeatures = [ "alloc" "default" "getrandom" "rand_core" "std" ];
       };
       "charset" = rec {
         crateName = "charset";
@@ -4793,7 +4823,7 @@ ChaCha8Poly1305 and ChaCha12Poly1305 lightweight variants.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" ];
           }
@@ -8729,7 +8759,7 @@ full support for heapless no_std targets
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_UI_Shell" "Win32_Foundation" "Win32_Globalization" "Win32_System_Com" ];
           }
@@ -9393,7 +9423,7 @@ decoding/encoding support
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Diagnostics_Debug" ];
           }
@@ -9761,7 +9791,7 @@ decoding/encoding support
           }
           {
             name = "half";
-            packageId = "half 2.7.1";
+            packageId = "half 1.8.3";
             usesDefaultFeatures = false;
           }
           {
@@ -10091,6 +10121,30 @@ and raw deflate streams.
         features = {
           "tokio" = [ "dep:tokio" ];
         };
+      };
+      "fs2" = rec {
+        crateName = "fs2";
+        version = "0.4.3";
+        edition = "2015";
+        description = "Cross-platform file locks and file duplication.";
+        sha256 = "04v2hwk7035c088f19mfl5b1lz84gnvv2hv6m935n0hmirszqr4m";
+        authors = [
+          "Dan Burkert <dan@danburkert.com>"
+        ];
+        dependencies = [
+          {
+            name = "libc";
+            packageId = "libc";
+            target = { target, features }: (target."unix" or false);
+          }
+          {
+            name = "winapi";
+            packageId = "winapi 0.3.9";
+            target = { target, features }: (target."windows" or false);
+            features = [ "handleapi" "processthreadsapi" "winerror" "fileapi" "winbase" "std" ];
+          }
+        ];
+
       };
       "futures" = rec {
         crateName = "futures";
@@ -12272,6 +12326,7 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "chacha20poly1305";
             packageId = "chacha20poly1305";
+            features = [ "std" ];
           }
           {
             name = "dirs";
@@ -12549,12 +12604,6 @@ as in the AES-GCM authenticated encryption cipher.
             rename = "aura-testkit";
           }
           {
-            name = "hxrts-aura-invitation";
-            packageId = "hxrts-aura-invitation";
-            rename = "aura-invitation";
-            features = [ "test-support" ];
-          }
-          {
             name = "criterion";
             packageId = "criterion";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -12562,6 +12611,18 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "futures";
             packageId = "futures";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "test-support" ];
+          }
+          {
+            name = "hxrts-aura-invitation";
+            packageId = "hxrts-aura-invitation";
+            rename = "aura-invitation";
+            features = [ "test-support" ];
           }
           {
             name = "loom";
@@ -13027,6 +13088,11 @@ as in the AES-GCM authenticated encryption cipher.
         ];
         devDependencies = [
           {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+          }
+          {
             name = "futures";
             packageId = "futures";
           }
@@ -13311,6 +13377,10 @@ as in the AES-GCM authenticated encryption cipher.
             name = "serde";
             packageId = "serde";
             features = [ "derive" "rc" ];
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
           }
           {
             name = "thiserror";
@@ -13672,6 +13742,10 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "async-trait";
           }
           {
+            name = "aura-build-support";
+            packageId = "aura-build-support";
+          }
+          {
             name = "criterion";
             packageId = "criterion";
             target = { target, features }: (!("wasm32" == target."arch" or null));
@@ -13745,6 +13819,7 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "chacha20poly1305";
             packageId = "chacha20poly1305";
+            features = [ "std" ];
           }
           {
             name = "curve25519-dalek";
@@ -13799,6 +13874,11 @@ as in the AES-GCM authenticated encryption cipher.
             rename = "aura-core";
           }
           {
+            name = "hxrts-aura-macros";
+            packageId = "hxrts-aura-macros";
+            rename = "aura-macros";
+          }
+          {
             name = "indexed_db_futures";
             packageId = "indexed_db_futures";
             target = { target, features }: ("wasm32" == target."arch" or null);
@@ -13849,6 +13929,12 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "rand_chacha";
             packageId = "rand_chacha 0.3.1";
+          }
+          {
+            name = "rustix";
+            packageId = "rustix 1.1.5";
+            target = { target, features }: (target."unix" or false);
+            features = [ "fs" "process" ];
           }
           {
             name = "serde";
@@ -13956,6 +14042,13 @@ as in the AES-GCM authenticated encryption cipher.
           {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "process" ];
           }
           {
             name = "wasm-bindgen-test";
@@ -14195,6 +14288,10 @@ as in the AES-GCM authenticated encryption cipher.
             packageId = "assert_matches";
           }
           {
+            name = "aura-testkit";
+            packageId = "aura-testkit";
+          }
+          {
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
@@ -14202,9 +14299,8 @@ as in the AES-GCM authenticated encryption cipher.
           }
         ];
         features = {
-          "test-support" = [];
         };
-
+        resolvedDefaultFeatures = [ "test-support" ];
       };
       "hxrts-aura-journal" = rec {
         crateName = "hxrts-aura-journal";
@@ -14372,6 +14468,10 @@ as in the AES-GCM authenticated encryption cipher.
           }
         ];
         devDependencies = [
+          {
+            name = "aura-build-support";
+            packageId = "aura-build-support";
+          }
           {
             name = "futures";
             packageId = "futures";
@@ -16704,10 +16804,10 @@ as in the AES-GCM authenticated encryption cipher.
       };
       "insta" = rec {
         crateName = "insta";
-        version = "1.48.0";
+        version = "1.49.0";
         edition = "2021";
         description = "A snapshot testing library for Rust";
-        sha256 = "10kbxza7vzj4nvkga8r3rfn6z8i3hnh47bnnb1f429n9x3zgiw46";
+        sha256 = "1k91zskbkqjj97rhb7dkpms9py6i6c868frz1g0qcjvy50p3szdn";
         authors = [
           "Armin Ronacher <armin.ronacher@active-4.com>"
         ];
@@ -16971,7 +17071,7 @@ as in the AES-GCM authenticated encryption cipher.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" ];
           }
@@ -17670,10 +17770,10 @@ Node.js and browsers, built on `#[wasm_bindgen]` using the `wasm-bindgen` crate.
       };
       "libc" = rec {
         crateName = "libc";
-        version = "0.2.189";
+        version = "0.2.190";
         edition = "2021";
         description = "Raw FFI bindings to platform libraries like libc.";
-        sha256 = "1whjfs375vlng2q6yrbzs73cvp5lm3w1n2gfqajb2vgf7zg3xbry";
+        sha256 = "0y5yap4bfp7rfsldcbk9pb5alcgygca5xn1n2pmh181zdpf3spff";
         features = {
           "default" = [ "std" ];
           "rustc-dep-of-std" = [ "align" "rustc-std-workspace-core" ];
@@ -18793,10 +18893,10 @@ be used outside of a proc-macro context.
       };
       "mio" = rec {
         crateName = "mio";
-        version = "1.2.3";
+        version = "1.2.4";
         edition = "2021";
         description = "Lightweight non-blocking I/O.";
-        sha256 = "1n5ryp7j5fga38z7php5yy9k7ia24rp6cl9gm27zwar6khz4862b";
+        sha256 = "1vl6px9zy0pwhlwnw3cknsqyzkg8bcpiwiq4cgicf2fwgywfv20p";
         authors = [
           "Carl Lerche <me@carllerche.com>"
           "Thomas de Zeeuw <thomasdezeeuw@gmail.com>"
@@ -19516,7 +19616,7 @@ be used outside of a proc-macro context.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.59.0";
             rename = "windows";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_Console" "Win32_Storage_FileSystem" "Win32_Security" ];
@@ -22304,7 +22404,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.5";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -22487,7 +22587,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "socket2";
-            packageId = "socket2 0.6.5";
+            packageId = "socket2 0.5.10";
             target = { target, features }: (!((builtins.elem "wasm" target."family") && ("unknown" == target."os" or null)));
           }
           {
@@ -22499,7 +22599,7 @@ a Message Authentication Code (MAC)
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_System_IO" "Win32_Networking_WinSock" ];
           }
@@ -24116,7 +24216,7 @@ finite automata and guarantees linear time matching on all inputs.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" ];
           }
@@ -25437,39 +25537,6 @@ a panic occurs.";
         features = {
         };
       };
-      "serde_yaml" = rec {
-        crateName = "serde_yaml";
-        version = "0.9.34+deprecated";
-        edition = "2021";
-        description = "YAML data format for Serde";
-        sha256 = "0isba1fjyg3l6rxk156k600ilzr8fp7crv82rhal0rxz5qd1m2va";
-        authors = [
-          "David Tolnay <dtolnay@gmail.com>"
-        ];
-        dependencies = [
-          {
-            name = "indexmap";
-            packageId = "indexmap 2.14.2";
-          }
-          {
-            name = "itoa";
-            packageId = "itoa";
-          }
-          {
-            name = "ryu";
-            packageId = "ryu";
-          }
-          {
-            name = "serde";
-            packageId = "serde";
-          }
-          {
-            name = "unsafe-libyaml";
-            packageId = "unsafe-libyaml";
-          }
-        ];
-
-      };
       "serdect" = rec {
         crateName = "serdect";
         version = "0.2.0";
@@ -26427,7 +26494,7 @@ possible intended.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Networking_WinSock" "Win32_System_IO" "Win32_System_Threading" "Win32_System_WindowsProgramming" ];
           }
@@ -27002,10 +27069,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale" = rec {
         crateName = "telltale";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Session types for multi-party asynchronous communication.";
-        sha256 = "0rjyyr34s6hyyia0y571vbjwka3vfknab5v8r2f5hpdv33zh4v8i";
+        sha256 = "1s3b0ffciprn6m0gnf330svclk35fgf7p9f49j4azgyhlwcymwpi";
         libPath = "rust/src/lib.rs";
         authors = [
           "Zak Cutner <me@zakcutner.uk>"
@@ -27102,8 +27169,9 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           {
             name = "tokio";
             packageId = "tokio";
+            usesDefaultFeatures = false;
             target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "full" ];
+            features = [ "macros" "rt" "rt-multi-thread" "sync" "time" "net" "io-util" ];
           }
           {
             name = "tracing";
@@ -27153,7 +27221,8 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           {
             name = "tokio";
             packageId = "tokio";
-            features = [ "full" "macros" "rt" "time" ];
+            usesDefaultFeatures = false;
+            features = [ "macros" "rt" "rt-multi-thread" "sync" "time" "net" "io-util" "macros" "rt" "time" ];
           }
         ];
         features = {
@@ -27170,11 +27239,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-bridge" = rec {
         crateName = "telltale-bridge";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Lean verification bridge for Telltale session types";
         crateBin = [];
-        sha256 = "0k4y7zg2a289vspn2wh9dr13cxmsjvshhnzsjvn37xcal58i5xx7";
+        sha256 = "097vhxg86x7gzm17g1v1gjamszhyr5k5jl3r0qg5j7h09y051616";
         libName = "telltale_bridge";
         authors = [
           "Sam Hart <sam@hxrts.com>"
@@ -27250,10 +27319,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-language" = rec {
         crateName = "telltale-language";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Shared choreography frontend for Telltale DSL parsing, projection, and macro code generation";
-        sha256 = "1phw6rh7v06hd9cac5wcwds10b3k86x4m9r4n66gs4cbl1z81441";
+        sha256 = "015vinrrx1j4giph280sj6d39v0lpchb0haa52xj39p5isbqk3nr";
         libName = "telltale_language";
         authors = [
           "Sam Hart"
@@ -27310,11 +27379,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-machine" = rec {
         crateName = "telltale-machine";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Protocol machine for choreographic session type protocols";
         crateBin = [];
-        sha256 = "05nzws5c2w5z1hlap0w2w8sjw6rmvxc6m8c1xy5yrz6m4sycb7jz";
+        sha256 = "1lbzlxdlj2h1xrasf1k6lv4cg3fx7svgsnnwla85p52r16nigasi";
         libName = "telltale_machine";
         authors = [
           "Sam Hart"
@@ -27327,6 +27396,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           {
             name = "cfg-if";
             packageId = "cfg-if";
+          }
+          {
+            name = "ciborium";
+            packageId = "ciborium";
           }
           {
             name = "getrandom";
@@ -27349,16 +27422,8 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
             features = [ "derive" "derive" ];
           }
           {
-            name = "serde_cbor";
-            packageId = "serde_cbor";
-          }
-          {
             name = "serde_json";
             packageId = "serde_json";
-          }
-          {
-            name = "serde_yaml";
-            packageId = "serde_yaml";
           }
           {
             name = "telltale-theory";
@@ -27393,10 +27458,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-macros" = rec {
         crateName = "telltale-macros";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Procedural macros for Telltale session types (Aura flavored).";
-        sha256 = "13sfjabl2s908496j9z49swg0x43pqc2wqw8rir5y0w81gh4fgky";
+        sha256 = "0ax5b9cm58702j7v6634akm70w6b0x25i3zhjwwf0g40jshr72h0";
         procMacro = true;
         libName = "telltale_macros";
         authors = [
@@ -27425,11 +27490,11 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-runtime" = rec {
         crateName = "telltale-runtime";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Choreographic programming for Telltale - effect-based distributed protocols";
         crateBin = [];
-        sha256 = "1855wjgfsdmln9jflwhnwkajg6hfnf603bqrd4l8sf5mqwibmjv6";
+        sha256 = "162rg0azhyr3i6ampr040rpfa8zgs6ag63qdpzfdrapqfx1cjpyz";
         libName = "telltale_runtime";
         authors = [
           "Sam Hart"
@@ -27539,8 +27604,9 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           {
             name = "tokio";
             packageId = "tokio";
+            usesDefaultFeatures = false;
             target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "full" ];
+            features = [ "macros" "rt" "rt-multi-thread" "sync" "time" "net" "io-util" ];
           }
           {
             name = "toml";
@@ -27575,8 +27641,9 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           {
             name = "tokio";
             packageId = "tokio";
+            usesDefaultFeatures = false;
             target = { target, features }: (!("wasm32" == target."arch" or null));
-            features = [ "full" "full" ];
+            features = [ "macros" "rt" "rt-multi-thread" "sync" "time" "net" "io-util" "macros" "rt" "rt-multi-thread" "sync" "time" "net" "io-util" ];
           }
         ];
         features = {
@@ -27588,10 +27655,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-search" = rec {
         crateName = "telltale-search";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Deterministic weighted-graph search substrate for Telltale";
-        sha256 = "0yykagiijz9673n5i9dg5mrig6q1h7y416hik2gm2n6w9d5rxl3s";
+        sha256 = "152ap8h12gz6nr1k275kkds0fcnl1ll3f0925q2i06yrcm2dnyn5";
         libName = "telltale_search";
         authors = [
           "Sam Hart"
@@ -27610,16 +27677,24 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-simulator" = rec {
         crateName = "telltale-simulator";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Protocol-machine-backed simulation engine for Telltale choreographic protocols";
         crateBin = [];
-        sha256 = "1m5bla8mld4rp695yq65qsxy3d3mvzhdv14svyix86wspvfqqpqn";
+        sha256 = "0q499ffz04wzd02138zb09zhi07kvqm0qqzyc0mg8h74alf0f63y";
         libName = "telltale_simulator";
         authors = [
           "Sam Hart"
         ];
         dependencies = [
+          {
+            name = "blake3";
+            packageId = "blake3";
+          }
+          {
+            name = "ciborium";
+            packageId = "ciborium";
+          }
           {
             name = "getrandom";
             packageId = "getrandom 0.2.17";
@@ -27638,10 +27713,6 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
             name = "serde";
             packageId = "serde";
             features = [ "derive" "derive" ];
-          }
-          {
-            name = "serde_cbor";
-            packageId = "serde_cbor";
           }
           {
             name = "serde_json";
@@ -27677,10 +27748,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-theory" = rec {
         crateName = "telltale-theory";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Session type theory algorithms - projection, merge, subtyping";
-        sha256 = "1f19aqcgi1ra76r57xl4w5332qsq6wjk876k6692qkav04pp52ka";
+        sha256 = "1ki2srsk6zl52bj7i5sjnrhzsrypn2hazv4brfgr9n16vgsr027b";
         libName = "telltale_theory";
         authors = [
           "Sam Hart"
@@ -27704,10 +27775,10 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "telltale-types" = rec {
         crateName = "telltale-types";
-        version = "15.0.0";
+        version = "17.0.1";
         edition = "2021";
         description = "Core session types for Telltale - matching Lean definitions";
-        sha256 = "0hg2ga5v2fnrrfxfr85yr9is641v139apkmqdbq39pm0cqasibvj";
+        sha256 = "0dcs9lncvd5gvyzpbkfk23lrwvkf0wbqxfma5pbp1596cqdjjvqr";
         libName = "telltale_types";
         authors = [
           "Sam Hart"
@@ -27722,6 +27793,14 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
             packageId = "fixed";
             usesDefaultFeatures = false;
             features = [ "std" ];
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.8";
+          }
+          {
+            name = "rand_chacha";
+            packageId = "rand_chacha 0.3.1";
           }
           {
             name = "serde";
@@ -27762,7 +27841,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "getrandom";
-            packageId = "getrandom 0.4.3";
+            packageId = "getrandom 0.3.4";
             optional = true;
             usesDefaultFeatures = false;
             target = { target, features }: ((target."unix" or false) || (target."windows" or false) || ("wasi" == target."os" or null));
@@ -27781,7 +27860,7 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.52.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Storage_FileSystem" "Win32_Foundation" ];
           }
@@ -28162,12 +28241,12 @@ OSA, Damerau-Levenshtein, Jaro, Jaro-Winkler, and Sørensen-Dice.
       };
       "tokio" = rec {
         crateName = "tokio";
-        version = "1.53.1";
+        version = "1.53.2";
         edition = "2021";
         description = "An event-driven, non-blocking I/O platform for writing asynchronous I/O
 backed applications.
 ";
-        sha256 = "1v8b3b45pkpbibls75yniqbvx5dlks2708141ljni5mnf6lawb10";
+        sha256 = "0i202ksji8q2asvii0adzgi8m0z93z3j7apn62qfh8d6qzy92pz9";
         authors = [
           "Tokio Contributors <team@tokio.rs>"
         ];
@@ -29670,7 +29749,7 @@ clients and servers.
           }
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.60.2";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Networking_WinSock" "Win32_Foundation" "Win32_System_Threading" "Win32_System_IO" ];
           }
@@ -30154,19 +30233,6 @@ Unicode Standard Annex #31.
           "std" = [ "crypto-common/std" ];
         };
       };
-      "unsafe-libyaml" = rec {
-        crateName = "unsafe-libyaml";
-        version = "0.2.11";
-        edition = "2021";
-        description = "libyaml transpiled to rust by c2rust";
-        crateBin = [];
-        sha256 = "0qdq69ffl3v5pzx9kzxbghzn0fzn266i1xn70y88maybz9csqfk7";
-        libName = "unsafe_libyaml";
-        authors = [
-          "David Tolnay <dtolnay@gmail.com>"
-        ];
-
-      };
       "untrusted" = rec {
         crateName = "untrusted";
         version = "0.9.0";
@@ -30265,10 +30331,10 @@ Unicode Standard Annex #31.
       };
       "uuid" = rec {
         crateName = "uuid";
-        version = "1.26.1";
+        version = "1.27.0";
         edition = "2021";
         description = "A library to generate and parse UUIDs.";
-        sha256 = "1kl5nb7r3gpmkc43d6nbayvzqhcp2grczk6c7bxv80b6x70xmxif";
+        sha256 = "16h5h6bf5ybh1lj97lcdl41g7fqbiczpavpsb0zf3b63p4v7s9wp";
         authors = [
           "Ashley Mannix<ashleymannix@live.com.au>"
           "Dylan DPC<dylan.dpc@gmail.com>"
@@ -31701,7 +31767,7 @@ dependency.
         features = {
           "debug" = [ "impl-debug" ];
         };
-        resolvedDefaultFeatures = [ "cfg" "consoleapi" "errhandlingapi" "evntrace" "fileapi" "handleapi" "impl-debug" "impl-default" "in6addr" "inaddr" "minwinbase" "minwindef" "namedpipeapi" "ntsecapi" "ntstatus" "processenv" "processthreadsapi" "synchapi" "timezoneapi" "winbase" "windef" "winerror" "winioctl" "winnt" "winreg" "winsock2" "winuser" "ws2ipdef" "ws2tcpip" ];
+        resolvedDefaultFeatures = [ "cfg" "consoleapi" "errhandlingapi" "evntrace" "fileapi" "handleapi" "impl-debug" "impl-default" "in6addr" "inaddr" "minwinbase" "minwindef" "namedpipeapi" "ntsecapi" "ntstatus" "processenv" "processthreadsapi" "std" "synchapi" "timezoneapi" "winbase" "windef" "winerror" "winioctl" "winnt" "winreg" "winsock2" "winuser" "ws2ipdef" "ws2tcpip" ];
       };
       "winapi-i686-pc-windows-gnu" = rec {
         crateName = "winapi-i686-pc-windows-gnu";
@@ -31728,7 +31794,7 @@ dependency.
         dependencies = [
           {
             name = "windows-sys";
-            packageId = "windows-sys 0.61.2";
+            packageId = "windows-sys 0.48.0";
             target = { target, features }: (target."windows" or false);
             features = [ "Win32_Foundation" "Win32_Storage_FileSystem" "Win32_System_Console" "Win32_System_SystemInformation" ];
           }
@@ -33289,7 +33355,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_SystemInformation" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.52.0" = rec {
         crateName = "windows-sys";
@@ -33538,7 +33604,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_System" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Authorization" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Threading" "Win32_System_WindowsProgramming" "default" ];
       };
       "windows-sys 0.59.0" = rec {
         crateName = "windows-sys";
@@ -33798,7 +33864,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_System" "Win32_System_Com" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Globalization" "Win32_NetworkManagement" "Win32_NetworkManagement_IpHelper" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Threading" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.60.2" = rec {
         crateName = "windows-sys";
@@ -34064,7 +34130,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_Memory" "Win32_System_Ole" "Win32_UI" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Win32" "Win32_Foundation" "Win32_Graphics" "Win32_Graphics_Gdi" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Security_Credentials" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_DataExchange" "Win32_System_IO" "Win32_System_Memory" "Win32_System_Ole" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Shell" "default" ];
       };
       "windows-sys 0.61.2" = rec {
         crateName = "windows-sys";
@@ -34327,7 +34393,7 @@ dependency.
           "Win32_Web" = [ "Win32" ];
           "Win32_Web_InternetExplorer" = [ "Win32_Web" ];
         };
-        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Devices" "Win32_Devices_Communication" "Win32_Foundation" "Win32_Globalization" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_Diagnostics" "Win32_System_Diagnostics_Debug" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemInformation" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
+        resolvedDefaultFeatures = [ "Wdk" "Wdk_Foundation" "Wdk_Storage" "Wdk_Storage_FileSystem" "Wdk_System" "Wdk_System_IO" "Win32" "Win32_Devices" "Win32_Devices_Communication" "Win32_Foundation" "Win32_Networking" "Win32_Networking_WinSock" "Win32_Security" "Win32_Storage" "Win32_Storage_FileSystem" "Win32_System" "Win32_System_Com" "Win32_System_Console" "Win32_System_IO" "Win32_System_LibraryLoader" "Win32_System_Pipes" "Win32_System_Registry" "Win32_System_SystemServices" "Win32_System_Threading" "Win32_System_WindowsProgramming" "Win32_UI" "Win32_UI_Input" "Win32_UI_Input_KeyboardAndMouse" "Win32_UI_Shell" "default" ];
       };
       "windows-targets 0.42.2" = rec {
         crateName = "windows-targets";

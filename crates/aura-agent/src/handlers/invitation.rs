@@ -93,9 +93,7 @@ use aura_protocol::effects::ChoreographyError;
 use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
-use aura_signature::{
-    threshold_signing_context_transcript_bytes, verify_ed25519_transcript, SecurityTranscript,
-};
+use aura_signature::{threshold_signing_context_transcript_bytes, SecurityTranscript};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 #[cfg(test)]
@@ -112,7 +110,9 @@ mod channel;
 mod contact;
 pub(crate) mod contact_confirmation;
 mod device_enrollment;
+pub(crate) use device_enrollment::EnrollmentVmTeardownFailure;
 pub(crate) mod enrollment_manifest_admission;
+pub(crate) mod enrollment_parent_archive;
 /// Guard preparation owns its exact sender record and commands. It cannot
 /// authorize enrollment terminal mutation or be constructed by callers.
 /// Required sender storage custody; private fields prevent observed Invitation
@@ -142,6 +142,8 @@ impl AuthorizedInvitationCancellationCapability {
     }
 }
 
+mod enrollment_terminal_notice;
+pub(crate) use enrollment_terminal_notice::execute_recovered_cancelled_notice;
 pub(crate) mod enrollment_trust;
 mod enrollment_vm_admission;
 mod required_channel_read;
@@ -152,6 +154,9 @@ pub(crate) use enrollment_vm_admission::{
 mod exchange;
 mod execution;
 mod guardian;
+#[cfg(test)]
+pub(crate) use guardian::{finish_guardian_vm_operation, GuardianVmTerminalFailure};
+pub(crate) mod issued_identity;
 
 pub(crate) fn guardian_confirmation_storage_key(invitation_id: &InvitationId) -> String {
     format!("guardian-confirmation:{invitation_id}")
@@ -397,6 +402,7 @@ pub(crate) struct PreparedInvitation {
 /// This identifies an operation; it is not evidence of invitation trust.
 #[must_use]
 pub(crate) struct ReservedInvitationIssuance {
+    runtime_owner: Arc<AuraEffectSystem>,
     invitation_id: InvitationId,
     authority: AuthorityId,
     device: DeviceId,
@@ -404,6 +410,14 @@ pub(crate) struct ReservedInvitationIssuance {
 }
 
 impl ReservedInvitationIssuance {
+    pub(crate) fn owns_effects(&self, effects: &AuraEffectSystem) -> bool {
+        std::ptr::eq(self.runtime_owner.as_ref(), effects)
+    }
+
+    pub(crate) fn issuer_binding(&self) -> (AuthorityId, DeviceId) {
+        (self.authority, self.device)
+    }
+
     pub(crate) fn invitation_id(&self) -> &InvitationId {
         &self.invitation_id
     }
@@ -477,6 +491,51 @@ fn channel_id_from_home_id(home_id: &str) -> AgentResult<ChannelId> {
 /// Invitation handler
 ///
 /// Uses `aura_invitation::InvitationService` for guard chain integration.
+/// Contact verification custody is internal to the original response path.
+/// Observers may borrow the public handler without minting verifier authority.
+///
+/// ```
+/// use aura_agent::handlers::InvitationHandler;
+/// fn observe(handler: &InvitationHandler) -> &InvitationHandler { handler }
+/// ```
+///
+/// A raw public key cannot reconstruct the private required-response owner.
+///
+/// ```compile_fail
+/// use aura_agent::handlers::invitation::contact_confirmation::RequiredContactResponseVerificationCapability;
+/// fn forge<'a>(key: &'a [u8]) -> RequiredContactResponseVerificationCapability<'a> {
+///     RequiredContactResponseVerificationCapability { stored: key }
+/// }
+/// ```
+///
+/// Observed envelopes cannot invoke the internal terminal publication path.
+///
+/// ```compile_fail
+/// use aura_agent::handlers::InvitationHandler;
+/// use aura_agent::runtime::AuraEffectSystem;
+/// use aura_core::effects::TransportEnvelope;
+/// async fn publish(handler: &InvitationHandler, effects: &AuraEffectSystem, observed: &TransportEnvelope) {
+///     handler.apply_contact_invitation_response(effects, observed).await;
+/// }
+/// ```
+///
+/// Guardian local-pair, imported-continuity and first-binding possession owners
+/// cannot be reconstructed by external callers from raw keys or responses.
+///
+/// ```compile_fail
+/// use aura_agent::handlers::invitation::guardian::RequiredGuardianPairVerificationCapability;
+/// fn forge(key: Vec<u8>) { let _ = RequiredGuardianPairVerificationCapability { public: key }; }
+/// ```
+///
+/// ```compile_fail
+/// use aura_agent::handlers::invitation::guardian::RequiredGuardianConfirmationVerificationCapability;
+/// fn forge(key: Vec<u8>) { let _ = RequiredGuardianConfirmationVerificationCapability { stored: key }; }
+/// ```
+///
+/// ```compile_fail
+/// use aura_agent::handlers::invitation::guardian::RequiredGuardianPossessionVerificationCapability;
+/// fn forge(key: Vec<u8>) { let _ = RequiredGuardianPossessionVerificationCapability { accept: key }; }
+/// ```
 pub struct InvitationHandler {
     context: HandlerContext,
     /// Core invitation service from aura_invitation
@@ -831,6 +890,69 @@ impl InvitationHandler {
         &self.context.authority
     }
 
+    /// Required reservation execution never substitutes time, budget, or authorization faults.
+    async fn build_required_snapshot_for_context(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+    ) -> AgentResult<GuardSnapshot> {
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|source| {
+                AgentError::from(aura_core::AuraError::Internal {
+                    message: "read reserved invitation guard time".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?
+            .ts_ms;
+        let mut capabilities = Vec::new();
+        if let Some((token, bridge)) = effects
+            .verified_biscuit_frontier()
+            .map_err(AgentError::from)?
+        {
+            for capability in evaluation_candidates_for_invitation_guard() {
+                let capability_name: CapabilityName = capability.as_name();
+                let allowed = bridge
+                    .has_capability_with_time(
+                        &token,
+                        capability_name.as_str(),
+                        Some(now_ms / 1_000),
+                    )
+                    .map_err(|source| {
+                        AgentError::from(aura_core::AuraError::Internal {
+                            message: "evaluate reserved invitation capability".into(),
+                            source: Some(Arc::new(source)),
+                        })
+                    })?;
+                if allowed {
+                    capabilities.push(capability_name);
+                }
+            }
+        }
+        let budget = aura_core::effects::JournalEffects::get_flow_budget(
+            effects,
+            &context_id,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .map_err(AgentError::from)?;
+        let remaining = u32::try_from(budget.remaining()).map_err(|source| {
+            AgentError::from(aura_core::AuraError::Internal {
+                message: "reserved invitation flow budget exceeds guard representation".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        Ok(GuardSnapshot::new(
+            self.context.authority.authority_id(),
+            context_id,
+            FlowCost::new(remaining),
+            capabilities,
+            u64::from(budget.epoch),
+            now_ms,
+        ))
+    }
+
     /// Build a guard snapshot from the provided context and effects.
     async fn build_snapshot_for_context(
         &self,
@@ -1038,7 +1160,7 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<PreparedInvitation> {
-        let reserved = self.reserve_invitation_issuance(effects.as_ref()).await?;
+        let reserved = self.reserve_invitation_issuance(&effects).await?;
         Box::pin(self.prepare_reserved_invitation_with_context(
             effects,
             reserved,
@@ -1054,10 +1176,11 @@ impl InvitationHandler {
 
     pub(crate) async fn reserve_invitation_issuance(
         &self,
-        effects: &AuraEffectSystem,
+        effects: &Arc<AuraEffectSystem>,
     ) -> AgentResult<ReservedInvitationIssuance> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
         Ok(ReservedInvitationIssuance {
+            runtime_owner: effects.clone(),
             invitation_id: InvitationId::new(format!(
                 "inv-{}",
                 effects.random_uuid().await.simple()
@@ -1089,14 +1212,19 @@ impl InvitationHandler {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<PreparedInvitation> {
+        #[cfg(test)]
+        eprintln!("enrollment reserved handler stage: enter required reserved handler");
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
         let sender_id = self.context.authority.authority_id();
-        if reserved.authority != sender_id || reserved.device != effects.device_id() {
+        if !reserved.owns_effects(effects.as_ref())
+            || reserved.authority != sender_id
+            || reserved.device != effects.device_id()
+        {
             return Err(AgentError::from(aura_core::AuraError::invalid(
                 "Invitation reservation belongs to another issuer",
             )));
         }
-        let invitation_id = reserved.invitation_id;
+        let invitation_id = reserved.invitation_id.clone();
         let current_time = reserved.created_at_ms;
         let expires_at = expires_in_ms
             .map(|ms| {
@@ -1108,6 +1236,8 @@ impl InvitationHandler {
             })
             .transpose()?;
 
+        #[cfg(test)]
+        eprintln!("enrollment reserved handler stage: resolve exact invitation context");
         let invitation_context = if let Some(context_id) = context_override {
             context_id
         } else {
@@ -1147,6 +1277,12 @@ impl InvitationHandler {
             invitation.receiver_id,
             &invitation.invitation_type,
         ) {
+            timeout_prepare_invitation_stage(
+                effects.as_ref(),
+                "retain_original_contact_identity",
+                issued_identity::birth_original_identity(&reserved, &invitation),
+            )
+            .await?;
             let fact = InvitationFact::Sent {
                 context_id: invitation.context_id,
                 invitation_id: invitation.invitation_id.clone(),
@@ -1180,29 +1316,41 @@ impl InvitationHandler {
             // Build snapshot and prepare through service.
             // For channel invitations this must use the channel context so the
             // generated invitation facts and transport metadata are scoped correctly.
+            #[cfg(test)]
+            eprintln!("enrollment reserved handler stage: build invitation guard snapshot");
             let snapshot = self
-                .build_snapshot_for_context(effects.as_ref(), invitation_context)
-                .await;
+                .build_required_snapshot_for_context(effects.as_ref(), invitation_context)
+                .await?;
 
-            let outcome = self.service.prepare_send_invitation(
-                &snapshot,
-                invitation.receiver_id,
-                invitation.invitation_type.clone(),
-                invitation.message.clone(),
-                expires_in_ms,
-                invitation.invitation_id.clone(),
-            );
+            #[cfg(test)]
+            eprintln!("enrollment reserved handler stage: prepare send guard outcome");
+            let outcome = self
+                .service
+                .prepare_reserved_send_invitation(&snapshot, &invitation);
 
-            let execution_plan =
-                aura_invitation::guards::plan_send_execution(outcome).map_err(|reason| {
-                    AgentError::effects(format!("Guard denied operation: {reason}"))
-                })?;
+            let execution_plan = aura_invitation::guards::plan_required_send_execution(outcome)
+                .map_err(|source| AgentError::from(source.into_native_error()))?;
+            if matches!(
+                invitation.invitation_type,
+                InvitationType::Guardian { .. }
+                    | InvitationType::Contact { .. }
+                    | InvitationType::Channel { .. }
+            ) {
+                timeout_prepare_invitation_stage(
+                    effects.as_ref(),
+                    "retain_original_guardian_identity",
+                    issued_identity::birth_original_identity(&reserved, &invitation),
+                )
+                .await?;
+            }
             tracing::debug!(
                 authority = %self.context.authority.authority_id(),
                 local_effect_count = execution_plan.local_effects.len(),
                 deferred_network_effect_count = execution_plan.deferred_network_effects.len(),
                 "Prepared invitation guard outcome with deferred network side effects"
             );
+            #[cfg(test)]
+            eprintln!("enrollment reserved handler stage: execute original local guard effects");
             timeout_prepare_invitation_stage(
                 effects.as_ref(),
                 "execute_local_effects",
@@ -1251,7 +1399,7 @@ impl InvitationHandler {
                 timeout_prepare_invitation_stage(
                     effects.as_ref(),
                     "commit_sender_contact_fact",
-                    self.commit_contact_fact_and_sync_view(
+                    self.commit_contact_fact_and_record_observation(
                         effects.as_ref(),
                         invitation.context_id,
                         &contact_fact,
@@ -1261,6 +1409,8 @@ impl InvitationHandler {
             }
         }
 
+        #[cfg(test)]
+        eprintln!("enrollment reserved handler stage: persist exact created invitation");
         // Persist the invitation to storage (so it survives service recreation)
         timeout_prepare_invitation_stage(
             effects.as_ref(),
@@ -1273,6 +1423,8 @@ impl InvitationHandler {
         )
         .await?;
 
+        #[cfg(test)]
+        eprintln!("enrollment reserved handler stage: cache committed pending invitation");
         // Cache the pending invitation (for fast lookup within same service instance)
         self.invitation_cache
             .cache_invitation(invitation.clone())
@@ -1294,6 +1446,8 @@ impl InvitationHandler {
             InvitationType::Channel { .. } => {}
         }
 
+        #[cfg(test)]
+        eprintln!("enrollment reserved handler stage: return required prepared invitation");
         Ok(PreparedInvitation {
             invitation,
             deferred_network_effects,
@@ -1403,7 +1557,7 @@ impl InvitationHandler {
             })
         {
             return self
-                .confirm_contact_invitation_acceptance(effects, invitation_id)
+                .confirm_contact_invitation_acceptance(effects, invitation_id, &operation_budget)
                 .await;
         }
 
@@ -1496,17 +1650,27 @@ impl InvitationHandler {
             .await
     }
 
-    async fn commit_contact_fact_and_sync_view(
+    async fn commit_contact_fact_and_record_observation(
         &self,
         effects: &AuraEffectSystem,
         context_id: ContextId,
         fact: &ContactFact,
     ) -> AgentResult<()> {
+        let bytes = aura_core::util::serialization::to_vec(fact).map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "encode required contact fact".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
         effects
-            .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID.into(), fact.to_bytes())
+            .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID.into(), bytes)
             .await
-            .map_err(|error| AgentError::effects(format!("commit contact fact: {error}")))?;
-        effects.await_next_view_update().await;
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Internal {
+                    message: "commit required contact fact".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
         self.invitation_cache.record_contact_fact(fact).await;
         Ok(())
     }
@@ -1544,7 +1708,7 @@ impl InvitationHandler {
                 "Committing ContactFact::Added for accepted invitation"
             );
 
-            self.commit_contact_fact_and_sync_view(effects, context_id, &fact)
+            self.commit_contact_fact_and_record_observation(effects, context_id, &fact)
                 .await?;
 
             // Promote LAN-discovered descriptor into the local context so that
@@ -2175,6 +2339,7 @@ impl InvitationHandler {
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
+        tasks: &crate::task_registry::TaskGroup,
     ) -> AgentResult<InvitationResult> {
         let admitted = enrollment_manifest_admission::load_admitted_enrollment_for_id(
             effects.as_ref(),
@@ -2186,7 +2351,11 @@ impl InvitationHandler {
         let enrollment_response = admitted.is_some();
         if let Some(admitted) = admitted {
             device_enrollment::InvitationDeviceEnrollmentHandler::new(self)
-                .execute_device_enrollment_invitee_decline(effects.clone(), &admitted)
+                .execute_device_enrollment_invitee_decline(
+                    effects.clone(),
+                    Arc::new(admitted),
+                    tasks,
+                )
                 .await?;
         }
         self.validate_cached_invitation_for_action(
@@ -2262,6 +2431,7 @@ impl InvitationHandler {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "sender_invitation_record",
+        capability_type = SenderInvitationRecordCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn created_invitation_required(
@@ -2289,11 +2459,68 @@ impl InvitationHandler {
         })
     }
 
+    /// Preserve the original issued selector through required sender hydration.
+    /// The raw ceremony ID is consumed only by the initial protected selector.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "sender_invitation_record",
+        capability_type = SenderInvitationRecordCapability,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn created_enrollment_for_ceremony_required(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        ceremony: &aura_core::CeremonyId,
+    ) -> AgentResult<(
+        SenderInvitationRecordCapability,
+        enrollment_trust::RetainedEnrollmentVmControl,
+    )> {
+        let selector =
+            enrollment_trust::RequiredIssuedEnrollmentSelectorCapability::load(effects, ceremony)
+                .await?;
+        let record = self
+            .created_invitation_for_issued_selector_required(&selector)
+            .await?;
+        let control =
+            enrollment_trust::RetainedEnrollmentVmControl::load_required_sender(&record).await?;
+        selector.require_control(&control)?;
+        Ok((record, control))
+    }
+
+    async fn created_invitation_for_issued_selector_required(
+        &self,
+        selector: &enrollment_trust::RequiredIssuedEnrollmentSelectorCapability,
+    ) -> AgentResult<SenderInvitationRecordCapability> {
+        let effects = selector.runtime_owner();
+        if self.context.authority.authority_id() != effects.runtime_authority_id() {
+            return Err(enrollment_trust::EnrollmentVerifierError::RuntimeOwner.into());
+        }
+        let invitation = required_channel_read::created_required(
+            &effects,
+            effects.runtime_authority_id(),
+            selector.invitation_id(),
+        )
+        .await
+        .map_err(AgentError::from)?;
+        let invitation = required_channel_read::hydrate_created_enrollment_required(
+            effects.as_ref(),
+            effects.runtime_authority_id(),
+            invitation,
+        )
+        .await
+        .map_err(AgentError::from)?;
+        Ok(SenderInvitationRecordCapability {
+            runtime_owner: effects,
+            invitation,
+        })
+    }
+
     /// Publish the local cancellation only after the actual enrollment terminal
     /// owner has durably won its first-decision CAS.
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "verified_enrollment_cancellation",
+        capability_type = AuthorizedInvitationCancellationCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn publish_verified_enrollment_cancellation(
@@ -2332,6 +2559,7 @@ impl InvitationHandler {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "sender_invitation_cancellation",
+        capability_type = SenderInvitationRecordCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn cancel_required_invitation(
@@ -2354,6 +2582,7 @@ impl InvitationHandler {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "issued_enrollment_cancellation",
+        capability_type = AuthorizedInvitationCancellationCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn prepare_enrollment_cancellation(
@@ -2378,6 +2607,7 @@ impl InvitationHandler {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "prepared_invitation_cancellation",
+        capability_type = AuthorizedInvitationCancellationCapability,
         family = "authorizer"
     )]
     pub(crate) async fn prepare_invitation_cancellation(
@@ -2417,6 +2647,7 @@ impl InvitationHandler {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "prepared_invitation_cancellation",
+        capability_type = AuthorizedInvitationCancellationCapability,
         family = "runtime_helper"
     )]
     async fn publish_cancelled_invitation(
@@ -2878,7 +3109,31 @@ pub(crate) async fn execute_invitation_effect_commands(
     Ok(())
 }
 
-async fn execute_effect_command(
+fn execute_effect_command<'a>(
+    command: aura_invitation::guards::EffectCommand,
+    authority: &'a AuthorityContext,
+    local_context_id: ContextId,
+    charge_context_id: ContextId,
+    effects: &'a AuraEffectSystem,
+    charge_peer: AuthorityId,
+    pending_receipt: &'a mut Option<Receipt>,
+    best_effort_network_failures: bool,
+) -> impl Future<Output = AgentResult<()>> + 'a {
+    // Keep the entire typed dispatch out of its loop/timeout caller's frame.
+    // The same lexical owner retains the command and its mutable receipt.
+    Box::pin(execute_effect_command_owned(
+        command,
+        authority,
+        local_context_id,
+        charge_context_id,
+        effects,
+        charge_peer,
+        pending_receipt,
+        best_effort_network_failures,
+    ))
+}
+
+async fn execute_effect_command_owned(
     command: aura_invitation::guards::EffectCommand,
     authority: &AuthorityContext,
     local_context_id: ContextId,
@@ -3047,7 +3302,6 @@ async fn signed_invitation_code_for_notify(
         effects.is_testing(),
     )
     .await
-    .map_err(|error| AgentError::invalid(error.to_string()))
 }
 
 async fn execute_notify_peer(
@@ -3306,9 +3560,12 @@ async fn sign_invitation_acceptance_transcript<T>(
 where
     T: SecurityTranscript + ?Sized,
 {
-    let payload = transcript
-        .transcript_bytes()
-        .map_err(|error| AgentError::invalid(error.to_string()))?;
+    let payload = transcript.transcript_bytes().map_err(|source| {
+        AgentError::from(aura_core::AuraError::Serialization {
+            message: "encode invitation acceptance transcript".into(),
+            source: Some(Arc::new(source)),
+        })
+    })?;
     effects
         .sign(SigningContext {
             authority,
@@ -3319,7 +3576,7 @@ where
             approval_context: ApprovalContext::SelfOperation,
         })
         .await
-        .map_err(|error| AgentError::effects(error.to_string()))
+        .map_err(AgentError::from)
 }
 
 async fn verify_invitation_acceptance_signature<T>(
@@ -3347,9 +3604,12 @@ where
     } else {
         SigningMode::Threshold
     };
-    let payload = transcript
-        .transcript_bytes()
-        .map_err(|error| AgentError::invalid(error.to_string()))?;
+    let payload = transcript.transcript_bytes().map_err(|source| {
+        AgentError::from(aura_core::AuraError::Serialization {
+            message: "encode invitation acceptance verification transcript".into(),
+            source: Some(Arc::new(source)),
+        })
+    })?;
     let verification_message = threshold_signing_context_transcript_bytes(
         &SigningContext {
             authority,
@@ -3361,7 +3621,12 @@ where
         },
         signature.epoch,
     )
-    .map_err(|error| AgentError::invalid(error.to_string()))?;
+    .map_err(|source| {
+        AgentError::from(aura_core::AuraError::Serialization {
+            message: "encode invitation threshold verification context".into(),
+            source: Some(Arc::new(source)),
+        })
+    })?;
     let verified = effects
         .verify_signature(
             &verification_message,
@@ -3370,7 +3635,7 @@ where
             mode,
         )
         .await
-        .map_err(|error| AgentError::effects(error.to_string()))?;
+        .map_err(AgentError::from)?;
     if !verified {
         return Err(AgentError::invalid(
             "invitation acceptance signature verification failed".to_string(),
@@ -3460,6 +3725,40 @@ async fn execute_record_receipt(
         .await
         .map_err(|e| AgentError::effects(format!("Failed to store invitation receipt: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn unpolled_invitation_command_dispatch_caller_frame_is_bounded() {
+    fn frame_bytes<A, F: Future>(_: impl FnOnce(A) -> F) -> usize {
+        std::mem::size_of::<F>()
+    }
+    // Infer the real production dispatcher type without constructing any
+    // command, owner, receipt, effect handler or future.
+    let bytes = frame_bytes(
+        |(command, authority, context, charge_context, effects, peer, receipt): (
+            aura_invitation::guards::EffectCommand,
+            &'static AuthorityContext,
+            ContextId,
+            ContextId,
+            &'static AuraEffectSystem,
+            AuthorityId,
+            &'static mut Option<Receipt>,
+        )| {
+            execute_effect_command(
+                command,
+                authority,
+                context,
+                charge_context,
+                effects,
+                peer,
+                receipt,
+                false,
+            )
+        },
+    );
+    assert!(bytes <= 16 * 1024,
+        "invitation command dispatch caller frame is {bytes} bytes; bounded lexical delegation is required");
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ pub(super) const RUNTIME_BRIDGE_IDENTITY_AUTHENTICATION_QUERY_CAPABILITY: &str =
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_settings_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn get_settings(
@@ -92,6 +93,7 @@ pub(super) async fn get_settings(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_device_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn list_devices(
@@ -137,6 +139,7 @@ pub(super) async fn list_devices(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_authority_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn list_authorities(
@@ -216,6 +219,7 @@ pub(super) async fn list_authorities(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_nickname_mutation",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn set_nickname_suggestion(
@@ -240,6 +244,7 @@ pub(super) async fn set_nickname_suggestion(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_mfa_policy_mutation",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn set_mfa_policy(
@@ -264,6 +269,7 @@ pub(super) async fn set_mfa_policy(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_time_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn current_time_ms(
@@ -280,6 +286,7 @@ pub(super) async fn current_time_ms(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_sleep",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn sleep_ms(
@@ -299,6 +306,7 @@ pub(super) async fn sleep_ms(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_identity_authentication_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn authentication_status(

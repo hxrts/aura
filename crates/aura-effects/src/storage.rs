@@ -331,7 +331,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
             let mut keys = Vec::new();
             for relative in self
                 .descriptor_directory()?
-                .files()
+                .ordinary_files()
                 .map_err(|e| Self::descriptor_failure("enumerate profile values", e))?
             {
                 if relative.extension().and_then(|e| e.to_str()) != Some("dat") {
@@ -467,7 +467,10 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
                 .await
                 .map_err(|source| io("read clear entry", source))?
             {
-                if entry.file_name() == std::ffi::OsStr::new(".aura-profile-owner.lock") {
+                if entry.file_name() == std::ffi::OsStr::new(".aura-profile-owner.lock")
+                    || entry.file_name()
+                        == std::ffi::OsStr::new(crate::profile_storage::SECURE_PROVIDER_DIRECTORY)
+                {
                     continue;
                 }
                 let kind = entry
@@ -492,7 +495,7 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
             let mut key_count = 0;
             let mut total_size = 0u64;
             for path in directory
-                .files()
+                .ordinary_files()
                 .map_err(|e| Self::descriptor_failure("enumerate profile statistics", e))?
             {
                 if path.extension().and_then(|e| e.to_str()) != Some("dat") {
@@ -532,6 +535,14 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
                 };
 
                 while let Ok(Some(entry)) = entries.next_entry().await {
+                    if dir == self.base_path
+                        && entry.file_name()
+                            == std::ffi::OsStr::new(
+                                crate::profile_storage::SECURE_PROVIDER_DIRECTORY,
+                            )
+                    {
+                        continue;
+                    }
                     let file_type = match entry.file_type().await {
                         Ok(ft) => ft,
                         Err(_) => continue,
@@ -600,6 +611,7 @@ impl FilesystemStorageHandler {
 
         let segments: Vec<&str> = key.split('/').collect();
         Self::validate_segments(&segments, false)?;
+        Self::require_ordinary_subtree(&segments)?;
         Ok(segments)
     }
 
@@ -620,7 +632,24 @@ impl FilesystemStorageHandler {
         }
 
         let segments: Vec<&str> = prefix.split('/').collect();
-        Self::validate_segments(&segments, true)
+        Self::validate_segments(&segments, true)?;
+        Self::require_ordinary_subtree(&segments)
+    }
+
+    fn require_ordinary_subtree(segments: &[&str]) -> Result<(), StorageError> {
+        if segments.first().copied() == Some(crate::profile_storage::SECURE_PROVIDER_DIRECTORY) {
+            #[derive(Debug, thiserror::Error)]
+            #[error("secure-provider subtree is outside ordinary storage scope")]
+            struct SecureProviderSubtreeOutsideScope;
+            return Err(StorageError::BackendFailure {
+                operation: "ordinary storage physical scope".into(),
+                source: aura_core::AuraError::PermissionDenied {
+                    message: "ordinary storage cannot access the secure provider subtree".into(),
+                    source: Some(std::sync::Arc::new(SecureProviderSubtreeOutsideScope)),
+                },
+            });
+        }
+        Ok(())
     }
 
     fn validate_segments(
@@ -727,6 +756,13 @@ impl FilesystemStorageHandler {
         stack: &mut Vec<PathBuf>,
         keys: &mut Vec<String>,
     ) -> Result<(), StorageError> {
+        if entry.path().parent() == Some(base)
+            && entry.file_name()
+                == std::ffi::OsStr::new(crate::profile_storage::SECURE_PROVIDER_DIRECTORY)
+        {
+            return Ok(());
+        }
+
         let file_type = entry.file_type().await.map_err(|e| {
             StorageError::ReadFailed(format!("Failed to stat directory entry: {e}"))
         })?;
@@ -1270,6 +1306,88 @@ mod descriptor_owner_tests {
                 )
                 .await?,
             b"retained-secret"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod secure_provider_scope_tests {
+    use super::*;
+    use aura_core::effects::{
+        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    };
+
+    #[tokio::test]
+    async fn ordinary_io_and_clear_cannot_cross_selected_secure_provider_subtree(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let temporary = tempfile::tempdir()?;
+        let owner = std::sync::Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(
+                temporary.path().to_path_buf(),
+            )
+            .acquire_owned_native()?,
+        );
+        let ordinary = FilesystemStorageHandler::new(temporary.path().to_path_buf())
+            .retain_profile_owner(owner.clone())?;
+        let secure =
+            crate::secure::ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                owner,
+            )?;
+        // The exact physical filename previously collided with an ordinary
+        // key's mandatory .dat suffix; both providers use their actual owner.
+        let location = SecureStorageLocation::new("test_scope", "secret.dat");
+        let caps = [
+            SecureStorageCapability::Read,
+            SecureStorageCapability::Write,
+        ];
+        secure
+            .secure_store_immutable(&location, b"first decision", &caps)
+            .await?;
+        ordinary
+            .store("ordinary/value", b"ordinary".to_vec())
+            .await?;
+        assert!(ordinary
+            .store("secure_store/test_scope/secret", b"replacement".to_vec())
+            .await
+            .is_err());
+        assert!(ordinary
+            .retrieve("secure_store/test_scope/secret")
+            .await
+            .is_err());
+        assert!(ordinary
+            .remove("secure_store/test_scope/secret")
+            .await
+            .is_err());
+        assert!(ordinary
+            .exists("secure_store/test_scope/secret")
+            .await
+            .is_err());
+        assert!(ordinary.list_keys(Some("secure_store/")).await.is_err());
+        assert_eq!(ordinary.list_keys(None).await?, vec!["ordinary/value"]);
+        assert_eq!(ordinary.stats().await?.key_count, 1);
+        ordinary.clear_all().await?;
+        assert_eq!(ordinary.retrieve("ordinary/value").await?, None);
+        assert_eq!(
+            secure.secure_retrieve(&location, &caps).await?,
+            b"first decision"
+        );
+        drop(ordinary);
+        drop(secure);
+        let reopened_owner = std::sync::Arc::new(
+            crate::profile_storage::FilesystemProfileStorageHandler::new(
+                temporary.path().to_path_buf(),
+            )
+            .acquire_owned_native()?,
+        );
+        let reopened =
+            crate::secure::ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                reopened_owner,
+            )?;
+        assert_eq!(
+            reopened.secure_retrieve(&location, &caps).await?,
+            b"first decision",
+            "ordinary cleanup preserves the original wrapping key and record after reopen"
         );
         Ok(())
     }

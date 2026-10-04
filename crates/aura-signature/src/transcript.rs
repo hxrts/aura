@@ -7,6 +7,31 @@ use aura_core::util::serialization;
 use aura_core::AuthorityId;
 use serde::Serialize;
 
+/// Process-local encoding failure with the original canonical codec cause.
+#[derive(Debug)]
+pub enum RequiredTranscriptEncodingError {
+    /// A transcript must identify its protocol domain.
+    EmptyDomain,
+    /// Canonical encoding failed before cryptographic work.
+    Codec(serialization::SerializationError),
+}
+impl std::fmt::Display for RequiredTranscriptEncodingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyDomain => f.write_str("transcript domain separator must be non-empty"),
+            Self::Codec(source) => write!(f, "transcript encoding: {source}"),
+        }
+    }
+}
+impl std::error::Error for RequiredTranscriptEncodingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EmptyDomain => None,
+            Self::Codec(source) => Some(source),
+        }
+    }
+}
+
 /// Stable envelope wrapped around every security-critical signing payload.
 ///
 /// The envelope keeps protocol domain and schema version outside the payload so
@@ -55,6 +80,34 @@ pub trait SecurityTranscript {
             &self.transcript_payload(),
         )
     }
+
+    /// Encode for a required local boundary, retaining the native codec source.
+    fn required_transcript_bytes(
+        &self,
+    ) -> std::result::Result<Vec<u8>, RequiredTranscriptEncodingError> {
+        encode_transcript_required(
+            Self::DOMAIN_SEPARATOR,
+            Self::SCHEMA_VERSION,
+            &self.transcript_payload(),
+        )
+    }
+}
+
+/// Canonical bytes for required signing and verification; identical wire format.
+pub fn encode_transcript_required<T: Serialize>(
+    domain_separator: &'static str,
+    schema_version: u16,
+    payload: &T,
+) -> std::result::Result<Vec<u8>, RequiredTranscriptEncodingError> {
+    if domain_separator.trim().is_empty() {
+        return Err(RequiredTranscriptEncodingError::EmptyDomain);
+    }
+    serialization::to_vec(&TranscriptEnvelope::new(
+        domain_separator,
+        schema_version,
+        payload,
+    ))
+    .map_err(RequiredTranscriptEncodingError::Codec)
 }
 
 /// Encode a domain-separated transcript payload into canonical signing bytes.
@@ -223,6 +276,35 @@ mod tests {
     use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
     use aura_core::AuthorityId;
     use serde::Serialize;
+
+    #[test]
+    fn required_encoding_preserves_canonical_wire_and_native_codec_failure() {
+        let payload = ("guardian", 7_u64);
+        assert_eq!(
+            encode_transcript("required-test", 1, &payload).unwrap(),
+            encode_transcript_required("required-test", 1, &payload).unwrap(),
+        );
+        struct FailedPayload;
+        impl Serialize for FailedPayload {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("actual payload encoding fault"))
+            }
+        }
+        let error = encode_transcript_required("required-test", 1, &FailedPayload).unwrap_err();
+        let source = std::error::Error::source(&error).unwrap();
+        assert!(source.is::<serialization::SerializationError>());
+        assert!(
+            source.source().is_some(),
+            "original codec cause remains traversable"
+        );
+        assert!(matches!(
+            encode_transcript_required(" ", 1, &payload),
+            Err(RequiredTranscriptEncodingError::EmptyDomain)
+        ));
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     struct TestPayload {

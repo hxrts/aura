@@ -341,11 +341,25 @@ impl<T> SessionManager<T>
 where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
-    fn timeout_at(now: &PhysicalTime, duration: Duration) -> PhysicalTime {
-        PhysicalTime {
-            ts_ms: now.ts_ms + duration.as_millis() as u64,
+    fn timeout_at(now: &PhysicalTime, duration: Duration) -> SyncResult<PhysicalTime> {
+        use aura_core::types::window::{PhysicalMillis, WindowInterval, WindowPosition};
+        let extent = u64::try_from(duration.as_millis()).map_err(|source| {
+            aura_core::AuraError::Invalid {
+                message: "sync session duration cannot be represented".into(),
+                source: Some(std::sync::Arc::new(source)),
+            }
+        })?;
+        let interval =
+            WindowInterval::<PhysicalMillis>::new(WindowPosition::new(now.ts_ms), extent).map_err(
+                |source| aura_core::AuraError::Invalid {
+                    message: "sync session endpoint cannot be represented".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                },
+            )?;
+        Ok(PhysicalTime {
+            ts_ms: interval.end().value(),
             uncertainty: now.uncertainty,
-        }
+        })
     }
 
     fn missing_session(session_id: SessionId) -> aura_core::AuraError {
@@ -429,7 +443,13 @@ where
         }
 
         // Check concurrent session limit
-        let active_count = self.count_active_sessions();
+        // Initializing and terminating allocations still consume concurrent
+        // custody until actual retirement; an Active-only count is not admission.
+        let active_count = self
+            .sessions
+            .values()
+            .filter(|state| !matches!(state, SessionState::Completed(_)))
+            .count();
         if active_count >= self.config.max_concurrent_sessions as usize {
             return Err(sync_resource_with_limit(
                 "concurrent_sessions",
@@ -438,10 +458,11 @@ where
             ));
         }
 
+        let timeout_at = Self::timeout_at(now, self.config.timeout)?;
         let session_id = self.generate_session_id(now);
         let session_state = SessionState::Initializing {
             participants,
-            timeout_at: Self::timeout_at(now, self.config.timeout),
+            timeout_at,
             created_at: now.clone(),
         };
 
@@ -453,6 +474,31 @@ where
         }
 
         Ok(session_id)
+    }
+
+    /// Admit a local session attenuated to a required caller's original resource
+    /// deadline. This does not authenticate its participants.
+    pub(crate) fn create_session_in_original_window(
+        &mut self,
+        participants: Vec<DeviceId>,
+        now: &PhysicalTime,
+        original: &aura_core::time::timeout::TimeoutBudget,
+    ) -> SyncResult<SessionId> {
+        original
+            .remaining_at(now)
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "original sync session resource window failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })?;
+        let id = self.create_session(participants, now)?;
+        if let Some(SessionState::Initializing { timeout_at, .. }) = self.sessions.get_mut(&id) {
+            timeout_at.ts_ms = timeout_at.ts_ms.min(original.deadline_at_ms());
+        }
+        Ok(id)
+    }
+
+    pub(crate) fn required_resource_timeout(&self) -> Duration {
+        self.config.timeout
     }
 
     /// Create a new session with participants (from milliseconds)
@@ -476,6 +522,7 @@ where
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
         let max_session_duration = self.config.resource_limits.max_session_duration;
+        let candidate_timeout = Self::timeout_at(current_time, max_session_duration)?;
         let session = self.session_mut(session_id)?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
@@ -487,13 +534,21 @@ where
         }
 
         match session {
-            SessionState::Initializing { participants, .. } => {
+            SessionState::Initializing {
+                participants,
+                timeout_at,
+                ..
+            } => {
+                let original_deadline = timeout_at.ts_ms;
                 let participants = participants.clone();
                 *session = SessionState::Active {
                     protocol_state,
                     started_at: current_time.clone(),
                     participants,
-                    timeout_at: Self::timeout_at(current_time, max_session_duration),
+                    timeout_at: PhysicalTime {
+                        ts_ms: candidate_timeout.ts_ms.min(original_deadline),
+                        uncertainty: candidate_timeout.uncertainty,
+                    },
                 };
 
                 Ok(())
@@ -813,6 +868,12 @@ where
         self.cleanup_stale_sessions(&physical_time_from_ms(now_ms))
     }
 
+    /// Observe exact retained allocations, including initializing records, in tests.
+    #[cfg(test)]
+    pub(crate) fn retained_session_ids(&self) -> Vec<SessionId> {
+        self.sessions.keys().copied().collect()
+    }
+
     /// Get session statistics
     pub fn get_statistics(&self) -> SessionManagerStatistics {
         let mut active_count = 0u64;
@@ -870,6 +931,14 @@ where
     }
 
     /// Close a session for a specific peer
+    /// Pure targeted retirement used by an original lexical issued-session owner.
+    /// The caller retains exclusive manager custody; peer membership is not a
+    /// substitute for the exact issued local allocation.
+    pub(crate) fn retire_owned_session(&mut self, session: &SessionId) -> bool {
+        self.sessions.remove(session).is_some()
+    }
+
+    /// Close an active session selected by a peer (compatibility API).
     pub fn close_session(&mut self, peer: DeviceId) -> SyncResult<()> {
         // Find sessions involving this peer and close them
         let session_ids_to_remove: Vec<SessionId> = self

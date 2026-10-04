@@ -384,6 +384,50 @@ impl InvitationService {
         expires_in_ms: Option<u64>,
         invitation_id: InvitationId,
     ) -> GuardOutcome {
+        self.prepare_send_invitation_header(
+            snapshot,
+            (receiver_id, invitation_type, message, invitation_id),
+            expires_in_ms,
+            None,
+        )
+    }
+
+    /// Evaluate current guards while retaining the reserved canonical creation header.
+    /// Runtime reservation custody must authorize execution of the returned commands.
+    pub fn prepare_reserved_send_invitation(
+        &self,
+        snapshot: &GuardSnapshot,
+        invitation: &Invitation,
+    ) -> GuardOutcome {
+        if invitation.sender_id != snapshot.authority_id
+            || invitation.context_id != snapshot.context_id
+            || invitation.created_at > snapshot.now_ms
+            || invitation.is_expired(snapshot.now_ms)
+            || !invitation.is_pending()
+        {
+            return GuardOutcome::denied(aura_guards::types::GuardViolation::AuthorizationDenied);
+        }
+        self.prepare_send_invitation_header(
+            snapshot,
+            (
+                invitation.receiver_id,
+                invitation.invitation_type.clone(),
+                invitation.message.clone(),
+                invitation.invitation_id.clone(),
+            ),
+            None,
+            Some(invitation),
+        )
+    }
+
+    fn prepare_send_invitation_header(
+        &self,
+        snapshot: &GuardSnapshot,
+        request: (AuthorityId, InvitationType, Option<String>, InvitationId),
+        expires_in_ms: Option<u64>,
+        reserved: Option<&Invitation>,
+    ) -> GuardOutcome {
+        let (receiver_id, invitation_type, message, invitation_id) = request;
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
         if let Some(outcome) = check_capability(snapshot, &InvitationCapability::Send.as_name()) {
@@ -428,7 +472,10 @@ impl InvitationService {
         }
 
         // Calculate expiration
-        let expires_at_ms = match Self::compute_expires_at_ms(snapshot.now_ms, expires_in_ms) {
+        let expires_at_ms = match reserved
+            .map(|invitation| Ok(invitation.expires_at))
+            .unwrap_or_else(|| Self::compute_expires_at_ms(snapshot.now_ms, expires_in_ms))
+        {
             Ok(expires_at_ms) => expires_at_ms,
             Err(error) => {
                 return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
@@ -444,9 +491,11 @@ impl InvitationService {
             sender_id: snapshot.authority_id,
             receiver_id,
             invitation_type,
-            sent_at: Self::exact_time(snapshot.now_ms),
+            sent_at: Self::exact_time(
+                reserved.map_or(snapshot.now_ms, |invitation| invitation.created_at),
+            ),
             expires_at: expires_at_ms.map(Self::exact_time),
-            receiver_nickname: None,
+            receiver_nickname: reserved.and_then(|invitation| invitation.receiver_nickname.clone()),
             message,
         };
 
@@ -607,6 +656,63 @@ mod tests {
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 4);
+    }
+
+    #[test]
+    fn reserved_send_preserves_original_header_and_checks_current_expiry() {
+        let service = InvitationService::new(test_authority(), InvitationConfig::default());
+        let mut snapshot = test_snapshot();
+        snapshot.now_ms = 500;
+        let invitation = Invitation {
+            invitation_id: InvitationId::new("original-reservation"),
+            context_id: snapshot.context_id,
+            sender_id: snapshot.authority_id,
+            receiver_id: test_receiver(),
+            invitation_type: InvitationType::Contact { nickname: None },
+            status: InvitationStatus::Pending,
+            created_at: 100,
+            expires_at: Some(600),
+            message: None,
+            receiver_nickname: Some("original nickname".into()),
+        };
+        let outcome = service.prepare_reserved_send_invitation(&snapshot, &invitation);
+        assert!(outcome.is_allowed());
+        let fact = outcome
+            .effects
+            .iter()
+            .find_map(|effect| match effect {
+                EffectCommand::JournalAppend { fact } => Some(fact),
+                _ => None,
+            })
+            .expect("canonical invitation fact");
+        match fact {
+            InvitationFact::Sent {
+                sent_at,
+                expires_at,
+                receiver_nickname,
+                invitation_id,
+                ..
+            } => {
+                assert_eq!(*sent_at, InvitationService::exact_time(100));
+                assert_eq!(*expires_at, Some(InvitationService::exact_time(600)));
+                assert_eq!(receiver_nickname, &invitation.receiver_nickname);
+                assert_eq!(invitation_id, &invitation.invitation_id);
+            }
+            _ => panic!("reserved send must emit Sent"),
+        }
+        snapshot.now_ms = 600;
+        assert!(service
+            .prepare_reserved_send_invitation(&snapshot, &invitation)
+            .is_denied());
+        snapshot.now_ms = 99;
+        assert!(service
+            .prepare_reserved_send_invitation(&snapshot, &invitation)
+            .is_denied());
+        snapshot.now_ms = 500;
+        snapshot.capabilities.clear();
+        assert!(service
+            .prepare_reserved_send_invitation(&snapshot, &invitation)
+            .is_denied());
     }
 
     /// Send denied without required capability — invitation operations are

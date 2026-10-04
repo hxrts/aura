@@ -122,9 +122,9 @@ impl CliPresetBuilder {
 
         // Ensure data directory exists
         if !data_dir.exists() {
-            std::fs::create_dir_all(&data_dir).map_err(|e| BuildError::EffectInit {
+            std::fs::create_dir_all(&data_dir).map_err(|e| BuildError::EffectInitSource {
                 effect: "storage",
-                message: format!("failed to create data directory: {}", e),
+                source: Box::new(e),
             })?;
         }
 
@@ -149,7 +149,7 @@ impl CliPresetBuilder {
                 .with_authority(authority_id)
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Production => EffectSystemBuilder::production()
                 .with_config(self.config)
                 .with_authority(authority_id)
@@ -157,13 +157,13 @@ impl CliPresetBuilder {
                 .with_rendezvous()
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Simulation { seed } => EffectSystemBuilder::simulation(seed)
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build(&effect_context)
                 .await
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -178,9 +178,9 @@ impl CliPresetBuilder {
 
         // Ensure data directory exists
         if !data_dir.exists() {
-            std::fs::create_dir_all(&data_dir).map_err(|e| BuildError::EffectInit {
+            std::fs::create_dir_all(&data_dir).map_err(|e| BuildError::EffectInitSource {
                 effect: "storage",
-                message: format!("failed to create data directory: {}", e),
+                source: Box::new(e),
             })?;
         }
 
@@ -195,7 +195,7 @@ impl CliPresetBuilder {
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build_sync()
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
             ExecutionMode::Production => {
                 return Err(BuildError::RuntimeConstruction(
                     "production mode requires async build".to_string(),
@@ -206,7 +206,7 @@ impl CliPresetBuilder {
                 .with_config(self.config)
                 .with_authority(authority_id)
                 .build_sync()
-                .map_err(|e| BuildError::RuntimeConstruction(e.to_string()))?,
+                .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?,
         };
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -216,5 +216,47 @@ impl CliPresetBuilder {
 impl Default for CliPresetBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod required_storage_failure_tests {
+    use super::*;
+
+    fn assert_original_io_failure(error: &crate::AgentError) {
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(error);
+        while let Some(current) = cause {
+            if let Some(original) = current.downcast_ref::<std::io::Error>() {
+                assert_eq!(original.kind(), std::io::ErrorKind::NotADirectory);
+                return;
+            }
+            cause = current.source();
+        }
+        panic!("required storage construction lost its native IO failure");
+    }
+
+    #[tokio::test]
+    async fn cli_build_paths_preserve_actual_directory_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let profile = tempfile::tempdir()?;
+        let blocker = profile.path().join("blocked");
+        std::fs::write(&blocker, b"original file")?;
+        let target = blocker.join("profile");
+        let asynchronous = match CliPresetBuilder::new()
+            .data_dir(target.clone())
+            .build()
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("a file cannot admit a profile directory"),
+        };
+        assert_original_io_failure(&asynchronous);
+        let synchronous = match CliPresetBuilder::new().data_dir(target).build_sync() {
+            Err(error) => error,
+            Ok(_) => panic!("a file cannot admit a profile directory"),
+        };
+        assert_original_io_failure(&synchronous);
+        assert_eq!(std::fs::read(blocker)?, b"original file");
+        Ok(())
     }
 }

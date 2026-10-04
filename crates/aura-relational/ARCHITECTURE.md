@@ -107,3 +107,8 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
 - [Relational Contexts](../../docs/114_relational_contexts.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
+
+Required Contact and Friendship envelope decoders use the shared pure core
+validator for the declared domain and schema-1 policy. Structural and native
+JSON/DAG-CBOR failures remain explicit; successful decoding alone establishes
+neither journal commitment nor relationship agreement.

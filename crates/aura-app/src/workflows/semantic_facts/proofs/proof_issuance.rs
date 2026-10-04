@@ -120,6 +120,7 @@ impl AccountCreatedProof {
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = HomeCreatedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -131,6 +132,7 @@ pub(in crate::workflows) fn issue_home_created_proof(home_id: ChannelId) -> Home
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = AccountCreatedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -142,6 +144,7 @@ pub(in crate::workflows) fn issue_account_created_proof() -> AccountCreatedProof
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = ChannelMembershipReadyProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -155,6 +158,7 @@ pub(in crate::workflows) fn issue_channel_membership_ready_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationCreatedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -168,6 +172,7 @@ pub(in crate::workflows) fn issue_invitation_created_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationExportedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -181,6 +186,7 @@ pub(in crate::workflows) fn issue_invitation_exported_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = ChannelInvitationCreatedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -194,6 +200,7 @@ pub(in crate::workflows) fn issue_channel_invitation_created_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationAcceptedOrMaterializedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -207,6 +214,7 @@ pub(in crate::workflows) fn issue_invitation_accepted_or_materialized_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = PendingInvitationConsumedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -220,6 +228,7 @@ pub(in crate::workflows) fn issue_pending_invitation_consumed_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationDeclinedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -233,6 +242,7 @@ pub(in crate::workflows) fn issue_invitation_declined_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationRevokedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -246,6 +256,7 @@ pub(in crate::workflows) fn issue_invitation_revoked_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = DeviceEnrollmentStartedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -259,6 +270,7 @@ pub(in crate::workflows) fn issue_device_enrollment_started_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = DeviceEnrollmentCompletedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -272,6 +284,7 @@ pub(in crate::workflows) fn issue_device_enrollment_completed_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = GuardianInvitationConfirmedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -285,6 +298,7 @@ pub(in crate::workflows) fn issue_guardian_invitation_confirmed_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = InvitationImportedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -298,6 +312,7 @@ pub(in crate::workflows) fn issue_invitation_imported_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = MessageCommittedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]
@@ -313,6 +328,7 @@ pub(in crate::workflows) fn issue_message_committed_proof(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = DeviceEnrollmentImportedProof,
     family = "proof_issuer"
 )]
 #[aura_macros::authoritative_source(kind = "proof_issuer")]

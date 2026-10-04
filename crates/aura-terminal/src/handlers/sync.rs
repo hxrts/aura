@@ -9,21 +9,35 @@ use crate::cli::sync::SyncAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
-use aura_agent::{
-    RuntimeService, RuntimeServiceContext, ServiceHealth, SyncManagerConfig, SyncServiceManager,
-    TaskSupervisor,
-};
+use aura_agent::{AdmittedSyncCommandCapability, ServiceHealth, SyncManagerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::DeviceId;
-use aura_effects::time::PhysicalTimeHandler;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
 
-fn sync_service_context(
-    time_handler: Arc<dyn PhysicalTimeEffects + Send + Sync>,
-) -> RuntimeServiceContext {
-    RuntimeServiceContext::new(Arc::new(TaskSupervisor::new()), time_handler)
+#[derive(Debug, thiserror::Error)]
+#[error("sync command requires the current owned runtime")]
+struct SyncRuntimeUnavailable;
+
+async fn admit_sync_command(
+    ctx: &HandlerContext<'_>,
+    config: SyncManagerConfig,
+) -> TerminalResult<AdmittedSyncCommandCapability> {
+    let agent = ctx.agent().ok_or_else(|| {
+        TerminalError::native_operation(
+            "No owned runtime is available for sync",
+            SyncRuntimeUnavailable,
+        )
+    })?;
+    agent
+        .runtime()
+        .admit_sync_command(config)
+        .await
+        .map_err(|source| {
+            TerminalError::native_operation("Failed to start owned sync command", source)
+        })
 }
 
 /// An execution failure remains primary when stopping also fails.
@@ -193,26 +207,24 @@ async fn handle_daemon_mode(
         ..SyncManagerConfig::default()
     };
 
-    let manager = SyncServiceManager::new(config);
-
-    // Start the sync service
-    let time_handler = Arc::new(PhysicalTimeHandler::new());
-    let service_context = sync_service_context(time_handler.clone());
     let interval_ms =
         u64::try_from(Duration::from_secs(interval_secs).as_millis()).map_err(|error| {
             TerminalError::native_operation("Sync interval exceeds physical milliseconds", error)
         })?;
+    let manager = admit_sync_command(ctx, config).await?;
+    let time_handler = manager.time_effects();
     let tick_count = run_sync_with_cleanup(async {
-        manager.start(&service_context).await.map_err(sync_source)?;
+
         println!("\nSync daemon started. Press Ctrl+C to stop.\n");
         let started = time_handler.physical_time().await.map_err(sync_source)?;
         let observation = aura_core::TimeoutClockObservation::new(&started);
         let mut tick_count = 0u64;
         loop {
-            if let Some(failure) = service_context.tasks().terminal_failure() {
+            if let Some(failure) = manager.terminal_failure() {
                 return Err(sync_source(failure));
             }
             tokio::select! {
+                _ = manager.closed() => { break; }
                 result = signal::ctrl_c() => {
                     result.map_err(sync_source)?;
                     println!("\nReceived shutdown signal...");
@@ -220,7 +232,7 @@ async fn handle_daemon_mode(
                 }
                 result = required_sync_tick(time_handler.as_ref(), &observation, started.ts_ms, interval_ms) => {
                     let uptime_secs = result?;
-                    if let Some(failure) = service_context.tasks().terminal_failure() {
+                    if let Some(failure) = manager.terminal_failure() {
                         return Err(sync_source(failure));
                     }
                     tick_count += 1;
@@ -240,8 +252,6 @@ async fn handle_daemon_mode(
         println!("Stopping sync daemon...");
         manager.stop().await
     }).await?;
-
-    let _ = ctx; // Acknowledge context for future use
 
     // Return shutdown summary (startup messages already rendered)
     let mut shutdown_output = CliOutput::new();
@@ -271,25 +281,11 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
 
     // Configure for one-shot (no auto sync)
     let config = SyncManagerConfig::manual_only();
-    let manager = SyncServiceManager::new(config);
+    let manager = admit_sync_command(ctx, config).await?;
 
-    // Start the sync service
-    let time_handler = Arc::new(PhysicalTimeHandler::new());
-    let service_context = sync_service_context(time_handler.clone());
     run_sync_with_cleanup(
         async {
-            manager.start(&service_context).await.map_err(sync_source)?;
-
-            // Full sync_with_peers needs the full effect system
-            // For now, just add peers and show status
-            for peer in &peers {
-                manager.add_peer(*peer).await;
-            }
-
-            output.kv("Registered peers", manager.peers().await.len().to_string());
-
-            // In a real implementation, this would call:
-            // manager.sync_with_peers(effects, peers).await?;
+            manager.sync_with_peers(peers).await?;
 
             // Show completion
             let health = manager.health().await;
@@ -300,7 +296,6 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
         || manager.stop(),
     )
     .await?;
-    let _ = ctx; // Acknowledge context for future use
 
     output.println("One-shot sync complete.");
     Ok(output)

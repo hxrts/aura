@@ -145,3 +145,54 @@ TRYBUILD=overwrite cargo test -p aura-macros --test compile_fail
 ### Durable enrollment execution boundary
 
 The `async-session-ownership` lane also enforces sealed durable enrollment windows. AST checks reject raw timeout executor calls or aliases, fresh timeout reconstruction, weaker attempt parameters, and raw budget methods in production device enrollment. Attempt functions and methods require a sealed window input regardless of parameter name. Test-only exclusions require a positive test predicate; `cfg(not(test))` remains checked. Adversarial fixtures cover each bypass, renamed inputs, missing inputs, and the sanctioned window path.
+
+## Declared capability type recognition
+
+Capability boundary declaration validation recognizes the exact configured capability type in the parsed signature, including references and nested result types. Parameter names, string literals and type-name substrings do not establish this exact signature match. Historical body-string, `_CAPABILITY` and substring shortcuts remain separate acceptance paths in the full validator; removing those unchecked paths is outstanding under Task 13. This syntax check does not establish construction provenance: opaque fields, actual provider and tracker identity checks, move ownership and internal negative trait assertions remain required. Original cleanup custody can own a real generation guard without granting enrollment publication or activation.
+
+Production task-spawn enforcement excludes declarations only when parsed `cfg`
+requires `test`. Conjunctions such as `all(test, unix)` qualify; `not(test)` and
+`any(test, unix)` remain checked. Ownership CI requires exact source, discovery
+and execution evidence for the positive and adversarial configuration regression.
+
+All compile-fail suites share the host-only process lock implementation in
+`toolkit/test-support/process_lock.rs`, including service-surface and marker
+validation. Different suite names do not create different lock namespaces;
+Cargo absence and bounded acquisition failure fail required coverage.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.
+
+All ownership lint visitors use the common parsed test-only cfg predicate.
+Attribute text containing `test` is insufficient: production-capable negations,
+disjunctions and feature names continue to be enforced across policy domains.
+
+Capability declaration matching retains full configured generic arguments:
+qualified paths and their type parameters must match the actual signature.
+The required full-validator regression rejects omitted/substituted parameters
+and containers containing unrelated values.
+
+The canonical agent result alias preserves success capability evidence. The
+validator follows only its first success type, never diagnostic/error arms;
+required positive and adversarial tests cover nested successful values.
+
+Capability declaration matching rejects foreign qualified container lookalikes.
+Preserve canonical wrapper paths, exact capability generic arguments, and the
+required full-validator foreign Result/Arc/AgentResult regressions. Unqualified
+names remain declaration syntax; opaque APIs and compiler checks establish actual
+custody independently.
+
+### Architecture lint input discovery
+
+Every explicit scan input must exist. In a Git checkout, architecture lints
+inspect tracked and new untracked Rust sources, excluding ignored artifacts
+from directory scans. An explicitly requested Rust file is scanned even when
+ignored. Mixed valid/missing input cannot report a clean result. The real CLI
+regressions in `tests/lint_input_discovery.rs` exercise each case in isolated Git
+fixtures; full workspace test runs include this enforcement coverage.
+A successful Git inventory with no Rust inputs fails explicitly; it does not
+trigger a filesystem fallback that would reintroduce ignored artifacts. Outside
+a Git checkout, native directory discovery remains available.

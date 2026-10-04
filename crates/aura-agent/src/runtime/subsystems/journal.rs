@@ -17,7 +17,7 @@
 #![allow(clippy::disallowed_types)]
 
 use crate::database::IndexedJournalHandler;
-use crate::reactive::{FactSource, ViewUpdate};
+use crate::reactive::FactSource;
 use aura_authorization::BiscuitAuthorizationBridge;
 use aura_journal::extensibility::FactRegistry;
 use biscuit_auth::Biscuit;
@@ -25,7 +25,7 @@ use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Journal subsystem grouping fact storage and publication.
 ///
@@ -35,8 +35,7 @@ use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 /// - Publication channel for reactive updates
 /// - Authorization policy for journal operations
 struct JournalSubsystemShared {
-    fact_publish_tx: Mutex<Option<mpsc::Sender<FactSource>>>,
-    view_update_tx: Mutex<Option<broadcast::Sender<ViewUpdate>>>,
+    fact_publish_tx: Mutex<Option<crate::reactive::FactIngress>>,
     indexed_keys: Arc<Mutex<HashSet<String>>>,
     cached_journal: Arc<AsyncMutex<Option<aura_core::Journal>>>,
 }
@@ -74,7 +73,6 @@ impl JournalSubsystem {
             journal_verifying_key: None,
             shared: Arc::new(JournalSubsystemShared {
                 fact_publish_tx: Mutex::new(None),
-                view_update_tx: Mutex::new(None),
                 indexed_keys: Arc::new(Mutex::new(HashSet::new())),
                 cached_journal: Arc::new(AsyncMutex::new(None)),
             }),
@@ -85,7 +83,7 @@ impl JournalSubsystem {
     pub fn from_parts(
         indexed_journal: Arc<IndexedJournalHandler>,
         fact_registry: Arc<FactRegistry>,
-        fact_publish_tx: Option<mpsc::Sender<FactSource>>,
+        fact_publish_tx: Option<crate::reactive::FactIngress>,
         journal_policy: Option<(Biscuit, BiscuitAuthorizationBridge)>,
         journal_verifying_key: Option<Vec<u8>>,
     ) -> Self {
@@ -96,7 +94,6 @@ impl JournalSubsystem {
             journal_verifying_key,
             shared: Arc::new(JournalSubsystemShared {
                 fact_publish_tx: Mutex::new(fact_publish_tx),
-                view_update_tx: Mutex::new(None),
                 indexed_keys: Arc::new(Mutex::new(HashSet::new())),
                 cached_journal: Arc::new(AsyncMutex::new(None)),
             }),
@@ -187,7 +184,7 @@ impl JournalSubsystem {
     ///
     /// Facts committed to the journal will be published to this channel
     /// for processing by the reactive scheduler.
-    pub fn attach_fact_sink(&self, tx: mpsc::Sender<FactSource>) {
+    pub fn attach_fact_sink(&self, tx: crate::reactive::FactIngress) {
         *self.shared.fact_publish_tx.lock() = Some(tx);
     }
 
@@ -202,6 +199,40 @@ impl JournalSubsystem {
         self.shared.fact_publish_tx.lock().is_some()
     }
 
+    /// Issue required processing custody only from the actual attached scheduler.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "fact_processing_target", capability_type = crate::reactive::FactProcessingTargetCapability, family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn publish_required(
+        &self,
+        facts: Vec<aura_journal::fact::Fact>,
+    ) -> Result<crate::reactive::FactProcessingTargetCapability, crate::reactive::FactProcessingError>
+    {
+        let ingress = self
+            .shared
+            .fact_publish_tx
+            .lock()
+            .clone()
+            .ok_or(crate::reactive::FactProcessingError::IngressAbsent)?;
+        ingress.publish_required(facts).await
+    }
+
+    /// Validate and await the original processing owner under the supplied window.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "fact_processing_target", capability_type = crate::reactive::FactProcessingTargetCapability, family = "runtime_helper")]
+    pub(crate) async fn await_required<T: aura_core::effects::PhysicalTimeEffects + Sync>(
+        &self,
+        target: crate::reactive::FactProcessingTargetCapability,
+        time: &T,
+        budget: &aura_core::TimeoutBudget,
+    ) -> Result<(), aura_core::time::timeout::TimeoutRunError<crate::reactive::FactProcessingError>>
+    {
+        let ingress = self.shared.fact_publish_tx.lock().clone().ok_or(
+            aura_core::time::timeout::TimeoutRunError::Operation(
+                crate::reactive::FactProcessingError::IngressAbsent,
+            ),
+        )?;
+        target.await_processed(&ingress, time, budget).await
+    }
+
     /// Publish facts to the reactive scheduler
     ///
     /// Returns Ok(()) if publication succeeded or no sink is attached.
@@ -212,34 +243,9 @@ impl JournalSubsystem {
         if let Some(tx) = tx {
             tx.send(source)
                 .await
-                .map_err(|_| JournalSubsystemError::SinkClosed)?;
+                .map_err(|source| JournalSubsystemError::SinkClosed { source })?;
         }
         Ok(())
-    }
-
-    /// Attach a view update sender for awaiting fact processing
-    ///
-    /// This allows commit operations to wait for the reactive scheduler
-    /// to process their facts before returning.
-    pub fn attach_view_update_sender(&self, tx: broadcast::Sender<ViewUpdate>) {
-        *self.shared.view_update_tx.lock() = Some(tx);
-    }
-
-    /// Subscribe to view updates for awaiting fact processing
-    ///
-    /// Returns None if no view update sender is attached.
-    pub fn subscribe_view_updates(&self) -> Option<broadcast::Receiver<ViewUpdate>> {
-        self.shared
-            .view_update_tx
-            .lock()
-            .as_ref()
-            .map(|tx| tx.subscribe())
-    }
-
-    /// Check if view update subscription is available
-    #[allow(dead_code)] // Retained until every view wait path attaches the sender explicitly before use.
-    pub fn has_view_update_sender(&self) -> bool {
-        self.shared.view_update_tx.lock().is_some()
     }
 }
 
@@ -248,7 +254,10 @@ impl JournalSubsystem {
 #[derive(Debug, thiserror::Error)]
 pub enum JournalSubsystemError {
     #[error("Fact publication sink is closed")]
-    SinkClosed,
+    SinkClosed {
+        #[source]
+        source: crate::reactive::FactProcessingError,
+    },
 }
 
 impl Clone for JournalSubsystem {
@@ -294,7 +303,11 @@ mod tests {
         let registry = Arc::new(build_fact_registry());
         let subsystem = JournalSubsystem::new(1000u64, registry);
 
-        let (tx, _rx) = mpsc::channel(16);
+        let (_scheduler, tx, _shutdown) = crate::reactive::ReactiveScheduler::new(
+            crate::reactive::SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
+        );
         subsystem.attach_fact_sink(tx);
         assert!(subsystem.has_fact_sink());
 
@@ -306,14 +319,21 @@ mod tests {
     async fn test_publish_facts_reports_closed_sink() {
         let registry = Arc::new(build_fact_registry());
         let subsystem = JournalSubsystem::new(1000u64, registry);
-        let (tx, rx) = mpsc::channel(1);
+        let (scheduler, tx, _shutdown) = crate::reactive::ReactiveScheduler::new(
+            crate::reactive::SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
+        );
         subsystem.attach_fact_sink(tx);
-        drop(rx);
+        drop(scheduler);
 
         let result = subsystem
             .publish_facts(FactSource::Journal(Vec::new()))
             .await;
-        assert!(matches!(result, Err(JournalSubsystemError::SinkClosed)));
+        assert!(matches!(
+            result,
+            Err(JournalSubsystemError::SinkClosed { .. })
+        ));
     }
 
     #[tokio::test]

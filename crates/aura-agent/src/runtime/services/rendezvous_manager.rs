@@ -12,7 +12,9 @@ use super::config_profiles::impl_service_config_profiles;
 use super::service_registry::ServiceRegistry;
 use super::traits::{RuntimeService, RuntimeServiceContext, ServiceError, ServiceHealth};
 use crate::core::default_context_id_for_authority;
-use crate::handlers::rendezvous_identity::retrieve_identity_keys;
+use crate::handlers::rendezvous_identity::{
+    require_active_identity_signing_context, require_identity_keys,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::runtime::services::bootstrap_broker::{
     fetch_remote_candidates, register_remote_candidate, send_remote_invitation,
@@ -32,9 +34,7 @@ use aura_app::runtime_bridge::DiscoveryTriggerOutcome;
 #[cfg(target_arch = "wasm32")]
 use aura_core::effects::network::NetworkError;
 use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
-use aura_core::effects::secure::SecureStorageEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::{CryptoEffects, NoiseEffects};
 use aura_core::service::{EstablishPath, LinkProtocol};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{AuraError, OwnershipCategory};
@@ -190,8 +190,8 @@ pub enum RendezvousManagerError {
         peer: AuthorityId,
         context_id: ContextId,
     },
-    #[error("local identity key material is missing or invalid for authority {authority}")]
-    MissingIdentityKey { authority: AuthorityId },
+    #[error("required rendezvous identity failed")]
+    Identity(#[source] aura_invitation::enrollment_manifest::EnrollmentManifestError),
     #[error("rendezvous channel preparation failed")]
     ChannelPreparation(#[source] AuraError),
     #[error("rendezvous manager is not running under supervised task ownership")]
@@ -761,13 +761,13 @@ impl RendezvousManager {
     /// Publish a transport descriptor for a context
     ///
     /// Returns the guard outcome with the descriptor fact.
-    pub async fn publish_descriptor<E: SecureStorageEffects>(
+    pub async fn publish_descriptor(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
-        effects: &E,
+        effects: &crate::runtime::AuraEffectSystem,
     ) -> Result<aura_rendezvous::GuardOutcome, RendezvousManagerError> {
         let service = self
             .snapshot()
@@ -780,11 +780,12 @@ impl RendezvousManager {
         );
 
         // Retrieve identity keys to get public key
-        let (_, public_key) = retrieve_identity_keys(effects, &self.authority_id)
+        let identity = require_active_identity_signing_context(effects, &self.authority_id)
             .await
-            .ok_or(RendezvousManagerError::MissingIdentityKey {
-                authority: self.authority_id,
-            })?;
+            .map_err(RendezvousManagerError::Identity)?;
+        let (_, public_key) = require_identity_keys(&identity)
+            .await
+            .map_err(RendezvousManagerError::Identity)?;
 
         service
             .prepare_publish_descriptor(snapshot, context_id, hints, public_key, now_ms)
@@ -794,13 +795,13 @@ impl RendezvousManager {
     /// Refresh a descriptor for a context
     ///
     /// Returns the guard outcome with the new descriptor fact.
-    pub async fn refresh_descriptor<E: SecureStorageEffects>(
+    pub async fn refresh_descriptor(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
-        effects: &E,
+        effects: &crate::runtime::AuraEffectSystem,
     ) -> Result<aura_rendezvous::GuardOutcome, RendezvousManagerError> {
         let service = self
             .snapshot()
@@ -813,11 +814,12 @@ impl RendezvousManager {
         );
 
         // Retrieve identity keys to get public key
-        let (_, public_key) = retrieve_identity_keys(effects, &self.authority_id)
+        let identity = require_active_identity_signing_context(effects, &self.authority_id)
             .await
-            .ok_or(RendezvousManagerError::MissingIdentityKey {
-                authority: self.authority_id,
-            })?;
+            .map_err(RendezvousManagerError::Identity)?;
+        let (_, public_key) = require_identity_keys(&identity)
+            .await
+            .map_err(RendezvousManagerError::Identity)?;
 
         service
             .prepare_refresh_descriptor(snapshot, context_id, hints, public_key, now_ms)
@@ -909,16 +911,14 @@ impl RendezvousManager {
     // ========================================================================
 
     /// Prepare to establish a channel with a peer
-    pub async fn prepare_establish_channel<
-        E: NoiseEffects + CryptoEffects + SecureStorageEffects,
-    >(
+    pub async fn prepare_establish_channel(
         &self,
         context_id: ContextId,
         peer: AuthorityId,
         psk: &[u8; 32],
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
-        effects: &E,
+        effects: &crate::runtime::AuraEffectSystem,
     ) -> Result<aura_rendezvous::GuardOutcome, RendezvousManagerError> {
         let service = self
             .snapshot()
@@ -943,11 +943,12 @@ impl RendezvousManager {
             .ok_or(RendezvousManagerError::PeerDescriptorNotFound { peer })?;
 
         // Retrieve identity keys
-        let (local_private_key, _) = retrieve_identity_keys(effects, &self.authority_id)
+        let identity = require_active_identity_signing_context(effects, &self.authority_id)
             .await
-            .ok_or(RendezvousManagerError::MissingIdentityKey {
-                authority: self.authority_id,
-            })?;
+            .map_err(RendezvousManagerError::Identity)?;
+        let (local_private_key, _) = require_identity_keys(&identity)
+            .await
+            .map_err(RendezvousManagerError::Identity)?;
 
         let remote_public_key = descriptor.public_key;
 
@@ -1838,21 +1839,6 @@ impl RendezvousManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::TaskSupervisor;
-    use async_trait::async_trait;
-    use aura_core::crypto::single_signer::SingleSignerKeyPackage;
-    use aura_core::effects::noise::{
-        HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
-    };
-    use aura_core::effects::secure::{
-        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-    };
-    use aura_core::effects::{
-        CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
-        SecureGeneratedKey, SecureStorageError,
-    };
-    use aura_core::secrets::SecretExportContext;
-    use aura_core::time::PhysicalTime;
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_rendezvous::{capabilities::RendezvousCapability, GuardSnapshot};
@@ -1877,14 +1863,6 @@ mod tests {
         [seed; 32]
     }
 
-    fn test_identity_key_bytes() -> Vec<u8> {
-        SingleSignerKeyPackage::new(vec![9u8; 32], vec![8u8; 32])
-            .export_for_secure_storage(SecretExportContext::secure_storage(
-                "aura-agent::runtime::services::rendezvous_manager::retrieve_identity_keys",
-            ))
-            .expect("test identity package should serialize")
-    }
-
     fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
         GuardSnapshot {
             authority_id: authority,
@@ -1906,370 +1884,111 @@ mod tests {
         default_udp_effects()
     }
 
-    fn test_service_context() -> RuntimeServiceContext {
-        RuntimeServiceContext::new(Arc::new(TaskSupervisor::new()), test_time())
+    async fn test_service_context() -> RuntimeServiceContext {
+        let time: Arc<dyn PhysicalTimeEffects + Send + Sync> = test_time();
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &time
+                .physical_time()
+                .await
+                .expect("actual service fixture startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original actual service fixture window");
+        RuntimeServiceContext::new(
+            Arc::new(crate::runtime::TaskSupervisor::new()),
+            time,
+            original,
+        )
     }
 
-    // Mock for tests
-    struct MockEffects;
-    #[async_trait]
-    impl SecureStorageEffects for MockEffects {
-        async fn secure_store(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[u8],
-            _: &[SecureStorageCapability],
-        ) -> Result<(), SecureStorageError> {
-            Ok(())
+    async fn actual_identity_effects(
+        salt: u64,
+        bootstrap: bool,
+    ) -> Arc<crate::runtime::AuraEffectSystem> {
+        use aura_core::effects::ThresholdSigningEffects;
+        let config = crate::AgentConfig::default();
+        let effects = Arc::new(
+            crate::runtime::AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                &config,
+                test_authority(),
+                salt,
+            )
+            .expect("actual authority-owned simulation runtime"),
+        );
+        if bootstrap {
+            crate::runtime::services::ThresholdSigningService::new(effects.clone())
+                .bootstrap_authority(&test_authority())
+                .await
+                .expect("actual canonical physical identity bootstrap");
         }
-        async fn secure_retrieve(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(test_identity_key_bytes())
-        }
-        async fn secure_delete(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-        ) -> Result<(), SecureStorageError> {
-            Ok(())
-        }
-        async fn secure_exists(
-            &self,
-            _: &SecureStorageLocation,
-        ) -> Result<bool, SecureStorageError> {
-            Ok(false)
-        }
-        async fn secure_list_keys(
-            &self,
-            _: &str,
-            _: &[SecureStorageCapability],
-        ) -> Result<Vec<String>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn secure_generate_key(
-            &self,
-            _: &SecureStorageLocation,
-            _: &str,
-            _: &[SecureStorageCapability],
-        ) -> Result<SecureGeneratedKey, SecureStorageError> {
-            Ok(SecureGeneratedKey::OpaqueHandle(String::new()))
-        }
-        async fn secure_create_time_bound_token(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-            _: &PhysicalTime,
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn secure_access_with_token(
-            &self,
-            _: &[u8],
-            _: &SecureStorageLocation,
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn is_secure_storage_available(&self) -> bool {
-            false
-        }
-        fn get_secure_storage_capabilities(&self) -> Vec<String> {
-            vec![]
-        }
-    }
-    #[async_trait]
-    impl NoiseEffects for MockEffects {
-        async fn create_handshake_state(
-            &self,
-            _: NoiseParams,
-        ) -> Result<HandshakeState, NoiseError> {
-            Ok(HandshakeState(Box::new(())))
-        }
-        async fn write_message(
-            &self,
-            _: HandshakeState,
-            _: &[u8],
-        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
-            Ok((vec![], HandshakeState(Box::new(()))))
-        }
-        async fn read_message(
-            &self,
-            _: HandshakeState,
-            _: &[u8],
-        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
-            Ok((vec![], HandshakeState(Box::new(()))))
-        }
-        async fn into_transport_mode(
-            &self,
-            _: HandshakeState,
-        ) -> Result<TransportState, NoiseError> {
-            Ok(TransportState(Box::new(())))
-        }
-        async fn encrypt_transport_message(
-            &self,
-            _: &mut TransportState,
-            _: &[u8],
-        ) -> Result<Vec<u8>, NoiseError> {
-            Ok(vec![])
-        }
-        async fn decrypt_transport_message(
-            &self,
-            _: &mut TransportState,
-            _: &[u8],
-        ) -> Result<Vec<u8>, NoiseError> {
-            Ok(vec![])
-        }
-    }
-    // Minimal implementations for other traits needed by E
-    #[async_trait]
-    impl RandomCoreEffects for MockEffects {
-        async fn random_bytes(&self, _: usize) -> Vec<u8> {
-            vec![]
-        }
-        async fn random_bytes_32(&self) -> [u8; 32] {
-            [0u8; 32]
-        }
-        async fn random_u64(&self) -> u64 {
-            0
-        }
-    }
-    #[async_trait]
-    impl CryptoCoreEffects for MockEffects {
-        async fn kdf_derive(
-            &self,
-            _: &[u8],
-            _: &[u8],
-            _: &[u8],
-            _: u32,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn derive_key(
-            &self,
-            _: &[u8],
-            _: &aura_core::effects::crypto::KeyDerivationContext,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-            Ok((vec![], vec![]))
-        }
-        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
-            Ok(true)
-        }
-        fn is_simulated(&self) -> bool {
-            false
-        }
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec![]
-        }
-        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool {
-            true
-        }
-        fn secure_zero(&self, _: &mut [u8]) {}
-    }
-    #[async_trait]
-    impl CryptoExtendedEffects for MockEffects {
-        async fn convert_ed25519_to_x25519_public(
-            &self,
-            _: &[u8],
-        ) -> Result<[u8; 32], CryptoError> {
-            Ok([0u8; 32])
-        }
-        async fn convert_ed25519_to_x25519_private(
-            &self,
-            _: &[u8],
-        ) -> Result<[u8; 32], CryptoError> {
-            Ok([0u8; 32])
-        }
+        effects
     }
 
-    struct MissingIdentityEffects;
-    #[async_trait]
-    impl SecureStorageEffects for MissingIdentityEffects {
-        async fn secure_store(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[u8],
-            _: &[SecureStorageCapability],
-        ) -> Result<(), SecureStorageError> {
-            Ok(())
+    #[tokio::test]
+    async fn required_manager_identity_rejects_corrupt_primary_without_fallback() {
+        use aura_core::effects::{
+            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+        };
+        let effects = actual_identity_effects(505, true).await;
+        let identity = require_active_identity_signing_context(effects.as_ref(), &test_authority())
+            .await
+            .expect("actual original active physical identity");
+        let location = SecureStorageLocation::with_sub_key(
+            "signing_keys",
+            format!("{}:{}", test_authority(), identity.epoch()),
+            "1",
+        );
+        let companion = SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", test_authority(), identity.epoch()),
+            aura_core::threshold::ParticipantIdentity::device(effects.device_id()).storage_key(),
+        );
+        assert!(effects
+            .secure_exists(&companion)
+            .await
+            .expect("real canonical companion"));
+        effects
+            .secure_store(&location, b"{", &[SecureStorageCapability::Write])
+            .await
+            .expect("corrupt actual provider primary payload");
+        let manager = RendezvousManager::new(
+            test_authority(),
+            RendezvousManagerConfig::for_testing(),
+            test_time(),
+            test_udp(),
+        );
+        let context = test_service_context().await;
+        RuntimeService::start(&manager, &context)
+            .await
+            .expect("start real manager");
+        let failure = manager
+            .publish_descriptor(
+                test_context(),
+                Some(vec![]),
+                1000,
+                &test_snapshot(test_authority(), test_context()),
+                effects.as_ref(),
+            )
+            .await
+            .expect_err("manager must not choose companion or historical material after failure");
+        assert!(
+            matches!(&failure, RendezvousManagerError::Identity(_)),
+            "actual identity failure: {failure:?}"
+        );
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut codec = false;
+        while let Some(cause) = source {
+            codec |= cause.downcast_ref::<serde_json::Error>().is_some();
+            source = cause.source();
         }
-        async fn secure_retrieve(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Err(AuraError::not_found("missing test key"))
-        }
-        async fn secure_delete(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-        ) -> Result<(), SecureStorageError> {
-            Ok(())
-        }
-        async fn secure_exists(
-            &self,
-            _: &SecureStorageLocation,
-        ) -> Result<bool, SecureStorageError> {
-            Ok(false)
-        }
-        async fn secure_list_keys(
-            &self,
-            _: &str,
-            _: &[SecureStorageCapability],
-        ) -> Result<Vec<String>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn secure_generate_key(
-            &self,
-            _: &SecureStorageLocation,
-            _: &str,
-            _: &[SecureStorageCapability],
-        ) -> Result<SecureGeneratedKey, SecureStorageError> {
-            Ok(SecureGeneratedKey::OpaqueHandle(String::new()))
-        }
-        async fn secure_create_time_bound_token(
-            &self,
-            _: &SecureStorageLocation,
-            _: &[SecureStorageCapability],
-            _: &PhysicalTime,
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn secure_access_with_token(
-            &self,
-            _: &[u8],
-            _: &SecureStorageLocation,
-        ) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
-            Ok(vec![])
-        }
-        async fn is_secure_storage_available(&self) -> bool {
-            false
-        }
-        fn get_secure_storage_capabilities(&self) -> Vec<String> {
-            vec![]
-        }
-    }
-    #[async_trait]
-    impl NoiseEffects for MissingIdentityEffects {
-        async fn create_handshake_state(
-            &self,
-            _: NoiseParams,
-        ) -> Result<HandshakeState, NoiseError> {
-            Ok(HandshakeState(Box::new(())))
-        }
-        async fn write_message(
-            &self,
-            _: HandshakeState,
-            _: &[u8],
-        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
-            panic!("Noise setup must not run when local identity keys are missing")
-        }
-        async fn read_message(
-            &self,
-            _: HandshakeState,
-            _: &[u8],
-        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
-            panic!("Noise setup must not run when local identity keys are missing")
-        }
-        async fn into_transport_mode(
-            &self,
-            _: HandshakeState,
-        ) -> Result<TransportState, NoiseError> {
-            panic!("Noise setup must not run when local identity keys are missing")
-        }
-        async fn encrypt_transport_message(
-            &self,
-            _: &mut TransportState,
-            _: &[u8],
-        ) -> Result<Vec<u8>, NoiseError> {
-            panic!("Noise setup must not run when local identity keys are missing")
-        }
-        async fn decrypt_transport_message(
-            &self,
-            _: &mut TransportState,
-            _: &[u8],
-        ) -> Result<Vec<u8>, NoiseError> {
-            panic!("Noise setup must not run when local identity keys are missing")
-        }
-    }
-    #[async_trait]
-    impl RandomCoreEffects for MissingIdentityEffects {
-        async fn random_bytes(&self, _: usize) -> Vec<u8> {
-            vec![]
-        }
-        async fn random_bytes_32(&self) -> [u8; 32] {
-            [0u8; 32]
-        }
-        async fn random_u64(&self) -> u64 {
-            0
-        }
-    }
-    #[async_trait]
-    impl CryptoCoreEffects for MissingIdentityEffects {
-        async fn kdf_derive(
-            &self,
-            _: &[u8],
-            _: &[u8],
-            _: &[u8],
-            _: u32,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn derive_key(
-            &self,
-            _: &[u8],
-            _: &aura_core::effects::crypto::KeyDerivationContext,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-            Ok((vec![], vec![]))
-        }
-        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![])
-        }
-        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
-            Ok(true)
-        }
-        fn is_simulated(&self) -> bool {
-            false
-        }
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec![]
-        }
-        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool {
-            true
-        }
-        fn secure_zero(&self, _: &mut [u8]) {}
-    }
-    #[async_trait]
-    impl CryptoExtendedEffects for MissingIdentityEffects {
-        async fn convert_ed25519_to_x25519_public(
-            &self,
-            _: &[u8],
-        ) -> Result<[u8; 32], CryptoError> {
-            Ok([0u8; 32])
-        }
-        async fn convert_ed25519_to_x25519_private(
-            &self,
-            _: &[u8],
-        ) -> Result<[u8; 32], CryptoError> {
-            Ok([0u8; 32])
-        }
+        assert!(codec, "actual native codec cause survives manager boundary");
+        assert!(manager
+            .list_descriptors_in_context(test_context(), 1000)
+            .await
+            .is_empty());
+        RuntimeService::stop(&manager)
+            .await
+            .expect("stop actual manager");
     }
 
     #[tokio::test]
@@ -2285,7 +2004,7 @@ mod tests {
     async fn test_manager_lifecycle() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         RuntimeService::start(&manager, &context).await.unwrap();
         assert!(manager.is_running().await);
@@ -2306,7 +2025,7 @@ mod tests {
             test_udp(),
         );
         // Keep the context alive: its task group owns the command actor.
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
         let commands = manager.command_handle().await.unwrap();
         let peer = |seed: u8, nickname: &str, real_keys: bool| {
@@ -2354,7 +2073,7 @@ mod tests {
     async fn test_manager_concurrent_lifecycle_transitions_are_idempotent() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         let start_a = RuntimeService::start(&manager, &context);
         let start_b = RuntimeService::start(&manager, &context);
@@ -2375,7 +2094,7 @@ mod tests {
     async fn test_manager_stop_drains_owned_tasks() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
 
         RuntimeService::start(&manager, &context).await.unwrap();
         let task_group = manager
@@ -2400,7 +2119,7 @@ mod tests {
     async fn test_descriptor_caching() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         let descriptor = RendezvousDescriptor {
@@ -2431,7 +2150,7 @@ mod tests {
     async fn test_list_descriptors_in_context_returns_runtime_snapshot() {
         let config = RendezvousManagerConfig::manual_only();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         let valid_descriptor = RendezvousDescriptor {
@@ -2482,18 +2201,18 @@ mod tests {
     async fn test_publish_descriptor() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         let snapshot = test_snapshot(test_authority(), test_context());
-        let mock_effects = MockEffects;
+        let mock_effects = actual_identity_effects(501, true).await;
         let outcome = manager
             .publish_descriptor(
                 test_context(),
                 Some(vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()]),
                 1000,
                 &snapshot,
-                &mock_effects,
+                mock_effects.as_ref(),
             )
             .await
             .unwrap();
@@ -2507,9 +2226,10 @@ mod tests {
     async fn test_publish_and_refresh_fail_when_identity_key_missing() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
+        let missing = actual_identity_effects(502, false).await;
         let snapshot = test_snapshot(test_authority(), test_context());
         let publish_error = manager
             .publish_descriptor(
@@ -2517,14 +2237,11 @@ mod tests {
                 Some(vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()]),
                 1000,
                 &snapshot,
-                &MissingIdentityEffects,
+                missing.as_ref(),
             )
             .await
             .expect_err("publish must fail closed without local identity keys");
-        assert!(matches!(
-            publish_error,
-            RendezvousManagerError::MissingIdentityKey { .. }
-        ));
+        assert!(matches!(publish_error, RendezvousManagerError::Identity(_)));
 
         let refresh_error = manager
             .refresh_descriptor(
@@ -2532,14 +2249,11 @@ mod tests {
                 Some(vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()]),
                 1000,
                 &snapshot,
-                &MissingIdentityEffects,
+                missing.as_ref(),
             )
             .await
             .expect_err("refresh must fail closed without local identity keys");
-        assert!(matches!(
-            refresh_error,
-            RendezvousManagerError::MissingIdentityKey { .. }
-        ));
+        assert!(matches!(refresh_error, RendezvousManagerError::Identity(_)));
 
         RuntimeService::stop(&manager).await.unwrap();
     }
@@ -2548,7 +2262,7 @@ mod tests {
     async fn test_needs_refresh() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         // No descriptor cached - should need refresh
@@ -2574,7 +2288,7 @@ mod tests {
     async fn test_direct_upgrade_candidates_filter_recoverable_direct_hints() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         let descriptor = RendezvousDescriptor {
@@ -2616,7 +2330,7 @@ mod tests {
     async fn test_cache_descriptor_rejects_placeholder_descriptor_crypto() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
         let error = manager
@@ -2666,9 +2380,10 @@ mod tests {
     async fn test_prepare_establish_channel_rejects_placeholder_descriptor_crypto() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
+        let actual = actual_identity_effects(503, true).await;
         manager
             .registry
             .cache_descriptor(RendezvousDescriptor {
@@ -2692,7 +2407,7 @@ mod tests {
                 &[7u8; 32],
                 1_000,
                 &test_snapshot(test_authority(), test_context()),
-                &MockEffects,
+                actual.as_ref(),
             )
             .await
             .expect_err("placeholder descriptor crypto must be rejected");
@@ -2708,9 +2423,10 @@ mod tests {
     async fn test_prepare_establish_channel_fails_before_noise_when_identity_key_missing() {
         let config = RendezvousManagerConfig::for_testing();
         let manager = RendezvousManager::new(test_authority(), config, test_time(), test_udp());
-        let context = test_service_context();
+        let context = test_service_context().await;
         RuntimeService::start(&manager, &context).await.unwrap();
 
+        let missing = actual_identity_effects(504, false).await;
         manager
             .cache_descriptor(RendezvousDescriptor {
                 authority_id: test_peer(),
@@ -2734,14 +2450,11 @@ mod tests {
                 &[7u8; 32],
                 1_000,
                 &test_snapshot(test_authority(), test_context()),
-                &MissingIdentityEffects,
+                missing.as_ref(),
             )
             .await
             .expect_err("missing identity keys must fail before Noise setup");
-        assert!(matches!(
-            error,
-            RendezvousManagerError::MissingIdentityKey { .. }
-        ));
+        assert!(matches!(error, RendezvousManagerError::Identity(_)));
 
         RuntimeService::stop(&manager).await.unwrap();
     }

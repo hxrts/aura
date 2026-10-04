@@ -5,6 +5,8 @@ use aura_core::AuraError;
 
 #[derive(Debug, thiserror::Error)]
 enum RequiredInvitationIdentityError {
+    #[error("required original sender invitation record is absent")]
+    SenderRecordAbsent,
     #[error("retained sender enrollment payload differs from its regular record")]
     EnrollmentPayloadBinding,
     #[error("retained sender enrollment exceeds the 4 MiB secret record bound")]
@@ -80,7 +82,12 @@ pub(super) async fn created_required<E: StorageCoreEffects + ?Sized>(
             message: "read required sender invitation".into(),
             source: Some(Arc::new(source)),
         })?
-        .ok_or_else(|| AuraError::not_found("sender invitation"))?;
+        .ok_or_else(|| AuraError::NotFound {
+            message: "sender invitation".into(),
+            source: Some(Arc::new(
+                RequiredInvitationIdentityError::SenderRecordAbsent,
+            )),
+        })?;
     if bytes.len() > 1024 * 1024 {
         return Err(identity_failure(RequiredInvitationIdentityError::Oversized));
     }

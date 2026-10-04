@@ -74,6 +74,7 @@ pub fn classify_terminal_execution_error(error: &AuraError) -> CommandTerminalCl
             K::Storage => (S::Failed, R::StorageFailure),
             K::Journal => (S::Failed, R::JournalFailure),
             K::Reactive => (S::Failed, R::ReactiveFailure),
+            K::BudgetExceeded => (S::Denied, R::BudgetExceeded),
             K::Unauthorized => (S::Denied, R::PermissionDenied),
             K::Validation => (S::Invalid, R::InvalidArgument),
             K::NotFound | K::ContextNotFound => (S::Invalid, R::NotFound),

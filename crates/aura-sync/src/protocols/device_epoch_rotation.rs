@@ -78,6 +78,15 @@ pub struct DeviceEpochAcceptance {
     pub acceptor_device_id: DeviceId,
     pub proposal_hash: Hash32,
     pub accepted_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_mode: Option<aura_core::crypto::single_signer::SigningMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_index: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_package_digest: Option<Hash32>,
+
     pub signature: Vec<u8>,
 }
 
@@ -91,6 +100,11 @@ pub struct DeviceEpochCommit {
     pub attested_leaf_op_hash: Option<Hash32>,
     pub authority_signature: ThresholdSignature,
     pub attested_leaf_op: Option<AttestedOp>,
+    /// Enrollment v2 requires the original-parent-key attested epoch fence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attested_epoch_op_hash: Option<Hash32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attested_epoch_op: Option<AttestedOp>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -175,6 +189,64 @@ impl SecurityTranscript for DeviceEpochAcceptanceTranscript<'_> {
     }
 }
 
+/// Current individual participant proof, separate from group quorum signatures.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceEpochParticipantAcceptancePayload {
+    pub ceremony_id: CeremonyId,
+    pub acceptor_device_id: DeviceId,
+    pub proposal_hash: Hash32,
+    pub accepted_at_ms: u64,
+    pub signing_epoch: u64,
+    pub signing_mode: aura_core::crypto::single_signer::SigningMode,
+    pub signing_index: u16,
+    pub signing_package_digest: Hash32,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("participant acceptance lacks its exact current signing context")]
+pub struct MissingParticipantAcceptanceContext;
+fn missing_participant_acceptance_context() -> AuraError {
+    AuraError::PermissionDenied {
+        message: "participant acceptance signing context missing".into(),
+        source: Some(std::sync::Arc::new(MissingParticipantAcceptanceContext)),
+    }
+}
+pub struct DeviceEpochParticipantAcceptanceTranscript {
+    payload: DeviceEpochParticipantAcceptancePayload,
+}
+impl DeviceEpochParticipantAcceptanceTranscript {
+    pub fn new(payload: DeviceEpochParticipantAcceptancePayload) -> Self {
+        Self { payload }
+    }
+    pub fn from_acceptance(value: &DeviceEpochAcceptance) -> Result<Self, AuraError> {
+        Ok(Self::new(DeviceEpochParticipantAcceptancePayload {
+            ceremony_id: value.ceremony_id.clone(),
+            acceptor_device_id: value.acceptor_device_id,
+            proposal_hash: value.proposal_hash,
+            accepted_at_ms: value.accepted_at_ms,
+            signing_epoch: value
+                .signing_epoch
+                .ok_or_else(missing_participant_acceptance_context)?,
+            signing_mode: value
+                .signing_mode
+                .ok_or_else(missing_participant_acceptance_context)?,
+            signing_index: value
+                .signing_index
+                .ok_or_else(missing_participant_acceptance_context)?,
+            signing_package_digest: value
+                .signing_package_digest
+                .ok_or_else(missing_participant_acceptance_context)?,
+        }))
+    }
+}
+impl SecurityTranscript for DeviceEpochParticipantAcceptanceTranscript {
+    type Payload = DeviceEpochParticipantAcceptancePayload;
+    const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.participant-acceptance.v2";
+    fn transcript_payload(&self) -> Self::Payload {
+        self.payload.clone()
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceEpochCommitTranscriptPayload {
     pub ceremony_id: CeremonyId,
@@ -184,31 +256,103 @@ pub struct DeviceEpochCommitTranscriptPayload {
     pub attested_leaf_op_hash: Option<Hash32>,
 }
 
-pub struct DeviceEpochCommitTranscript<'a> {
-    commit: &'a DeviceEpochCommit,
+pub struct DeviceEpochCommitTranscript {
+    payload: DeviceEpochCommitTranscriptPayload,
 }
 
-impl<'a> DeviceEpochCommitTranscript<'a> {
+impl DeviceEpochCommitTranscript {
     #[must_use]
-    pub fn new(commit: &'a DeviceEpochCommit) -> Self {
-        Self { commit }
+    pub fn new(commit: &DeviceEpochCommit) -> Self {
+        Self::from_payload(DeviceEpochCommitTranscriptPayload {
+            ceremony_id: commit.ceremony_id.clone(),
+            new_epoch: commit.new_epoch,
+            proposal_hash: commit.proposal_hash,
+            committed_at_ms: commit.committed_at_ms,
+            attested_leaf_op_hash: commit.attested_leaf_op_hash,
+        })
+    }
+    pub fn from_payload(payload: DeviceEpochCommitTranscriptPayload) -> Self {
+        Self { payload }
     }
 }
 
-impl SecurityTranscript for DeviceEpochCommitTranscript<'_> {
+impl SecurityTranscript for DeviceEpochCommitTranscript {
     type Payload = DeviceEpochCommitTranscriptPayload;
-
     const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.commit";
-
     fn transcript_payload(&self) -> Self::Payload {
-        DeviceEpochCommitTranscriptPayload {
-            ceremony_id: self.commit.ceremony_id.clone(),
-            new_epoch: self.commit.new_epoch,
-            proposal_hash: self.commit.proposal_hash,
-            committed_at_ms: self.commit.committed_at_ms,
-            attested_leaf_op_hash: self.commit.attested_leaf_op_hash,
-        }
+        self.payload.clone()
     }
+}
+
+/// Exact payload for the enrollment-only v2 commit signature. Rotation/removal
+/// retain their original transcript and domain byte for byte.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceEnrollmentEpochCommitTranscriptPayload {
+    pub ceremony_id: CeremonyId,
+    pub new_epoch: u64,
+    pub proposal_hash: Hash32,
+    pub committed_at_ms: u64,
+    pub attested_leaf_op_hash: Hash32,
+    pub attested_epoch_op_hash: Hash32,
+}
+
+pub struct DeviceEnrollmentEpochCommitTranscript {
+    payload: DeviceEnrollmentEpochCommitTranscriptPayload,
+}
+
+impl DeviceEnrollmentEpochCommitTranscript {
+    /// Pure signed data; this does not grant runtime activation authority.
+    pub fn new(payload: DeviceEnrollmentEpochCommitTranscriptPayload) -> Self {
+        Self { payload }
+    }
+
+    pub fn from_commit(commit: &DeviceEpochCommit) -> Result<Self, AuraError> {
+        if aura_core::util::serialization::to_vec(commit)?.len() > MAX_DEVICE_EPOCH_COMMIT_BYTES {
+            return Err(AuraError::invalid("oversized enrollment epoch commit"));
+        }
+        let leaf_hash = commit
+            .attested_leaf_op_hash
+            .ok_or_else(|| AuraError::invalid("enrollment commit missing signed leaf hash"))?;
+        let epoch_hash = commit.attested_epoch_op_hash.ok_or_else(|| {
+            AuraError::invalid("legacy enrollment commit missing signed epoch fence")
+        })?;
+        if device_epoch_commit_attested_op_hash(commit)? != Some(leaf_hash)
+            || device_epoch_commit_epoch_op_hash(commit)? != Some(epoch_hash)
+        {
+            return Err(AuraError::invalid(
+                "enrollment commit operation hash mismatch",
+            ));
+        }
+        Ok(Self::new(DeviceEnrollmentEpochCommitTranscriptPayload {
+            ceremony_id: commit.ceremony_id.clone(),
+            new_epoch: commit.new_epoch,
+            proposal_hash: commit.proposal_hash,
+            committed_at_ms: commit.committed_at_ms,
+            attested_leaf_op_hash: leaf_hash,
+            attested_epoch_op_hash: epoch_hash,
+        }))
+    }
+}
+
+impl SecurityTranscript for DeviceEnrollmentEpochCommitTranscript {
+    type Payload = DeviceEnrollmentEpochCommitTranscriptPayload;
+    const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.enrollment-commit.v2";
+    fn transcript_payload(&self) -> Self::Payload {
+        self.payload.clone()
+    }
+}
+
+pub const MAX_DEVICE_EPOCH_COMMIT_BYTES: usize = 1_048_576;
+
+pub fn device_epoch_commit_epoch_op_hash(
+    commit: &DeviceEpochCommit,
+) -> Result<Option<Hash32>, AuraError> {
+    commit
+        .attested_epoch_op
+        .as_ref()
+        .map(Hash32::from_value)
+        .transpose()
+        .map_err(AuraError::from)
 }
 
 pub fn verify_device_epoch_proposal_hashes(proposal: &DeviceEpochProposal) -> bool {
@@ -784,6 +928,8 @@ mod tests {
                 0,
             ),
             attested_leaf_op: None,
+            attested_epoch_op_hash: None,
+            attested_epoch_op: None,
         };
         let transcript = DeviceEpochCommitTranscript::new(&commit);
         let signing_context = aura_core::threshold::SigningContext::message(
@@ -819,5 +965,118 @@ mod tests {
         .await
         .expect("verify commit authority signature");
         assert!(!verified);
+    }
+}
+
+#[cfg(test)]
+mod enrollment_epoch_commit_migration_tests {
+    use super::*;
+    use aura_core::util::serialization::{from_slice, to_vec};
+
+    // The actual previous wire schema, independently encoded by the canonical
+    // runtime binary codec. Defaults alone are not compatibility evidence.
+    #[derive(Serialize)]
+    struct LegacyCommit {
+        ceremony_id: CeremonyId,
+        new_epoch: u64,
+        proposal_hash: Hash32,
+        committed_at_ms: u64,
+        attested_leaf_op_hash: Option<Hash32>,
+        authority_signature: ThresholdSignature,
+        attested_leaf_op: Option<AttestedOp>,
+    }
+
+    #[test]
+    fn historical_binary_commit_decodes_without_enrollment_authority(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let original = LegacyCommit {
+            ceremony_id: CeremonyId::new("historical-rotation"),
+            new_epoch: 7,
+            proposal_hash: Hash32::from_bytes(b"old proposal"),
+            committed_at_ms: 11,
+            attested_leaf_op_hash: None,
+            attested_leaf_op: None,
+            // This is a codec fixture, never a valid authorization fixture.
+            authority_signature: ThresholdSignature::single_signer(vec![1], vec![2], 0),
+        };
+        let actual_old_binary = to_vec(&original)?;
+        let decoded: DeviceEpochCommit = from_slice(&actual_old_binary)?;
+        assert!(decoded.attested_epoch_op.is_none());
+        assert!(decoded.attested_epoch_op_hash.is_none());
+        assert!(DeviceEnrollmentEpochCommitTranscript::from_commit(&decoded).is_err());
+        assert_eq!(to_vec(&decoded)?, actual_old_binary);
+        let legacy_payload = DeviceEpochCommitTranscriptPayload {
+            ceremony_id: original.ceremony_id,
+            new_epoch: original.new_epoch,
+            proposal_hash: original.proposal_hash,
+            committed_at_ms: original.committed_at_ms,
+            attested_leaf_op_hash: original.attested_leaf_op_hash,
+        };
+        assert_eq!(
+            DeviceEpochCommitTranscript::new(&decoded).transcript_bytes()?,
+            DeviceEpochCommitTranscript::from_payload(legacy_payload).transcript_bytes()?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enrollment_domain_binds_both_operation_hashes() -> Result<(), Box<dyn std::error::Error>> {
+        let fields = DeviceEnrollmentEpochCommitTranscriptPayload {
+            ceremony_id: CeremonyId::new("v2-codec-contract"),
+            new_epoch: 8,
+            proposal_hash: Hash32::from_bytes(b"proposal"),
+            committed_at_ms: 12,
+            attested_leaf_op_hash: Hash32::from_bytes(b"leaf"),
+            attested_epoch_op_hash: Hash32::from_bytes(b"fence"),
+        };
+        let bytes =
+            DeviceEnrollmentEpochCommitTranscript::new(fields.clone()).transcript_bytes()?;
+        let mut altered = fields.clone();
+        altered.attested_epoch_op_hash = Hash32::from_bytes(b"other fence");
+        assert_ne!(
+            bytes,
+            DeviceEnrollmentEpochCommitTranscript::new(altered).transcript_bytes()?
+        );
+        let mut altered = fields;
+        altered.attested_leaf_op_hash = Hash32::from_bytes(b"other leaf");
+        assert_ne!(
+            bytes,
+            DeviceEnrollmentEpochCommitTranscript::new(altered).transcript_bytes()?
+        );
+        assert_ne!(
+            DeviceEnrollmentEpochCommitTranscript::DOMAIN_SEPARATOR,
+            DeviceEpochCommitTranscript::DOMAIN_SEPARATOR
+        );
+        Ok(())
+    }
+    #[test]
+    fn historical_acceptance_codec_preserves_bytes_and_refuses_proof_upgrade(
+    ) -> Result<(), AuraError> {
+        // Actual prior schema: no newly optional fields. Codec defaults must be
+        // exercised by bytes produced from this historical representation.
+        #[derive(Serialize)]
+        struct HistoricalAcceptance {
+            ceremony_id: CeremonyId,
+            acceptor_device_id: DeviceId,
+            proposal_hash: Hash32,
+            accepted_at_ms: u64,
+            signature: Vec<u8>,
+        }
+        let previous = HistoricalAcceptance {
+            ceremony_id: CeremonyId::new("legacy-peer-proof"),
+            acceptor_device_id: DeviceId::new_from_entropy([17; 32]),
+            proposal_hash: Hash32::from_bytes(b"historical-proposal"),
+            accepted_at_ms: 31,
+            signature: vec![19; 64],
+        };
+        let bytes = aura_core::util::serialization::to_vec(&previous)?;
+        let decoded: DeviceEpochAcceptance = aura_core::util::serialization::from_slice(&bytes)?;
+        assert!(decoded.signing_epoch.is_none());
+        assert!(decoded.signing_mode.is_none());
+        assert!(decoded.signing_index.is_none());
+        assert!(decoded.signing_package_digest.is_none());
+        assert_eq!(bytes, aura_core::util::serialization::to_vec(&decoded)?);
+        assert!(DeviceEpochParticipantAcceptanceTranscript::from_acceptance(&decoded).is_err());
+        Ok(())
     }
 }

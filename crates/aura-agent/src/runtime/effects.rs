@@ -34,6 +34,7 @@ use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::*;
 use aura_core::hash::hash as aura_hash;
 use aura_core::types::scope::AuthorizationOp;
+use aura_core::TimeoutRunError;
 use aura_core::{
     execute_with_timeout_budget, AuraError, AuthorityId, ContextId, Ed25519SigningKey,
     TimeoutBudget,
@@ -54,8 +55,6 @@ use aura_mpst::CompositionManifest;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{Biscuit, PublicKey};
 use parking_lot::RwLock;
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
@@ -66,7 +65,6 @@ use std::sync::Once;
 use std::sync::OnceLock;
 #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 use std::time::Duration;
-use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
 
@@ -94,13 +92,39 @@ pub struct BiscuitCache {
     pub root_pk_b64: String,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum BiscuitStartupRecordError {
+    #[error("persisted Biscuit exceeds its record budget")]
+    Oversized,
+    #[error("persisted Biscuit record is too short: {0} bytes")]
+    Truncated(usize),
+}
+
+impl From<BiscuitStartupRecordError> for AuraError {
+    fn from(source: BiscuitStartupRecordError) -> Self {
+        AuraError::Serialization {
+            message: "invalid persisted authorization record".into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+}
+
 mod amp;
 mod aura;
 mod choreography;
 mod crypto;
+#[cfg(test)]
+pub(crate) use crypto::ParticipantEnvelopeBoundsError;
 pub(crate) use crypto::{
-    held_registration_error, EnrollmentGenerationReservation, HeldEnrollmentRegistrationError,
-    RegisteredEnrollmentGenerationCapability,
+    held_registration_error, EnrollmentFinalVerifierInventoryCapability,
+    EnrollmentGenerationCustodyCapability, EnrollmentGenerationReservation,
+    EnrollmentResponsePolicy, HeldEnrollmentRegistrationError,
+    RegisteredEnrollmentGenerationCapability, RequiredSigningParticipantError,
+};
+
+pub(in crate::runtime) use crypto::{
+    OwnedSecretBirthCapability, OwnedSecretNegativeCapability, OwnedSecretPositiveCapability,
+    OwnedSecretReadCapability,
 };
 
 mod effect_api;
@@ -190,6 +214,27 @@ struct TestSeedUsage {
 static TEST_SEED_REGISTRY: OnceLock<parking_lot::Mutex<HashMap<u64, TestSeedUsage>>> =
     OnceLock::new();
 
+/// Providers selected by the complete custom typestate builder before subsystem assembly.
+/// Ordinary storage remains wrapped by the selected profile's encrypted/secure owner.
+pub(crate) struct SelectedCustomProviders {
+    pub(crate) crypto: Arc<dyn CryptoEffects>,
+    pub(crate) storage: Arc<dyn StorageEffects>,
+    pub(crate) random: Arc<dyn RandomEffects>,
+    pub(crate) console: Arc<dyn ConsoleEffects>,
+    pub(crate) transports: Vec<Arc<dyn TransportEffects>>,
+}
+
+type RuntimeEncryptedStorage = EncryptedStorage<
+    Arc<dyn StorageEffects>,
+    Arc<dyn CryptoEffects>,
+    ProductionSecureStorageHandler,
+>;
+type RuntimeJournalHandler = aura_journal::JournalHandler<
+    Arc<dyn CryptoEffects>,
+    Arc<RuntimeEncryptedStorage>,
+    JournalBiscuitAuthorizationHandler,
+>;
+
 /// Concrete effect system combining all effects for runtime usage
 ///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
@@ -203,6 +248,8 @@ static TEST_SEED_REGISTRY: OnceLock<parking_lot::Mutex<HashMap<u64, TestSeedUsag
 ///
 /// Remaining fields are core infrastructure used across subsystems.
 pub struct AuraEffectSystem {
+    // One actual operation admission owner shared by runtime and service clones.
+    public_operation_activity: Arc<crate::runtime::system::RuntimeActivityGate>,
     // === Core Configuration ===
     config: AgentConfig,
     authority_id: AuthorityId,
@@ -224,13 +271,7 @@ pub struct AuraEffectSystem {
     composite: CompositeHandlerAdapter,
 
     // === Storage Infrastructure ===
-    storage_handler: Arc<
-        EncryptedStorage<
-            FilesystemStorageHandler,
-            RealCryptoHandler,
-            ProductionSecureStorageHandler,
-        >,
-    >,
+    storage_handler: Arc<RuntimeEncryptedStorage>,
     tree_handler: PersistentTreeHandler,
     sync_handler: PersistentSyncHandler,
 
@@ -240,16 +281,9 @@ pub struct AuraEffectSystem {
     order_clock: OrderClockHandler,
 
     // === Authorization & Flow Control ===
-    authorization_handler: aura_authorization::effects::WotAuthorizationHandler<
-        aura_effects::crypto::RealCryptoHandler,
-    >,
-    leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
-        EncryptedStorage<
-            FilesystemStorageHandler,
-            RealCryptoHandler,
-            ProductionSecureStorageHandler,
-        >,
-    >,
+    authorization_handler:
+        aura_authorization::effects::WotAuthorizationHandler<Arc<dyn CryptoEffects>>,
+    leakage_handler: aura_effects::leakage::ProductionLeakageHandler<RuntimeEncryptedStorage>,
 
     // === Reactive System ===
     /// Reactive signal graph for UI-facing state.
@@ -275,10 +309,15 @@ pub struct AuraEffectSystem {
     biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
 
     /// Runtime-local key used to sign flow receipts and their transport binding.
-    receipt_signing_key: Ed25519SigningKey,
+    receipt_signing_key: tokio::sync::OnceCell<Ed25519SigningKey>,
+    custom_random: Option<Arc<dyn RandomEffects>>,
+    custom_console: Option<Arc<dyn ConsoleEffects>>,
+    custom_transports: Vec<Arc<dyn TransportEffects>>,
 
     /// Runtime-owned in-memory ledger surface for EffectApiEffects consumers.
     effect_api_ledger: parking_lot::Mutex<EffectApiLedgerState>,
+    imported_invitation_decision_gate: tokio::sync::Mutex<()>,
+    guardian_recovery_keypair_gate: tokio::sync::Mutex<()>,
     enrollment_manifest_admission_gate: tokio::sync::Mutex<()>,
     enrollment_profile_handoff_gate: tokio::sync::Mutex<()>,
     enrollment_invitee_window_owner: Arc<tokio::sync::Semaphore>,
@@ -351,24 +390,276 @@ impl BiscuitAuthorizationEffects for JournalBiscuitAuthorizationHandler {
     }
 }
 
-pub(crate) struct AdmittedEnrollmentWindowLeaseCapability {
+pub(crate) struct AdmittedEnrollmentWindowLeaseCapability<'a> {
+    effects: &'a AuraEffectSystem,
     permit: tokio::sync::OwnedSemaphorePermit,
 }
-impl AdmittedEnrollmentWindowLeaseCapability {
+impl AdmittedEnrollmentWindowLeaseCapability<'_> {
+    pub(crate) fn require_effects(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), aura_core::AuraError> {
+        if !std::ptr::eq(self.effects, effects) {
+            return Err(aura_core::AuraError::from(
+                aura_core::TimeoutBudgetError::CheckpointDiscontinuity {
+                    detail: "admitted lease belongs to another runtime owner".into(),
+                },
+            ));
+        }
+        Ok(())
+    }
     pub(crate) fn into_permit(self) -> tokio::sync::OwnedSemaphorePermit {
         self.permit
     }
 }
+/// Exclusive original-runtime custody for required contact import reads and
+/// decision publication. Raw locks and separately instantiated handler caches
+/// cannot issue or replace this lease.
+#[derive(Debug, thiserror::Error)]
+enum ImportedInvitationDecisionOwnerError {
+    #[error("imported invitation decision belongs to another runtime owner")]
+    ForeignRuntime,
+}
+
+/// Private runtime-issued custody for Guardian key initialization.
+pub(crate) struct GuardianRecoveryKeypairLeaseCapability<'runtime> {
+    effects: &'runtime AuraEffectSystem,
+    _guard: tokio::sync::MutexGuard<'runtime, ()>,
+}
+impl<'runtime> GuardianRecoveryKeypairLeaseCapability<'runtime> {
+    pub(crate) fn effects(&self) -> &'runtime AuraEffectSystem {
+        self.effects
+    }
+}
+
+pub(crate) struct ImportedInvitationDecisionLeaseCapability<'runtime> {
+    effects: &'runtime AuraEffectSystem,
+    _guard: tokio::sync::MutexGuard<'runtime, ()>,
+}
+impl ImportedInvitationDecisionLeaseCapability<'_> {
+    pub(crate) fn require_runtime_owner(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> Result<(), AuraError> {
+        if !std::ptr::eq(self.effects, effects) {
+            let cause = ImportedInvitationDecisionOwnerError::ForeignRuntime;
+            return Err(AuraError::Invalid {
+                message: cause.to_string(),
+                source: Some(Arc::new(cause)),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// One admitted runtime operation with its original effect-backed window.
+/// The admission lease is retained through every mutation and observation await.
+#[must_use = "retain the admitted operation through its original window"]
+pub(crate) struct RuntimeBoundedOperationCapability<'runtime> {
+    effects: &'runtime AuraEffectSystem,
+    lease: crate::runtime::system::RuntimeOperationLease,
+    window: TimeoutBudget,
+}
+impl RuntimeBoundedOperationCapability<'_> {
+    pub(crate) fn original_window(&self) -> &TimeoutBudget {
+        &self.window
+    }
+    pub(crate) fn require_runtime_owner(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> crate::core::AgentResult<()> {
+        self.lease
+            .require_gate(&effects.public_operation_activity)?;
+        if !std::ptr::eq(self.effects, effects) {
+            return Err(crate::core::AgentError::from(
+                crate::runtime::system::RuntimePublicOperationError::ForeignHandoff,
+            ));
+        }
+        Ok(())
+    }
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = RuntimeBoundedOperationCapability, receiver_type = RuntimeBoundedOperationCapability<'_>, family = "runtime_helper")]
+    pub(crate) async fn execute<F, Fut, T>(&self, operation: F) -> crate::core::AgentResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = crate::core::AgentResult<T>>,
+    {
+        match execute_with_timeout_budget(self.effects, &self.window, operation).await {
+            Ok(value) => Ok(value),
+            Err(TimeoutRunError::Operation(source)) => Err(source),
+            Err(TimeoutRunError::Timeout(
+                source @ aura_core::TimeoutBudgetError::DeadlineExceeded { .. },
+            )) => {
+                let message = source.to_string();
+                Err(crate::core::AgentError::TimeoutWithSource {
+                    message: message.clone(),
+                    source: AuraError::Internal {
+                        message,
+                        source: Some(Arc::new(source)),
+                    },
+                })
+            }
+            Err(TimeoutRunError::Timeout(source)) => {
+                Err(crate::core::AgentError::Aura(AuraError::Internal {
+                    message: "required original runtime operation window failed".into(),
+                    source: Some(Arc::new(source)),
+                }))
+            }
+        }
+    }
+}
+
 impl AuraEffectSystem {
+    /// Admission and its window are born once, before any operation mutation.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = RuntimeBoundedOperationCapability, family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn admit_bounded_runtime_operation(
+        &self,
+    ) -> crate::core::AgentResult<RuntimeBoundedOperationCapability<'_>> {
+        let lease = self.admit_public_operation()?;
+        self.bound_admitted_runtime_operation(lease).await
+    }
+
+    /// Continue an actual admitted lease into its one original resource window.
+    /// No second admission or caller-provided clock/deadline is accepted.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "runtime_bounded_operation", capability_type = RuntimeBoundedOperationCapability, family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn bound_admitted_runtime_operation(
+        &self,
+        lease: crate::runtime::system::RuntimeOperationLease,
+    ) -> crate::core::AgentResult<RuntimeBoundedOperationCapability<'_>> {
+        lease.require_gate(&self.public_operation_activity())?;
+        let started = self.physical_time().await.map_err(|source| {
+            crate::core::AgentError::Aura(AuraError::Internal {
+                message: "read original runtime operation admission time".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        // Public operation policy, not a helper/retry-renewed duration.
+        let window =
+            TimeoutBudget::from_start_and_timeout(&started, std::time::Duration::from_secs(30))
+                .map_err(|source| {
+                    crate::core::AgentError::Aura(AuraError::Internal {
+                        message: "validate original runtime operation window".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?;
+        Ok(RuntimeBoundedOperationCapability {
+            effects: self,
+            lease: lease,
+            window,
+        })
+    }
+}
+
+/// Exact canonical commit and processing owner, minted only by the runtime commit path.
+#[must_use = "await exact processing under original operation custody"]
+pub(crate) struct RequiredReactiveFactCommitCapability<'runtime> {
+    effects: &'runtime AuraEffectSystem,
+    committed: Vec<TypedFact>,
+    target: crate::reactive::FactProcessingTargetCapability,
+}
+impl RequiredReactiveFactCommitCapability<'_> {
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "required_reactive_fact_commit", capability_type = RequiredReactiveFactCommitCapability, receiver_type = RequiredReactiveFactCommitCapability<'_>, family = "runtime_helper")]
+    pub(crate) async fn await_processed(
+        self,
+        operation: &RuntimeBoundedOperationCapability<'_>,
+    ) -> crate::core::AgentResult<Vec<TypedFact>> {
+        operation.require_runtime_owner(self.effects)?;
+        self.await_processed_in_original_window(operation.original_window())
+            .await
+    }
+
+    /// Observation under an already held protocol/startup resource window.
+    /// The retained canonical target remains mutation provenance; the borrowed
+    /// window cannot authorize, renew, or reconstruct the original operation.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "required_reactive_fact_commit", capability_type = RequiredReactiveFactCommitCapability, receiver_type = RequiredReactiveFactCommitCapability<'_>, family = "runtime_helper")]
+    pub(crate) async fn await_processed_in_original_window(
+        self,
+        original_window: &TimeoutBudget,
+    ) -> crate::core::AgentResult<Vec<TypedFact>> {
+        match self
+            .effects
+            .journal
+            .await_required(self.target, self.effects, original_window)
+            .await
+        {
+            Ok(()) => Ok(self.committed),
+            Err(aura_core::time::timeout::TimeoutRunError::Timeout(
+                source @ aura_core::TimeoutBudgetError::DeadlineExceeded { .. },
+            )) => {
+                let message = source.to_string();
+                Err(crate::core::AgentError::TimeoutWithSource {
+                    message: message.clone(),
+                    source: AuraError::Internal {
+                        message,
+                        source: Some(Arc::new(source)),
+                    },
+                })
+            }
+            Err(source) => Err(crate::core::AgentError::Aura(AuraError::Internal {
+                message: "required original canonical fact processing failed".into(),
+                source: Some(Arc::new(source)),
+            })),
+        }
+    }
+}
+
+impl AuraEffectSystem {
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "runtime_public_operation", capability_type = crate::runtime::system::RuntimeOperationLease,
+        family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) fn admit_public_operation(
+        &self,
+    ) -> crate::core::AgentResult<crate::runtime::system::RuntimeOperationLease> {
+        self.public_operation_activity
+            .admit()
+            .map_err(crate::core::AgentError::from)
+    }
+
+    pub(crate) fn public_operation_activity(
+        &self,
+    ) -> Arc<crate::runtime::system::RuntimeActivityGate> {
+        self.public_operation_activity.clone()
+    }
+
+    /// Serialize the original local Guardian key birth and required pair reads.
+    #[aura_macros::capability_boundary(category = "capability_gated",
+        capability = "guardian_recovery_keypair", capability_type = GuardianRecoveryKeypairLeaseCapability,
+        family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn acquire_guardian_recovery_keypair(
+        &self,
+    ) -> GuardianRecoveryKeypairLeaseCapability<'_> {
+        GuardianRecoveryKeypairLeaseCapability {
+            effects: self,
+            _guard: self.guardian_recovery_keypair_gate.lock().await,
+        }
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated",
+    capability = "imported_invitation_decision", capability_type = ImportedInvitationDecisionLeaseCapability,
+    family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn acquire_imported_invitation_decision(
+        &self,
+    ) -> ImportedInvitationDecisionLeaseCapability<'_> {
+        ImportedInvitationDecisionLeaseCapability {
+            effects: self,
+            _guard: self.imported_invitation_decision_gate.lock().await,
+        }
+    }
+
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "admitted_enrollment_execution_window",
+        capability_type = AdmittedEnrollmentWindowLeaseCapability,
         family = "runtime_helper"
     )]
     pub(crate) fn acquire_admitted_enrollment_window_owner(
         &self,
         admitted: &crate::handlers::invitation::enrollment_manifest_admission::AdmittedEnrollmentManifest,
-    ) -> Result<AdmittedEnrollmentWindowLeaseCapability, aura_core::AuraError> {
+    ) -> Result<AdmittedEnrollmentWindowLeaseCapability<'_>, aura_core::AuraError> {
         if admitted.manifest().invitee_device != self.device_id() {
             return Err(aura_core::AuraError::invalid(
                 "enrollment window must name actual physical device",
@@ -377,29 +668,45 @@ impl AuraEffectSystem {
         self.enrollment_invitee_window_owner
             .clone()
             .try_acquire_owned()
-            .map(|permit| AdmittedEnrollmentWindowLeaseCapability { permit })
+            .map(|permit| AdmittedEnrollmentWindowLeaseCapability {
+                effects: self,
+                permit,
+            })
             .map_err(|source| aura_core::AuraError::Internal {
                 message: "admitted enrollment execution already has a window owner".into(),
                 source: Some(Arc::new(source)),
             })
     }
 
-    fn unique_test_storage_path(label: &str) -> std::path::PathBuf {
-        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-        let temp_root = std::env::temp_dir();
-        for _ in 0..4096 {
-            let attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let candidate = temp_root.join(format!("aura-agent-{label}-{attempt}"));
+    fn create_test_storage_namespace(
+        root: &std::path::Path,
+        label: &str,
+        counter: &std::sync::atomic::AtomicUsize,
+        maximum_attempts: usize,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let mut collision = None;
+        for _ in 0..maximum_attempts {
+            let attempt = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // A versioned namespace never selects the old unchecked fallback.
+            let candidate = root.join(format!("aura-agent-isolated-v2-{label}-{attempt}"));
             match std::fs::create_dir(&candidate) {
-                Ok(()) => return candidate,
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => return candidate,
+                Ok(()) => return Ok(candidate),
+                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                    collision = Some(source);
+                }
+                Err(source) => return Err(source),
             }
         }
-
-        let attempt = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        temp_root.join(format!("aura-agent-{label}-{attempt}-fallback"))
+        Err(collision.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "test namespace requires a positive attempt budget",
+            )
+        }))
+    }
+    fn unique_test_storage_path(label: &str) -> std::io::Result<std::path::PathBuf> {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        Self::create_test_storage_namespace(&std::env::temp_dir(), label, &COUNTER, 4096)
     }
 
     #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
@@ -428,15 +735,19 @@ impl AuraEffectSystem {
     #[cfg(any(not(debug_assertions), target_arch = "wasm32"))]
     fn maybe_start_deadlock_detector() {}
 
-    fn normalize_test_config(mut config: AgentConfig) -> AgentConfig {
-        // Avoid writing test data into the user's real data directory (e.g. `~/.aura`).
-        //
-        // Tests that require a specific persistent directory should override
-        // `config.storage.base_path` explicitly.
+    fn normalize_test_config(
+        mut config: AgentConfig,
+    ) -> Result<AgentConfig, crate::core::AgentError> {
         if config.storage.base_path == default_storage_path() {
-            config.storage.base_path = Self::unique_test_storage_path("test");
+            config.storage.base_path =
+                Self::unique_test_storage_path("test").map_err(|source| {
+                    crate::core::AgentError::from(aura_core::AuraError::Storage {
+                        message: "allocate isolated test profile".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?;
         }
-        config
+        Ok(config)
     }
 
     fn secure_storage_handler_for_config(
@@ -507,6 +818,9 @@ impl AuraEffectSystem {
             authority_id,
             test_filesystem_secure_storage_allowed,
             None,
+            None,
+            #[cfg(test)]
+            None,
         )
     }
 
@@ -520,7 +834,11 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         test_filesystem_secure_storage_allowed: bool,
         selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+        custom: Option<SelectedCustomProviders>,
+        #[cfg(test)] testing_profile: Option<super::builder::TestingOwnedProfileCapability>,
     ) -> Result<Self, crate::core::AgentError> {
+        let entropy = super::entropy::NonProductionEntropySeed::admit(execution_mode, crypto_seed)
+            .map_err(crate::core::AgentError::from)?;
         if execution_mode.is_production()
             && matches!(
                 config.storage.encryption_policy,
@@ -537,7 +855,32 @@ impl AuraEffectSystem {
                 source: Some(std::sync::Arc::new(source)),
             })
         };
-        let profile_owner = if execution_mode.is_production() {
+        if !execution_mode.is_production() && selected_profile_owner.is_some() {
+            return Err(profile_error(
+                aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                    "production profile lease supplied to a nonproduction runtime".into(),
+                ),
+            ));
+        }
+        #[cfg(test)]
+        let owned_testing = testing_profile.is_some();
+        #[cfg(not(test))]
+        let owned_testing = false;
+        #[cfg(test)]
+        let selected_profile_owner = match testing_profile {
+            Some(profile) if matches!(execution_mode, ExecutionMode::Testing) => {
+                Some(profile.into_owner())
+            }
+            Some(_) => {
+                return Err(profile_error(
+                    aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                        "testing profile capability supplied outside Testing assembly".into(),
+                    ),
+                ))
+            }
+            None => selected_profile_owner,
+        };
+        let profile_owner = if execution_mode.is_production() || owned_testing {
             let owned = match selected_profile_owner {
                 Some(owned) => owned,
                 None => {
@@ -573,10 +916,6 @@ impl AuraEffectSystem {
             None
         };
         Self::maybe_start_deadlock_detector();
-        assert!(
-            !execution_mode.is_production() || crypto_seed.is_none(),
-            "production effect system must not use seeded crypto"
-        );
         let authority = authority_id;
         let device_id = config.device_id();
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
@@ -585,12 +924,20 @@ impl AuraEffectSystem {
             std::env::var_os("AURA_HARNESS_MODE").is_some() || authenticated_browser_harness_mode();
 
         // === Build CryptoSubsystem ===
-        let crypto_handler = match crypto_seed {
-            Some(seed) => RealCryptoHandler::for_simulation_seed(seed),
-            None => RealCryptoHandler::new(),
+        let crypto_handler: Arc<dyn CryptoEffects> = match custom.as_ref() {
+            Some(providers) => providers.crypto.clone(),
+            None => Arc::new(match entropy.as_ref() {
+                Some(seed) => seed.crypto_handler(),
+                None => RealCryptoHandler::new(),
+            }),
         };
-        let random_rng = match crypto_seed {
-            Some(seed) => CryptoRng::deterministic(StdRng::from_seed(seed)),
+        if execution_mode.is_production() && crypto_handler.is_simulated() {
+            return Err(crate::core::AgentError::config(
+                "production custom crypto provider must not be simulated",
+            ));
+        }
+        let random_rng = match entropy.as_ref() {
+            Some(seed) => seed.random_stream(),
             None => CryptoRng::thread_local(),
         };
         // The actual filesystem provider must receive the owner before touching
@@ -646,13 +993,37 @@ impl AuraEffectSystem {
                 .map_err(profile_error)?,
             _ => secure_storage_backend,
         };
+        #[cfg(unix)]
+        let (secure_storage_backend, allocation_lifetime_root) = if profile_owner.is_some()
+            && matches!(&secure_storage_backend, ProductionSecureStorageHandler::ProfileOwned(owned) if owned.uses_filesystem_fallback())
+        {
+            let (ordinary, root) = secure_storage_backend
+                .into_selected_profile_lifetime_channel()
+                .map_err(crate::core::AgentError::from)?;
+            (ordinary, Some(root))
+        } else {
+            (secure_storage_backend, None)
+        };
+        #[cfg(not(unix))]
+        let allocation_lifetime_root = None;
         let secure_storage_handler = Arc::new(secure_storage_backend);
-        let crypto = CryptoSubsystem::from_parts(
+
+        let mut crypto = CryptoSubsystem::from_parts(
             crypto_handler.clone(),
             random_rng,
             secure_storage_handler.clone(),
         );
-        let receipt_signing_key = Ed25519SigningKey::from_bytes(crypto.random_32_bytes());
+        if let Some(root) = allocation_lifetime_root {
+            crypto
+                .retain_selected_secret_lifetimes(root)
+                .map_err(crate::core::AgentError::from)?;
+        }
+        let receipt_signing_key = match custom.as_ref() {
+            Some(_) => tokio::sync::OnceCell::new(),
+            None => tokio::sync::OnceCell::new_with(Some(Ed25519SigningKey::from_bytes(
+                crypto.random_32_bytes(),
+            ))),
+        };
 
         // === Build Storage Infrastructure ===
         let auth_time = PhysicalTimeHandler::new();
@@ -702,8 +1073,12 @@ impl AuraEffectSystem {
                 .map_err(profile_error)?,
             None => plain_storage,
         };
+        let selected_storage: Arc<dyn StorageEffects> = match custom.as_ref() {
+            Some(providers) => providers.storage.clone(),
+            None => Arc::new(plain_storage),
+        };
         let storage_handler = Arc::new(EncryptedStorage::new(
-            plain_storage,
+            selected_storage,
             Arc::new(crypto_handler),
             secure_storage_handler,
             encrypted_storage_config,
@@ -772,6 +1147,7 @@ impl AuraEffectSystem {
         };
 
         let effect_system = Self {
+            public_operation_activity: Arc::new(crate::runtime::system::RuntimeActivityGate::new()),
             config,
             authority_id: authority,
             execution_mode,
@@ -799,7 +1175,14 @@ impl AuraEffectSystem {
             move_manager: parking_lot::RwLock::new(None),
             biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
             receipt_signing_key,
+            custom_random: custom.as_ref().map(|providers| providers.random.clone()),
+            custom_console: custom.as_ref().map(|providers| providers.console.clone()),
+            custom_transports: custom
+                .map(|providers| providers.transports)
+                .unwrap_or_default(),
             effect_api_ledger: parking_lot::Mutex::new(EffectApiLedgerState::default()),
+            imported_invitation_decision_gate: tokio::sync::Mutex::new(()),
+            guardian_recovery_keypair_gate: tokio::sync::Mutex::new(()),
             enrollment_manifest_admission_gate: tokio::sync::Mutex::new(()),
             enrollment_profile_handoff_gate: tokio::sync::Mutex::new(()),
             enrollment_invitee_window_owner: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -828,11 +1211,25 @@ impl AuraEffectSystem {
         self.execution_mode.is_deterministic()
     }
 
-    pub(crate) fn sign_flow_receipt(
+    pub(crate) async fn initialize_selected_receipt_key(&self) {
+        if self.custom_random.is_some() {
+            let _ = self.receipt_signing_key().await;
+        }
+    }
+
+    async fn receipt_signing_key(&self) -> &Ed25519SigningKey {
+        self.receipt_signing_key
+            .get_or_init(|| async {
+                Ed25519SigningKey::from_bytes(RandomCoreEffects::random_bytes_32(self).await)
+            })
+            .await
+    }
+
+    pub(crate) async fn sign_flow_receipt(
         &self,
         receipt: &mut aura_core::Receipt,
     ) -> Result<(), AuraError> {
-        crate::runtime::receipt_model::sign_flow_receipt(receipt, &self.receipt_signing_key)
+        crate::runtime::receipt_model::sign_flow_receipt(receipt, self.receipt_signing_key().await)
     }
 
     pub(crate) fn verify_transport_flow_receipt(
@@ -842,7 +1239,7 @@ impl AuraEffectSystem {
         crate::runtime::receipt_model::verify_transport_flow_receipt(receipt)
     }
 
-    pub(crate) fn bind_transport_receipt_to_envelope(
+    pub(crate) async fn bind_transport_receipt_to_envelope(
         &self,
         receipt: &mut aura_core::effects::transport::TransportReceipt,
         envelope: &aura_core::effects::transport::TransportEnvelope,
@@ -850,7 +1247,7 @@ impl AuraEffectSystem {
         crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
             receipt,
             envelope,
-            &self.receipt_signing_key,
+            self.receipt_signing_key().await,
         )
     }
 
@@ -1083,18 +1480,13 @@ impl AuraEffectSystem {
     /// Attach a fact sink for reactive scheduling (facts → scheduler ingestion).
     ///
     /// This is called during runtime startup when the ReactivePipeline is started.
-    pub fn attach_fact_sink(&self, tx: mpsc::Sender<crate::reactive::FactSource>) {
-        self.journal.attach_fact_sink(tx);
-    }
-
-    /// Attach a view update sender for awaiting fact processing.
-    ///
-    /// This is called during runtime startup when the ReactivePipeline is started.
-    pub fn attach_view_update_sender(
+    pub(crate) fn attach_fact_sink(
         &self,
-        tx: tokio::sync::broadcast::Sender<crate::reactive::ViewUpdate>,
-    ) {
-        self.journal.attach_view_update_sender(tx);
+        tx: crate::reactive::FactIngress,
+    ) -> Result<(), crate::reactive::FactProcessingError> {
+        tx.require_runtime_owner(self)?;
+        self.journal.attach_fact_sink(tx);
+        Ok(())
     }
 
     /// Snapshot the runtime choreography session bound to the current task.
@@ -1160,6 +1552,37 @@ impl AuraEffectSystem {
             .ok_or_else(|| format!("runtime session {session_id} has no owner record"))
     }
 
+    /// Retire exactly the registered owner held by a dropped VM handle. Validation
+    /// and cleanup share the same lock ordering as ownership transfer. This is
+    /// resource cancellation, not a terminal decision or required async close.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "SessionOwnerCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn retire_dropped_vm_owner(
+        &self,
+        capability: &crate::runtime::subsystems::choreography::SessionOwnerCapability,
+    ) -> Result<(), crate::runtime::subsystems::choreography::SessionOwnershipError> {
+        use crate::runtime::subsystems::choreography::SessionOwnershipError;
+        let mut state = self.choreography_state.write();
+        match state.ensure_session_owner(capability.session_id(), capability) {
+            Ok(()) => {}
+            // Required close already retired this owner before reporting a clock
+            // failure. Do not invent another cleanup failure or touch newer state.
+            Err(SessionOwnershipError::MissingOwner { .. })
+                if !state.contains_registered_session(capability.session_id()) =>
+            {
+                return Ok(())
+            }
+            Err(error) => return Err(error),
+        }
+        let mut fragments = self.vm_fragment_registry.write();
+        state.cancel_session(capability.session_id());
+        fragments.release_session(capability.session_id());
+        Ok(())
+    }
+
     /// Atomically transfer authoritative ownership for one active runtime choreography session.
     pub(crate) fn transfer_runtime_choreography_session_owner(
         &self,
@@ -1179,7 +1602,7 @@ impl AuraEffectSystem {
             .write()
             .transfer_session_if_present(
                 session_id,
-                &expected_capability.owner_label,
+                expected_capability.owner_label(),
                 &next_owner_label,
             )
             .map_err(|error| error.to_string())?;
@@ -1196,7 +1619,7 @@ impl AuraEffectSystem {
         if transferred_fragments > 0 {
             tracing::info!(
                 session_id = %session_id,
-                from_owner = %expected_capability.owner_label,
+                from_owner = %expected_capability.owner_label(),
                 to_owner = %next_owner_label,
                 fragment_count = transferred_fragments,
                 "transferred runtime choreography session owner and fragment ownership together"
@@ -1280,53 +1703,35 @@ impl AuraEffectSystem {
         self.vm_fragment_registry.read().snapshot()
     }
 
-    /// Wait for the reactive scheduler to process the next batch of facts.
-    ///
-    /// This is useful after committing facts to ensure the reactive views
-    /// have been updated before continuing. Returns immediately if no
-    /// view update subscription is available (e.g., in tests).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// effects.commit_generic_fact_bytes(context, type_id, bytes).await?;
-    /// effects.await_next_view_update().await; // Ensure views are updated
-    /// ```
-    pub async fn await_next_view_update(&self) {
-        use crate::reactive::ViewUpdate;
-
-        let Some(mut rx) = self.journal.subscribe_view_updates() else {
-            return;
-        };
-
-        let wait_for_batch = async {
-            loop {
-                match rx.recv().await {
-                    Ok(ViewUpdate::Batch { .. }) => return,
-                    Ok(_) => continue,
-                    Err(_) => return, // Channel closed or lagged, just return
-                }
-            }
-        };
-
-        if self.harness_mode_enabled() {
-            let time = PhysicalTimeHandler::new();
-            if let Ok(started_at) = time.physical_time().await {
-                if let Ok(budget) = TimeoutBudget::from_start_and_timeout(
-                    &started_at,
-                    std::time::Duration::from_secs(2),
-                ) {
-                    let _ = execute_with_timeout_budget(&time, &budget, || async {
-                        wait_for_batch.await;
-                        Ok::<(), ()>(())
-                    })
-                    .await;
-                }
-            }
-            return;
-        }
-
-        wait_for_batch.await;
+    /// Observe processing of publications accepted before this original ingress
+    /// barrier. This grants no journal commit or canonical entity evidence.
+    /// Required mutation paths retain their exact commit target instead.
+    pub(crate) async fn await_reactive_publications_in_original_window(
+        &self,
+        original: &TimeoutBudget,
+    ) -> Result<(), AuraError> {
+        execute_with_timeout_budget(self, original, || async {
+            let target = self
+                .journal
+                .publish_required(Vec::new())
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "required original processing barrier enqueue failed".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            self.journal
+                .await_required(target, self, original)
+                .await
+                .map_err(|source| AuraError::Internal {
+                    message: "required original processing barrier failed".into(),
+                    source: Some(Arc::new(source)),
+                })
+        })
+        .await
+        .map_err(|source| AuraError::Internal {
+            message: "required original processing barrier window failed".into(),
+            source: Some(Arc::new(source)),
+        })
     }
 
     pub fn requeue_envelope(
@@ -1431,7 +1836,7 @@ impl AuraEffectSystem {
     /// For new users the cache remains empty until `bootstrap_authority()` creates tokens.
     ///
     /// Storage format: `[32 bytes root public key][N bytes biscuit token]`
-    pub async fn initialize_biscuit_cache(&self) {
+    pub async fn initialize_biscuit_cache(&self) -> Result<(), AuraError> {
         use aura_core::effects::secure::{SecureStorageCapability, SecureStorageLocation};
         use aura_core::effects::SecureStorageEffects;
         use base64::Engine;
@@ -1441,6 +1846,22 @@ impl AuraEffectSystem {
 
         match self.secure_retrieve(&location, &caps).await {
             Ok(bytes) if bytes.len() > 32 => {
+                if bytes.len() > 1_048_576 {
+                    return Err(BiscuitStartupRecordError::Oversized.into());
+                }
+                let root =
+                    aura_authorization::PublicKey::from_bytes(&bytes[..32]).map_err(|source| {
+                        AuraError::Crypto {
+                            message: "decode persisted Biscuit root key".into(),
+                            source: Some(Arc::new(source)),
+                        }
+                    })?;
+                aura_authorization::VerifiedBiscuitToken::from_bytes(&bytes[32..], root).map_err(
+                    |source| AuraError::Crypto {
+                        message: "verify persisted Biscuit token".into(),
+                        source: Some(Arc::new(source)),
+                    },
+                )?;
                 let engine = base64::engine::general_purpose::STANDARD;
                 let root_pk_b64 = engine.encode(&bytes[..32]);
                 let token_b64 = engine.encode(&bytes[32..]);
@@ -1453,20 +1874,30 @@ impl AuraEffectSystem {
                 tracing::info!("Biscuit cache initialized from secure storage");
             }
             Ok(bytes) => {
-                tracing::warn!(
-                    len = bytes.len(),
-                    "Biscuit data in secure storage too short (need >32 bytes)"
-                );
+                return Err(BiscuitStartupRecordError::Truncated(bytes.len()).into());
             }
-            Err(_) => {
+            Err(error)
+                if std::error::Error::source(&error).is_some_and(|source| {
+                    source
+                        .downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>()
+                        .is_some_and(|missing| missing.location() == &location)
+                }) =>
+            {
                 tracing::debug!("No biscuit found in secure storage (new account)");
             }
+            Err(error) => return Err(error),
         }
+        Ok(())
     }
 
-    /// Set the biscuit cache directly (used during bootstrap_authority).
-    pub fn set_biscuit_cache(&self, cache: BiscuitCache) {
+    /// Runtime-private publication after required authorization validation.
+    fn publish_biscuit_cache(&self, cache: BiscuitCache) {
         *self.biscuit_cache.write() = Some(cache);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_biscuit_cache(&self, cache: BiscuitCache) {
+        self.publish_biscuit_cache(cache);
     }
 
     #[cfg(test)]
@@ -1533,26 +1964,32 @@ impl AuraEffectSystem {
         }
 
         let engine = base64::engine::general_purpose::STANDARD;
-        let token_bytes = engine.decode(cache.token_b64).map_err(|error| {
-            AuraError::invalid(format!("decode cached Biscuit token bytes failed: {error}"))
-        })?;
+        let token_bytes =
+            engine
+                .decode(cache.token_b64)
+                .map_err(|error| AuraError::Serialization {
+                    message: "decode cached Biscuit token bytes".into(),
+                    source: Some(Arc::new(error)),
+                })?;
 
-        let cached_root_bytes = engine.decode(cache.root_pk_b64).map_err(|error| {
-            AuraError::invalid(format!(
-                "decode cached Biscuit root public key failed: {error}"
-            ))
-        })?;
+        let cached_root_bytes =
+            engine
+                .decode(cache.root_pk_b64)
+                .map_err(|error| AuraError::Serialization {
+                    message: "decode cached Biscuit root public key".into(),
+                    source: Some(Arc::new(error)),
+                })?;
         let root_public_key = aura_authorization::PublicKey::from_bytes(&cached_root_bytes)
-            .map_err(|error| {
-                AuraError::invalid(format!(
-                    "parse cached Biscuit root public key failed: {error}"
-                ))
+            .map_err(|error| AuraError::Crypto {
+                message: "parse cached Biscuit root public key".into(),
+                source: Some(Arc::new(error)),
             })?;
 
         let token =
             aura_authorization::VerifiedBiscuitToken::from_bytes(&token_bytes, root_public_key)
-                .map_err(|error| {
-                    AuraError::invalid(format!("verify cached Biscuit token failed: {error}"))
+                .map_err(|error| AuraError::Crypto {
+                    message: "verify cached Biscuit token".into(),
+                    source: Some(Arc::new(error)),
                 })?;
         let bridge =
             aura_authorization::BiscuitAuthorizationBridge::new(root_public_key, trusted_authority);
@@ -1594,7 +2031,7 @@ impl AuraEffectSystem {
 
         // Populate in-memory cache immediately
         let engine = base64::engine::general_purpose::STANDARD;
-        self.set_biscuit_cache(BiscuitCache {
+        self.publish_biscuit_cache(BiscuitCache {
             token_b64: engine.encode(&token_bytes),
             issuer_authority: *authority,
             root_pk_b64: engine.encode(root_pk_bytes),
@@ -1612,7 +2049,10 @@ impl AuraEffectSystem {
         self.journal
             .publish_facts(crate::reactive::FactSource::Journal(facts))
             .await
-            .map_err(|error| AuraError::internal(error.to_string()))?;
+            .map_err(|source| AuraError::Internal {
+                message: source.to_string(),
+                source: Some(Arc::new(source)),
+            })?;
 
         Ok(())
     }
@@ -1639,6 +2079,38 @@ impl AuraEffectSystem {
         &self,
         facts: Vec<RelationalFact>,
     ) -> Result<Vec<TypedFact>, AuraError> {
+        let committed = self.persist_relational_facts(facts).await?;
+        self.publish_typed_facts(committed.clone()).await?;
+        Ok(committed)
+    }
+
+    /// Commit canonical facts and retain exact original scheduler processing custody.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "required_reactive_fact_commit", capability_type = RequiredReactiveFactCommitCapability, family = "proof_issuer")]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) async fn commit_relational_facts_required(
+        &self,
+        facts: Vec<RelationalFact>,
+    ) -> Result<RequiredReactiveFactCommitCapability<'_>, AuraError> {
+        let committed = self.persist_relational_facts(facts).await?;
+        let target = self
+            .journal
+            .publish_required(committed.clone())
+            .await
+            .map_err(|source| AuraError::Internal {
+                message: "required canonical fact publication failed after persistence".into(),
+                source: Some(Arc::new(source)),
+            })?;
+        Ok(RequiredReactiveFactCommitCapability {
+            effects: self,
+            committed,
+            target,
+        })
+    }
+
+    async fn persist_relational_facts(
+        &self,
+        facts: Vec<RelationalFact>,
+    ) -> Result<Vec<TypedFact>, AuraError> {
         if facts.is_empty() {
             return Ok(vec![]);
         }
@@ -1648,7 +2120,10 @@ impl AuraEffectSystem {
             let order = self
                 .order_time()
                 .await
-                .map_err(|e| AuraError::internal(format!("order_time: {e}")))?;
+                .map_err(|source| AuraError::Internal {
+                    message: format!("order_time: {source}"),
+                    source: Some(Arc::new(source)),
+                })?;
 
             let fact = TypedFact::new(
                 order.clone(),
@@ -1657,17 +2132,23 @@ impl AuraEffectSystem {
             );
 
             let key = Self::typed_fact_storage_key(self.authority_id, &order);
-            let bytes = aura_core::util::serialization::to_vec(&fact)
-                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            let bytes = aura_core::util::serialization::to_vec(&fact).map_err(|source| {
+                AuraError::Serialization {
+                    message: format!("serialize fact: {source}"),
+                    source: Some(Arc::new(source)),
+                }
+            })?;
             self.store(&key, bytes)
                 .await
-                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+                .map_err(|source| AuraError::Storage {
+                    message: format!("persist fact: {source}"),
+                    source: Some(Arc::new(source)),
+                })?;
 
             committed.push(fact);
         }
 
         // Publish after persistence so subscribers can always recover from storage.
-        self.publish_typed_facts(committed.clone()).await?;
 
         Ok(committed)
     }
@@ -1689,7 +2170,10 @@ impl AuraEffectSystem {
             let order = self
                 .order_time()
                 .await
-                .map_err(|e| AuraError::internal(format!("order_time: {e}")))?;
+                .map_err(|source| AuraError::Internal {
+                    message: format!("order_time: {source}"),
+                    source: Some(Arc::new(source)),
+                })?;
 
             let mut fact = TypedFact::new(
                 order.clone(),
@@ -1706,11 +2190,18 @@ impl AuraEffectSystem {
             }
 
             let key = Self::typed_fact_storage_key(self.authority_id, &order);
-            let bytes = aura_core::util::serialization::to_vec(&fact)
-                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            let bytes = aura_core::util::serialization::to_vec(&fact).map_err(|source| {
+                AuraError::Serialization {
+                    message: format!("serialize fact: {source}"),
+                    source: Some(Arc::new(source)),
+                }
+            })?;
             self.store(&key, bytes)
                 .await
-                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+                .map_err(|source| AuraError::Storage {
+                    message: format!("persist fact: {source}"),
+                    source: Some(Arc::new(source)),
+                })?;
 
             committed.push(fact);
         }
@@ -1761,11 +2252,18 @@ impl AuraEffectSystem {
             if present {
                 continue;
             }
-            let bytes = aura_core::util::serialization::to_vec(&fact)
-                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            let bytes = aura_core::util::serialization::to_vec(&fact).map_err(|source| {
+                AuraError::Serialization {
+                    message: format!("serialize fact: {source}"),
+                    source: Some(Arc::new(source)),
+                }
+            })?;
             self.store(&key, bytes)
                 .await
-                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+                .map_err(|source| AuraError::Storage {
+                    message: format!("persist fact: {source}"),
+                    source: Some(Arc::new(source)),
+                })?;
             imported.push(fact);
         }
         let count = imported.len();
@@ -1902,7 +2400,7 @@ impl AuraEffectSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config);
+        let config = Self::normalize_test_config(config)?;
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Self::build_internal(
             config,
@@ -2151,6 +2649,36 @@ impl AuraEffectSystem {
         )
     }
 
+    /// Retains the actual isolated lease before selected-provider construction.
+    #[cfg(test)]
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "TestingOwnedProfileCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn testing_with_owned_profile(
+        config: &AgentConfig,
+        authority_id: AuthorityId,
+        shared_transport: Option<SharedTransport>,
+        profile: super::builder::TestingOwnedProfileCapability,
+        custom: Option<SelectedCustomProviders>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
+        Self::build_internal_owned(
+            Self::normalize_test_config(config.clone())?,
+            composite,
+            ExecutionMode::Testing,
+            Some(Self::TEST_CRYPTO_SEED),
+            shared_transport,
+            None,
+            authority_id,
+            false,
+            None,
+            custom,
+            Some(profile),
+        )
+    }
+
     /// Create effect system for testing with default configuration.
     ///
     /// Prefer `simulation_for_test(...)` for deterministic per-test seeding.
@@ -2160,7 +2688,7 @@ impl AuraEffectSystem {
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Self::build_internal(
-            Self::normalize_test_config(config.clone()),
+            Self::normalize_test_config(config.clone())?,
             composite,
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
@@ -2182,7 +2710,7 @@ impl AuraEffectSystem {
     ) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
         Self::build_internal(
-            Self::normalize_test_config(config.clone()),
+            Self::normalize_test_config(config.clone())?,
             composite,
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
@@ -2199,7 +2727,7 @@ impl AuraEffectSystem {
         seed: u64,
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
+        let config = Self::normalize_test_config(config.clone())?;
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
@@ -2227,7 +2755,7 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_transport: SharedTransport,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
+        let config = Self::normalize_test_config(config.clone())?;
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         // Convert u64 seed to [u8; 32] for crypto handler
         let mut crypto_seed = [0u8; 32];
@@ -2254,7 +2782,7 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
         shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Self, crate::core::AgentError> {
-        let config = Self::normalize_test_config(config.clone());
+        let config = Self::normalize_test_config(config.clone())?;
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
         let mut crypto_seed = [0u8; 32];
         crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
@@ -2276,6 +2804,61 @@ impl AuraEffectSystem {
         authority_id: AuthorityId,
     ) -> Result<Self, crate::core::AgentError> {
         Self::production(config, authority_id)
+    }
+
+    /// Assemble selected handlers before any persistent handler or service can retain defaults.
+    pub(crate) fn custom_for_authority(
+        config: AgentConfig,
+        authority: AuthorityId,
+        mode: ExecutionMode,
+        providers: SelectedCustomProviders,
+        owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+        shared: Option<SharedTransport>,
+    ) -> Result<Self, crate::core::AgentError> {
+        if providers.transports.len() > 16 {
+            return Err(crate::core::AgentError::config(
+                "custom transport inventory exceeds 16 providers",
+            ));
+        }
+        let config = if mode.is_production() {
+            config
+        } else {
+            Self::normalize_test_config(config)?
+        };
+        let mut composite = match mode {
+            ExecutionMode::Production => {
+                CompositeHandlerAdapter::for_production(config.device_id())
+            }
+            ExecutionMode::Testing => CompositeHandlerAdapter::for_testing(config.device_id()),
+            ExecutionMode::Simulation { seed } => {
+                CompositeHandlerAdapter::for_simulation(config.device_id(), seed)
+            }
+        };
+        if mode.is_production() {
+            composite
+                .composite_mut()
+                .register_all(RegisterAllOptions::allow_impure())
+                .map_err(|source| {
+                    crate::core::AgentError::from(AuraError::Internal {
+                        message: "assemble selected custom providers".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?;
+        }
+        Self::build_internal_owned(
+            config,
+            composite,
+            mode,
+            None,
+            shared,
+            None,
+            authority,
+            false,
+            owner,
+            Some(providers),
+            #[cfg(test)]
+            None,
+        )
     }
 
     /// Owned production assembly accepts only the concrete audited adapter token.
@@ -2306,6 +2889,9 @@ impl AuraEffectSystem {
             authority_id,
             false,
             Some(owner),
+            None,
+            #[cfg(test)]
+            None,
         )
     }
 
@@ -2363,6 +2949,11 @@ impl AuraEffectSystem {
         self.enrollment_profile_handoff_gate.lock().await
     }
 
+    /// The authority actually selected by this runtime's construction owner.
+    pub(crate) fn runtime_authority_id(&self) -> AuthorityId {
+        self.authority_id
+    }
+
     pub fn config(&self) -> &AgentConfig {
         &self.config
     }
@@ -2380,6 +2971,17 @@ impl AuraEffectSystem {
     ) -> Self {
         self.time_handler = EnhancedTimeHandler::with_provider(provider);
         self
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn fault_remove_secure_record_for_test(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+    ) -> Result<bool, aura_core::AuraError> {
+        self.crypto
+            .secure_storage()
+            .fault_remove_selected_record_for_test(location)
+            .await
     }
 
     pub fn time_effects(&self) -> &EnhancedTimeHandler {
@@ -2418,12 +3020,12 @@ impl AuraEffectSystem {
     /// Build the Biscuit-backed authorization handler.
     fn init_authorization_handler(
         authority: AuthorityId,
-        crypto_handler: &RealCryptoHandler,
+        crypto_handler: &Arc<dyn CryptoEffects>,
         verifying_key: &[u8],
         time_handler: &PhysicalTimeHandler,
         execution_mode: ExecutionMode,
         harness_mode_enabled: bool,
-    ) -> aura_authorization::effects::WotAuthorizationHandler<RealCryptoHandler> {
+    ) -> aura_authorization::effects::WotAuthorizationHandler<Arc<dyn CryptoEffects>> {
         let runtime_config = AuthorizationRuntimeConfig::from_verifying_key(
             authority,
             execution_mode,
@@ -2446,19 +3048,7 @@ impl AuraEffectSystem {
     }
 
     /// Construct a journal handler with current policy hooks.
-    fn journal_handler(
-        &self,
-    ) -> aura_journal::JournalHandler<
-        RealCryptoHandler,
-        Arc<
-            EncryptedStorage<
-                FilesystemStorageHandler,
-                RealCryptoHandler,
-                ProductionSecureStorageHandler,
-            >,
-        >,
-        JournalBiscuitAuthorizationHandler,
-    > {
+    fn journal_handler(&self) -> RuntimeJournalHandler {
         let (token, bridge) = self
             .journal
             .journal_policy()
@@ -2514,6 +3104,359 @@ mod tests {
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
+
+    #[tokio::test]
+    async fn simulation_constructor_preserves_seeded_stream_across_actual_subsystem_clones(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use aura_core::effects::RandomCoreEffects;
+        use rand::{rngs::StdRng, RngCore, SeedableRng};
+
+        let temporary = tempfile::tempdir()?;
+        let mut first_draws = Vec::new();
+        for salt in [0x31, 0x32] {
+            let config = AgentConfig {
+                storage: StorageConfig {
+                    base_path: temporary.path().join(format!("simulation-{salt}")),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let effects = AuraEffectSystem::simulation_for_named_test_with_salt(
+                &config,
+                "actual constructor entropy continuation",
+                salt,
+            )?;
+            let ExecutionMode::Simulation { seed } = effects.execution_mode else {
+                panic!("simulation constructor must retain its actual mode");
+            };
+            let mut seed_bytes = [0; 32];
+            seed_bytes[..8].copy_from_slice(&seed.to_le_bytes());
+            let mut reference = StdRng::from_seed(seed_bytes);
+            // Construction consumes the actual receipt signing key first.
+            let mut receipt_key_draw = [0; 32];
+            reference.fill_bytes(&mut receipt_key_draw);
+            let cloned_crypto = effects.crypto.clone();
+            let mut draws = Vec::new();
+            for (index, length) in [17, 29, 11, 43].into_iter().enumerate() {
+                let actual = if index % 2 == 0 {
+                    RandomCoreEffects::random_bytes(&effects, length).await
+                } else {
+                    cloned_crypto.random_bytes(length)
+                };
+                let mut expected = vec![0; length];
+                reference.fill_bytes(&mut expected);
+                assert_eq!(
+                    actual, expected,
+                    "the constructed owner must share one stream"
+                );
+                draws.push(actual);
+            }
+            // Replaying the independently seeded reference reproduces every draw.
+            let mut replay = StdRng::from_seed(seed_bytes);
+            replay.fill_bytes(&mut receipt_key_draw);
+            for actual in &draws {
+                let mut expected = vec![0; actual.len()];
+                replay.fill_bytes(&mut expected);
+                assert_eq!(actual, &expected);
+            }
+            first_draws.push(draws.remove(0));
+        }
+        assert_ne!(first_draws[0], first_draws[1]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn seeded_simulation_constructor_retains_configured_crypto_and_random_dispatch(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use aura_core::effects::{CryptoCoreEffects, RandomCoreEffects};
+        use aura_testkit::stateful_effects::custom_provider::{
+            CustomCryptoProbe, CustomProviderOutage, CustomProviderProbe,
+        };
+        use std::error::Error;
+        let temporary = tempfile::tempdir()?;
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: temporary.path().join("configured-simulation"),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let crypto = Arc::new(CustomCryptoProbe::default());
+        let probe = Arc::new(CustomProviderProbe::default());
+        let effects = AuraEffectSystem::build_internal_owned(
+            config.clone(),
+            CompositeHandlerAdapter::for_simulation(config.device_id(), 0x58),
+            ExecutionMode::Simulation { seed: 0x58 },
+            Some([0x58; 32]),
+            None,
+            None,
+            AuthorityId::new_from_entropy([0x59; 32]),
+            false,
+            None,
+            Some(SelectedCustomProviders {
+                crypto: crypto.clone(),
+                storage: probe.clone(),
+                random: probe.clone(),
+                console: probe.clone(),
+                transports: vec![probe.clone()],
+            }),
+            None,
+        )?;
+        assert!(!effects.crypto.handler().is_simulated());
+        assert!(effects
+            .crypto
+            .handler()
+            .crypto_capabilities()
+            .iter()
+            .any(|name| name == "configured-custom-probe"));
+        let initial_draws = probe.random_draws();
+        assert_eq!(
+            RandomCoreEffects::random_bytes(&effects, 13).await,
+            vec![0x93; 13]
+        );
+        assert_eq!(
+            RandomCoreEffects::random_bytes_32(&effects).await,
+            [0x93; 32]
+        );
+        assert_eq!(probe.random_draws(), initial_draws + 2);
+        crypto.set_fault(true);
+        let error = CryptoCoreEffects::kdf_derive(&effects, &[0x61; 32], b"salt", b"context", 32)
+            .await
+            .expect_err("actual configured outage must survive seeded construction");
+        let mut source: Option<&dyn Error> = Some(&error);
+        let mut retained = false;
+        while let Some(actual) = source {
+            retained |= actual.is::<CustomProviderOutage>();
+            source = actual.source();
+        }
+        assert!(retained);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn production_seed_rejection_precedes_profile_io_with_custom_real_crypto(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use std::error::Error;
+        let temporary = tempfile::tempdir()?;
+        let profile = temporary.path().join("seeded-production-must-stay-absent");
+        let config = AgentConfig {
+            storage: StorageConfig {
+                base_path: profile.clone(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let probe = Arc::new(
+            aura_testkit::stateful_effects::custom_provider::CustomProviderProbe::default(),
+        );
+        let crypto: Arc<dyn CryptoEffects> = Arc::new(RealCryptoHandler::new());
+        assert!(!crypto.is_simulated());
+        let composite = CompositeHandlerAdapter::for_production(config.device_id());
+        let result = AuraEffectSystem::build_internal_owned(
+            config,
+            composite,
+            ExecutionMode::Production,
+            Some([0x74; 32]),
+            None,
+            None,
+            AuthorityId::new_from_entropy([0x75; 32]),
+            false,
+            None,
+            Some(SelectedCustomProviders {
+                crypto,
+                storage: probe.clone(),
+                random: probe.clone(),
+                console: probe.clone(),
+                transports: vec![probe.clone()],
+            }),
+            None,
+        );
+        let error = result
+            .err()
+            .ok_or("seeded production assembly was admitted")?;
+        let mut source: Option<&dyn Error> = Some(&error);
+        let mut retained = false;
+        while let Some(actual) = source {
+            retained |= actual.is::<super::super::entropy::ProductionSeededEntropyError>();
+            source = actual.source();
+        }
+        assert!(retained);
+        assert!(!profile.exists());
+        assert_eq!(probe.random_draws(), 0);
+        assert_eq!(probe.console_calls(), 0);
+        assert_eq!(probe.sends(), 0);
+        assert!(probe.stored_bytes().await.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn required_biscuit_hydration_distinguishes_absence_corruption_and_valid_restore() {
+        use aura_core::effects::secure::{SecureStorageCapability, SecureStorageLocation};
+        use aura_core::effects::SecureStorageEffects;
+        use std::error::Error;
+        let authority = AuthorityId::new_from_entropy([241; 32]);
+        let profile = tempfile::tempdir().expect("isolated authorization profile");
+        let config = crate::AgentConfig {
+            storage: StorageConfig {
+                base_path: profile.path().to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let context = aura_core::context::EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([242; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = crate::AgentBuilder::new()
+            .with_authority(authority)
+            .with_config(config.clone())
+            .build_testing_async(&context)
+            .await
+            .expect("genuine fresh runtime permits confirmed absence");
+        let effects = agent.runtime().effects();
+        effects.clear_biscuit_cache();
+        effects
+            .initialize_biscuit_cache()
+            .await
+            .expect("confirmed absence");
+        assert!(effects.biscuit_cache().is_none());
+        let location = SecureStorageLocation::biscuit_authority(&authority);
+        effects
+            .secure_store(&location, &[1; 32], &[SecureStorageCapability::Write])
+            .await
+            .expect("publish malformed mutable authorization record");
+        let truncated = effects
+            .initialize_biscuit_cache()
+            .await
+            .expect_err("persisted truncation cannot mean new account");
+        assert!(matches!(
+            truncated
+                .source()
+                .and_then(|source| source.downcast_ref::<BiscuitStartupRecordError>()),
+            Some(BiscuitStartupRecordError::Truncated(32))
+        ));
+        assert!(effects.biscuit_cache().is_none());
+        effects
+            .bootstrap_biscuit_tokens(&authority)
+            .await
+            .expect("real token producer");
+        let original = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("retain actual token bytes");
+        effects.clear_biscuit_cache();
+        effects
+            .initialize_biscuit_cache()
+            .await
+            .expect("verify valid retained token");
+        assert!(effects
+            .verified_biscuit_frontier()
+            .expect("verified restored frontier")
+            .is_some());
+        effects.clear_biscuit_cache();
+        let mut corrupt = original;
+        corrupt.truncate(33);
+        effects
+            .secure_store(&location, &corrupt, &[SecureStorageCapability::Write])
+            .await
+            .expect("actual encoded token corruption");
+        let failure = effects
+            .initialize_biscuit_cache()
+            .await
+            .expect_err("malformed token cannot publish a cache");
+        assert!(matches!(failure, AuraError::Crypto { .. }));
+        assert!(failure.source().is_some());
+        assert!(effects.biscuit_cache().is_none());
+        agent
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("acknowledge original runtime shutdown before reopen");
+        drop(agent);
+        let returning = crate::AgentBuilder::new()
+            .with_authority(authority)
+            .with_config(config)
+            .build_testing_async(&context)
+            .await
+            .err()
+            .expect("returning builder cannot admit corrupt persisted authorization");
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&returning);
+        let mut native_crypto = false;
+        while let Some(error) = cause {
+            if matches!(
+                error.downcast_ref::<AuraError>(),
+                Some(AuraError::Crypto { .. })
+            ) {
+                native_crypto = true;
+            }
+            cause = error.source();
+        }
+        assert!(
+            native_crypto,
+            "returning builder retains actual verification cause"
+        );
+    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn required_biscuit_hydration_retains_actual_secure_decryption_failure() {
+        use aura_core::effects::secure::SecureStorageLocation;
+        use std::error::Error;
+        let authority = AuthorityId::new_from_entropy([243; 32]);
+        let profile = tempfile::tempdir().expect("isolated backing fault profile");
+        let config = crate::AgentConfig {
+            storage: StorageConfig {
+                base_path: profile.path().to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let context = aura_core::context::EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([244; 32]),
+            ExecutionMode::Testing,
+        );
+        let agent = crate::AgentBuilder::new()
+            .with_authority(authority)
+            .with_config(config)
+            .build_testing_async(&context)
+            .await
+            .expect("actual runtime");
+        let effects = agent.runtime().effects();
+        effects
+            .bootstrap_biscuit_tokens(&authority)
+            .await
+            .expect("actual persisted token");
+        effects.clear_biscuit_cache();
+        effects
+            .crypto
+            .secure_storage()
+            .fault_corrupt_selected_record_for_test(&SecureStorageLocation::biscuit_authority(
+                &authority,
+            ))
+            .await
+            .expect("mutate selected actual encrypted backing bytes");
+        let failure = effects
+            .initialize_biscuit_cache()
+            .await
+            .expect_err("authenticated decryption failure cannot mean credential absence");
+        assert!(matches!(failure, AuraError::Storage { .. }));
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&failure);
+        let mut native_aead = false;
+        while let Some(error) = cause {
+            native_aead |= error
+                .downcast_ref::<chacha20poly1305::aead::Error>()
+                .is_some();
+            cause = error.source();
+        }
+        assert!(
+            native_aead,
+            "retain actual secure-provider authentication cause"
+        );
+        assert!(effects.biscuit_cache().is_none());
+    }
+
     #[test]
     fn required_parent_metadata_keeps_injected_io_failure_as_storage() {
         use std::error::Error;
@@ -2770,6 +3713,7 @@ mod tests {
     #[test]
     fn verified_biscuit_frontier_rejects_mismatched_cached_root_key() {
         use base64::Engine;
+        use std::error::Error;
 
         let authority_id = AuthorityId::new_from_entropy([0xB3; 32]);
         let effects = AuraEffectSystem::simulation_for_test_for_authority(
@@ -2792,7 +3736,15 @@ mod tests {
             root_pk_b64: engine.encode(wrong_root.root_public_key().to_bytes()),
         });
 
-        assert!(effects.verified_biscuit_frontier().is_err());
+        let failure = effects
+            .verified_biscuit_frontier()
+            .err()
+            .expect("actual token signature rejects a different root");
+        assert!(matches!(failure, AuraError::Crypto { .. }));
+        assert!(
+            failure.source().is_some(),
+            "retain native verification cause"
+        );
     }
 
     #[test]
@@ -3249,6 +4201,7 @@ impl AuraEffectSystem {
         agreement_mode: aura_core::threshold::AgreementMode,
     ) -> Result<(), AuraError> {
         let metadata = ThresholdConfigMetadata {
+            bootstrap_migration_origin: None,
             threshold_k: threshold,
             total_n: total_participants,
             participants: participants.to_vec(),
@@ -3306,7 +4259,14 @@ impl AuraEffectSystem {
             .secure_storage()
             .secure_retrieve(&location, &[SecureStorageCapability::Read])
             .await;
-        Self::decode_required_threshold_metadata(data)
+        let metadata = Self::decode_required_threshold_metadata(data)?;
+        if let Some(origin) = metadata.bootstrap_migration_origin {
+            crate::runtime::services::threshold_signing::validate_bootstrap_migration_origin(
+                self, authority, epoch, origin,
+            )
+            .await?;
+        }
+        Ok(metadata)
     }
 
     fn decode_required_threshold_metadata(
@@ -3428,6 +4388,9 @@ pub(crate) struct ThresholdConfigMetadata {
     /// Agreement mode (A1/A2/A3) for the stored epoch
     #[serde(default)]
     agreement_mode: aura_core::threshold::AgreementMode,
+    /// Exact protected original bootstrap migration decision, absent for fresh keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bootstrap_migration_origin: Option<[u8; 32]>,
 }
 
 impl ThresholdConfigMetadata {
@@ -3466,8 +4429,70 @@ pub(crate) fn enrollment_generation_profile_location(
     epoch: u64,
 ) -> aura_core::effects::SecureStorageLocation {
     aura_core::effects::SecureStorageLocation::with_sub_key(
+        "device_enrollment_generation_live_slot_v2",
+        authority.to_string(),
+        epoch.to_string(),
+    )
+}
+
+pub(crate) fn legacy_enrollment_generation_profile_location(
+    authority: &aura_core::AuthorityId,
+    epoch: u64,
+) -> aura_core::effects::SecureStorageLocation {
+    aura_core::effects::SecureStorageLocation::with_sub_key(
         "device_enrollment_generation_profile_v1",
         authority.to_string(),
         epoch.to_string(),
     )
+}
+
+#[cfg(all(test, unix))]
+mod test_namespace_tests {
+    use super::AuraEffectSystem;
+    use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn collision_exhaustion_never_returns_or_modifies_a_preexisting_profile(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        for suffix in ["0", "1", "2-fallback"] {
+            let name = root
+                .path()
+                .join(format!("aura-agent-isolated-v2-fixture-{suffix}"));
+            std::fs::create_dir(&name)?;
+            std::fs::set_permissions(&name, std::fs::Permissions::from_mode(0o755))?;
+        }
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let failure =
+            AuraEffectSystem::create_test_storage_namespace(root.path(), "fixture", &counter, 2)
+                .expect_err(
+                    "collision budget cannot authorize unchecked fallback or existing owner",
+                );
+        assert_eq!(failure.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::metadata(root.path().join("aura-agent-isolated-v2-fixture-0"))?
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
+        let fresh =
+            AuraEffectSystem::create_test_storage_namespace(root.path(), "fixture", &counter, 2)?;
+        assert_eq!(fresh, root.path().join("aura-agent-isolated-v2-fixture-2"));
+        assert!(fresh.is_dir());
+        Ok(())
+    }
+    #[test]
+    fn namespace_creation_fault_preserves_native_io_instead_of_returning_a_locator(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let file = root.path().join("not-a-directory");
+        std::fs::write(&file, b"fixture")?;
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let failure =
+            AuraEffectSystem::create_test_storage_namespace(&file, "fixture", &counter, 2)
+                .expect_err("native creation fault cannot be swallowed");
+        assert!(failure.raw_os_error().is_some());
+        assert_eq!(std::fs::read(file)?, b"fixture");
+        Ok(())
+    }
 }

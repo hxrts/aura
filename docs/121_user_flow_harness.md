@@ -145,3 +145,8 @@ subject/device IDs. A profile handoff or restart must revalidate the runtime's
 original durable receipt before publishing the selected identity. Persisting
 selection, account configuration and pending-state cleanup separately does not
 satisfy this profile transaction contract.
+
+Required flow-budget guard denial has the stable `budget_exceeded` native and
+semantic category. It remains distinct from authorization denial and retains the
+structural required/remaining policy reason. Frontends and harness observers do
+not infer either category from operation text or automatically retry it.

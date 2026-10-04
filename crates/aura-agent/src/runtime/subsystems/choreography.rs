@@ -13,8 +13,9 @@ use tokio::sync::Notify;
 use tokio::task::Id as TaskId;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum ExecutionBindingKey {
+    Registered(crate::task_registry::OwnedRuntimeTaskIdentity),
     Task(TaskId),
     Thread(ThreadId),
 }
@@ -79,16 +80,59 @@ pub enum SessionOwnerCapabilityScope {
 }
 
 /// Capability proving current authority to act on one runtime session.
+///
+/// Only a runtime claim or transfer can construct this token. Its metadata is
+/// observed through getters; copies retain the same actual claim identity.
+///
+/// ```
+/// use aura_agent::{SessionOwnerCapability, SessionOwnerCapabilityScope};
+/// fn observe(owner: &SessionOwnerCapability) -> (&str, u64, &SessionOwnerCapabilityScope) {
+///     (owner.owner_label(), owner.generation(), owner.scope())
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use aura_agent::SessionOwnerCapability;
+/// fn forge(observed: &SessionOwnerCapability) -> SessionOwnerCapability {
+///     SessionOwnerCapability::full_session(observed.session_id(), observed.owner_label(), observed.generation())
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use aura_agent::SessionOwnerCapability;
+/// fn replace_generation(owner: &mut SessionOwnerCapability) {
+///     owner.generation = 1;
+/// }
+/// ```
+///
+/// ```compile_fail
+/// use aura_agent::SessionOwnerCapability;
+/// fn decode_wire_owner<'de>() {
+///     fn requires_deserialize<T: serde::Deserialize<'de>>() {}
+///     requires_deserialize::<SessionOwnerCapability>();
+/// }
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionOwnerCapability {
-    pub session_id: RuntimeChoreographySessionId,
-    pub owner_label: String,
-    pub generation: u64,
-    pub scope: SessionOwnerCapabilityScope,
+    session_id: RuntimeChoreographySessionId,
+    owner_label: String,
+    generation: u64,
+    scope: SessionOwnerCapabilityScope,
+    claim: SessionOwnerClaim,
 }
 
+/// Physical identity of one actual claim or transfer, independent of metadata.
+#[derive(Debug, Clone)]
+struct SessionOwnerClaim(Arc<()>);
+impl PartialEq for SessionOwnerClaim {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+impl Eq for SessionOwnerClaim {}
+
 impl SessionOwnerCapability {
-    pub fn full_session(
+    fn full_session(
         session_id: RuntimeChoreographySessionId,
         owner_label: impl Into<String>,
         generation: u64,
@@ -98,14 +142,35 @@ impl SessionOwnerCapability {
             owner_label: owner_label.into(),
             generation,
             scope: SessionOwnerCapabilityScope::Session,
+            claim: SessionOwnerClaim(Arc::new(())),
         }
+    }
+
+    /// Session selector carried by the actual owner claim.
+    pub fn session_id(&self) -> RuntimeChoreographySessionId {
+        self.session_id
+    }
+
+    /// Diagnostic label of the actual owner.
+    pub fn owner_label(&self) -> &str {
+        &self.owner_label
+    }
+
+    /// Local handoff generation; it cannot reconstruct claim identity.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Authority scope granted by the actual claim or transfer.
+    pub fn scope(&self) -> &SessionOwnerCapabilityScope {
+        &self.scope
     }
 
     pub fn allows_full_session(&self) -> bool {
         matches!(self.scope, SessionOwnerCapabilityScope::Session)
     }
 
-    pub fn with_scope(mut self, scope: SessionOwnerCapabilityScope) -> Self {
+    fn with_scope(mut self, scope: SessionOwnerCapabilityScope) -> Self {
         self.scope = scope;
         self
     }
@@ -272,6 +337,9 @@ impl Default for ChoreographySessionState {
 impl ChoreographyState {
     #[allow(clippy::disallowed_methods)] // Fallback for tests/sync callers outside a Tokio task.
     fn current_binding_key() -> ExecutionBindingKey {
+        if let Some(identity) = crate::task_registry::current_owned_runtime_task() {
+            return ExecutionBindingKey::Registered(identity);
+        }
         tokio::task::try_id()
             .map(ExecutionBindingKey::Task)
             .unwrap_or_else(|| ExecutionBindingKey::Thread(std::thread::current().id()))
@@ -363,6 +431,14 @@ impl ChoreographyState {
         now_ms: u64,
     ) -> Result<RuntimeChoreographySessionId, SessionEndError> {
         self.end_session_observed(Some(now_ms))
+    }
+
+    /// Pure observation for exact owned retirement idempotence.
+    pub(crate) fn contains_registered_session(
+        &self,
+        session_id: RuntimeChoreographySessionId,
+    ) -> bool {
+        self.sessions.contains_key(&session_id)
     }
 
     /// Retire resources even when required clock evidence is unavailable.
@@ -632,7 +708,8 @@ impl ChoreographyState {
             });
         }
 
-        if owner.capability.generation != expected_capability.generation
+        if owner.capability.claim != expected_capability.claim
+            || owner.capability.generation != expected_capability.generation
             || owner.capability.scope != expected_capability.scope
         {
             return Err(SessionOwnershipError::CapabilityMismatch {
@@ -697,6 +774,76 @@ impl ChoreographyState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn equal_metadata_from_another_runtime_cannot_authorize_owner_mutation() {
+        let role = ChoreographicRole::new(
+            DeviceId::from_uuid(Uuid::from_bytes([204; 16])),
+            AuthorityId::new_from_entropy([205; 32]),
+            RoleIndex::new(0).expect("role index"),
+        );
+        let session = RuntimeChoreographySessionId::from_uuid(Uuid::from_u128(206));
+        let context = ContextId::new_from_entropy([207; 32]);
+        let mut original = ChoreographyState::new();
+        let mut foreign = ChoreographyState::new();
+        for runtime in [&mut original, &mut foreign] {
+            runtime
+                .start_session(session, None, context, vec![role], role, Some(1000), 0)
+                .expect("actual runtime starts session");
+        }
+        let original_claim = original
+            .claim_session_owner(session, "same-owner")
+            .expect("original runtime issues claim");
+        let foreign_claim = foreign
+            .claim_session_owner(session, "same-owner")
+            .expect("foreign runtime issues claim");
+        assert_eq!(original_claim.session_id(), foreign_claim.session_id());
+        assert_eq!(original_claim.owner_label(), foreign_claim.owner_label());
+        assert_eq!(original_claim.generation(), foreign_claim.generation());
+        assert_eq!(original_claim.scope(), foreign_claim.scope());
+        assert_ne!(original_claim, foreign_claim);
+        assert!(matches!(
+            original.ensure_session_owner(session, &foreign_claim),
+            Err(SessionOwnershipError::CapabilityMismatch { .. })
+        ));
+        assert!(matches!(
+            original.release_session_owner(session, &foreign_claim),
+            Err(SessionOwnershipError::CapabilityMismatch { .. })
+        ));
+        assert!(matches!(
+            original.transfer_session_owner(
+                session,
+                &foreign_claim,
+                "replacement",
+                SessionOwnerCapabilityScope::Session,
+            ),
+            Err(SessionOwnershipError::CapabilityMismatch { .. })
+        ));
+        assert_eq!(
+            original.session_owner(session).unwrap().capability,
+            original_claim
+        );
+        original
+            .ensure_session_owner(session, &original_claim.clone())
+            .unwrap();
+        let transferred = original
+            .transfer_session_owner(
+                session,
+                &original_claim,
+                "replacement",
+                SessionOwnerCapabilityScope::Session,
+            )
+            .expect("actual owner transfers custody");
+        assert!(original
+            .ensure_session_owner(session, &original_claim)
+            .is_err());
+        original
+            .release_session_owner(session, &transferred)
+            .unwrap();
+        foreign
+            .ensure_session_owner(session, &foreign_claim)
+            .unwrap();
+    }
 
     #[test]
     fn runtime_choreography_session_id_bridges_aura_session_id_explicitly() {
@@ -1020,6 +1167,7 @@ mod tests {
             owner_label: capability_b.owner_label.clone(),
             generation: capability_b.generation,
             scope: capability_b.scope.clone(),
+            claim: capability_b.claim.clone(),
         };
 
         assert!(matches!(

@@ -177,6 +177,21 @@ pub enum ContactFact {
 }
 
 impl ContactFact {
+    /// Decode required contact evidence while retaining structural and codec failures.
+    ///
+    /// # Errors
+    /// Returns domain, schema, payload-bound or native declared-codec failures.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_decode_envelope(
+            &aura_core::types::facts::FactTypeId::from(CONTACT_FACT_TYPE_ID),
+            1,
+            1,
+            envelope,
+        )
+    }
+
     /// Get the contact_id from any variant
     pub fn contact_id(&self) -> AuthorityId {
         match self {

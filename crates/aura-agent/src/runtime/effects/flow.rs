@@ -50,7 +50,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
             Hash32::default(),
             ReceiptSig::new(Vec::new())?,
         );
-        self.sign_flow_receipt(&mut receipt)?;
+        self.sign_flow_receipt(&mut receipt).await?;
         Ok(receipt)
     }
 }

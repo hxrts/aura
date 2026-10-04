@@ -123,3 +123,30 @@ the primary clock fault and any typed secondary cleanup failure. See
 ### Complete tree publication
 
 `PersistentTreeHandler` serializes local mutations, writes complete content-addressed operation blobs before publishing the canonical ordered index, and updates its observed cache only after publication is acknowledged. An index-write error is an uncertain outcome: subsequent reads reload the canonical index. Original blobs are retained; reclamation is a separate maintenance responsibility. Storage comparison never authenticates a peer batch. The runtime supplies an independently admitted baseline and the immutable digest of its original local history; replay of an existing complete baseline prefix preserves later local operations. Snapshot-state representation remains a separate contract from this index-publication guarantee.
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.
+
+The persistent tree decision lease holds a platform-neutral asynchronous mutation
+lock across authenticated reads and installation. Protocol orchestration does
+not require a Tokio executor for this custody primitive. The architecture syntax
+gate enforces that boundary; actual held-decision replacement and extension
+regressions verify writer exclusion and preservation of later evidence.

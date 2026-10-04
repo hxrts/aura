@@ -15,7 +15,6 @@ use crate::runtime::services::ceremony_runner::{
 use crate::runtime::{AuraEffectSystem, TaskSupervisor};
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
@@ -81,6 +80,13 @@ async fn settle_required_enrollment_initiator_failure(
     }
 }
 
+/// Required bootstrap lookup custody, transferred once into the existing owner.
+pub(crate) struct CancelledEnrollmentNoticeRecoveryCapability {
+    effects: Arc<AuraEffectSystem>,
+    issued: super::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    registered: crate::runtime::services::ceremony_tracker::RegisteredCancelledNoticeCapability,
+}
+
 /// Invitation service API
 ///
 /// Provides invitation operations through a clean public API.
@@ -92,14 +98,31 @@ pub struct InvitationServiceApi {
     tasks: Arc<TaskSupervisor>,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum EnrollmentManifestExportValidationError {
+    #[error("issued enrollment manifest signature validation failed")]
+    Signature(#[source] aura_invitation::enrollment_manifest::EnrollmentManifestError),
+    #[error("issued enrollment manifest baseline validation failed")]
+    Baseline(#[source] aura_invitation::enrollment_manifest::EnrollmentManifestError),
+}
+
 /// Actual issuer-owned signed binding. No Clone/Deserialize/raw constructor.
 pub(crate) struct IssuedEnrollmentManifestBinding {
+    runtime_owner: Arc<AuraEffectSystem>,
     manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     digest: [u8; 32],
     signed_code: String,
     confirmation_verifier: Vec<u8>,
 }
 impl IssuedEnrollmentManifestBinding {
+    pub(crate) fn require_effects(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        if !std::ptr::eq(self.runtime_owner.as_ref(), effects) {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RuntimeOwner.into(),
+            );
+        }
+        Ok(())
+    }
     pub(crate) fn manifest(
         &self,
     ) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
@@ -116,11 +139,88 @@ impl IssuedEnrollmentManifestBinding {
     }
 }
 
+enum EnrollmentCodeExportOwner<'a> {
+    Issued(&'a IssuedEnrollmentManifestBinding),
+    Retained(&'a super::invitation::enrollment_trust::RetainedEnrollmentVmControl),
+}
+impl EnrollmentCodeExportOwner<'_> {
+    fn require_effects(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
+        match self {
+            Self::Issued(issued) => issued.require_effects(effects),
+            Self::Retained(retained) => retained
+                .require_runtime_owner(effects)
+                .map_err(AgentError::from),
+        }
+    }
+    fn manifest(&self) -> &aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
+        match self {
+            Self::Issued(issued) => issued.manifest(),
+            Self::Retained(retained) => retained.manifest(),
+        }
+    }
+}
+
 impl std::fmt::Debug for InvitationServiceApi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InvitationServiceApi")
             .finish_non_exhaustive()
     }
+}
+
+/// Bounds selector lookup and historical negative publication only. This local
+/// ingress scope cannot be used as an original enrollment execution window.
+struct CancellationIngressWindowCapability {
+    effects: Arc<AuraEffectSystem>,
+    budget: aura_core::TimeoutBudget,
+}
+impl CancellationIngressWindowCapability {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "cancellation_ingress_window",
+        capability_type = CancellationIngressWindowCapability,
+        family = "runtime_helper"
+    )]
+    async fn acquire(
+        effects: Arc<AuraEffectSystem>,
+    ) -> AgentResult<CancellationIngressWindowCapability> {
+        let now = effects.physical_time().await.map_err(|source| {
+            AgentError::from(aura_core::AuraError::from(
+                aura_core::TimeoutBudgetError::time_source_failure(source),
+            ))
+        })?;
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &now,
+            std::time::Duration::from_secs(5),
+        )
+        .map_err(aura_core::AuraError::from)?;
+        Ok(Self { effects, budget })
+    }
+    async fn execute<F, Fut, T>(&self, operation: F) -> AgentResult<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = AgentResult<T>>,
+    {
+        aura_core::time::timeout::execute_with_timeout_budget(
+            self.effects.as_ref(),
+            &self.budget,
+            operation,
+        )
+        .await
+        .map_err(|source| {
+            crate::runtime::services::enrollment_window::map_enrollment_run_error(
+                "cancellation ingress",
+                &self.budget,
+                source,
+            )
+        })
+    }
+}
+
+/// Admission outcome for the actual original registered execution lease.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DeviceEnrollmentInitiatorStart {
+    Started,
+    AlreadyRunning,
 }
 
 impl InvitationServiceApi {
@@ -246,9 +346,20 @@ impl InvitationServiceApi {
         }
     }
 
-    fn spawn_device_enrollment_initiator(&self, invitation: &Invitation) {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentWindowCapability",
+        family = "runtime_helper"
+    )]
+    fn spawn_device_enrollment_initiator(
+        &self,
+        invitation: &Invitation,
+        budget: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
+    ) -> AgentResult<()> {
         if invitation.receiver_id == invitation.sender_id {
-            return;
+            return Err(AgentError::internal(
+                "device enrollment requires a distinct invitee",
+            ));
         }
 
         let invitation = invitation.clone();
@@ -262,13 +373,22 @@ impl InvitationServiceApi {
         let invitation_id = invitation.invitation_id.clone();
         let ceremony_id = match &invitation.invitation_type {
             InvitationType::DeviceEnrollment { ceremony_id, .. } => ceremony_id.clone(),
-            _ => return,
+            _ => {
+                return Err(AgentError::internal(
+                    "Expected DeviceEnrollment invitation type",
+                ))
+            }
         };
         let sender_id = invitation.sender_id;
         let receiver_id = invitation.receiver_id;
-        let fut = async move {
+        let fut = Box::pin(async move {
             if let Err(error) = handler
-                .execute_device_enrollment_initiator(effects, &invitation, ceremony_runner.clone())
+                .execute_device_enrollment_initiator_owned(
+                    effects,
+                    &invitation,
+                    ceremony_runner.clone(),
+                    budget,
+                )
                 .await
             {
                 tracing::error!(
@@ -286,7 +406,7 @@ impl InvitationServiceApi {
                 .await);
             }
             Ok::<(), aura_core::AuraError>(())
-        };
+        });
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
@@ -295,6 +415,127 @@ impl InvitationServiceApi {
                 let _task_handle = tasks.spawn_try_named("device_enrollment_initiator", fut);
             }
         }
+        if let Some(source) = tasks.terminal_failure() {
+            return Err(AgentError::from(aura_core::AuraError::Internal {
+                message: "admit registered enrollment initiator task".into(),
+                source: Some(Arc::new(source)),
+            }));
+        }
+        Ok(())
+    }
+
+    /// Bootstrap selector is used once; the task receives only issued control
+    /// and a sealed Cancelled original-window owner.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "CancelledEnrollmentNoticeRecoveryCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn prepare_cancelled_enrollment_notice_recovery(
+        &self,
+        ceremony: &aura_core::CeremonyId,
+    ) -> AgentResult<Option<CancelledEnrollmentNoticeRecoveryCapability>> {
+        let ingress = CancellationIngressWindowCapability::acquire(self.effects.clone()).await?;
+        ingress
+            .execute(|| async {
+                let (_, issued) = self
+                    .handler
+                    .created_enrollment_for_ceremony_required(self.effects.clone(), ceremony)
+                    .await?;
+                self.prepare_cancelled_notice_from_issued(issued).await
+            })
+            .await
+    }
+
+    /// Retain the strongest issued control across live cancellation and restart.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "CancelledEnrollmentNoticeRecoveryCapability",
+        family = "runtime_helper"
+    )]
+    async fn prepare_cancelled_notice_from_issued(
+        &self,
+        issued: super::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> AgentResult<Option<CancelledEnrollmentNoticeRecoveryCapability>> {
+        let registered = match self.ceremony_runner.prepare_cancelled_notice(
+            &issued, self.effects.as_ref(),
+        ).await {
+            Ok(owner) => owner,
+            Err(cause) if crate::runtime::services::ceremony_tracker::registered_enrollment_window_already_owned(&cause) => {
+                return Ok(None);
+            }
+            Err(cause) => return Err(AgentError::from(cause)),
+        };
+        Ok(Some(CancelledEnrollmentNoticeRecoveryCapability {
+            effects: self.effects.clone(),
+            issued,
+            registered,
+        }))
+    }
+
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "CancelledEnrollmentNoticeRecoveryCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn start_cancelled_enrollment_notice_recovery(
+        &self,
+        capability: CancelledEnrollmentNoticeRecoveryCapability,
+    ) -> AgentResult<()> {
+        if !Arc::ptr_eq(&capability.effects, &self.effects) {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RuntimeOwner.into(),
+            );
+        }
+        let CancelledEnrollmentNoticeRecoveryCapability {
+            effects,
+            issued,
+            registered,
+        } = capability;
+        let runner = self.ceremony_runner.clone();
+        let tasks = self.tasks.group(format!(
+            "invitation_service.cancelled_notice.{}",
+            issued.manifest().invitation,
+        ));
+        let fut = Box::pin(async move {
+            let window = match runner.cancelled_notice_window(registered, effects.as_ref()).await? {
+                crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::Eligible(window) => window,
+                crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::EligibilityEnded { cause } => {
+                    tracing::debug!(error = %cause, "cancelled enrollment notice eligibility ended; no send");
+                    return Ok::<(), aura_core::AuraError>(());
+                }
+            };
+            super::invitation::execute_recovered_cancelled_notice(
+                effects, issued, runner, window,
+            ).await.or_else(|cause| {
+                if crate::runtime::services::enrollment_window::cancelled_notice_eligibility_ended(&cause) {
+                    tracing::debug!(error = %cause, "cancelled enrollment notice original eligibility ended; no send");
+                    Ok(())
+                } else {
+                    Err(cause)
+                }
+            }).map_err(|source| match source {
+                AgentError::Aura(cause) => cause,
+                source => aura_core::AuraError::Internal {
+                    message: "required cancelled enrollment notice execution".into(),
+                    source: Some(Arc::new(source)),
+                },
+            })
+        });
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _task = tasks.spawn_local_try_named("cancelled_enrollment_notice_recovery", fut);
+            } else {
+                let _task = tasks.spawn_try_named("cancelled_enrollment_notice_recovery", fut);
+            }
+        }
+        if let Some(source) = tasks.terminal_failure() {
+            return Err(AgentError::from(aura_core::AuraError::Internal {
+                message: "admit original cancelled enrollment notice task".into(),
+                source: Some(Arc::new(source)),
+            }));
+        }
+        Ok(())
     }
 
     fn spawn_deferred_invitation_delivery(
@@ -596,6 +837,7 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        let _operation = self.effects.admit_public_operation()?;
         let home_id = ChannelId::from_str(&home_id).map_err(|e| {
             AgentError::invalid(format!(
                 "invalid channel/home id `{home_id}`: expected canonical ChannelId format ({e})"
@@ -667,6 +909,7 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        let _operation = self.effects.admit_public_operation()?;
         let prepared = self
             .handler
             .prepare_invitation_with_context(
@@ -704,6 +947,7 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
+        let _operation = self.effects.admit_public_operation()?;
         let prepared = self
             .handler
             .prepare_invitation_with_context(
@@ -748,10 +992,48 @@ impl InvitationServiceApi {
     ///
     /// This is intended for out-of-band transfer (copy/paste, QR).
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn export_owned_enrollment_manifest(
+    pub(crate) fn export_owned_enrollment_manifest<'a>(
+        &'a self,
+        reserved: &'a super::invitation::ReservedInvitationIssuance,
+        selected_setup: &'a aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        selected_identity: &'a crate::handlers::rendezvous_identity::RequiredIdentitySigningContext<
+            'a,
+        >,
+        final_inventory: &'a crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+            'a,
+            'a,
+        >,
+        manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    ) -> impl std::future::Future<
+        Output = AgentResult<(
+            aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
+            IssuedEnrollmentManifestBinding,
+        )>,
+    > + 'a {
+        // Allocate before the caller embeds this cryptographic preparation in
+        // its frame. The original reservation/setup/identity stay borrowed by
+        // the same lexical task; there is no spawn or ownership re-resolution.
+        Box::pin(self.export_owned_enrollment_manifest_owned(
+            reserved,
+            selected_setup,
+            selected_identity,
+            final_inventory,
+            manifest,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn export_owned_enrollment_manifest_owned(
         &self,
         reserved: &super::invitation::ReservedInvitationIssuance,
         selected_setup: &aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+        selected_identity: &crate::handlers::rendezvous_identity::RequiredIdentitySigningContext<
+            '_,
+        >,
+        final_inventory: &crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+            '_,
+            '_,
+        >,
         manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     ) -> AgentResult<(
         aura_app::runtime_bridge::EnrollmentManifestTransferCodes,
@@ -760,6 +1042,10 @@ impl InvitationServiceApi {
         use aura_invitation::enrollment_manifest::{
             encode_initiator_verifier_transfer, SignedEnrollmentTrustManifest,
         };
+        final_inventory.require_manifest(self.effects.as_ref(), &manifest)?;
+        manifest
+            .validate_setup_validity(selected_setup.statement())
+            .map_err(crate::core::AgentError::EnrollmentManifest)?;
         if manifest.invitation != *reserved.invitation_id()
             || manifest.subject != self.handler.authority_context().authority_id()
             || manifest.initiator_device != self.effects.device_id()
@@ -772,17 +1058,24 @@ impl InvitationServiceApi {
                 "manifest issuer/reservation/setup mismatch",
             ));
         }
-        let (private, public) = crate::handlers::rendezvous_identity::require_identity_keys(
-            self.effects.as_ref(),
-            &manifest.subject,
-        )
-        .await
-        .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: validate exact selected identity");
+        selected_identity
+            .require_effects(self.effects.as_ref())
+            .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: load required physical identity keys");
+        let (private, public) =
+            crate::handlers::rendezvous_identity::require_identity_keys(selected_identity)
+                .await
+                .map_err(crate::core::AgentError::EnrollmentManifest)?;
         if manifest.initiator_confirmation_verifier != public {
             return Err(crate::core::AgentError::invalid(
                 "manifest confirmation key mismatch",
             ));
         }
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: sign exact manifest");
         let signature = sign_ed25519_transcript(self.effects.as_ref(), &manifest, &private)
             .await
             .map_err(|e| {
@@ -790,6 +1083,8 @@ impl InvitationServiceApi {
                     aura_invitation::enrollment_manifest::EnrollmentManifestError::Transcript(e),
                 )
             })?;
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: export exact baseline");
         let baseline = self
             .effects
             .export_tree_ops()
@@ -805,16 +1100,32 @@ impl InvitationServiceApi {
                 })
             })
             .collect::<AgentResult<Vec<_>>>()?;
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: verify own signature and baseline");
         let checked = manifest
             .clone()
             .verify_signature(self.effects.as_ref(), &public, &signature)
             .await
-            .map_err(crate::core::AgentError::EnrollmentManifest)?
+            .map_err(|source| {
+                crate::core::AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                        Box::new(EnrollmentManifestExportValidationError::Signature(source)),
+                    ),
+                )
+            })?
             .verify_baseline(&baseline)
-            .map_err(crate::core::AgentError::EnrollmentManifest)?;
+            .map_err(|source| {
+                crate::core::AgentError::EnrollmentManifest(
+                    aura_invitation::enrollment_manifest::EnrollmentManifestError::Runtime(
+                        Box::new(EnrollmentManifestExportValidationError::Baseline(source)),
+                    ),
+                )
+            })?;
         let manifest_subject = manifest.subject;
         let manifest_device = manifest.initiator_device;
         let digest = checked.manifest_digest();
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: encode signed manifest");
         let manifest_code = SignedEnrollmentTrustManifest {
             manifest: manifest.clone(),
             signature,
@@ -824,7 +1135,10 @@ impl InvitationServiceApi {
         let initiator_verifier_code =
             encode_initiator_verifier_transfer(manifest_subject, manifest_device, &public)
                 .map_err(crate::core::AgentError::EnrollmentManifest)?;
+        #[cfg(test)]
+        eprintln!("enrollment manifest export stage: construct sealed issued manifest binding");
         let binding = IssuedEnrollmentManifestBinding {
+            runtime_owner: self.effects.clone(),
             manifest,
             digest,
             signed_code: manifest_code.clone(),
@@ -842,21 +1156,30 @@ impl InvitationServiceApi {
     pub(crate) async fn reserve_device_enrollment_invitation(
         &self,
     ) -> AgentResult<super::invitation::ReservedInvitationIssuance> {
-        self.handler
-            .reserve_invitation_issuance(self.effects.as_ref())
-            .await
+        let reserved = self
+            .handler
+            .reserve_invitation_issuance(&self.effects)
+            .await?;
+        self.effects
+            .retain_original_enrollment_reservation(&reserved)
+            .await?;
+        Ok(reserved)
     }
 
     #[allow(clippy::too_many_arguments)]
     #[aura_macros::capability_boundary(
         category = "capability_gated",
-        capability = "registered_enrollment_generation",
+        capability = "RegisteredEnrollmentGenerationCapability",
         family = "runtime_helper"
     )]
-    pub(crate) fn start_registered_device_enrollment(
+    pub(crate) async fn start_registered_device_enrollment(
         &self,
-        registered: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability,
-    ) -> AgentResult<()> {
+        registered: &crate::runtime::effects::RegisteredEnrollmentGenerationCapability<'_>,
+    ) -> AgentResult<DeviceEnrollmentInitiatorStart> {
+        Box::pin(async move {
+        registered
+            .require_effects(self.effects.as_ref())
+            .map_err(AgentError::from)?;
         let invitation = registered.canonical_invitation();
         let InvitationType::DeviceEnrollment {
             initiator_device_id,
@@ -874,11 +1197,54 @@ impl InvitationServiceApi {
                 super::invitation::enrollment_trust::EnrollmentVerifierError::RecordBinding.into(),
             );
         }
-        self.spawn_device_enrollment_initiator(registered.canonical_invitation());
-        Ok(())
+        let budget = match self.ceremony_runner.registered_enrollment_generation_window(registered).await {
+            Ok(budget) => budget,
+            Err(source) if crate::runtime::services::ceremony_tracker::registered_enrollment_window_already_owned(&source) => return Ok(DeviceEnrollmentInitiatorStart::AlreadyRunning),
+            Err(source) => return Err(AgentError::from(source)),
+        };
+        self.spawn_device_enrollment_initiator(registered.canonical_invitation(), budget)?;
+        Ok(DeviceEnrollmentInitiatorStart::Started)
+        }).await
     }
 
-    pub(crate) async fn invite_device_enrollment(
+    pub(crate) fn invite_device_enrollment(
+        &self,
+        reserved: super::invitation::ReservedInvitationIssuance,
+        receiver_id: AuthorityId,
+        subject_authority: AuthorityId,
+        initiator_device_id: DeviceId,
+        device_id: DeviceId,
+        nickname_suggestion: Option<String>,
+        ceremony_id: CeremonyId,
+        pending_epoch: u64,
+        key_package: Vec<u8>,
+        threshold_config: Vec<u8>,
+        public_key_package: Vec<u8>,
+        baseline_tree_ops: Vec<Vec<u8>>,
+        setup_binding: aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding,
+        expires_in_ms: Option<u64>,
+    ) -> impl std::future::Future<Output = AgentResult<Invitation>> + '_ {
+        // The original reserved issuance and secret payload move into this
+        // lexical future; no new task or weaker selector replaces their owner.
+        Box::pin(self.invite_device_enrollment_owned(
+            reserved,
+            receiver_id,
+            subject_authority,
+            initiator_device_id,
+            device_id,
+            nickname_suggestion,
+            ceremony_id,
+            pending_epoch,
+            key_package,
+            threshold_config,
+            public_key_package,
+            baseline_tree_ops,
+            setup_binding,
+            expires_in_ms,
+        ))
+    }
+
+    async fn invite_device_enrollment_owned(
         &self,
         reserved: super::invitation::ReservedInvitationIssuance,
         receiver_id: AuthorityId,
@@ -895,32 +1261,30 @@ impl InvitationServiceApi {
         setup_binding: aura_invitation::enrollment_setup::DeviceEnrollmentSetupBinding,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        let prepared = self
-            .handler
-            .prepare_reserved_invitation_with_context(
-                self.effects.clone(),
-                reserved,
-                receiver_id,
-                InvitationType::DeviceEnrollment {
-                    setup_binding: Some(setup_binding),
-                    subject_authority,
-                    invitee_authority: Some(receiver_id),
-                    initiator_device_id,
-                    device_id,
-                    nickname_suggestion,
-                    ceremony_id,
-                    pending_epoch,
-                    key_package,
-                    threshold_config,
-                    public_key_package,
-                    baseline_tree_ops,
-                },
-                None,
-                None,
-                None,
-                expires_in_ms,
-            )
-            .await?;
+        let prepared = Box::pin(self.handler.prepare_reserved_invitation_with_context(
+            self.effects.clone(),
+            reserved,
+            receiver_id,
+            InvitationType::DeviceEnrollment {
+                setup_binding: Some(setup_binding),
+                subject_authority,
+                invitee_authority: Some(receiver_id),
+                initiator_device_id,
+                device_id,
+                nickname_suggestion,
+                ceremony_id,
+                pending_epoch,
+                key_package,
+                threshold_config,
+                public_key_package,
+                baseline_tree_ops,
+            },
+            None,
+            None,
+            None,
+            expires_in_ms,
+        ))
+        .await?;
         let invitation = prepared.invitation;
         self.spawn_deferred_invitation_delivery(&invitation, prepared.deferred_network_effects);
 
@@ -935,6 +1299,7 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        let _operation = self.effects.admit_public_operation()?;
         Box::pin(self.accept_owned(invitation_id)).await
     }
 
@@ -961,7 +1326,11 @@ impl InvitationServiceApi {
                 // enrollment must not report success if the initiator never
                 // received and verified it.
                 self.handler
-                    .execute_device_enrollment_invitee(self.effects.clone(), &invitation)
+                    .execute_device_enrollment_invitee(
+                        self.effects.clone(),
+                        &invitation,
+                        &self.tasks.group("invitation_service.enrollment_receiver"),
+                    )
                     .await?;
             }
             if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
@@ -982,9 +1351,14 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the decline
     pub async fn decline(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        let _operation = self.effects.admit_public_operation()?;
         let result = self
             .handler
-            .decline_invitation(self.effects.clone(), invitation_id)
+            .decline_invitation(
+                self.effects.clone(),
+                invitation_id,
+                &self.tasks.group("invitation_service.enrollment_decline"),
+            )
             .await?;
 
         if let Some(invitation) = self
@@ -1018,6 +1392,17 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the cancellation
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
+        let _operation = self.effects.admit_public_operation()?;
+        let ingress = CancellationIngressWindowCapability::acquire(self.effects.clone()).await?;
+        ingress
+            .execute(|| self.cancel_selected_invitation(invitation_id))
+            .await
+    }
+
+    async fn cancel_selected_invitation(
+        &self,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<InvitationResult> {
         let record = self
             .handler
             .created_invitation_required(self.effects.clone(), invitation_id)
@@ -1027,24 +1412,9 @@ impl InvitationServiceApi {
             invitation.invitation_type,
             InvitationType::DeviceEnrollment { .. }
         ) {
-            let issued = super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load(
-                record.runtime_owner(),
-                &invitation,
-            )
+            let issued = super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load_required_sender(&record)
             .await?;
-            let prepared = self
-                .handler
-                .prepare_enrollment_cancellation(&issued, record)
-                .await?;
-            let cancelled = self
-                .ceremony_runner
-                .cancel_verified_enrollment(&issued)
-                .await
-                .map_err(AgentError::from)?;
-            return self
-                .handler
-                .publish_verified_enrollment_cancellation(self.effects.clone(), prepared, cancelled)
-                .await;
+            return self.cancel_owned_enrollment(record, issued).await;
         }
         let result = self.handler.cancel_required_invitation(record).await?;
         if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
@@ -1059,6 +1429,76 @@ impl InvitationServiceApi {
         }
         Ok(result)
     }
+    /// Cancel only the original protected issuer allocation selected by this ID.
+    pub(crate) async fn cancel_original_device_enrollment_ceremony(
+        &self,
+        ceremony: &aura_core::CeremonyId,
+    ) -> AgentResult<InvitationResult> {
+        let ingress = CancellationIngressWindowCapability::acquire(self.effects.clone()).await?;
+        ingress
+            .execute(|| async {
+                let (record, issued) = self
+                    .handler
+                    .created_enrollment_for_ceremony_required(self.effects.clone(), ceremony)
+                    .await?;
+                self.cancel_owned_enrollment(record, issued).await
+            })
+            .await
+    }
+
+    async fn cancel_owned_enrollment(
+        &self,
+        record: super::invitation::SenderInvitationRecordCapability,
+        issued: super::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+    ) -> AgentResult<InvitationResult> {
+        let preparation = self
+            .ceremony_runner
+            .original_cancellation_preparation(&issued, self.effects.as_ref())
+            .await
+            .map_err(AgentError::from)?;
+        let result = match preparation {
+            crate::runtime::services::enrollment_window::EnrollmentCancellationPreparationCapability::Active(window) => {
+                window.execute(self.effects.as_ref(), || Box::pin(async {
+                    let prepared = self.handler.prepare_enrollment_cancellation(&issued, record).await?;
+                    let cancelled = self.ceremony_runner.cancel_verified_enrollment(&issued)
+                        .await.map_err(AgentError::from)?;
+                    self.handler.publish_verified_enrollment_cancellation(
+                        self.effects.clone(), prepared, cancelled,
+                    ).await
+                })).await.map_err(|source| window.map_run_error("original cancellation preparation", source))
+            }
+            crate::runtime::services::enrollment_window::EnrollmentCancellationPreparationCapability::Decided(cancelled) => {
+                // This is a persisted negative decision, never a new live
+                // window or permission to admit/sign a protocol session.
+                let prepared = self.handler.prepare_enrollment_cancellation(&issued, record).await?;
+                self.handler.publish_verified_enrollment_cancellation(
+                    self.effects.clone(), prepared, cancelled,
+                ).await
+            }
+        }?;
+        // Required negative publication completes before notice admission. A
+        // retained original execution owner already sending the notice is the
+        // only admission fault treated as a normal duplicate disposition.
+        let notice = match self.prepare_cancelled_notice_from_issued(issued).await {
+            Ok(Some(capability)) => self.start_cancelled_enrollment_notice_recovery(capability),
+            Ok(None) => Ok(()),
+            Err(source) => Err(source),
+        };
+        if let Err(source) = notice {
+            let cause = match source {
+                AgentError::Aura(cause) => cause,
+                source => aura_core::AuraError::Internal {
+                    message: "required cancelled enrollment notice admission".into(),
+                    source: Some(Arc::new(source)),
+                },
+            };
+            self.tasks
+                .group("invitation_service.cancelled_notice_admission")
+                .record_subsidiary_failure("original-negative-notice", cause);
+        }
+        Ok(result)
+    }
+
     /// List pending invitations
     ///
     /// # Returns
@@ -1161,65 +1601,195 @@ impl InvitationServiceApi {
         code
     }
 
-    /// The authority's identity signing keys, from plain or encrypted
-    /// participant storage at the current epoch (shared with rendezvous).
-    async fn retrieve_identity_keys_from_effects(
-        effects: &AuraEffectSystem,
-        authority: &AuthorityId,
-    ) -> Option<(Vec<u8>, Vec<u8>)> {
-        crate::handlers::rendezvous_identity::retrieve_identity_keys(effects, authority)
-            .await
-            .map(|(signing, verifying)| (signing.to_vec(), verifying.to_vec()))
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "issued",
+        capability_type = IssuedEnrollmentManifestBinding,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn export_owned_enrollment_invitation(
+        &self,
+        invitation: &Invitation,
+        selected_identity: &crate::handlers::rendezvous_identity::RequiredIdentitySigningContext<
+            '_,
+        >,
+        issued: &IssuedEnrollmentManifestBinding,
+    ) -> AgentResult<String> {
+        self.export_enrollment_invitation_from_owner(
+            invitation,
+            selected_identity,
+            EnrollmentCodeExportOwner::Issued(issued),
+        )
+        .await
+    }
+
+    async fn export_enrollment_invitation_from_owner(
+        &self,
+        invitation: &Invitation,
+        selected_identity: &crate::handlers::rendezvous_identity::RequiredIdentitySigningContext<
+            '_,
+        >,
+        owner: EnrollmentCodeExportOwner<'_>,
+    ) -> AgentResult<String> {
+        use super::invitation::enrollment_trust::EnrollmentVerifierError;
+        use aura_invitation::enrollment_manifest::EnrollmentManifestError;
+        owner.require_effects(self.effects.as_ref())?;
+        selected_identity
+            .require_effects(self.effects.as_ref())
+            .map_err(AgentError::EnrollmentManifest)?;
+        let manifest = owner.manifest();
+        let InvitationType::DeviceEnrollment {
+            subject_authority,
+            invitee_authority,
+            initiator_device_id,
+            device_id,
+            ceremony_id,
+            pending_epoch,
+            setup_binding,
+            key_package,
+            public_key_package,
+            threshold_config,
+            baseline_tree_ops,
+            ..
+        } = &invitation.invitation_type
+        else {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        };
+        let baseline =
+            aura_core::util::serialization::to_vec(baseline_tree_ops).map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
+            })?;
+        if invitation.invitation_id != manifest.invitation
+            || invitation.sender_id != manifest.subject
+            || invitation.receiver_id != manifest.invitee_authority
+            || *subject_authority != manifest.subject
+            || *invitee_authority != Some(manifest.invitee_authority)
+            || *initiator_device_id != manifest.initiator_device
+            || *device_id != manifest.invitee_device
+            || *ceremony_id != manifest.ceremony
+            || *pending_epoch != manifest.pending_epoch
+            || setup_binding.as_ref() != Some(&manifest.setup)
+            || aura_core::hash::hash(key_package) != manifest.pending_share_digest
+            || aura_core::hash::hash(public_key_package)
+                != manifest.pending_public_key_package_digest
+            || aura_core::Hash32::from_bytes(threshold_config)
+                != manifest.pending_threshold_config_digest
+            || baseline_tree_ops.len() != manifest.baseline_count as usize
+            || aura_core::hash::hash(&baseline) != manifest.baseline_digest
+            || selected_identity.epoch() != manifest.final_epoch
+        {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        let (private, public) =
+            crate::handlers::rendezvous_identity::require_identity_keys(selected_identity)
+                .await
+                .map_err(AgentError::EnrollmentManifest)?;
+        if public.as_slice() != manifest.initiator_confirmation_verifier.as_slice() {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        let transport = self.sender_transport_metadata();
+        if transport.sender_device_id != Some(manifest.initiator_device) {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        let shareable = ShareableInvitation::from(invitation);
+        let signature = sign_ed25519_transcript(
+            self.effects.as_ref(),
+            &shareable.signing_transcript_with_transport(&transport),
+            &private,
+        )
+        .await
+        .map_err(|source| {
+            AgentError::EnrollmentManifest(EnrollmentManifestError::Transcript(source))
+        })?;
+        let code = shareable
+            .to_signed_code_with_transport(
+                ShareableInvitationSenderProof {
+                    scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
+                    public_key: public.to_vec(),
+                    signature,
+                    sender_device_id: transport.sender_device_id,
+                    key_epoch: Some(selected_identity.epoch()),
+                },
+                transport.clone(),
+            )
+            .map_err(|source| {
+                AgentError::EnrollmentManifest(EnrollmentManifestError::Runtime(Box::new(source)))
+            })?;
+        Ok(self.append_sender_hint(code, &transport))
     }
 
     pub(crate) async fn export_signed_invitation_with_transport(
         effects: &AuraEffectSystem,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
-        allow_ephemeral_fallback: bool,
-    ) -> Result<String, ShareableInvitationError> {
-        let shareable = ShareableInvitation::from(invitation);
-        let (private_key, public_key) =
-            match Self::retrieve_identity_keys_from_effects(effects, &shareable.sender_id).await {
-                Some(identity_keys) => identity_keys,
-                None if allow_ephemeral_fallback => effects
-                    .ed25519_generate_keypair()
-                    .await
-                    .map_err(|_| ShareableInvitationError::SerializationFailed)?,
-                None => return Err(ShareableInvitationError::MissingSenderProof),
-            };
-        let signature = sign_ed25519_transcript(
+        _legacy_allow_ephemeral_fallback: bool,
+    ) -> AgentResult<String> {
+        if matches!(
+            invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            return Err(invitation_shareable_failure(
+                ShareableInvitationError::MissingEnrollmentSetupBinding,
+            ));
+        }
+        let issued = super::invitation::issued_identity::select_original_identity(
             effects,
-            &shareable.signing_transcript_with_transport(transport),
-            &private_key,
+            &invitation.invitation_id,
         )
-        .await
-        .map_err(|_| ShareableInvitationError::SerializationFailed)?;
-        shareable.to_signed_code_with_transport(
-            ShareableInvitationSenderProof {
-                scheme: ShareableInvitation::SENDER_PROOF_SCHEME.to_string(),
-                public_key,
-                signature,
-                sender_device_id: transport.sender_device_id,
-                key_epoch: Some(1),
-            },
-            transport.clone(),
-        )
+        .await?;
+        let observed =
+            serde_json::to_vec(&ShareableInvitation::from(invitation)).map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Serialization {
+                    message: "encode observed invitation export binding".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        let original = serde_json::to_vec(&ShareableInvitation::from(issued.invitation()))
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Serialization {
+                    message: "encode original invitation export binding".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        if observed != original {
+            return Err(AgentError::invalid(
+                "invitation export differs from required original sender record",
+            ));
+        }
+        super::invitation::issued_identity::export_owned_invitation_code(issued, transport).await
     }
 
     async fn export_signed_invitation(
         &self,
         invitation: &Invitation,
         transport: &ShareableInvitationTransportMetadata,
-        allow_ephemeral_fallback: bool,
-    ) -> Result<String, ShareableInvitationError> {
-        Self::export_signed_invitation_with_transport(
-            self.effects.as_ref(),
-            invitation,
-            transport,
-            allow_ephemeral_fallback,
-        )
-        .await
+        _legacy_allow_ephemeral_fallback: bool,
+    ) -> AgentResult<String> {
+        let sender = self
+            .handler
+            .created_invitation_required(self.effects.clone(), &invitation.invitation_id)
+            .await?;
+        let issued = super::invitation::issued_identity::load_original_identity(sender).await?;
+        let observed =
+            serde_json::to_vec(&ShareableInvitation::from(invitation)).map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Serialization {
+                    message: "encode observed invitation export binding".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        let original = serde_json::to_vec(&ShareableInvitation::from(issued.invitation()))
+            .map_err(|source| {
+                AgentError::Aura(aura_core::AuraError::Serialization {
+                    message: "encode original invitation export binding".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+        if observed != original {
+            return Err(AgentError::invalid(
+                "invitation export differs from required original sender record",
+            ));
+        }
+        super::invitation::issued_identity::export_owned_invitation_code(issued, transport).await
     }
 
     /// Export an invitation as a shareable code string (compile-time safe)
@@ -1250,7 +1820,31 @@ impl InvitationServiceApi {
     pub async fn export_invitation_with_sender_hint(
         &self,
         invitation: &Invitation,
-    ) -> Result<String, ShareableInvitationError> {
+    ) -> AgentResult<String> {
+        if matches!(
+            invitation.invitation_type,
+            InvitationType::DeviceEnrollment { .. }
+        ) {
+            let retained = super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load(
+                self.effects.clone(),
+                invitation,
+            )
+            .await?;
+            let context =
+                crate::handlers::rendezvous_identity::require_retained_identity_signing_context(
+                    self.effects.as_ref(),
+                    &retained,
+                )
+                .await
+                .map_err(AgentError::EnrollmentManifest)?;
+            return self
+                .export_enrollment_invitation_from_owner(
+                    retained.canonical_invitation(),
+                    &context,
+                    EnrollmentCodeExportOwner::Retained(&retained),
+                )
+                .await;
+        }
         let transport = self.sender_transport_metadata();
         let code = self
             .export_signed_invitation(
@@ -1279,6 +1873,7 @@ impl InvitationServiceApi {
     /// # Errors
     /// Returns an error if the invitation is not found
     pub async fn export_code(&self, invitation_id: &InvitationId) -> AgentResult<String> {
+        let _operation = self.effects.admit_public_operation()?;
         let invitation = self
             .handler
             .get_invitation_with_storage(&self.effects, invitation_id)
@@ -1290,9 +1885,7 @@ impl InvitationServiceApi {
             invitation_id = %invitation_id,
             "export invitation sender websocket hint"
         );
-        self.export_invitation_with_sender_hint(&invitation)
-            .await
-            .map_err(|error| AgentError::invalid(error.to_string()))
+        self.export_invitation_with_sender_hint(&invitation).await
     }
 
     /// Import an invitation from a shareable code string
@@ -1318,10 +1911,39 @@ impl InvitationServiceApi {
     /// details by `invitation_id` without requiring the original `Sent` fact to
     /// be present in the local journal.
     pub async fn import_and_cache(&self, code: &str) -> AgentResult<Invitation> {
+        let _operation = self.effects.admit_public_operation()?;
         self.handler
             .import_invitation_code(&self.effects, code)
             .await
     }
+}
+
+fn invitation_shareable_failure(source: ShareableInvitationError) -> AgentError {
+    let cause = Arc::new(source);
+    let error = match cause.as_ref() {
+        ShareableInvitationError::SerializationFailed => aura_core::AuraError::Serialization {
+            message: "serialize invitation transfer".into(),
+            source: Some(cause),
+        },
+        ShareableInvitationError::InvalidSenderProof
+        | ShareableInvitationError::VerificationFailed => aura_core::AuraError::Crypto {
+            message: "verify invitation transfer".into(),
+            source: Some(cause),
+        },
+        ShareableInvitationError::InvalidFormat
+        | ShareableInvitationError::UnsupportedVersion(_)
+        | ShareableInvitationError::SizeLimitExceeded(_)
+        | ShareableInvitationError::DecodingFailed
+        | ShareableInvitationError::ParsingFailed
+        | ShareableInvitationError::MissingSenderProof
+        | ShareableInvitationError::MissingChannelContext
+        | ShareableInvitationError::MissingEnrollmentSetupBinding
+        | ShareableInvitationError::Expired => aura_core::AuraError::Invalid {
+            message: "validate invitation transfer".into(),
+            source: Some(cause),
+        },
+    };
+    AgentError::from(error)
 }
 
 /// Builds the invitation sender hint: a comma-separated list with one
@@ -1346,6 +1968,40 @@ fn sender_hint_from_addrs(tcp: Option<&str>, websocket: Option<&str>) -> Option<
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+
+    #[test]
+    fn unpolled_owned_manifest_export_caller_frame_is_bounded() {
+        fn frame_bytes<A, F: std::future::Future>(_: impl FnOnce(A) -> F) -> usize {
+            std::mem::size_of::<F>()
+        }
+        // Only infer the exact production future type. No fake owner or setup
+        // is constructed, no function is invoked and no future is polled.
+        let bytes = frame_bytes(
+            |(service, reserved, setup, identity, final_inventory, manifest): (
+                &'static InvitationServiceApi,
+                &'static super::super::invitation::ReservedInvitationIssuance,
+                &'static aura_app::ui::workflows::ceremonies::UserTransferredEnrollmentSetup,
+                &'static crate::handlers::rendezvous_identity::RequiredIdentitySigningContext<
+                    'static,
+                >,
+                &'static crate::runtime::effects::EnrollmentFinalVerifierInventoryCapability<
+                    'static,
+                    'static,
+                >,
+                aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+            )| {
+                service.export_owned_enrollment_manifest(
+                    reserved,
+                    setup,
+                    identity,
+                    final_inventory,
+                    manifest,
+                )
+            },
+        );
+        assert!(bytes <= 16 * 1024,
+            "owned manifest export caller frame is {bytes} bytes; bounded lexical delegation is required");
+    }
 
     #[test]
     fn sender_hint_lists_every_transport_type() {
@@ -1385,6 +2041,65 @@ mod tests {
             .unwrap_or_else(|error| panic!("large-stack test thread should spawn: {error}"))
             .join()
             .unwrap_or_else(|error| panic!("large-stack test thread should complete: {error:?}"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn retained_invitation_service_clone_rejects_import_after_admission_closes(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let authority = create_test_authority(239);
+        let profile = tempfile::tempdir()?;
+        let mut config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
+        config.storage.base_path = profile.path().join("original-profile");
+        let effects = Arc::new(AuraEffectSystem::simulation_for_test_for_authority(
+            &config,
+            authority.authority_id(),
+        )?);
+        let time: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let service = InvitationServiceApi::new_with_runner(
+            effects.clone(),
+            authority,
+            CeremonyRunner::new(CeremonyTracker::new(time)),
+            Arc::new(TaskSupervisor::new()),
+        )?;
+        let retained = service.clone();
+        assert_eq!(
+            effects.public_operation_activity().begin_shutdown(),
+            crate::runtime::system::RuntimeActivityState::Running
+        );
+        let error = match retained.import_and_cache("unparsed-untrusted-input").await {
+            Err(error) => error,
+            Ok(_) => panic!("closed original runtime admitted a retained service clone"),
+        };
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut found = false;
+        while let Some(cause) = source {
+            if let Some(native) =
+                cause.downcast_ref::<crate::runtime::system::RuntimePublicOperationError>()
+            {
+                assert!(matches!(
+                    native,
+                    crate::runtime::system::RuntimePublicOperationError::NotAccepting {
+                        state: crate::runtime::system::RuntimeActivityState::Stopping
+                    }
+                ));
+                found = true;
+                break;
+            }
+            source = cause.source();
+        }
+        assert!(
+            found,
+            "original typed admission failure must remain in source chain"
+        );
+        effects
+            .public_operation_activity()
+            .wait_for_operations()
+            .await;
+        Ok(())
     }
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
@@ -1707,6 +2422,195 @@ mod required_enrollment_task_tests {
     use crate::runtime::services::CeremonyTracker;
     use std::error::Error;
 
+    async fn cancellation_fixture(
+        label: &str,
+    ) -> (
+        Arc<crate::AuraAgent>,
+        aura_testkit::time::ManualPhysicalClock,
+        super::super::invitation::enrollment_trust::RetainedEnrollmentVmControl,
+        aura_app::runtime_bridge::DeviceEnrollmentStart,
+    ) {
+        let clock = aura_testkit::time::ManualPhysicalClock::new(5_000);
+        let (issuer, _invitee, invitation, start, _accept, _witness) =
+            super::super::invitation::tests::actual_pinned_device_enrollment_fixture_with_clock(
+                label,
+                Arc::new(clock.clone()),
+            )
+            .await;
+        let service = issuer
+            .invitations()
+            .expect("actual original issuer service");
+        let record = service
+            .handler
+            .created_invitation_required(
+                issuer.runtime().effects().clone(),
+                &invitation.invitation_id,
+            )
+            .await
+            .expect("required exact sender custody");
+        let issued = super::super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load_required_sender(
+            &record,
+        ).await.expect("original independently bound issuer control");
+        (issuer, clock, issued, start)
+    }
+
+    #[tokio::test]
+    async fn cancellation_preparation_observes_original_owner_without_execution_reacquisition() {
+        use crate::runtime::services::enrollment_window::EnrollmentCancellationPreparationCapability;
+        let (issuer, _clock, issued, start) =
+            Box::pin(cancellation_fixture("cancellation-observation-only")).await;
+        let runner = issuer.ceremony_runner().await;
+        let tracker = issuer.ceremony_tracker().await;
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        // Keep the actual registered execution permit occupied synchronously if
+        // its genuine initiator has not acquired it yet. No VM is admitted by
+        // this test-only lease, and availability cannot race an awaited lookup.
+        let _execution = before
+            .enrollment_window_lease
+            .clone()
+            .try_acquire_owned()
+            .ok();
+        assert_eq!(before.enrollment_window_lease.available_permits(), 0);
+        let preparation = runner
+            .original_cancellation_preparation(&issued, issuer.runtime().effects().as_ref())
+            .await
+            .expect("observation sibling does not reacquire execution permit");
+        let EnrollmentCancellationPreparationCapability::Active(window) = preparation else {
+            panic!("original active fixture must retain preparation eligibility");
+        };
+        window
+            .execute(issuer.runtime().effects().as_ref(), || async { Ok(()) })
+            .await
+            .expect("required original checkpoint is acknowledged");
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("same allocation");
+        assert_eq!(
+            before.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms()
+        );
+        assert_eq!(after.enrollment_window_lease.available_permits(), 0);
+        assert!(after.terminal_outcome.is_none());
+    }
+
+    #[tokio::test]
+    async fn cancellation_preparation_pending_operation_expires_at_original_deadline() {
+        use crate::runtime::services::enrollment_window::EnrollmentCancellationPreparationCapability;
+        let (issuer, clock, issued, start) =
+            Box::pin(cancellation_fixture("cancellation-original-deadline")).await;
+        let tracker = issuer.ceremony_tracker().await;
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        let deadline = before
+            .timeout_budget
+            .deadline_at_ms()
+            .min(issued.manifest().expires_at_ms);
+        clock.set_time(deadline - 1);
+        let preparation = issuer
+            .ceremony_runner()
+            .await
+            .original_cancellation_preparation(&issued, issuer.runtime().effects().as_ref())
+            .await
+            .expect("one millisecond of original admission remains");
+        let EnrollmentCancellationPreparationCapability::Active(window) = preparation else {
+            panic!("active original window expected");
+        };
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let effects = issuer.runtime().effects();
+        let pending = window.execute(effects.as_ref(), || async move {
+            entered_tx
+                .send(())
+                .expect("operation observer remains live");
+            std::future::pending::<AgentResult<()>>().await
+        });
+        tokio::pin!(pending);
+        tokio::select! {
+            outcome = &mut pending => panic!("original operation must first enter: {outcome:?}"),
+            entered = entered_rx => entered.expect("required operation actually entered"),
+        }
+        clock.set_time(deadline);
+        let error = pending
+            .await
+            .expect_err("original deadline cancels pending preparation");
+        assert!(matches!(error, aura_core::TimeoutRunError::Timeout(
+            aura_core::TimeoutBudgetError::DeadlineExceeded { deadline_at_ms, .. }
+        ) if deadline_at_ms == deadline));
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration remains");
+        assert_eq!(
+            after.timeout_budget.deadline_at_ms(),
+            before.timeout_budget.deadline_at_ms()
+        );
+        assert_ne!(
+            after.terminal_outcome,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            )),
+            "an expired pending preparation never publishes a cancelled decision"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_preparation_checkpoint_failure_retains_storage_cause_before_operation() {
+        use crate::runtime::services::enrollment_window::EnrollmentCancellationPreparationCapability;
+        let (issuer, _clock, issued, start) =
+            Box::pin(cancellation_fixture("cancellation-required-checkpoint")).await;
+        let tracker = issuer.ceremony_tracker().await;
+        let preparation = issuer
+            .ceremony_runner()
+            .await
+            .original_cancellation_preparation(&issued, issuer.runtime().effects().as_ref())
+            .await
+            .expect("actual original observation capability");
+        let EnrollmentCancellationPreparationCapability::Active(window) = preparation else {
+            panic!("active original window expected");
+        };
+        tracker
+            .fail_next_cancellation_checkpoint_for_test(aura_core::AuraError::Storage {
+                message: "injected required cancellation checkpoint write".into(),
+                source: Some(Arc::new(aura_core::effects::StorageError::WriteFailed(
+                    "controlled original owner checkpoint failure".into(),
+                ))),
+            })
+            .await;
+        let entered = std::cell::Cell::new(false);
+        let error = window
+            .execute(issuer.runtime().effects().as_ref(), || async {
+                entered.set(true);
+                Ok(())
+            })
+            .await
+            .expect_err("required checkpoint failure blocks preparation");
+        assert!(!entered.get());
+        let mapped = window.map_run_error("required cancellation checkpoint", error);
+        let mut current: &(dyn Error + 'static) = &mapped;
+        loop {
+            if matches!(
+                current.downcast_ref::<aura_core::effects::StorageError>(),
+                Some(aura_core::effects::StorageError::WriteFailed(_))
+            ) {
+                break;
+            }
+            current = current
+                .source()
+                .expect("original storage cause survives each boundary");
+        }
+        assert!(tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration")
+            .terminal_outcome
+            .is_none());
+    }
+
     #[tokio::test]
     async fn required_window_rejection_retains_execution_and_settlement_sources() {
         let config = crate::core::AgentConfig::default();
@@ -1718,11 +2622,21 @@ mod required_enrollment_task_tests {
             .expect("distinct simulation effects"),
         );
         let time: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
-        let runner = CeremonyRunner::new(CeremonyTracker::new_with_storage(time, effects));
+        let tracker = CeremonyTracker::new_with_storage(time, effects.clone());
+        let runner = CeremonyRunner::new(tracker.clone());
         let missing = CeremonyId::new("required-window-unregistered".to_owned());
-        let rejection = match runner.registered_enrollment_window(&missing).await {
+        let rejection = match effects
+            .resume_owned_enrollment_registration(
+                &tracker,
+                effects.runtime_authority_id(),
+                0,
+                &missing,
+                aura_core::Hash32::new([0; 32]),
+            )
+            .await
+        {
             Err(error) => error,
-            Ok(_) => panic!("unregistered ceremony must not mint a window"),
+            Ok(_) => panic!("unregistered ceremony must not recover execution authority"),
         };
         let execution = AgentError::from(rejection);
         let supervisor = TaskSupervisor::new();
@@ -1756,6 +2670,463 @@ mod required_enrollment_task_tests {
             assert!(
                 found,
                 "standard supervision source chain retains actual admission failure"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn public_live_cancellation_retry_preserves_primary_and_original_window() {
+        let (issuer, _clock, issued, start) = Box::pin(cancellation_fixture(
+            "public-live-cancellation-original-notice",
+        ))
+        .await;
+        let service = issuer.invitations().expect("actual issuer service");
+        let tracker = issuer.ceremony_tracker().await;
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        let first = Box::pin(service.cancel(&issued.manifest().invitation)).await;
+        let retry = Box::pin(service.cancel(&issued.manifest().invitation)).await;
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("retained terminal registration");
+        // Drain the genuine original/finite notice owners before assertions,
+        // including when either public request fails unexpectedly.
+        let drained = issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        first.expect("live required negative publication succeeds");
+        retry.expect("negative publication retry remains primary success");
+        assert_eq!(
+            before.timeout_budget.started_at_ms(),
+            after.timeout_budget.started_at_ms()
+        );
+        assert_eq!(
+            before.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms()
+        );
+        assert_eq!(
+            after.terminal_outcome,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ),)
+        );
+        assert!(
+            issuer.runtime().tasks().active_tasks().is_empty(),
+            "actual notice owners drain"
+        );
+        if let Err(source) = drained {
+            assert!(
+                issuer.runtime().tasks().terminal_failure().is_some(),
+                "required subsidiary failure remains in health: {source}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_notice_owner_rejects_active_and_preserves_original_interval() {
+        let (issuer, _clock, issued, start) =
+            Box::pin(cancellation_fixture("cancelled-notice-original-owner")).await;
+        let runner = issuer.ceremony_runner().await;
+        let tracker = issuer.ceremony_tracker().await;
+        let effects = issuer.runtime().effects();
+        assert!(runner
+            .prepare_cancelled_notice(&issued, effects.as_ref())
+            .await
+            .is_err());
+        let before = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registered allocation");
+        runner
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("actual durable Cancelled CAS");
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("ordinary cancellation drops actual original VM owner");
+        let capability = runner
+            .prepare_cancelled_notice(&issued, effects.as_ref())
+            .await
+            .expect("original negative decision mints finite notice custody");
+        assert!(
+            runner
+                .prepare_cancelled_notice(&issued, effects.as_ref())
+                .await
+                .is_err(),
+            "same original semaphore admits only one notice sender"
+        );
+        let admission = runner
+            .cancelled_notice_window(capability, effects.as_ref())
+            .await
+            .expect("required original eligibility read");
+        let crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::Eligible(
+            window,
+        ) = admission
+        else {
+            panic!("unexpired original signed validity must permit finite notice");
+        };
+        window
+            .execute(effects.as_ref(), || async { Ok(()) })
+            .await
+            .expect("negative observation requires actual checkpoint ACK");
+        let after = tracker
+            .get(&start.ceremony_id)
+            .await
+            .expect("retained negative allocation");
+        assert_eq!(
+            before.timeout_budget.started_at_ms(),
+            after.timeout_budget.started_at_ms()
+        );
+        assert_eq!(
+            before.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms()
+        );
+        assert_eq!(
+            after.terminal_outcome,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ))
+        );
+        assert!(
+            runner
+                .enrollment_window_budget(&start.ceremony_id)
+                .await
+                .is_err(),
+            "negative notice custody never reopens ordinary enrollment admission"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_notice_owner_expiry_preserves_cancelled_without_new_window() {
+        let (issuer, clock, issued, start) =
+            Box::pin(cancellation_fixture("cancelled-notice-original-expiry")).await;
+        let runner = issuer.ceremony_runner().await;
+        let effects = issuer.runtime().effects();
+        runner
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("genuine negative first decision");
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("drop actual VM before negative restart observation");
+        let state = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("original cancelled allocation");
+        let deadline = state
+            .timeout_budget
+            .deadline_at_ms()
+            .min(issued.manifest().expires_at_ms);
+        let capability = runner
+            .prepare_cancelled_notice(&issued, effects.as_ref())
+            .await
+            .expect("only original cancelled authority");
+        clock.set_time(deadline);
+        let error = match runner.cancelled_notice_window(capability, effects.as_ref()).await {
+            Ok(crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::EligibilityEnded { cause }) => cause,
+            Ok(_) => panic!("expiry must not allocate negative sending eligibility"),
+            Err(cause) => panic!("known expiry is no-send, not required service fault: {cause}"),
+        };
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut deadline_source = false;
+        while let Some(source) = cause {
+            deadline_source |= matches!(
+                source
+                    .downcast_ref::<aura_invitation::enrollment_manifest::EnrollmentManifestError>(
+                    ),
+                Some(aura_invitation::enrollment_manifest::EnrollmentManifestError::Expired)
+            );
+            deadline_source |= matches!(
+                source.downcast_ref::<aura_core::TimeoutBudgetError>(),
+                Some(aura_core::TimeoutBudgetError::DeadlineExceeded { .. })
+            );
+            cause = source.source();
+        }
+        assert!(
+            deadline_source,
+            "actual original deadline remains in source chain"
+        );
+        let after = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("original negative readout survives expiry");
+        assert_eq!(state.terminal_outcome, after.terminal_outcome);
+        assert_eq!(
+            state.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms()
+        );
+    }
+    #[tokio::test]
+    async fn cancelled_notice_owner_requires_original_checkpoint_and_retains_storage_failure() {
+        use aura_core::effects::{
+            SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+        };
+        let (issuer, _clock, issued, start) =
+            Box::pin(cancellation_fixture("cancelled-notice-required-checkpoint")).await;
+        let runner = issuer.ceremony_runner().await;
+        let tracker = issuer.ceremony_tracker().await;
+        let effects = issuer.runtime().effects();
+        runner
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("actual Cancelled first decision");
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("actual original execution owner drained");
+        let capability = runner
+            .prepare_cancelled_notice(&issued, effects.as_ref())
+            .await
+            .expect("exact original negative allocation");
+        tracker
+            .fail_next_cancellation_checkpoint_for_test(aura_core::AuraError::Storage {
+                message: "controlled negative-owner checkpoint failure".into(),
+                source: Some(Arc::new(aura_core::effects::StorageError::WriteFailed(
+                    "controlled required secure checkpoint write".into(),
+                ))),
+            })
+            .await;
+        let error = match runner
+            .cancelled_notice_window(capability, effects.as_ref())
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => {
+                panic!("required checkpoint failure cannot mint sending window or expected expiry")
+            }
+        };
+        assert!(
+            !crate::runtime::services::enrollment_window::cancelled_notice_eligibility_ended(
+                &error
+            )
+        );
+        let mut next: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut storage = false;
+        while let Some(source) = next {
+            storage |= matches!(
+                source.downcast_ref::<aura_core::effects::StorageError>(),
+                Some(aura_core::effects::StorageError::WriteFailed(_))
+            );
+            next = source.source();
+        }
+        assert!(storage, "required native storage cause remains traversable");
+        effects
+            .secure_delete(
+                &SecureStorageLocation::new("enrollment_clock_v1", start.ceremony_id.to_string()),
+                &[SecureStorageCapability::Delete],
+            )
+            .await
+            .expect("inject actual missing once-live checkpoint");
+        assert!(
+            runner
+                .prepare_cancelled_notice(&issued, effects.as_ref())
+                .await
+                .is_err(),
+            "once-live negative recovery never reconstructs missing original duration"
+        );
+        assert_eq!(
+            runner
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("required first decision"),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_notice_owner_rejects_actual_foreign_runtime() {
+        let (issuer, invitee, invitation, start, _, _) = Box::pin(
+            super::super::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "cancelled-notice-foreign-runtime",
+            ),
+        )
+        .await;
+        let service = issuer.invitations().expect("actual issuer service");
+        let record = service
+            .handler
+            .created_invitation_required(issuer.runtime().effects(), &invitation.invitation_id)
+            .await
+            .expect("actual required issuer custody");
+        let issued = super::super::invitation::enrollment_trust::RetainedEnrollmentVmControl::load_required_sender(
+            &record,
+        ).await.expect("independent original manifest binding");
+        let runner = issuer.ceremony_runner().await;
+        runner
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("actual original negative CAS");
+        let error = match runner
+            .prepare_cancelled_notice(&issued, invitee.runtime().effects().as_ref())
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("foreign physical runtime cannot receive original negative owner"),
+        };
+        let mut next: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut owner = false;
+        while let Some(source) = next {
+            owner |= matches!(source.downcast_ref::<super::super::invitation::enrollment_trust::EnrollmentVerifierError>(),
+                Some(super::super::invitation::enrollment_trust::EnrollmentVerifierError::RuntimeOwner));
+            next = source.source();
+        }
+        assert!(owner, "actual runtime binding failure is typed");
+        assert_eq!(
+            runner
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("retained negative decision"),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ))
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod enrollment_code_owner_tests {
+    use super::*;
+
+    #[test]
+    fn actual_enrollment_code_uses_original_pinned_signer_and_generic_fallback_refuses_it() {
+        crate::handlers::invitation::tests::run_async_test_on_large_stack(async {
+            let (issuer, invitee, invitation, start, _, _) = Box::pin(
+                crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                    "required-code-owner",
+                ),
+            )
+            .await;
+            let codes = start.manifest_transfer.as_ref().unwrap();
+            let selected =
+                aura_invitation::enrollment_manifest::decode_initiator_verifier_transfer(
+                    &codes.initiator_verifier_code,
+                )
+                .unwrap();
+            let manifest =
+                aura_invitation::enrollment_manifest::SignedEnrollmentTrustManifest::decode(
+                    &codes.manifest_code,
+                )
+                .unwrap();
+            let (shareable, proof, transport) =
+                ShareableInvitation::from_code_with_proof_and_transport(&start.enrollment_code)
+                    .unwrap();
+            let proof = proof.unwrap();
+            assert_eq!(
+                proof.public_key.as_slice(),
+                selected.verifying_key.as_slice()
+            );
+            assert_eq!(proof.key_epoch, Some(manifest.manifest.final_epoch));
+            assert_eq!(proof.sender_device_id, Some(selected.initiator_device));
+            assert!(aura_signature::verify_ed25519_transcript(
+                invitee.runtime().effects().as_ref(),
+                &shareable.signing_transcript_with_transport(&transport),
+                &proof.signature,
+                &selected.verifying_key
+            )
+            .await
+            .unwrap());
+            let rejected = InvitationServiceApi::export_signed_invitation_with_transport(
+                issuer.runtime().effects().as_ref(),
+                &invitation,
+                &transport,
+                true,
+            )
+            .await
+            .expect_err("testing fallback cannot sign an enrollment without its retained owner");
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&rejected);
+            let mut missing = false;
+            while let Some(cause) = source {
+                missing |= matches!(
+                    cause.downcast_ref::<ShareableInvitationError>(),
+                    Some(ShareableInvitationError::MissingEnrollmentSetupBinding)
+                );
+                source = cause.source();
+            }
+            assert!(
+                missing,
+                "actual enrollment owner rejection retains typed cause"
+            );
+            let exported = issuer
+                .invitations()
+                .unwrap()
+                .export_code(&invitation.invitation_id)
+                .await
+                .unwrap();
+            let (reexported, proof, transport) =
+                ShareableInvitation::from_code_with_proof_and_transport(&exported).unwrap();
+            let proof = proof.unwrap();
+            assert_eq!(
+                proof.public_key.as_slice(),
+                selected.verifying_key.as_slice()
+            );
+            assert!(aura_signature::verify_ed25519_transcript(
+                invitee.runtime().effects().as_ref(),
+                &reexported.signing_transcript_with_transport(&transport),
+                &proof.signature,
+                &selected.verifying_key
+            )
+            .await
+            .unwrap());
+        });
+    }
+
+    #[test]
+    fn general_invitation_failure_keeps_its_domain_category_and_actual_enum_source() {
+        enum Expected {
+            Serialization,
+            Crypto,
+            Invalid,
+        }
+        for (original, expected) in [
+            (
+                ShareableInvitationError::SerializationFailed,
+                Expected::Serialization,
+            ),
+            (
+                ShareableInvitationError::VerificationFailed,
+                Expected::Crypto,
+            ),
+            (
+                ShareableInvitationError::MissingChannelContext,
+                Expected::Invalid,
+            ),
+        ] {
+            let retained = original.clone();
+            let failure = invitation_shareable_failure(original);
+            let AgentError::Aura(error) = failure else {
+                panic!("general transfer error cannot become an enrollment admission failure")
+            };
+            assert!(matches!(
+                (&error, expected),
+                (
+                    aura_core::AuraError::Serialization { .. },
+                    Expected::Serialization
+                ) | (aura_core::AuraError::Crypto { .. }, Expected::Crypto)
+                    | (aura_core::AuraError::Invalid { .. }, Expected::Invalid)
+            ));
+            assert_eq!(
+                std::error::Error::source(&error)
+                    .unwrap()
+                    .downcast_ref::<ShareableInvitationError>()
+                    .unwrap(),
+                &retained
             );
         }
     }

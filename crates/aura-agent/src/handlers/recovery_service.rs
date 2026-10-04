@@ -328,6 +328,7 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
+        let _operation = self.effects.admit_public_operation()?;
         let request = self
             .handler
             .initiate(
@@ -363,6 +364,7 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
+        let _operation = self.effects.admit_public_operation()?;
         let request = self
             .handler
             .initiate(
@@ -398,6 +400,7 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
+        let _operation = self.effects.admit_public_operation()?;
         let request = self
             .handler
             .initiate(
@@ -435,6 +438,7 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
+        let _operation = self.effects.admit_public_operation()?;
         let request = self
             .handler
             .initiate(
@@ -462,6 +466,7 @@ impl RecoveryServiceApi {
     /// # Returns
     /// The updated recovery state
     pub async fn submit_approval(&self, approval: GuardianApproval) -> AgentResult<RecoveryState> {
+        let _operation = self.effects.admit_public_operation()?;
         let approval = self.verified_recovery_approval(approval).await?;
         let state = self
             .handler
@@ -651,6 +656,7 @@ impl RecoveryServiceApi {
     /// # Returns
     /// The recovery result
     pub async fn complete(&self, recovery_id: &RecoveryId) -> AgentResult<RecoveryResult> {
+        let _operation = self.effects.admit_public_operation()?;
         let result = self.handler.complete(&self.effects, recovery_id).await?;
         let ceremony_id = CeremonyId::new(recovery_id.to_string());
         let committed_at = self.effects.physical_time().await.ok();
@@ -680,6 +686,7 @@ impl RecoveryServiceApi {
         recovery_id: &RecoveryId,
         reason: String,
     ) -> AgentResult<RecoveryResult> {
+        let _operation = self.effects.admit_public_operation()?;
         let result = self
             .handler
             .cancel(&self.effects, recovery_id, reason.clone())
@@ -948,6 +955,7 @@ impl RecoveryServiceApi {
         threshold_k: u16,
         guardian_ids: Vec<AuthorityId>,
     ) -> AgentResult<(u64, Vec<Vec<u8>>, Vec<u8>)> {
+        let _operation = self.effects.admit_public_operation()?;
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
 
@@ -1002,6 +1010,7 @@ impl RecoveryServiceApi {
     /// Call this after all guardians have accepted and stored their key shares.
     /// This makes the new epoch authoritative.
     pub async fn commit_guardian_keys(&self, new_epoch: u64) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         use crate::core::{default_context_id_for_authority, AgentError};
         use aura_core::effects::ThresholdSigningEffects;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
@@ -1043,6 +1052,7 @@ impl RecoveryServiceApi {
     /// Call this when the ceremony fails (guardian declined, user cancelled, or timeout).
     /// This discards the new epoch's keys and keeps the previous configuration active.
     pub async fn rollback_guardian_keys(&self, failed_epoch: u64) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
 
@@ -1102,6 +1112,7 @@ impl RecoveryServiceApi {
         operation: aura_recovery::GuardianRotationOp,
         key_package: &[u8],
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         use crate::core::AgentError;
 
         use aura_core::ContextId;
@@ -1184,6 +1195,7 @@ impl RecoveryServiceApi {
         guardians: Vec<AuthorityId>,
         key_packages: Vec<Vec<u8>>,
     ) -> AgentResult<Vec<VerifiedIngress<CeremonyResponseMsg>>> {
+        let _operation = self.effects.admit_public_operation()?;
         if guardians.len() != key_packages.len() {
             return Err(AgentError::invalid(
                 "guardian list and key package length mismatch",
@@ -1509,6 +1521,7 @@ impl RecoveryServiceApi {
         response: CeremonyResponse,
         guardians: &[AuthorityId],
     ) -> AgentResult<GuardianCeremonyGuardianOutcome> {
+        let _operation = self.effects.admit_public_operation()?;
         let authority_id = self.handler.authority_context().authority_id();
         let mut sorted_guardians = guardians.to_vec();
         sorted_guardians.sort();
@@ -1968,9 +1981,12 @@ impl RecoveryServiceApi {
         guardians: Vec<AuthorityId>,
         threshold: u16,
     ) -> AgentResult<(String, SetupCompletion)> {
+        let operation = self.effects.admit_public_operation()?;
         let setup_id = self.build_guardian_setup_id(account_id).await?;
         let completion = self
-            .execute_guardian_setup_initiator_with_id(&setup_id, account_id, guardians, threshold)
+            .execute_guardian_setup_initiator_with_admission(
+                &operation, &setup_id, account_id, guardians, threshold,
+            )
             .await?;
         Ok((setup_id, completion))
     }
@@ -1983,6 +1999,22 @@ impl RecoveryServiceApi {
         guardians: Vec<AuthorityId>,
         threshold: u16,
     ) -> AgentResult<SetupCompletion> {
+        let operation = self.effects.admit_public_operation()?;
+        self.execute_guardian_setup_initiator_with_admission(
+            &operation, setup_id, account_id, guardians, threshold,
+        )
+        .await
+    }
+
+    async fn execute_guardian_setup_initiator_with_admission(
+        &self,
+        operation: &crate::runtime::system::RuntimeOperationLease,
+        setup_id: &str,
+        account_id: AuthorityId,
+        guardians: Vec<AuthorityId>,
+        threshold: u16,
+    ) -> AgentResult<SetupCompletion> {
+        operation.require_gate(&self.effects.public_operation_activity())?;
         validate_guardian_setup_inputs(&guardians, threshold)?;
 
         let authority_id = self.handler.authority_context().authority_id();
@@ -2132,6 +2164,7 @@ impl RecoveryServiceApi {
         invitation: GuardianInvitation,
         accepted: bool,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         validate_guardian_setup_inputs(&invitation.target_guardians, invitation.threshold)?;
 
         let authority_id = self.handler.authority_context().authority_id();
@@ -2354,6 +2387,7 @@ impl RecoveryServiceApi {
         threshold: u32,
         new_threshold: Option<u16>,
     ) -> AgentResult<ChangeCompletion> {
+        let _operation = self.effects.admit_public_operation()?;
         if guardians.len() != 3 {
             return Err(AgentError::invalid(
                 "Guardian membership change choreography requires exactly three guardians"
@@ -2810,6 +2844,7 @@ impl RecoveryServiceApi {
         rationale: String,
         guardian_private_key: &[u8],
     ) -> AgentResult<GuardianVote> {
+        let _operation = self.effects.admit_public_operation()?;
         let authority_id = self.handler.authority_context().authority_id();
 
         let active_role_name = match guardian_index {

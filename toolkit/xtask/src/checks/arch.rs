@@ -175,7 +175,7 @@ impl ArchAudit {
 }
 
 fn check_layers(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
-    let aura_core_impls = rg_non_comment_lines(&vec![
+    let aura_core_impls = rg_non_comment_lines(&[
         "-n".into(),
         r"\bimpl\b.*Effects".into(),
         repo_relative(repo_root.join("crates/aura-core/src")),
@@ -319,14 +319,12 @@ fn check_effects(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         "arch(effects): ad hoc VM bridge queue/state storage outside approved implementations",
         filtered_test_module_hits(
             repo_root,
-            rg_non_comment_lines(&vec![
-                "-n".into(),
+            rg_non_comment_lines(&["-n".into(),
                 "Mutex<.*VmBridgePendingSend|Mutex<.*VmBridgeBlockedEdge|Mutex<.*VmBridgeSchedulerSignals|VecDeque<.*VmBridgePendingSend|VecDeque<.*VmBridgeBlockedEdge|VecDeque<.*VmBridgeSchedulerSignals".into(),
                 repo_relative(repo_root.join("crates/aura-agent/src")),
                 repo_relative(repo_root.join("crates/aura-testkit/src")),
                 "-g".into(),
-                "*.rs".into(),
-            ])?,
+                "*.rs".into()])?,
         )?
         .into_iter()
         .filter(|hit| {
@@ -339,13 +337,11 @@ fn check_effects(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         "arch(effects): threaded/envelope runtime selection outside hardening/engine paths",
         filtered_test_module_hits(
             repo_root,
-            rg_non_comment_lines(&vec![
-                "-n".into(),
+            rg_non_comment_lines(&["-n".into(),
                 "ThreadedVM::with_workers|AuraVmRuntimeMode::ThreadedReplayDeterministic|AuraVmRuntimeMode::ThreadedEnvelopeBounded".into(),
                 repo_relative(repo_root.join("crates/aura-agent/src")),
                 "-g".into(),
-                "*.rs".into(),
-            ])?,
+                "*.rs".into()])?,
         )?
         .into_iter()
         .filter(|hit| {
@@ -413,7 +409,7 @@ fn check_effects(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(effects): synchronous guard/effect bridge remains",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "GuardEffectSystem|futures::executor::block_on".into(),
             repo_relative(repo_root.join("crates")),
@@ -432,7 +428,7 @@ fn check_effects(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 }
 
 fn check_invariants(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
-    let arch_files = rg_lines(&vec![
+    let arch_files = rg_lines(&[
         "--files".into(),
         repo_relative(repo_root.join("crates")),
         "-g".into(),
@@ -472,7 +468,7 @@ fn check_invariants(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     audit.push_matches(
         "arch(reactive): domain data marker remains in TUI props",
-        rg_lines(&vec![
+        rg_lines(&[
             "-l".into(),
             "// === Domain data".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src/tui/screens")),
@@ -495,13 +491,14 @@ fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         }
     }
 
-    let commit_files = rg_lines(&vec![
+    let commit_files = rg_lines(&[
         "-l".into(),
         "commit_generic_fact_bytes".into(),
         repo_relative(repo_root.join("crates")),
         "-g".into(),
         "*.rs".into(),
     ])?;
+    let sync_re = Regex::new(r"impl.*Handler|impl.*Service|async fn (accept|create|import|send)")?;
     for file in commit_files {
         if file.contains("/tests/")
             || file.contains("_test.rs")
@@ -513,8 +510,6 @@ fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
             continue;
         }
         let contents = read(repo_root.join(&file))?;
-        let sync_re =
-            Regex::new(r"impl.*Handler|impl.*Service|async fn (accept|create|import|send)")?;
         if !contents.contains("await_next_view_update")
             && !contents.contains("fire_and_forget")
             && !contents.contains("FactCommitResult")
@@ -529,20 +524,20 @@ fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 }
 
 fn check_ceremonies(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
-    let ceremony_files = rg_lines(&vec![
+    let ceremony_files = rg_lines(&[
         "-l".into(),
         "ceremony.*complete|GuardianBinding|invitation.*accept".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/runtime_bridge")),
         "-g".into(),
         "*.rs".into(),
     ])?;
+    let ceremony_re = Regex::new(r"ceremony.*complet|guardian.*accept|Committed.*Binding")?;
     for file in ceremony_files {
         if file.contains("/tests/") || file.contains("_test.rs") || file.contains("aura-simulator")
         {
             continue;
         }
         let contents = read(repo_root.join(&file))?;
-        let ceremony_re = Regex::new(r"ceremony.*complet|guardian.*accept|Committed.*Binding")?;
         if ceremony_re.is_match(&contents)
             && !contents.contains("commit_relational_facts")
             && !contents.contains("RelationalFact::")
@@ -553,20 +548,20 @@ fn check_ceremonies(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         }
     }
 
-    let handler_files = rg_lines(&vec![
+    let handler_files = rg_lines(&[
         "-l".into(),
         "async fn.*ceremony|execute.*ceremony".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/handlers")),
         "-g".into(),
         "*.rs".into(),
     ])?;
+    let handler_re = Regex::new(r"ceremony.*complet|Ok\(CeremonyResult")?;
     for file in handler_files {
         if file.contains("/tests/") || file.contains("_test.rs") || file.contains("aura-simulator")
         {
             continue;
         }
         let contents = read(repo_root.join(&file))?;
-        let handler_re = Regex::new(r"ceremony.*complet|Ok\(CeremonyResult")?;
         if !contents.contains("commit_relational_facts")
             && !contents.contains("runtime_bridge")
             && !contents.contains("RelationalFact::")
@@ -583,7 +578,7 @@ fn check_ceremonies(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 fn check_ui(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     audit.push_matches(
         "arch(ui): direct aura_app module access in aura-terminal",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "aura_app::(workflows|signal_defs|views|runtime_bridge|authorization)".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src")),
@@ -593,7 +588,7 @@ fn check_ui(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     );
     audit.push_matches(
         "arch(ui): direct ViewState access in aura-terminal",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             r"\.views\(".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src")),
@@ -603,31 +598,27 @@ fn check_ui(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     );
     audit.push_matches(
         "arch(ui): direct journal/protocol mutation in aura-terminal",
-        rg_non_comment_lines(&vec![
-            "-n".into(),
+        rg_non_comment_lines(&["-n".into(),
             "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src")),
             "-g".into(),
-            "*.rs".into(),
-        ])?
+            "*.rs".into()])?
         .into_iter()
         .filter(|hit| !hit.contains("crates/aura-terminal/src/demo/")),
     );
     audit.push_matches(
         "arch(ui): direct protocol/domain crate usage in aura-terminal",
-        rg_non_comment_lines(&vec![
-            "-n".into(),
+        rg_non_comment_lines(&["-n".into(),
             "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src")),
             "-g".into(),
-            "*.rs".into(),
-        ])?
+            "*.rs".into()])?
         .into_iter()
         .filter(|hit| !hit.contains("/demo/") && !hit.contains("/scenarios/")),
     );
     audit.push_matches(
         "arch(ui): local domain state in terminal handlers",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "HashSet<.*Id>|HashMap<.*Id,".into(),
             repo_relative(repo_root.join("crates/aura-terminal/src/handlers")),
@@ -676,7 +667,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     ] {
         audit.push_matches(
             label,
-            rg_non_comment_lines(&vec![
+            rg_non_comment_lines(&[
                 "-n".into(),
                 pattern.into(),
                 repo_relative(repo_root.join(root)),
@@ -685,16 +676,16 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
             ])?
             .into_iter()
             .filter(|hit| {
-                !exclusions.iter().any(|excluded| hit.contains(excluded))
-                    && !(label == "arch(workflows): direct runtime error string"
-                        && hit.contains(".contains("))
+                !(exclusions.iter().any(|excluded| hit.contains(excluded))
+                    || (label == "arch(workflows): direct runtime error string"
+                        && hit.contains(".contains(")))
             }),
         );
     }
 
     audit.push_matches(
         "arch(workflows): direct init_signals call outside approved app core",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "init_signals\\(".into(),
             repo_relative(repo_root.join("crates/aura-app/src")),
@@ -746,7 +737,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
     ] {
         audit.push_matches(
             label,
-            rg_non_comment_lines(&vec![
+            rg_non_comment_lines(&[
                 "-n".into(),
                 pattern.into(),
                 repo_relative(repo_root.join(root)),
@@ -758,7 +749,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         );
     }
 
-    if !rg_exists(&vec![
+    if !rg_exists(&[
         "-n".into(),
         "workflows::strong_command::execute_planned".into(),
         repo_relative(repo_root.join("crates/aura-terminal/src/tui/callbacks/factories")),
@@ -770,7 +761,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         );
     }
 
-    let factories_hits = rg_lines(&vec![
+    let factories_hits = rg_lines(&[
         "-n".into(),
         "strong_resolver\\.plan\\(".into(),
         repo_relative(repo_root.join("crates/aura-terminal/src/tui/callbacks/factories")),
@@ -785,7 +776,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(workflows): untyped workflow Result<_, String>",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             r"Result<[^>]*,\s*String>".into(),
             repo_relative(repo_root.join("crates/aura-app/src/workflows")),
@@ -802,7 +793,7 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(workflows): serde_json::Value in workflow surface",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "serde_json::Value".into(),
             repo_relative(repo_root.join("crates/aura-app/src/workflows")),
@@ -861,7 +852,7 @@ fn check_serialization(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         }
     }
 
-    for file in rg_lines(&vec![
+    for file in rg_lines(&[
         "-l".into(),
         "#\\[derive.*Serialize.*Deserialize|#\\[derive.*Deserialize.*Serialize".into(),
         repo_relative(repo_root.join("crates")),
@@ -887,7 +878,7 @@ fn check_serialization(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(serialization): stateful handler under aura-agent/src/handlers",
-        rg_non_comment_lines(&vec![
+        rg_non_comment_lines(&[
             "-n".into(),
             "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<".into(),
             repo_relative(repo_root.join("crates/aura-agent/src/handlers")),
@@ -898,7 +889,7 @@ fn check_serialization(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         .filter(|hit| !hit.contains("ota_activation_service") && !hit.contains("recovery_service")),
     );
 
-    for bridge_file in rg_lines(&vec![
+    for bridge_file in rg_lines(&[
         "--files".into(),
         repo_relative(repo_root.join("crates/aura-agent/src/handlers")),
         "-g".into(),
@@ -1056,14 +1047,12 @@ fn check_todos(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
             ],
         ),
     ] {
-        let hits = rg_non_comment_lines(&vec![
-            "-n".into(),
+        let hits = rg_non_comment_lines(&["-n".into(),
             "-i".into(),
             pattern.into(),
             repo_relative(repo_root.join("crates")),
             "-g".into(),
-            "*.rs".into(),
-        ])?;
+            "*.rs".into()])?;
         audit.push_matches(
             label,
             hits.into_iter()

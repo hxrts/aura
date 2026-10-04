@@ -44,6 +44,58 @@ mod tests {
     use super::*;
     use aura_effects::crypto::RealCryptoHandler;
 
+    #[derive(Debug, thiserror::Error)]
+    #[error("actual injected setup verification provider outage")]
+    struct InjectedSetupProviderFailure;
+
+    #[tokio::test]
+    async fn malformed_peer_encoding_is_distinct_from_required_provider_failure(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (crypto, request) = signed_request().await;
+        let source: std::sync::Arc<dyn std::error::Error + Send + Sync> =
+            std::sync::Arc::new(InjectedSetupProviderFailure);
+        let fixture=aura_testkit::stateful_effects::verification_failure_fixture::VerificationFailureFixture::new(crypto,source.clone());
+        let mut malformed = request.clone();
+        malformed.statement.public_key_package = vec![0xff];
+        malformed.proof.public_key_package = vec![0xff];
+        let rejection = match malformed.verify_possession(&fixture, 100).await {
+            Err(source) => source,
+            Ok(_) => {
+                return Err(
+                    "peer package parsing must reject before the failing provider is invoked"
+                        .into(),
+                )
+            }
+        };
+        assert!(matches!(rejection, EnrollmentSetupError::InputEncoding(_)));
+        let mut short = request.clone();
+        short.proof.signature.truncate(63);
+        assert!(matches!(
+            short.verify_possession(&fixture, 100).await,
+            Err(EnrollmentSetupError::InputEncoding(_))
+        ));
+        let failure = match request.verify_possession(&fixture, 100).await {
+            Err(source) => source,
+            Ok(_) => {
+                return Err(
+                    "a genuine signed request must reach the required failing provider".into(),
+                )
+            }
+        };
+        let EnrollmentSetupError::Crypto(aura_core::AuraError::Crypto {
+            source: Some(retained),
+            ..
+        }) = failure
+        else {
+            return Err("required provider source was reclassified or erased".into());
+        };
+        assert!(retained
+            .downcast_ref::<InjectedSetupProviderFailure>()
+            .is_some());
+        assert!(std::sync::Arc::ptr_eq(&retained, &source));
+        Ok(())
+    }
+
     async fn signed_request() -> (RealCryptoHandler, DeviceEnrollmentSetupRequest) {
         let crypto = RealCryptoHandler::for_simulation_seed([93; 32]);
         let keys = crypto.generate_signing_keys(1, 1).await.unwrap();
@@ -235,6 +287,8 @@ pub enum EnrollmentSetupError {
     ProofBinding,
     #[error("enrollment setup possession signature is invalid")]
     InvalidSignature,
+    #[error("enrollment setup public signature inputs are malformed")]
+    InputEncoding(#[source] aura_core::crypto::signature_input::SignatureInputError),
     #[error("enrollment setup codec failed")]
     Codec(#[from] serde_json::Error),
     #[error("enrollment setup transcript failed")]
@@ -490,6 +544,12 @@ impl DeviceEnrollmentSetupRequest {
         if now_ms < self.statement.issued_at_ms || now_ms >= self.statement.expires_at_ms {
             return Err(EnrollmentSetupError::OutsideValidity);
         }
+        aura_core::crypto::signature_input::validate_signature_encoding(
+            &self.statement.public_key_package,
+            &self.proof.signature,
+            self.statement.signing_mode,
+        )
+        .map_err(EnrollmentSetupError::InputEncoding)?;
         let context = Self::signing_context(&self.statement)?;
         let bytes =
             threshold_signing_context_transcript_bytes(&context, self.statement.signing_epoch)?;

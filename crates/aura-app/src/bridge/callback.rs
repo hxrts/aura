@@ -75,6 +75,7 @@ impl From<crate::runtime_bridge::RuntimeBridgeError> for CallbackError {
         let (code, recoverable) = match error.kind() {
             K::Crypto => ("crypto_error", false),
             K::Serialization => ("serialization_error", false),
+            K::BudgetExceeded => ("budget_exceeded", false),
             K::Unauthorized => ("unauthorized", false),
             K::Validation => ("validation_failed", true),
             K::Journal => ("journal_error", false),
@@ -100,6 +101,7 @@ impl From<IntentError> for CallbackError {
     fn from(err: IntentError) -> Self {
         Self {
             code: match &err {
+                IntentError::BudgetExceeded { .. } => "budget_exceeded",
                 IntentError::Unauthorized { .. } => "unauthorized",
                 IntentError::ValidationFailed { .. } => "validation_failed",
                 IntentError::JournalError { .. } => "journal_error",

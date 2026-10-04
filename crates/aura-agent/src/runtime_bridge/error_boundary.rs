@@ -93,6 +93,7 @@ pub(super) fn bridge_runtime_internal(
         Kind::Validation | Kind::NotFound => IntentError::validation_failed(detail),
         Kind::Network => IntentError::network_error(detail),
         Kind::Storage => IntentError::storage_error(detail),
+        Kind::BudgetExceeded => IntentError::budget_exceeded(detail),
         Kind::Service | Kind::TimedOut => IntentError::service_error(detail),
         Kind::Crypto
         | Kind::Serialization
@@ -112,6 +113,15 @@ pub(super) fn native_cause_kind(
     use aura_core::{AuraError, TimeoutBudgetError};
     let mut current = Some(error);
     while let Some(cause) = current {
+        if let Some(denial) = cause.downcast_ref::<aura_invitation::guards::InvitationGuardDenial>()
+        {
+            return match denial.reason() {
+                aura_guards::types::GuardViolation::InsufficientFlowBudget { .. } => {
+                    Kind::BudgetExceeded
+                }
+                _ => Kind::Unauthorized,
+            };
+        }
         if let Some(agent) = cause.downcast_ref::<crate::core::AgentError>() {
             let kind = match agent {
                 crate::core::AgentError::Config(_)
@@ -135,9 +145,13 @@ pub(super) fn native_cause_kind(
         {
             use aura_invitation::enrollment_manifest::EnrollmentManifestError as Manifest;
             let kind = match manifest {
-                Manifest::MissingPin | Manifest::Pin => Some(Kind::Unauthorized),
+                Manifest::MissingPin | Manifest::MissingFinalInventory | Manifest::Pin => {
+                    Some(Kind::Unauthorized)
+                }
                 Manifest::Unavailable | Manifest::Time(_) => Some(Kind::Service),
-                Manifest::Expired | Manifest::Shape => Some(Kind::Validation),
+                Manifest::Expired | Manifest::Shape | Manifest::SetupValidity => {
+                    Some(Kind::Validation)
+                }
                 Manifest::Signature | Manifest::Transcript(_) => Some(Kind::Crypto),
                 Manifest::Runtime(_) | Manifest::Boundary(_) | Manifest::Crypto(_) => None,
             };
@@ -145,11 +159,42 @@ pub(super) fn native_cause_kind(
                 return kind;
             }
         }
+        if let Some(signing) =
+            cause.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>()
+        {
+            use crate::runtime::effects::RequiredSigningParticipantError as Signing;
+            return match signing {
+                Signing::Missing | Signing::Ambiguous => Kind::Unauthorized,
+                Signing::QuorumOwnerRequired { .. } => Kind::Service,
+                Signing::KeyMismatch => Kind::Crypto,
+            };
+        }
+        if cause.is::<aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable>() {
+            return Kind::Service;
+        }
         if cause.is::<aura_core::effects::StorageError>() {
             return Kind::Storage;
         }
         if cause.is::<serde_json::Error>() {
             return Kind::Serialization;
+        }
+        if let Some(sync) = cause.downcast_ref::<aura_sync::services::RequiredPeerSyncError>() {
+            match sync {
+                aura_sync::services::RequiredPeerSyncError::RateLimited { .. } => {
+                    return Kind::Service
+                }
+                aura_sync::services::RequiredPeerSyncError::SessionLost { .. } => {
+                    return Kind::Internal
+                }
+                aura_sync::services::RequiredPeerSyncError::SessionAdmission { .. }
+                | aura_sync::services::RequiredPeerSyncError::Protocol { .. } => {}
+            }
+        }
+        if matches!(
+            cause.downcast_ref::<crate::runtime::services::SyncManagerError>(),
+            Some(crate::runtime::services::SyncManagerError::AuthorizationBackoff)
+        ) {
+            return Kind::Service;
         }
         if let Some(budget) = cause.downcast_ref::<TimeoutBudgetError>() {
             let kind = match budget {
@@ -164,6 +209,35 @@ pub(super) fn native_cause_kind(
             };
             if let Some(kind) = kind {
                 return kind;
+            }
+        }
+        if let Some(processing) = cause.downcast_ref::<crate::reactive::FactProcessingError>() {
+            use crate::reactive::FactProcessingError as Processing;
+            let kind = match processing {
+                Processing::RuntimeOwnerAbsent
+                | Processing::IngressAbsent
+                | Processing::SinkClosed { .. }
+                | Processing::SchedulerStopped { .. } => Some(Kind::Service),
+                Processing::ForeignOwner => Some(Kind::Unauthorized),
+                Processing::SequenceExhausted => Some(Kind::Internal),
+                Processing::SchedulerFailed { .. } => None,
+            };
+            if let Some(kind) = kind {
+                return kind;
+            }
+        }
+        if let Some(service) = cause.downcast_ref::<crate::runtime::services::ServiceError>() {
+            // A retained native child is more precise than its lifecycle wrapper.
+            if service.cause.is_none() {
+                use crate::runtime::services::ServiceErrorKind as Service;
+                return match &service.kind {
+                    Service::Unavailable | Service::DependencyUnavailable => Kind::Service,
+                    Service::InvalidConfiguration => Kind::Validation,
+                    Service::Timeout => Kind::TimedOut,
+                    Service::StartupFailed | Service::ShutdownFailed | Service::Internal => {
+                        Kind::Internal
+                    }
+                };
             }
         }
         if let Some(native) = cause.downcast_ref::<AuraError>() {
@@ -275,6 +349,7 @@ mod native_tests {
             (Manifest::Unavailable, Kind::Service),
             (Manifest::Expired, Kind::Validation),
             (Manifest::Shape, Kind::Validation),
+            (Manifest::SetupValidity, Kind::Validation),
             (Manifest::Signature, Kind::Crypto),
         ] {
             let native = bridge_runtime_internal(
@@ -579,4 +654,366 @@ mod invitation_reason_tests {
             "text cannot claim a signed terminal outcome"
         );
     }
+}
+
+#[cfg(test)]
+mod required_invitation_guard_category_tests {
+    use super::*;
+    use std::error::Error;
+    #[test]
+    fn real_guard_denials_preserve_budget_and_capability_categories() {
+        use aura_app::runtime_bridge::RuntimeBridgeErrorKind as K;
+        use aura_guards::types::GuardViolation as V;
+        for (reason, expected) in [
+            (
+                V::InsufficientFlowBudget {
+                    required: aura_core::FlowCost::new(2),
+                    remaining: aura_core::FlowCost::new(1),
+                },
+                K::BudgetExceeded,
+            ),
+            (
+                V::MissingCapability {
+                    capability: aura_core::CapabilityName::parse("invitation:send")
+                        .expect("capability"),
+                },
+                K::Unauthorized,
+            ),
+        ] {
+            let denial = aura_invitation::guards::plan_required_send_execution(
+                aura_invitation::guards::GuardOutcome::denied(reason.clone()),
+            )
+            .expect_err("actual pure guard denial");
+            let native =
+                bridge_runtime_internal("execute reserved invitation", denial.into_native_error());
+            assert_eq!(native.kind(), expected);
+            let mut cause = native.source();
+            let mut found = false;
+            while let Some(source) = cause {
+                if let Some(original) =
+                    source.downcast_ref::<aura_invitation::guards::InvitationGuardDenial>()
+                {
+                    assert_eq!(original.reason(), &reason);
+                    found = true;
+                }
+                cause = source.source();
+            }
+            assert!(found, "concrete policy denial survives boundary");
+        }
+    }
+}
+
+#[cfg(test)]
+mod actual_enrolled_identity_quorum_tests {
+    use super::*;
+    use aura_core::effects::{SecureStorageEffects, ThresholdSigningEffects};
+    use std::error::Error;
+
+    #[tokio::test]
+    async fn actual_activated_threshold_identity_requires_quorum_owner_with_native_source(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (issuer, _invitee, _invitation, start, _acceptance, verified) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "required-current-quorum-identity",
+            )
+            .await;
+        let runner = issuer.runtime().ceremony_runner();
+        runner
+            .record_verified_enrollment_response(verified)
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            runner.await_enrollment_terminal_outcome(&start.ceremony_id),
+        )
+        .await
+        .expect("real finalizer reaches original terminal outcome")
+        .unwrap();
+        assert_eq!(
+            outcome,
+            aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed
+        );
+        let effects = issuer.runtime().effects();
+        let error = crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+            effects.as_ref(),
+            &effects.runtime_authority_id(),
+        )
+        .await
+        .err()
+        .expect("one genuine active share cannot authorize a quorum manifest");
+        let native = bridge_runtime_internal("select actual enrollment signing owner", error);
+        assert_eq!(
+            native.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Service,
+            "actual activated identity classification: {native:?}"
+        );
+        let mut cause = native.source();
+        let mut found = false;
+        while let Some(error) = cause {
+            if let Some(
+                crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired {
+                    threshold,
+                },
+            ) = error.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>()
+            {
+                assert_eq!(*threshold, 2);
+                found = true;
+            }
+            cause = error.source();
+        }
+        assert!(
+            found,
+            "native boundary retains the actual required-owner cause"
+        );
+        let generic = issuer
+            .runtime()
+            .threshold_signing()
+            .sign(aura_core::threshold::SigningContext::message(
+                issuer.authority_id(),
+                "aura.test.raw-threshold-owner-required".into(),
+                vec![0x61],
+            ))
+            .await
+            .expect_err("retained dealer shares do not authorize a one-runtime quorum shortcut");
+        let generic = bridge_runtime_internal("raw current threshold context", generic);
+        assert_eq!(
+            generic.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Service
+        );
+        let mut cause = generic.source();
+        let mut original_owner = false;
+        while let Some(source) = cause {
+            original_owner |= matches!(
+                source.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>(),
+                Some(
+                    crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired {
+                        threshold: 2
+                    }
+                )
+            );
+            cause = source.source();
+        }
+        assert!(
+            original_owner,
+            "raw signing preserves actual native quorum-owner requirement"
+        );
+
+        // The required context must distinguish actual malformed native package
+        // bytes from genuine supported threshold material requiring a service.
+        let public_location = aura_core::effects::SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            effects.runtime_authority_id().to_string(),
+            start.pending_epoch.value().to_string(),
+        );
+        let original_public = effects
+            .secure_retrieve(
+                &public_location,
+                &[aura_core::effects::SecureStorageCapability::Read],
+            )
+            .await?;
+        effects
+            .secure_store(
+                &public_location,
+                b"malformed native FROST package",
+                &[aura_core::effects::SecureStorageCapability::Write],
+            )
+            .await?;
+        let malformed =
+            match crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                effects.as_ref(),
+                &effects.runtime_authority_id(),
+            )
+            .await
+            {
+                Err(source) => source,
+                Ok(_) => panic!("malformed current package must fail"),
+            };
+        let malformed =
+            bridge_runtime_internal("read malformed current threshold package", malformed);
+        assert_eq!(
+            malformed.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Crypto
+        );
+        let mut source = malformed.source();
+        let mut native_decode = false;
+        while let Some(cause) = source {
+            native_decode |= cause.is::<frost_ed25519::Error>();
+            assert!(!matches!(
+                cause.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>(),
+                Some(
+                    crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired { .. }
+                )
+            ));
+            source = cause.source();
+        }
+        assert!(
+            native_decode,
+            "actual native FROST decoding cause survives boundary"
+        );
+        effects
+            .secure_store(
+                &public_location,
+                &original_public,
+                &[aura_core::effects::SecureStorageCapability::Write],
+            )
+            .await?;
+        let config_location = aura_core::effects::SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            effects.runtime_authority_id().to_string(),
+            start.pending_epoch.value().to_string(),
+        );
+        let original_config = effects
+            .secure_retrieve(
+                &config_location,
+                &[aura_core::effects::SecureStorageCapability::Read],
+            )
+            .await?;
+        let mut unsupported_config: serde_json::Value = serde_json::from_slice(&original_config)?;
+        unsupported_config["threshold_k"] = serde_json::Value::from(1_u16);
+        effects
+            .secure_store(
+                &config_location,
+                &serde_json::to_vec(&unsupported_config)?,
+                &[aura_core::effects::SecureStorageCapability::Write],
+            )
+            .await?;
+        let unsupported =
+            match crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                effects.as_ref(),
+                &effects.runtime_authority_id(),
+            )
+            .await
+            {
+                Err(source) => source,
+                Ok(_) => panic!("unsupported native one-share threshold policy must fail"),
+            };
+        let unsupported = bridge_runtime_internal(
+            "read unsupported current native threshold policy",
+            unsupported,
+        );
+        assert_eq!(
+            unsupported.kind(),
+            aura_app::runtime_bridge::RuntimeBridgeErrorKind::Crypto
+        );
+        effects
+            .secure_store(
+                &config_location,
+                &original_config,
+                &[aura_core::effects::SecureStorageCapability::Write],
+            )
+            .await?;
+        #[cfg(unix)]
+        {
+            use aura_core::effects::SecureStorageLocation;
+            let participant =
+                aura_core::threshold::ParticipantIdentity::device(effects.device_id());
+            let location = SecureStorageLocation::with_sub_key(
+                "participant_shares",
+                format!(
+                    "{}:{}",
+                    effects.runtime_authority_id(),
+                    start.pending_epoch.value()
+                ),
+                participant.storage_key(),
+            );
+            assert!(effects
+                .fault_remove_secure_record_for_test(&location)
+                .await
+                .unwrap());
+            let absent =
+                crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                    effects.as_ref(),
+                    &effects.runtime_authority_id(),
+                )
+                .await
+                .err()
+                .expect("missing actual share cannot be classified as missing quorum ownership");
+            let native =
+                bridge_runtime_internal("select current signing owner after backing loss", absent);
+            assert_eq!(
+                native.kind(),
+                aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+            );
+            let mut cause = native.source();
+            let mut missing = false;
+            while let Some(error) = cause {
+                if let Some(record) =
+                    error.downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>()
+                {
+                    assert_eq!(record.location(), &location);
+                    missing = true;
+                }
+                assert!(!matches!(error.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>(),
+                    Some(crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired { .. })));
+                cause = error.source();
+            }
+            assert!(
+                missing,
+                "required reader retains the actual missing-share producer"
+            );
+            let generic_missing = issuer
+                .runtime()
+                .threshold_signing()
+                .sign(aura_core::threshold::SigningContext::message(
+                    issuer.authority_id(),
+                    "aura.test.raw-threshold-required-share".into(),
+                    vec![0x62],
+                ))
+                .await
+                .expect_err(
+                    "raw threshold signing requires its actual local share before quorum selection",
+                );
+            let generic_missing = bridge_runtime_internal(
+                "raw threshold signing after backing loss",
+                generic_missing,
+            );
+            assert_eq!(
+                generic_missing.kind(),
+                aura_app::runtime_bridge::RuntimeBridgeErrorKind::Storage
+            );
+            let mut cause = generic_missing.source();
+            let mut original_missing = false;
+            while let Some(source) = cause {
+                if let Some(record) =
+                    source.downcast_ref::<aura_core::effects::secure::SecureStorageRecordMissing>()
+                {
+                    assert_eq!(record.location(), &location);
+                    original_missing = true;
+                }
+                assert!(!matches!(source.downcast_ref::<crate::runtime::effects::RequiredSigningParticipantError>(),
+                    Some(crate::runtime::effects::RequiredSigningParticipantError::QuorumOwnerRequired { .. })));
+                cause = source.source();
+            }
+            assert!(
+                original_missing,
+                "raw route retains the original selected missing-share source"
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn lifetime_provider_availability_is_service_while_real_storage_failure_remains_storage() {
+    use aura_app::runtime_bridge::RuntimeBridgeErrorKind as K;
+    use aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable as U;
+    for cause in [
+        U::UnsupportedSelectedProvider,
+        U::MissingSelectedCustody,
+        U::LegacyMigrationRequired,
+    ] {
+        let original = cause.into_aura_error();
+        assert_eq!(native_cause_kind(&original), K::Service);
+        assert!(std::error::Error::source(&original)
+            .and_then(|source| source.downcast_ref::<U>())
+            .is_some());
+    }
+    let storage = aura_core::AuraError::Storage {
+        message: "same opaque operation context".into(),
+        source: Some(std::sync::Arc::new(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        ))),
+    };
+    assert_eq!(native_cause_kind(&storage), K::Storage);
 }

@@ -9,9 +9,8 @@
 //! - Emits a full snapshot into the corresponding signal (eventual consistency)
 
 use aura_app::effects::reactive::ConditionalEmit;
-use aura_app::errors::AppError;
 use aura_app::projection_owner::{ProjectionOwner, ProjectionSlot};
-use aura_app::signal_defs::{ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL};
+use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 pub(crate) use aura_app::views::invitations::InvitationCreationWitness;
 use aura_app::views::{
     chat::{note_to_self_channel_id, ChatState, Message, MessageDeliveryStatus},
@@ -60,13 +59,89 @@ use aura_social::moderation::{
 };
 use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
 
-async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
-    let _ = reactive
-        .emit(
-            &*ERROR_SIGNAL,
-            Some(AppError::internal("reactive_scheduler", message)),
-        )
-        .await;
+fn required_projection_source(
+    source: aura_core::effects::reactive::ReactiveError,
+) -> aura_core::AuraError {
+    aura_core::AuraError::Internal {
+        message: "required reactive projection failed".into(),
+        source: Some(Arc::new(source)),
+    }
+}
+
+enum RequiredModerationProjection {
+    Ban(HomeBanFact),
+    Unban(HomeUnbanFact),
+    Mute(HomeMuteFact),
+    Unmute(HomeUnmuteFact),
+    Kick(HomeKickFact),
+    Pin(HomePinFact),
+    Unpin(HomeUnpinFact),
+    GrantModerator(HomeGrantModeratorFact),
+    RevokeModerator(HomeRevokeModeratorFact),
+}
+
+fn required_moderation_projection(
+    envelope: &aura_core::types::facts::FactEnvelope,
+    context: ContextId,
+) -> Result<Option<RequiredModerationProjection>, aura_core::AuraError> {
+    Ok(Some(match envelope.type_id.as_str() {
+        HOME_BAN_FACT_TYPE_ID => RequiredModerationProjection::Ban(
+            HomeBanFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_UNBAN_FACT_TYPE_ID => RequiredModerationProjection::Unban(
+            HomeUnbanFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_MUTE_FACT_TYPE_ID => RequiredModerationProjection::Mute(
+            HomeMuteFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_UNMUTE_FACT_TYPE_ID => RequiredModerationProjection::Unmute(
+            HomeUnmuteFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_KICK_FACT_TYPE_ID => RequiredModerationProjection::Kick(
+            HomeKickFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_PIN_FACT_TYPE_ID => RequiredModerationProjection::Pin(
+            HomePinFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_UNPIN_FACT_TYPE_ID => RequiredModerationProjection::Unpin(
+            HomeUnpinFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_GRANT_MODERATOR_FACT_TYPE_ID => RequiredModerationProjection::GrantModerator(
+            HomeGrantModeratorFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        HOME_REVOKE_MODERATOR_FACT_TYPE_ID => RequiredModerationProjection::RevokeModerator(
+            HomeRevokeModeratorFact::try_from_envelope_in_context(envelope, context)
+                .map_err(aura_core::AuraError::from)?,
+        ),
+        _ => return Ok(None),
+    }))
+}
+
+fn required_projection_fact_source(
+    source: aura_core::types::facts::FactError,
+) -> aura_core::AuraError {
+    use aura_core::types::facts::FactError;
+    let message = "decode required projection fact".into();
+    match source {
+        source @ (FactError::Serialization(_) | FactError::Json(_)) => {
+            aura_core::AuraError::Serialization {
+                message,
+                source: Some(Arc::new(source)),
+            }
+        }
+        source => aura_core::AuraError::Invalid {
+            message,
+            source: Some(Arc::new(source)),
+        },
+    }
 }
 
 /// Canonical AMP checkpoint and joined-participant evidence for projecting an
@@ -482,14 +557,7 @@ impl ReactiveView for InvitationsSignalView {
             loop {
                 let current = match owner.snapshot(ProjectionSlot::invitations()).await {
                     Ok(current) => current,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to read INVITATIONS_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 };
                 let mut state = current.value;
                 let mut deferred_status = self.deferred_status.lock().await;
@@ -497,8 +565,10 @@ impl ReactiveView for InvitationsSignalView {
                 let mut changed = false;
 
                 for fact in facts {
-                    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
-                        &fact.content
+                    let FactContent::Relational(RelationalFact::Generic {
+                        context_id,
+                        envelope,
+                    }) = &fact.content
                     else {
                         continue;
                     };
@@ -507,17 +577,26 @@ impl ReactiveView for InvitationsSignalView {
                         continue;
                     }
 
-                    let Some(inv) = InvitationFact::from_envelope(envelope) else {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!(
-                                "Failed to decode InvitationFact envelope (payload len={})",
-                                envelope.payload.len()
-                            ),
-                        )
-                        .await;
-                        continue;
-                    };
+                    let inv = InvitationFact::try_from_envelope_in_context(envelope, *context_id)
+                        .map_err(|source| {
+                        use aura_invitation::facts::InvitationFactDecodeError;
+                        let message = "decode required invitation projection fact".into();
+                        if matches!(
+                            &source,
+                            InvitationFactDecodeError::Envelope(_)
+                                | InvitationFactDecodeError::ContextMismatch { .. }
+                        ) {
+                            aura_core::AuraError::Invalid {
+                                message,
+                                source: Some(Arc::new(source)),
+                            }
+                        } else {
+                            aura_core::AuraError::Serialization {
+                                message,
+                                source: Some(Arc::new(source)),
+                            }
+                        }
+                    })?;
 
                     match inv {
                         sent_fact @ InvitationFact::Sent { .. } => {
@@ -661,7 +740,7 @@ impl ReactiveView for InvitationsSignalView {
 
                 if !changed {
                     *deferred_status = next_deferred_status;
-                    return;
+                    return Ok(());
                 }
 
                 match owner
@@ -670,17 +749,10 @@ impl ReactiveView for InvitationsSignalView {
                 {
                     Ok(ConditionalEmit::Published { .. }) => {
                         *deferred_status = next_deferred_status;
-                        return;
+                        return Ok(());
                     }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to publish INVITATIONS_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 }
             }
         })
@@ -747,14 +819,7 @@ impl ReactiveView for ContactsSignalView {
             loop {
                 let current = match owner.snapshot(ProjectionSlot::contacts()).await {
                     Ok(current) => current,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to read CONTACTS_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 };
                 let mut state = self.state.lock().await;
                 let mut pending = self.pending_relationships.lock().await;
@@ -766,17 +831,8 @@ impl ReactiveView for ContactsSignalView {
                         FactContent::Relational(RelationalFact::Generic { envelope, .. })
                             if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
                         {
-                            let Some(contact_fact) = ContactFact::from_envelope(envelope) else {
-                                emit_internal_error(
-                                    &self.reactive,
-                                    format!(
-                                        "Failed to decode ContactFact envelope (payload len={})",
-                                        envelope.payload.len()
-                                    ),
-                                )
-                                .await;
-                                continue;
-                            };
+                            let contact_fact = ContactFact::try_from_envelope(envelope)
+                                .map_err(required_projection_fact_source)?;
 
                             let creation_witness = owner.contact_added_witness(&contact_fact);
                             match contact_fact {
@@ -864,18 +920,8 @@ impl ReactiveView for ContactsSignalView {
                         FactContent::Relational(RelationalFact::Generic { envelope, .. })
                             if envelope.type_id.as_str() == FRIENDSHIP_FACT_TYPE_ID =>
                         {
-                            let Some(friendship_fact) = FriendshipFact::from_envelope(envelope)
-                            else {
-                                emit_internal_error(
-                                    &self.reactive,
-                                    format!(
-                                        "Failed to decode FriendshipFact envelope (payload len={})",
-                                        envelope.payload.len()
-                                    ),
-                                )
-                                .await;
-                                continue;
-                            };
+                            let friendship_fact = FriendshipFact::try_from_envelope(envelope)
+                                .map_err(required_projection_fact_source)?;
                             changed |= self.apply_friendship_fact(
                                 &mut state,
                                 &mut pending,
@@ -920,7 +966,7 @@ impl ReactiveView for ContactsSignalView {
                 }
 
                 if !changed {
-                    return;
+                    return Ok(());
                 }
 
                 let snapshot = state.clone();
@@ -943,16 +989,9 @@ impl ReactiveView for ContactsSignalView {
                     .replace_if_current(ProjectionSlot::contacts(), current.revision, snapshot)
                     .await
                 {
-                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Published { .. }) => return Ok(()),
                     Ok(ConditionalEmit::Stale { .. }) => continue,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to publish CONTACTS_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 }
             }
         })
@@ -1003,14 +1042,7 @@ impl ReactiveView for RecoverySignalView {
             loop {
                 let current = match owner.snapshot(ProjectionSlot::recovery()).await {
                     Ok(current) => current,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to read RECOVERY_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 };
                 let mut state = self.state.lock().await;
                 *state = current.value;
@@ -1030,17 +1062,8 @@ impl ReactiveView for RecoverySignalView {
                         FactContent::Relational(RelationalFact::Generic { envelope, .. })
                             if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
                         {
-                            let Some(recovery_fact) = RecoveryFact::from_envelope(envelope) else {
-                                emit_internal_error(
-                                    &self.reactive,
-                                    format!(
-                                        "Failed to decode RecoveryFact envelope (payload len={})",
-                                        envelope.payload.len()
-                                    ),
-                                )
-                                .await;
-                                continue;
-                            };
+                            let recovery_fact = RecoveryFact::try_from_envelope(envelope)
+                                .map_err(required_projection_fact_source)?;
 
                             match recovery_fact {
                                 RecoveryFact::GuardianSetupInitiated {
@@ -1138,7 +1161,7 @@ impl ReactiveView for RecoverySignalView {
                 }
 
                 if !changed {
-                    return;
+                    return Ok(());
                 }
 
                 let snapshot = state.clone();
@@ -1148,16 +1171,9 @@ impl ReactiveView for RecoverySignalView {
                     .replace_if_current(ProjectionSlot::recovery(), current.revision, snapshot)
                     .await
                 {
-                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Published { .. }) => return Ok(()),
                     Ok(ConditionalEmit::Stale { .. }) => continue,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to publish RECOVERY_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 }
             }
         })
@@ -1265,53 +1281,41 @@ impl ReactiveView for HomeSignalView {
                     Ok(current) => current,
                     Err(e) => {
                         tracing::warn!(error = %e, facts = facts.len(), "home view could not read HOMES_SIGNAL; facts not applied");
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to read HOMES_SIGNAL: {e}"),
-                        )
-                        .await;
-                        return;
+                        return Err(required_projection_source(e));
                     }
                 };
                 let mut homes = current.value;
 
                 let mut changed = false;
 
+                let social_facts = facts
+                    .iter()
+                    .filter_map(|fact| match &fact.content {
+                        FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                            if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID =>
+                        {
+                            Some(SocialFact::try_from_envelope(envelope))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(required_projection_fact_source)?;
+
                 // Creation is reduced first even when journal replay presents
                 // membership before creation in the same batch.
-                for fact in facts {
-                    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
-                        &fact.content
-                    else {
-                        continue;
-                    };
-                    if envelope.type_id.as_str() != SOCIAL_FACT_TYPE_ID {
-                        continue;
-                    }
-                    if let Some(witness) = SocialFact::from_envelope(envelope)
-                        .as_ref()
-                        .and_then(|fact| owner.home_created_witness(fact))
-                    {
+                for fact in &social_facts {
+                    if let Some(witness) = owner.home_created_witness(fact) {
                         changed |= self.materialize_created_home(&mut homes, witness);
                     }
                 }
 
                 let mut unresolved = Vec::new();
-                for join in pending
-                    .iter()
-                    .cloned()
-                    .chain(facts.iter().filter_map(|fact| {
-                        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
-                            &fact.content
-                        else {
-                            return None;
-                        };
-                        (envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID)
-                            .then(|| SocialFact::from_envelope(envelope))
-                            .flatten()
-                            .filter(|social| matches!(social, SocialFact::MemberJoined { .. }))
-                    }))
-                {
+                for join in pending.iter().cloned().chain(
+                    social_facts
+                        .iter()
+                        .filter(|social| matches!(social, SocialFact::MemberJoined { .. }))
+                        .cloned(),
+                ) {
                     match Self::apply_member_joined(&mut homes, &join) {
                         Some(applied) => changed |= applied,
                         None if !unresolved.contains(&join) => unresolved.push(join),
@@ -1331,129 +1335,112 @@ impl ReactiveView for HomeSignalView {
                     if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
                         continue;
                     }
+                    // Validate relevant required evidence even before its Home
+                    // has materialized; missing canonical context is not a codec exemption.
+                    let Some(moderation) = required_moderation_projection(envelope, *context_id)?
+                    else {
+                        continue;
+                    };
                     let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id)
                     else {
                         continue;
                     };
 
-                    match envelope.type_id.as_str() {
-                        HOME_BAN_FACT_TYPE_ID => {
-                            if let Some(ban) = HomeBanFact::from_envelope(envelope) {
-                                let record = BanRecord {
-                                    authority_id: ban.banned_authority,
-                                    reason: ban.reason,
-                                    actor: ban.actor_authority,
-                                    banned_at: ban.banned_at.ts_ms,
-                                };
-                                home_state.add_ban(record);
-                                let _ = home_state.remove_member(&ban.banned_authority);
+                    match moderation {
+                        RequiredModerationProjection::Ban(ban) => {
+                            let record = BanRecord {
+                                authority_id: ban.banned_authority,
+                                reason: ban.reason,
+                                actor: ban.actor_authority,
+                                banned_at: ban.banned_at.ts_ms,
+                            };
+                            home_state.add_ban(record);
+                            let _ = home_state.remove_member(&ban.banned_authority);
+                            changed = true;
+                        }
+                        RequiredModerationProjection::Unban(unban) => {
+                            if home_state.remove_ban(&unban.unbanned_authority).is_some() {
                                 changed = true;
                             }
                         }
-                        HOME_UNBAN_FACT_TYPE_ID => {
-                            if let Some(unban) = HomeUnbanFact::from_envelope(envelope) {
-                                if home_state.remove_ban(&unban.unbanned_authority).is_some() {
-                                    changed = true;
-                                }
-                            }
+                        RequiredModerationProjection::Mute(mute) => {
+                            let record = MuteRecord {
+                                authority_id: mute.muted_authority,
+                                duration_secs: mute.duration_secs,
+                                muted_at: mute.muted_at.ts_ms,
+                                expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
+                                actor: mute.actor_authority,
+                            };
+                            home_state.add_mute(record);
+                            changed = true;
                         }
-                        HOME_MUTE_FACT_TYPE_ID => {
-                            if let Some(mute) = HomeMuteFact::from_envelope(envelope) {
-                                let record = MuteRecord {
-                                    authority_id: mute.muted_authority,
-                                    duration_secs: mute.duration_secs,
-                                    muted_at: mute.muted_at.ts_ms,
-                                    expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
-                                    actor: mute.actor_authority,
-                                };
-                                home_state.add_mute(record);
+                        RequiredModerationProjection::Unmute(unmute) => {
+                            if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
                                 changed = true;
                             }
                         }
-                        HOME_UNMUTE_FACT_TYPE_ID => {
-                            if let Some(unmute) = HomeUnmuteFact::from_envelope(envelope) {
-                                if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
-                                    changed = true;
-                                }
-                            }
+                        RequiredModerationProjection::Kick(kick) => {
+                            let record = KickRecord {
+                                authority_id: kick.kicked_authority,
+                                channel: kick.channel_id,
+                                reason: kick.reason,
+                                actor: kick.actor_authority,
+                                kicked_at: kick.kicked_at.ts_ms,
+                            };
+                            home_state.add_kick(record);
+                            let _ = home_state.remove_member(&kick.kicked_authority);
+                            changed = true;
                         }
-                        HOME_KICK_FACT_TYPE_ID => {
-                            if let Some(kick) = HomeKickFact::from_envelope(envelope) {
-                                let record = KickRecord {
-                                    authority_id: kick.kicked_authority,
-                                    channel: kick.channel_id,
-                                    reason: kick.reason,
-                                    actor: kick.actor_authority,
-                                    kicked_at: kick.kicked_at.ts_ms,
-                                };
-                                home_state.add_kick(record);
-                                let _ = home_state.remove_member(&kick.kicked_authority);
+                        RequiredModerationProjection::Pin(pin) => {
+                            home_state.pin_message_with_meta(PinnedMessageMeta {
+                                message_id: pin.message_id,
+                                pinned_by: pin.actor_authority,
+                                pinned_at: pin.pinned_at.ts_ms,
+                            });
+                            changed = true;
+                        }
+                        RequiredModerationProjection::Unpin(unpin) => {
+                            if home_state.unpin_message(&unpin.message_id) {
                                 changed = true;
                             }
                         }
-                        HOME_PIN_FACT_TYPE_ID => {
-                            if let Some(pin) = HomePinFact::from_envelope(envelope) {
-                                home_state.pin_message_with_meta(PinnedMessageMeta {
-                                    message_id: pin.message_id,
-                                    pinned_by: pin.actor_authority,
-                                    pinned_at: pin.pinned_at.ts_ms,
-                                });
+                        RequiredModerationProjection::GrantModerator(grant) => {
+                            if let Some(member) = home_state.member_mut(&grant.target_authority) {
+                                if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
+                                    member.role = HomeRole::Moderator;
+                                    changed = true;
+                                }
+                            }
+                            if grant.target_authority == self.own_authority
+                                && matches!(
+                                    home_state.my_role,
+                                    HomeRole::Member | HomeRole::Moderator
+                                )
+                            {
+                                home_state.my_role = HomeRole::Moderator;
                                 changed = true;
                             }
                         }
-                        HOME_UNPIN_FACT_TYPE_ID => {
-                            if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
-                                if home_state.unpin_message(&unpin.message_id) {
+                        RequiredModerationProjection::RevokeModerator(revoke) => {
+                            if let Some(member) = home_state.member_mut(&revoke.target_authority) {
+                                if matches!(member.role, HomeRole::Moderator) {
+                                    member.role = HomeRole::Member;
                                     changed = true;
                                 }
                             }
-                        }
-                        HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
-                            if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
-                                if let Some(member) = home_state.member_mut(&grant.target_authority)
-                                {
-                                    if matches!(member.role, HomeRole::Member | HomeRole::Moderator)
-                                    {
-                                        member.role = HomeRole::Moderator;
-                                        changed = true;
-                                    }
-                                }
-                                if grant.target_authority == self.own_authority
-                                    && matches!(
-                                        home_state.my_role,
-                                        HomeRole::Member | HomeRole::Moderator
-                                    )
-                                {
-                                    home_state.my_role = HomeRole::Moderator;
-                                    changed = true;
-                                }
+                            if revoke.target_authority == self.own_authority
+                                && matches!(home_state.my_role, HomeRole::Moderator)
+                            {
+                                home_state.my_role = HomeRole::Member;
+                                changed = true;
                             }
                         }
-                        HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
-                            if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
-                                if let Some(member) =
-                                    home_state.member_mut(&revoke.target_authority)
-                                {
-                                    if matches!(member.role, HomeRole::Moderator) {
-                                        member.role = HomeRole::Member;
-                                        changed = true;
-                                    }
-                                }
-                                if revoke.target_authority == self.own_authority
-                                    && matches!(home_state.my_role, HomeRole::Moderator)
-                                {
-                                    home_state.my_role = HomeRole::Member;
-                                    changed = true;
-                                }
-                            }
-                        }
-                        _ => {}
                     }
                 }
 
                 if !changed {
                     *pending = unresolved;
-                    return;
+                    return Ok(());
                 }
 
                 match owner
@@ -1462,17 +1449,10 @@ impl ReactiveView for HomeSignalView {
                 {
                     Ok(ConditionalEmit::Published { .. }) => {
                         *pending = unresolved;
-                        return;
+                        return Ok(());
                     }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to publish HOMES_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 }
             }
         })
@@ -1686,14 +1666,7 @@ impl ReactiveView for ChatSignalView {
             loop {
                 let source = match owner.snapshot(ProjectionSlot::chat()).await {
                     Ok(snapshot) => snapshot,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to read CHAT_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 };
                 let mut state = self.state.lock().await;
                 *state = source.value;
@@ -1730,17 +1703,7 @@ impl ReactiveView for ChatSignalView {
                         FactContent::Relational(RelationalFact::Generic { envelope, .. })
                             if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID =>
                         {
-                            let Some(chat_fact) = ChatFact::from_envelope(envelope) else {
-                                emit_internal_error(
-                                    &self.reactive,
-                                    format!(
-                                        "Failed to decode ChatFact envelope (payload len={})",
-                                        envelope.payload.len()
-                                    ),
-                                )
-                                .await;
-                                continue;
-                            };
+                            let chat_fact = ChatFact::try_from_envelope(envelope)?;
 
                             let canonical_creation = ChatViewReducer
                                 .reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None)
@@ -2113,7 +2076,7 @@ impl ReactiveView for ChatSignalView {
                 }
 
                 if !changed {
-                    return;
+                    return Ok(());
                 }
 
                 let snapshot = state.clone();
@@ -2123,16 +2086,9 @@ impl ReactiveView for ChatSignalView {
                     .replace_if_current(ProjectionSlot::chat(), source.revision, snapshot)
                     .await
                 {
-                    Ok(ConditionalEmit::Published { .. }) => return,
+                    Ok(ConditionalEmit::Published { .. }) => return Ok(()),
                     Ok(ConditionalEmit::Stale { .. }) => continue,
-                    Err(error) => {
-                        emit_internal_error(
-                            &self.reactive,
-                            format!("Failed to publish CHAT_SIGNAL: {error}"),
-                        )
-                        .await;
-                        return;
-                    }
+                    Err(error) => return Err(required_projection_source(error)),
                 }
             }
         })
@@ -2166,6 +2122,212 @@ mod tests {
     };
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
+
+    #[tokio::test]
+    async fn required_signal_views_retain_actual_unregistered_snapshot_failure() {
+        use std::error::Error;
+        let own = AuthorityId::new_from_entropy([0xd7; 32]);
+        let reactive = ReactiveHandler::new();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own)
+                .expect("actual simulation effects"),
+        );
+        let views: Vec<Arc<dyn ReactiveView>> = vec![
+            Arc::new(InvitationsSignalView::new(own, reactive.clone())),
+            Arc::new(ContactsSignalView::new(own, reactive.clone())),
+            Arc::new(RecoverySignalView::new(own, reactive.clone())),
+            Arc::new(HomeSignalView::new(own, reactive.clone())),
+            Arc::new(ChatSignalView::new(own, reactive, effects)),
+        ];
+        for view in views {
+            let failed = view
+                .update(&[])
+                .await
+                .expect_err("missing required signal cannot complete projection successfully");
+            assert!(
+                failed.source().is_some_and(|source| source
+                    .is::<aura_core::effects::reactive::ReactiveError>(
+                )),
+                "{} retains actual snapshot producer",
+                view.view_id()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn required_signal_views_matching_domain_codec_faults_are_terminal() {
+        use aura_core::types::facts::{FactEncoding, FactEnvelope, FactError, FactTypeId};
+        use std::error::Error;
+        let own = AuthorityId::new_from_entropy([0xd8; 32]);
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive)
+            .await
+            .expect("actual registered graph");
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own)
+                .expect("actual simulation effects"),
+        );
+        let views: Vec<(&str, Arc<dyn ReactiveView>)> = vec![
+            (
+                INVITATION_FACT_TYPE_ID,
+                Arc::new(InvitationsSignalView::new(own, reactive.clone())),
+            ),
+            (
+                CHAT_FACT_TYPE_ID,
+                Arc::new(ChatSignalView::new(own, reactive.clone(), effects)),
+            ),
+            (
+                CONTACT_FACT_TYPE_ID,
+                Arc::new(ContactsSignalView::new(own, reactive.clone())),
+            ),
+            (
+                FRIENDSHIP_FACT_TYPE_ID,
+                Arc::new(ContactsSignalView::new(own, reactive.clone())),
+            ),
+            (
+                RECOVERY_FACT_TYPE_ID,
+                Arc::new(RecoverySignalView::new(own, reactive.clone())),
+            ),
+            (
+                SOCIAL_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_BAN_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_UNBAN_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_MUTE_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_UNMUTE_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_KICK_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_PIN_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_UNPIN_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_GRANT_MODERATOR_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+            (
+                HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
+                Arc::new(HomeSignalView::new(own, reactive.clone())),
+            ),
+        ];
+        let owner = ProjectionOwner::new(reactive);
+        let invitation_before = owner
+            .snapshot(ProjectionSlot::invitations())
+            .await
+            .unwrap()
+            .revision;
+        let chat_before = owner
+            .snapshot(ProjectionSlot::chat())
+            .await
+            .unwrap()
+            .revision;
+        let contacts_before = owner
+            .snapshot(ProjectionSlot::contacts())
+            .await
+            .unwrap()
+            .revision;
+        let recovery_before = owner
+            .snapshot(ProjectionSlot::recovery())
+            .await
+            .unwrap()
+            .revision;
+        let homes_before = owner
+            .snapshot(ProjectionSlot::homes())
+            .await
+            .unwrap()
+            .revision;
+        for (type_id, view) in views {
+            for schema_version in [1, u16::MAX] {
+                let malformed = fact_from_relational(RelationalFact::Generic {
+                    context_id: ContextId::new_from_entropy([0xd9; 32]),
+                    envelope: FactEnvelope {
+                        type_id: FactTypeId::from(type_id),
+                        schema_version,
+                        encoding: FactEncoding::Json,
+                        payload: b"{".to_vec(),
+                    },
+                });
+                let failed = view
+                    .update(&[malformed])
+                    .await
+                    .expect_err("matching malformed fact cannot become a completed projection");
+                let mut cause: Option<&(dyn Error + 'static)> = Some(&failed);
+                let mut native = false;
+                while let Some(source) = cause {
+                    native |= if schema_version == 1 {
+                        source.is::<serde_json::Error>()
+                    } else {
+                        source.is::<FactError>()
+                    };
+                    cause = source.source();
+                }
+                assert!(
+                    native,
+                    "{} retains original codec/schema producer",
+                    view.view_id()
+                );
+            }
+        }
+        assert_eq!(
+            owner
+                .snapshot(ProjectionSlot::invitations())
+                .await
+                .unwrap()
+                .revision,
+            invitation_before
+        );
+        assert_eq!(
+            owner
+                .snapshot(ProjectionSlot::chat())
+                .await
+                .unwrap()
+                .revision,
+            chat_before
+        );
+        assert_eq!(
+            owner
+                .snapshot(ProjectionSlot::contacts())
+                .await
+                .unwrap()
+                .revision,
+            contacts_before
+        );
+        assert_eq!(
+            owner
+                .snapshot(ProjectionSlot::recovery())
+                .await
+                .unwrap()
+                .revision,
+            recovery_before
+        );
+        assert_eq!(
+            owner
+                .snapshot(ProjectionSlot::homes())
+                .await
+                .unwrap()
+                .revision,
+            homes_before
+        );
+    }
 
     fn add_fixture_home(
         homes: &mut HomesState,
@@ -2401,11 +2563,15 @@ mod tests {
             let reactive = ReactiveHandler::new();
             register_app_signals(&reactive).await.unwrap();
             let view = InvitationsSignalView::new(own, reactive.clone());
-            view.update(std::slice::from_ref(&accepted)).await;
+            view.update(std::slice::from_ref(&accepted))
+                .await
+                .expect("required fixture projection succeeds");
             let before = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
             assert!(before.invitation("early-acceptance").is_none());
 
-            view.update(std::slice::from_ref(&sent)).await;
+            view.update(std::slice::from_ref(&sent))
+                .await
+                .expect("required fixture projection succeeds");
             let after = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
             assert_eq!(
                 after
@@ -2447,13 +2613,19 @@ mod tests {
             register_app_signals(&reactive).await.unwrap();
             let view = InvitationsSignalView::new(own, reactive.clone());
             if fresh_replay {
-                view.update(&[terminal.clone(), sent.clone()]).await;
+                view.update(&[terminal.clone(), sent.clone()])
+                    .await
+                    .expect("required fixture projection succeeds");
             } else {
-                view.update(std::slice::from_ref(&terminal)).await;
+                view.update(std::slice::from_ref(&terminal))
+                    .await
+                    .expect("required fixture projection succeeds");
                 let before = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
                 assert!(before.invitation(invitation_id).is_none());
                 assert_eq!(before.pending_count(), 0);
-                view.update(std::slice::from_ref(&sent)).await;
+                view.update(std::slice::from_ref(&sent))
+                    .await
+                    .expect("required fixture projection succeeds");
             }
 
             let settled = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
@@ -2468,7 +2640,9 @@ mod tests {
             assert_eq!(settled.history_count(), 1);
 
             // A duplicate creation fact cannot resurrect the settled row.
-            view.update(std::slice::from_ref(&sent)).await;
+            view.update(std::slice::from_ref(&sent))
+                .await
+                .expect("required fixture projection succeeds");
             let replayed = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
             assert_eq!(
                 replayed
@@ -2578,7 +2752,8 @@ mod tests {
             initiated_at: at.clone(),
         };
         view.update(&[fact_from_relational(request.to_generic())])
-            .await;
+            .await
+            .expect("required fixture projection succeeds");
         let state = reactive.read(&*RECOVERY_SIGNAL).await.unwrap();
         assert_eq!(state.pending_requests().len(), 1);
         assert_eq!(state.pending_requests()[0].account_id, initiator);
@@ -2595,7 +2770,8 @@ mod tests {
             accepted_at: at,
         };
         view.update(&[fact_from_relational(accepted.to_generic())])
-            .await;
+            .await
+            .expect("required fixture projection succeeds");
         let state = reactive.read(&*RECOVERY_SIGNAL).await.unwrap();
         assert!(state.pending_requests().is_empty());
     }
@@ -2740,7 +2916,8 @@ mod tests {
         );
         InvitationsSignalView::new(own, reactive)
             .update(&[fact_from_relational(fact.to_generic())])
-            .await;
+            .await
+            .expect("required invitation projection succeeds");
 
         let after = owner.snapshot(ProjectionSlot::invitations()).await.unwrap();
         assert_eq!(after.revision, before.revision);
@@ -2855,7 +3032,8 @@ mod tests {
             fact_from_relational(message.to_generic()),
             fact_from_relational(created.to_generic()),
         ])
-        .await;
+        .await
+        .expect("required fixture projection succeeds");
         let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
         assert_eq!(chat.messages_for_channel(&channel_id).len(), 1);
     }
@@ -2961,7 +3139,9 @@ mod tests {
             123,
         )
         .to_generic();
-        view.update(&[fact_from_relational(pin)]).await;
+        view.update(&[fact_from_relational(pin)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
@@ -2975,7 +3155,9 @@ mod tests {
             124,
         )
         .to_generic();
-        view.update(&[fact_from_relational(unpin)]).await;
+        view.update(&[fact_from_relational(unpin)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
@@ -3002,7 +3184,9 @@ mod tests {
             None,
         )
         .to_generic();
-        view.update(&[fact_from_relational(ban)]).await;
+        view.update(&[fact_from_relational(ban)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
@@ -3036,7 +3220,9 @@ mod tests {
         let view = HomeSignalView::new(target, reactive.clone());
 
         let grant = HomeGrantModeratorFact::new_ms(context_id, target, owner, 100).to_generic();
-        view.update(&[fact_from_relational(grant)]).await;
+        view.update(&[fact_from_relational(grant)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
@@ -3051,7 +3237,9 @@ mod tests {
         ));
 
         let revoke = HomeRevokeModeratorFact::new_ms(context_id, target, owner, 101).to_generic();
-        view.update(&[fact_from_relational(revoke)]).await;
+        view.update(&[fact_from_relational(revoke)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home_state = updated.current_home().unwrap();
@@ -3089,7 +3277,9 @@ mod tests {
             Some(160_000),
         )
         .to_generic();
-        view.update(&[fact_from_relational(mute.clone())]).await;
+        view.update(&[fact_from_relational(mute.clone())])
+            .await
+            .expect("required fixture projection succeeds");
         let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         assert_eq!(home_count(&homes), before);
         assert!(homes
@@ -3105,7 +3295,8 @@ mod tests {
             SocialFact::member_joined_ms(target, home_id, new_context, 60, "Bob".to_string())
                 .to_generic();
         view.update(&[fact_from_relational(created), fact_from_relational(joined)])
-            .await;
+            .await
+            .expect("required fixture projection succeeds");
         let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home = homes
             .home_state(&ChannelId::from_bytes([44u8; 32]))
@@ -3115,7 +3306,9 @@ mod tests {
         assert!(home.member(&target).is_some());
 
         // Moderation now applies to the materialized home.
-        view.update(&[fact_from_relational(mute)]).await;
+        view.update(&[fact_from_relational(mute)])
+            .await
+            .expect("required fixture projection succeeds");
         let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home = homes
             .home_state(&ChannelId::from_bytes([44u8; 32]))
@@ -3159,12 +3352,15 @@ mod tests {
             fact_from_relational(wrong_home.clone()),
             fact_from_relational(wrong_context_join.clone()),
         ])
-        .await;
+        .await
+        .expect("required fixture projection succeeds");
         assert!(reactive.read(&*HOMES_SIGNAL).await.unwrap().is_empty());
 
         let created =
             SocialFact::home_created_ms(home_id, context, 10, creator, "Den".into()).to_generic();
-        view.update(&[fact_from_relational(created.clone())]).await;
+        view.update(&[fact_from_relational(created.clone())])
+            .await
+            .expect("required fixture projection succeeds");
         let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
         let home = homes
             .home_state(&ChannelId::from_bytes([86u8; 32]))
@@ -3182,7 +3378,9 @@ mod tests {
             .is_none());
 
         // Duplicate delivery does not inflate counts.
-        view.update(&[fact_from_relational(joined.clone())]).await;
+        view.update(&[fact_from_relational(joined.clone())])
+            .await
+            .expect("required fixture projection succeeds");
         let restarted_reactive = ReactiveHandler::new();
         register_app_signals(&restarted_reactive).await.unwrap();
         let restarted = HomeSignalView::new(own, restarted_reactive.clone());
@@ -3193,7 +3391,8 @@ mod tests {
                 fact_from_relational(wrong_context_join),
                 fact_from_relational(created),
             ])
-            .await;
+            .await
+            .expect("required replay projection succeeds");
         let home = restarted_reactive
             .read(&*HOMES_SIGNAL)
             .await
@@ -3230,7 +3429,9 @@ mod tests {
         )
         .to_generic();
 
-        view.update(&[fact_from_relational(membership)]).await;
+        view.update(&[fact_from_relational(membership)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let chat: ChatState = reactive.read(&*CHAT_SIGNAL).await.unwrap_or_default();
         assert!(
@@ -3273,7 +3474,9 @@ mod tests {
         )
         .to_generic();
 
-        view.update(&[fact_from_relational(update.clone())]).await;
+        view.update(&[fact_from_relational(update.clone())])
+            .await
+            .expect("required fixture projection succeeds");
         assert!(reactive
             .read(&*CHAT_SIGNAL)
             .await
@@ -3281,7 +3484,9 @@ mod tests {
             .channel(&channel_id)
             .is_none());
 
-        view.update(&[fact_from_relational(creation.clone())]).await;
+        view.update(&[fact_from_relational(creation.clone())])
+            .await
+            .expect("required fixture projection succeeds");
         let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
         let channel = chat
             .channel(&channel_id)
@@ -3300,7 +3505,8 @@ mod tests {
         );
         restarted
             .update(&[fact_from_relational(update), fact_from_relational(creation)])
-            .await;
+            .await
+            .expect("required replay projection succeeds");
         let chat = reactive.read(&*CHAT_SIGNAL).await.unwrap();
         let channel = chat.channel(&channel_id).unwrap();
         assert_eq!(
@@ -3333,7 +3539,9 @@ mod tests {
             invitation_code: Some("aura:v1:INITIAL".to_string()),
         }
         .to_generic();
-        view.update(&[fact_from_relational(contact_added)]).await;
+        view.update(&[fact_from_relational(contact_added)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
         assert_eq!(
@@ -3357,7 +3565,9 @@ mod tests {
             invitation_code: Some("aura:v1:REISSUED".to_string()),
         }
         .to_generic();
-        view.update(&[fact_from_relational(reissued)]).await;
+        view.update(&[fact_from_relational(reissued)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
         assert_eq!(
@@ -3381,7 +3591,9 @@ mod tests {
             invitation_code: None,
         }
         .to_generic();
-        view.update(&[fact_from_relational(no_code)]).await;
+        view.update(&[fact_from_relational(no_code)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
         assert_eq!(
@@ -3417,7 +3629,8 @@ mod tests {
             }
             .to_generic(),
         )])
-        .await;
+        .await
+        .expect("required fixture projection succeeds");
 
         owner
             .update(ProjectionSlot::contacts(), |contacts| {
@@ -3444,7 +3657,8 @@ mod tests {
             }
             .to_generic(),
         )])
-        .await;
+        .await
+        .expect("required fixture projection succeeds");
 
         assert!(matches!(
             owner
@@ -3482,7 +3696,9 @@ mod tests {
             invitation_code: None,
         }
         .to_generic();
-        view.update(&[fact_from_relational(contact_added)]).await;
+        view.update(&[fact_from_relational(contact_added)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
@@ -3506,7 +3722,8 @@ mod tests {
         }
         .to_generic();
         view.update(&[fact_from_relational(outbound_proposed)])
-            .await;
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
@@ -3529,7 +3746,9 @@ mod tests {
             },
         }
         .to_generic();
-        view.update(&[fact_from_relational(accepted)]).await;
+        view.update(&[fact_from_relational(accepted)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
@@ -3552,7 +3771,9 @@ mod tests {
             },
         }
         .to_generic();
-        view.update(&[fact_from_relational(revoked)]).await;
+        view.update(&[fact_from_relational(revoked)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
@@ -3575,7 +3796,9 @@ mod tests {
             },
         }
         .to_generic();
-        view.update(&[fact_from_relational(inbound_proposed)]).await;
+        view.update(&[fact_from_relational(inbound_proposed)])
+            .await
+            .expect("required fixture projection succeeds");
 
         let contacts = reactive
             .read(&*CONTACTS_SIGNAL)
@@ -3601,7 +3824,9 @@ mod tests {
             invitation_code: None,
         }
         .to_generic();
-        view.update(&[fact_from_relational(inbound_added)]).await;
+        view.update(&[fact_from_relational(inbound_added)])
+            .await
+            .expect("required fixture projection succeeds");
         let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
         assert_eq!(
             contacts
@@ -3646,14 +3871,18 @@ mod tests {
             let reactive = ReactiveHandler::new();
             register_app_signals(&reactive).await.unwrap();
             let view = ContactsSignalView::new(own, reactive.clone());
-            view.update(std::slice::from_ref(&friendship)).await;
+            view.update(std::slice::from_ref(&friendship))
+                .await
+                .expect("required fixture projection succeeds");
             assert!(reactive
                 .read(&*CONTACTS_SIGNAL)
                 .await
                 .unwrap()
                 .contact(&peer)
                 .is_none());
-            view.update(std::slice::from_ref(&added)).await;
+            view.update(std::slice::from_ref(&added))
+                .await
+                .expect("required fixture projection succeeds");
             let contacts = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
             assert_eq!(
                 contacts

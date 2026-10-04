@@ -1,7 +1,12 @@
 mod arch;
+mod guardian_transcript_scope;
 mod policy;
+mod public_frost_signing;
+mod required_compile_fail;
+mod required_secret_lifetime;
 mod runtime_typed_lifecycle_bridge;
 mod support;
+mod vm_session_lifecycle;
 
 use anyhow::{bail, Result};
 
@@ -86,12 +91,17 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         }
         "runtime-bootstrap-guardrails" => policy::run_runtime_bootstrap_guardrails(),
         "runtime-typed-lifecycle-bridge" => runtime_typed_lifecycle_bridge::run(),
+        "vm-session-lifecycle" => vm_session_lifecycle::run(),
+        "public-frost-signing" => public_frost_signing::run(),
         "security-boundary-policy" => policy::run_security_boundary_policy(),
+        "signed-transcript-boundary" => policy::run_signed_transcript_boundary(),
         "security-bug-class-regressions" => policy::run_security_bug_class_regressions(),
         "security-bypass-symbols" => policy::run_security_bypass_symbols(),
         "secure-storage-filesystem-boundary" => policy::run_secure_storage_filesystem_boundary(),
         "secret-persistence-boundary" => policy::run_secret_persistence_boundary(),
         "secret-field-wrappers" => policy::run_secret_field_wrappers(),
+        "security-exception-metadata" => policy::run_security_exception_metadata(),
+        "secret-lifetime-regressions" => required_secret_lifetime::run(),
         "runtime-boundary-allowlist" => policy::run_runtime_boundary_allowlist(args),
         "runtime-error-boundary" => policy::run_runtime_error_boundary(),
         "runtime-shutdown-order" => policy::run_runtime_shutdown_order(),

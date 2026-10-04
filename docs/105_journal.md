@@ -561,3 +561,13 @@ An enrollment baseline is installed only after independent manifest verification
 ### Immutable local enrollment decision records
 
 Locally retained enrollment setup, pending-generation, registration, response, and issued-manifest records preserve the first canonical decision via atomic absent-only provider publication. A competing existing value must pass bounded exact binding validation; accepted-response and issued-manifest evidence must be cryptographically revalidated. Different valid signature bytes do not replace the original decision. These local records are recovery evidence, not consensus facts. Generic mutable secure-provider write access does not establish domain authorization or lifetime immutability.
+
+### Required envelope decoding failures
+
+Required fact decoding validates the declared domain, supported schema range,
+payload bound and encoding before consuming a payload. An existing envelope and
+its canonical encoded form have the same validation contract. Malformed declared
+JSON retains the original JSON decoder cause; malformed DAG-CBOR retains the
+original canonical serialization cause. A decode failure is not fact absence.
+Successful decoding establishes value shape, not journal commitment or
+canonical entity materialization authority.

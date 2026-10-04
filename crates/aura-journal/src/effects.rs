@@ -215,8 +215,12 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
         let mut message = Vec::new();
         message.extend_from_slice(envelope_id);
         message.extend_from_slice(&authority_id.to_bytes());
-        let ts_bytes = aura_core::util::serialization::to_vec(timestamp)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let ts_bytes = aura_core::util::serialization::to_vec(timestamp).map_err(|source| {
+            AuraError::Serialization {
+                message: "journal codec failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            }
+        })?;
         message.extend_from_slice(&ts_bytes);
         Ok(message)
     }
@@ -329,8 +333,11 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {
         if let Some(bytes) = self.storage.retrieve(self.journal_key()).await? {
-            let stored: StoredJournal = serde_json::from_slice(&bytes)
-                .map_err(|e| AuraError::serialization(e.to_string()))?;
+            let stored: StoredJournal =
+                serde_json::from_slice(&bytes).map_err(|source| AuraError::Serialization {
+                    message: "journal codec failed".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                })?;
             Ok(stored.journal)
         } else {
             Ok(Journal::new())
@@ -341,12 +348,14 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         let stored = StoredJournal {
             journal: _journal.clone(),
         };
-        let bytes =
-            serde_json::to_vec(&stored).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let bytes = serde_json::to_vec(&stored).map_err(|source| AuraError::Serialization {
+            message: "journal codec failed".into(),
+            source: Some(std::sync::Arc::new(source)),
+        })?;
         self.storage
             .store(self.journal_key(), bytes)
             .await
-            .map_err(|e| AuraError::storage(e.to_string()))
+            .map_err(AuraError::from)
     }
 
     async fn get_flow_budget(
@@ -355,14 +364,12 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
         let key = self.flow_budget_key(context, peer);
-        if let Some(bytes) = self
-            .storage
-            .retrieve(&key)
-            .await
-            .map_err(|e| AuraError::storage(e.to_string()))?
-        {
+        if let Some(bytes) = self.storage.retrieve(&key).await.map_err(AuraError::from)? {
             let budget: FlowBudget =
-                from_slice(&bytes).map_err(|e| AuraError::serialization(e.to_string()))?;
+                from_slice(&bytes).map_err(|source| AuraError::Serialization {
+                    message: "journal codec failed".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                })?;
             return Ok(budget);
         }
 
@@ -377,12 +384,15 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
     ) -> Result<FlowBudget, AuraError> {
         let current = self.get_flow_budget(context, peer).await?;
         let merged = current.join(budget);
-        let bytes = to_vec(&merged).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let bytes = to_vec(&merged).map_err(|source| AuraError::Serialization {
+            message: "journal codec failed".into(),
+            source: Some(std::sync::Arc::new(source)),
+        })?;
         let key = self.flow_budget_key(context, peer);
         self.storage
             .store(&key, bytes)
             .await
-            .map_err(|e| AuraError::storage(e.to_string()))?;
+            .map_err(AuraError::from)?;
         Ok(merged)
     }
 

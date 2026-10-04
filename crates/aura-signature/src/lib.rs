@@ -58,10 +58,11 @@ pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 // Re-export session verification
 pub use session::verify_session_ticket;
 pub use transcript::{
-    encode_transcript, sign_ed25519_transcript, threshold_signing_context_transcript_bytes,
+    encode_transcript, encode_transcript_required, sign_ed25519_transcript,
+    threshold_signing_context_transcript_bytes,
     verify_ed25519_threshold_signing_context_transcript, verify_ed25519_transcript,
-    verify_frost_transcript, verify_threshold_signing_context_transcript, SecurityTranscript,
-    TranscriptEnvelope,
+    verify_frost_transcript, verify_threshold_signing_context_transcript,
+    RequiredTranscriptEncodingError, SecurityTranscript, TranscriptEnvelope,
 };
 
 // Re-export identity validation functions

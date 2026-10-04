@@ -18,6 +18,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct SessionServiceApi {
     operations: SessionOperations,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl std::fmt::Debug for SessionServiceApi {
@@ -34,7 +35,8 @@ impl SessionServiceApi {
         account_id: AccountId,
     ) -> AgentResult<Self> {
         Ok(Self {
-            operations: SessionOperations::new(effects, authority_context, account_id),
+            operations: SessionOperations::new(effects.clone(), authority_context, account_id),
+            effects,
         })
     }
 
@@ -51,6 +53,7 @@ impl SessionServiceApi {
         &self,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
+        let _operation = self.effects.admit_public_operation()?;
         self.operations
             .create_session(SessionType::Coordination, participants)
             .await
@@ -71,6 +74,7 @@ impl SessionServiceApi {
         participants: Vec<DeviceId>,
         threshold: usize,
     ) -> AgentResult<SessionHandle> {
+        let _operation = self.effects.admit_public_operation()?;
         self.operations
             .create_threshold_session(participants, threshold)
             .await
@@ -83,6 +87,7 @@ impl SessionServiceApi {
     /// # Returns
     /// A `SessionHandle` for the rotation session
     pub async fn create_key_rotation_session(&self) -> AgentResult<SessionHandle> {
+        let _operation = self.effects.admit_public_operation()?;
         self.operations.create_key_rotation_session().await
     }
 
@@ -107,6 +112,7 @@ impl SessionServiceApi {
     /// # Returns
     /// The final `SessionHandle` with end status
     pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
+        let _operation = self.effects.admit_public_operation()?;
         self.operations.end_session(session_id).await
     }
 
@@ -136,6 +142,7 @@ impl SessionServiceApi {
     /// # Returns
     /// Vector of session IDs that were cleaned up
     pub async fn cleanup_expired(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
+        let _operation = self.effects.admit_public_operation()?;
         self.operations
             .cleanup_expired_sessions(max_age_seconds)
             .await

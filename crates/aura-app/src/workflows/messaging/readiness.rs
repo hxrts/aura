@@ -270,12 +270,30 @@ fn channel_membership_fact(
     }
 }
 
+pub(in crate::workflows) async fn publish_authoritative_channel_membership_ready(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    channel_name: Option<&str>,
+    member_count: u32,
+) -> Result<(), AuraError> {
+    publish_authoritative_channel_membership_ready_with_capability(
+        semantic_readiness_publication_capability(),
+        app_core,
+        channel_id,
+        channel_name,
+        member_count,
+    )
+    .await
+}
+
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_readiness",
+    capability_type = ReadinessPublicationCapability,
     family = "authorizer"
 )]
-pub(in crate::workflows) async fn publish_authoritative_channel_membership_ready(
+async fn publish_authoritative_channel_membership_ready_with_capability(
+    capability: &aura_core::ReadinessPublicationCapability,
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
     channel_name: Option<&str>,
@@ -284,7 +302,7 @@ pub(in crate::workflows) async fn publish_authoritative_channel_membership_ready
     publish_authoritative_semantic_fact(
         app_core,
         aura_core::AuthorizedReadinessPublication::authorize(
-            semantic_readiness_publication_capability(),
+            capability,
             channel_membership_fact(channel_id, channel_name, member_count),
         ),
     )

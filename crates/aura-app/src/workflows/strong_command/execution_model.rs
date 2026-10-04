@@ -143,6 +143,7 @@ pub enum CommandTerminalReasonCode {
     None,
     MissingActiveContext,
     PermissionDenied,
+    BudgetExceeded,
     NotMember,
     NotFound,
     InvalidArgument,
@@ -165,6 +166,7 @@ impl CommandTerminalReasonCode {
         match self {
             Self::None => "none",
             Self::MissingActiveContext => "missing_active_context",
+            Self::BudgetExceeded => "budget_exceeded",
             Self::PermissionDenied => "permission_denied",
             Self::NotMember => "not_member",
             Self::NotFound => "not_found",

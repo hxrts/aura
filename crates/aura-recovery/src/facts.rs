@@ -381,6 +381,21 @@ fn hash_then_authority_key_data(hash: &Hash32, authority_id: &AuthorityId) -> Ve
 }
 
 impl RecoveryFact {
+    /// Decode required recovery evidence without discarding native codec failures.
+    ///
+    /// # Errors
+    /// Returns domain, schema, payload-bound or native declared-codec failures.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_decode_envelope(
+            &aura_core::types::facts::FactTypeId::from(RECOVERY_FACT_TYPE_ID),
+            1,
+            1,
+            envelope,
+        )
+    }
+
     /// Extract the context_id from any variant
     pub fn get_context_id(&self) -> ContextId {
         match self {

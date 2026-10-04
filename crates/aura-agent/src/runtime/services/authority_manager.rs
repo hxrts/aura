@@ -45,14 +45,14 @@ pub enum AuthorityError {
     category = "actor_owned"
 )]
 pub struct AuthorityManager {
-    state: RwLock<AuthorityManagerState>,
+    state: std::sync::Arc<RwLock<AuthorityManagerState>>,
 }
 
 impl AuthorityManager {
     /// Create a new authority manager.
     pub fn new() -> Self {
         Self {
-            state: RwLock::new(AuthorityManagerState::default()),
+            state: std::sync::Arc::new(RwLock::new(AuthorityManagerState::default())),
         }
     }
 
@@ -240,4 +240,30 @@ fn transition_allowed(from: AuthorityStatus, to: AuthorityStatus) -> bool {
             | (Terminated, Terminated)
             | (Terminated, Active)
     )
+}
+
+/// Test observation retains the actual authority state after runtime consumption.
+/// It exposes no mutation or lifecycle grant.
+#[cfg(test)]
+pub(crate) struct AuthorityStatusObservation {
+    state: std::sync::Arc<RwLock<AuthorityManagerState>>,
+}
+#[cfg(test)]
+impl AuthorityStatusObservation {
+    pub(crate) async fn status(&self, authority: AuthorityId) -> Option<AuthorityStatus> {
+        self.state
+            .read()
+            .await
+            .authorities
+            .get(&authority)
+            .map(|entry| entry.status)
+    }
+}
+#[cfg(test)]
+impl AuthorityManager {
+    pub(crate) fn observe_status_for_test(&self) -> AuthorityStatusObservation {
+        AuthorityStatusObservation {
+            state: self.state.clone(),
+        }
+    }
 }

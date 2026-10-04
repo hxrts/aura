@@ -1,0 +1,15 @@
+[package]
+name = "aura-build-support"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+license = "Apache-2.0"
+description = "Host-only infrastructure for Aura repository test harnesses"
+
+[lib]
+path = "process_lock.rs"
+
+[dependencies]
+fs2 = "=0.4.3"
+thiserror = "2"

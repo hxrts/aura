@@ -170,12 +170,13 @@ pub fn sync_biscuit_guard_error(
     peer: DeviceId,
     error: aura_guards::GuardError,
 ) -> AuraError {
-    sync_permission_denied(format!(
+    let diagnostic = SyncDiagnostic::permission_denied(format!(
         "Sync Biscuit guard error with peer {}, capability '{}': {}",
         peer,
         guard_capability.into(),
         error
-    ))
+    ));
+    sync_error_with_cause(diagnostic, error)
 }
 
 /// Create a sync timeout error (maps to Internal).
@@ -359,5 +360,190 @@ mod tests {
         let result = test_function();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
+    }
+}
+
+/// Pure message/category for a new sync failure. No native cause, terminal
+/// error, or existing `AuraError` can be converted into this type.
+///
+/// ```compile_fail
+/// use aura_sync::core::errors::SyncDiagnostic;
+/// let _: SyncDiagnostic = aura_core::AuraError::terminal("original terminal").into();
+/// ```
+pub struct SyncDiagnostic {
+    kind: SyncDiagnosticKind,
+    message: String,
+}
+enum SyncDiagnosticKind {
+    Internal,
+    Network,
+    Serialization,
+    PermissionDenied,
+}
+impl SyncDiagnostic {
+    /// New source-free internal diagnostic.
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self {
+            kind: SyncDiagnosticKind::Internal,
+            message: message.into(),
+        }
+    }
+    /// New source-free permission diagnostic.
+    pub fn permission_denied(message: impl Into<String>) -> Self {
+        Self {
+            kind: SyncDiagnosticKind::PermissionDenied,
+            message: message.into(),
+        }
+    }
+    /// New session diagnostic with existing display format.
+    pub fn session(message: impl Into<String>) -> Self {
+        Self::internal(format!("Sync session error: {}", message.into()))
+    }
+    /// New protocol diagnostic with existing display format.
+    pub fn protocol_with_peer(
+        protocol: impl Into<String>,
+        message: impl Into<String>,
+        peer: DeviceId,
+    ) -> Self {
+        Self::internal(format!(
+            "Protocol error in {} with peer {}: {}",
+            protocol.into(),
+            peer,
+            message.into()
+        ))
+    }
+    /// New network diagnostic with existing display format.
+    pub fn network(message: impl Into<String>) -> Self {
+        Self {
+            kind: SyncDiagnosticKind::Network,
+            message: format!("Sync network error: {}", message.into()),
+        }
+    }
+    /// New serialization diagnostic with existing display format.
+    pub fn serialization(data_type: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: SyncDiagnosticKind::Serialization,
+            message: format!(
+                "Sync serialization error for {}: {}",
+                data_type.into(),
+                message.into()
+            ),
+        }
+    }
+}
+
+/// Attach an original native cause to a newly constructed pure diagnostic.
+/// Existing errors and diagnostic strings cannot overwrite their own chains.
+///
+/// ```compile_fail
+/// use aura_sync::core::errors::{sync_error_with_cause, SyncDiagnostic};
+/// let _ = sync_error_with_cause(SyncDiagnostic::session("failure"), "diagnostic text");
+/// ```
+///
+/// ```compile_fail
+/// use aura_sync::core::errors::sync_error_with_cause;
+/// let _ = sync_error_with_cause(aura_core::AuraError::terminal("original"), std::io::Error::from(std::io::ErrorKind::Other));
+/// ```
+pub fn sync_error_with_cause(
+    diagnostic: SyncDiagnostic,
+    cause: impl std::error::Error + Send + Sync + 'static,
+) -> AuraError {
+    let source: Option<std::sync::Arc<dyn std::error::Error + Send + Sync>> =
+        Some(std::sync::Arc::new(cause));
+    let message = diagnostic.message;
+    match diagnostic.kind {
+        SyncDiagnosticKind::Internal => AuraError::Internal { message, source },
+        SyncDiagnosticKind::Network => AuraError::Network { message, source },
+        SyncDiagnosticKind::Serialization => AuraError::Serialization { message, source },
+        SyncDiagnosticKind::PermissionDenied => AuraError::PermissionDenied { message, source },
+    }
+}
+
+#[cfg(test)]
+mod native_cause_tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn required_sync_new_diagnostic_preserves_category_native_cause_and_clone() {
+        for diagnostic in [
+            SyncDiagnostic::internal("internal"),
+            SyncDiagnostic::network("network"),
+            SyncDiagnostic::serialization("wire", "serialization"),
+            SyncDiagnostic::permission_denied("permission"),
+        ] {
+            let expected_kind = match diagnostic.kind {
+                SyncDiagnosticKind::Internal => "internal",
+                SyncDiagnosticKind::Network => "network",
+                SyncDiagnosticKind::Serialization => "serialization",
+                SyncDiagnosticKind::PermissionDenied => "permission_denied",
+            };
+            let error = sync_error_with_cause(
+                diagnostic,
+                std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            );
+            assert_eq!(error.category(), expected_kind);
+            let cloned = error.clone();
+            assert_eq!(
+                cloned
+                    .source()
+                    .expect("native original cause")
+                    .downcast_ref::<std::io::Error>()
+                    .expect("direct native IO downcast")
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+        }
+    }
+
+    #[test]
+    fn required_sync_nested_and_terminal_causes_are_retained_without_reclassification() {
+        let codec =
+            serde_json::from_slice::<serde_json::Value>(b"{").expect_err("actual malformed codec");
+        let original = AuraError::Serialization {
+            message: "original codec".into(),
+            source: Some(std::sync::Arc::new(codec)),
+        };
+        let result = sync_error_with_cause(SyncDiagnostic::session("peer failed"), original);
+        let retained = result
+            .source()
+            .expect("original error retained")
+            .downcast_ref::<AuraError>()
+            .expect("original category remains structural");
+        assert!(matches!(retained, AuraError::Serialization { .. }));
+        assert!(retained
+            .source()
+            .expect("original prior chain survives")
+            .is::<serde_json::Error>());
+        let terminal = sync_error_with_cause(
+            SyncDiagnostic::session("operation failed"),
+            AuraError::terminal("original terminal"),
+        );
+        assert!(
+            matches!(terminal.source().expect("original terminal cause retained").downcast_ref::<AuraError>(), Some(AuraError::Terminal(message)) if message == "original terminal")
+        );
+    }
+    #[test]
+    fn required_sync_biscuit_guard_preserves_native_capability_failure() {
+        let peer = DeviceId::new_from_entropy([87; 32]);
+        let failure = sync_biscuit_guard_error(
+            "sync:test",
+            peer,
+            aura_guards::GuardError::MissingCapability {
+                capability: "sync:test".into(),
+            },
+        );
+        assert!(matches!(&failure, AuraError::PermissionDenied { .. }));
+        assert!(matches!(failure.source().and_then(|source|
+            source.downcast_ref::<aura_guards::GuardError>()),
+            Some(aura_guards::GuardError::MissingCapability { capability })
+            if capability == "sync:test"));
+        let copied = failure.clone();
+        assert!(matches!(
+            copied
+                .source()
+                .and_then(|source| source.downcast_ref::<aura_guards::GuardError>()),
+            Some(aura_guards::GuardError::MissingCapability { .. })
+        ));
     }
 }

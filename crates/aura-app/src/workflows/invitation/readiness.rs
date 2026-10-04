@@ -114,19 +114,33 @@ pub(in crate::workflows) async fn refresh_authoritative_contact_link_readiness(
     .await
 }
 
+pub(in crate::workflows) async fn publish_authoritative_contact_invitation_accepted(
+    app_core: &Arc<RwLock<AppCore>>,
+    authority_id: AuthorityId,
+) -> Result<(), AuraError> {
+    publish_authoritative_contact_invitation_accepted_with_capability(
+        semantic_readiness_publication_capability(),
+        app_core,
+        authority_id,
+    )
+    .await
+}
+
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_readiness",
+    capability_type = ReadinessPublicationCapability,
     family = "authorizer"
 )]
-pub(in crate::workflows) async fn publish_authoritative_contact_invitation_accepted(
+async fn publish_authoritative_contact_invitation_accepted_with_capability(
+    capability: &aura_core::ReadinessPublicationCapability,
     app_core: &Arc<RwLock<AppCore>>,
     authority_id: AuthorityId,
 ) -> Result<(), AuraError> {
     publish_authoritative_semantic_fact(
         app_core,
         aura_core::AuthorizedReadinessPublication::authorize(
-            semantic_readiness_publication_capability(),
+            capability,
             AuthoritativeSemanticFact::InvitationAccepted {
                 invitation_kind: InvitationFactKind::Contact,
                 authority_id: Some(authority_id.to_string()),

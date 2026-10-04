@@ -423,7 +423,7 @@ impl AuraEffectSystem {
         content_type: &str,
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
-        if self.execution_mode.is_deterministic() {
+        if self.execution_mode.is_deterministic() && self.custom_transports.is_empty() {
             if let Some(shared) = self.transport.shared_transport() {
                 let (peer, device) = resolve_network_peer(self, peer_id).await;
                 let mut metadata = HashMap::new();
@@ -476,9 +476,9 @@ impl AuraEffectSystem {
             aura_core::FlowCost::new(1),
         )
         .await
-        .map_err(|e| NetworkError::SendFailed {
-            peer_id: Some(peer_id),
-            reason: format!("flow charge failed: {e}"),
+        .map_err(|source| NetworkError::BackendFailure {
+            operation: "charge device payload flow".into(),
+            source,
         })?;
         let envelope = TransportEnvelope {
             destination: peer,
@@ -500,9 +500,12 @@ impl AuraEffectSystem {
 
         send_guarded_transport_envelope(self, envelope)
             .await
-            .map_err(|e| NetworkError::SendFailed {
-                peer_id: Some(peer_id),
-                reason: e.to_string(),
+            .map_err(|source| NetworkError::BackendFailure {
+                operation: "send guarded device payload".into(),
+                source: aura_core::AuraError::Network {
+                    message: "selected transport emission failed".into(),
+                    source: Some(std::sync::Arc::new(source)),
+                },
             })?;
         Ok(())
     }
@@ -513,27 +516,43 @@ impl AuraEffectSystem {
         peer_id: uuid::Uuid,
         content_type: &str,
     ) -> Result<Vec<u8>, NetworkError> {
-        // Take only this peer's network frame; other sessions' envelopes stay queued.
-        // Wait a bounded time so lockstep peers (sync) can answer before we give up.
+        let accept = |envelope: &TransportEnvelope| {
+            envelope.metadata.get("content-type").map(String::as_str) == Some(content_type)
+                && network_source_id(envelope) == peer_id
+        };
         for _ in 0..RECEIVE_FROM_POLLS {
-            match self.take_inbound_envelope(|env| {
-                env.metadata.get("content-type").map(String::as_str) == Some(content_type)
-                    && network_source_id(env) == peer_id
-            }) {
+            match self.take_inbound_envelope(accept) {
                 Ok(envelope) => return Ok(envelope.payload),
                 Err(TransportError::NoMessage) => {}
-                Err(e) => {
-                    return Err(NetworkError::ReceiveFailed {
-                        reason: e.to_string(),
-                    })
+                Err(source) => return Err(configured_network_ingress_error(source)),
+            }
+            if !self.custom_transports.is_empty() {
+                match self.receive_configured_envelope().await {
+                    Ok(envelope) => {
+                        match self.queue_runtime_envelope(envelope) {
+                            crate::runtime::subsystems::transport::QueueEnvelopeOutcome::Queued => {}
+                            crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow => {
+                                return Err(configured_network_ingress_error(
+                                    TransportError::IngressCapacityExceeded {
+                                        capacity: crate::runtime::subsystems::transport::LOCAL_TRANSPORT_INBOX_CAPACITY,
+                                    },
+                                ));
+                            }
+                        }
+                        // The next bounded turn checks this consumer's retained match,
+                        // then physical ingress, leaving all unrelated frames untouched.
+                        continue;
+                    }
+                    Err(TransportError::NoMessage) => {}
+                    Err(source) => return Err(configured_network_ingress_error(source)),
                 }
             }
-            if aura_core::effects::time::PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
+            aura_core::effects::time::PhysicalTimeEffects::sleep_ms(self, RECEIVE_FROM_POLL_MS)
                 .await
-                .is_err()
-            {
-                break;
-            }
+                .map_err(|source| NetworkError::BackendFailure {
+                    operation: "wait for device payload ingress".into(),
+                    source: source.into(),
+                })?;
         }
         Err(NetworkError::NoMessage)
     }
@@ -780,5 +799,15 @@ mod tests {
             .await
             .expect_err("closing an already closed handle should fail");
         assert!(matches!(close_err, NetworkError::ConnectionFailed(_)));
+    }
+}
+
+fn configured_network_ingress_error(source: TransportError) -> NetworkError {
+    NetworkError::BackendFailure {
+        operation: "receive retained/configured device payload".into(),
+        source: aura_core::AuraError::Network {
+            message: "device transport ingress failed".into(),
+            source: Some(std::sync::Arc::new(source)),
+        },
     }
 }

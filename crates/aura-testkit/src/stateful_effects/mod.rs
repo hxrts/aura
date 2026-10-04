@@ -47,6 +47,7 @@ pub mod authorization;
 pub mod biometric;
 pub mod console;
 pub mod crypto;
+pub mod custom_provider;
 pub mod journal;
 pub mod leakage_handler;
 pub mod random;
@@ -57,6 +58,7 @@ pub mod system;
 pub mod terminal;
 pub mod time;
 pub mod transport;
+pub mod verification_failure_fixture;
 pub mod vm_bridge;
 
 // Re-export commonly used stateful handlers

@@ -133,6 +133,10 @@ pub enum FactError {
     #[error("serialization failed: {0}")]
     Serialization(#[from] SerializationError),
 
+    /// Declared JSON payload decoding failed with its original codec cause.
+    #[error("JSON fact decoding failed: {0}")]
+    Json(#[from] serde_json::Error),
+
     /// Type ID mismatch
     #[error("type ID mismatch: expected {expected}, got {actual}")]
     TypeMismatch {
@@ -360,6 +364,27 @@ pub fn try_decode_fact<T: DeserializeOwned>(
 ) -> Result<T, FactError> {
     let envelope: FactEnvelope = crate::util::serialization::from_slice(bytes)?;
 
+    try_decode_envelope(
+        expected_type_id,
+        min_supported_schema_version,
+        current_schema_version,
+        &envelope,
+    )
+}
+
+/// Decode an already materialized envelope without discarding required failures.
+///
+/// This pure validator checks the expected domain, explicit schema compatibility,
+/// payload bound and declared encoding. It does not establish journal provenance.
+///
+/// # Errors
+/// Returns structural envelope failures or the original JSON/DAG-CBOR codec cause.
+pub fn try_decode_envelope<T: DeserializeOwned>(
+    expected_type_id: &FactTypeId,
+    min_supported_schema_version: u16,
+    current_schema_version: u16,
+    envelope: &FactEnvelope,
+) -> Result<T, FactError> {
     if envelope.type_id.as_str() != expected_type_id.as_str() {
         return Err(FactError::TypeMismatch {
             expected: expected_type_id.to_string(),
@@ -378,8 +403,7 @@ pub fn try_decode_fact<T: DeserializeOwned>(
 
     let payload = match envelope.encoding {
         FactEncoding::DagCbor => crate::util::serialization::from_slice(&envelope.payload)?,
-        FactEncoding::Json => serde_json::from_slice(&envelope.payload)
-            .map_err(|e| FactError::InvalidEnvelope(format!("JSON decode failed: {e}")))?,
+        FactEncoding::Json => serde_json::from_slice(&envelope.payload)?,
     };
 
     Ok(payload)
@@ -560,6 +584,28 @@ mod tests {
 
         let err = encode_domain_fact("test/v1", 1, &fact).unwrap_err();
         assert!(matches!(err, FactError::PayloadTooLarge { .. }));
+    }
+
+    #[test]
+    fn required_fact_json_decoder_retains_native_cause_through_both_entry_points() {
+        use std::error::Error;
+        let type_id = FactTypeId::new("test/v1");
+        let envelope = FactEnvelope {
+            type_id: type_id.clone(),
+            schema_version: 1,
+            encoding: FactEncoding::Json,
+            payload: b"{".to_vec(),
+        };
+        let encoded = crate::util::serialization::to_vec(&envelope).unwrap();
+        for failed in [
+            try_decode_envelope::<TestFact>(&type_id, 1, 1, &envelope).unwrap_err(),
+            try_decode_fact::<TestFact>(&type_id, 1, 1, &encoded).unwrap_err(),
+        ] {
+            assert!(matches!(&failed, FactError::Json(_)));
+            assert!(failed
+                .source()
+                .is_some_and(|source| source.is::<serde_json::Error>()));
+        }
     }
 
     #[test]

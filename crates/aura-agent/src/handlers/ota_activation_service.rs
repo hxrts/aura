@@ -891,6 +891,7 @@ impl OtaActivationServiceApi {
         participants: Vec<OTAQuorumMember>,
         threshold_k: u16,
     ) -> AgentResult<OTACeremonyId> {
+        let _operation = self.effects.admit_public_operation()?;
         self.admit_protocol_manifest().await?;
 
         let total_n = u16::try_from(participants.len()).map_err(|_| {
@@ -968,6 +969,7 @@ impl OtaActivationServiceApi {
         ceremony_id: OTACeremonyId,
         commitment: ReadinessCommitment,
     ) -> AgentResult<OTAReadinessOutcome> {
+        let _operation = self.effects.admit_public_operation()?;
         let command_tx = self.session_command_tx(ceremony_id).await?;
         let (respond_to, recv) = oneshot::channel();
         command_tx
@@ -996,6 +998,7 @@ impl OtaActivationServiceApi {
 
     /// Commit the OTA activation ceremony and update the shared runner status.
     pub async fn commit_activation(&self, ceremony_id: OTACeremonyId) -> AgentResult<Epoch> {
+        let _operation = self.effects.admit_public_operation()?;
         let command_tx = self.session_command_tx(ceremony_id).await?;
         let (respond_to, recv) = oneshot::channel();
         command_tx
@@ -1039,6 +1042,7 @@ impl OtaActivationServiceApi {
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         let command_tx = self.session_command_tx(ceremony_id).await?;
         let (respond_to, recv) = oneshot::channel();
         command_tx

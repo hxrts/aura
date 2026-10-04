@@ -116,3 +116,14 @@ cargo test -p aura-signature --lib  # all inline unit tests
 - [Cryptography](../../docs/100_crypto.md)
 - [Theoretical Model](../../docs/002_theoretical_model.md)
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md)
+
+### Required transcript encoding
+
+Required local signing and verification use `SecurityTranscript::required_transcript_bytes`
+(or `encode_transcript_required`). The canonical domain/schema/payload envelope
+is identical to the existing transcript wire format. `RequiredTranscriptEncodingError`
+retains the original canonical serialization error through `Error::source`; it is
+process-local evidence, rather than a serialized authentication response.
+The VM lifecycle gate requires source discovery and actual execution of
+`required_encoding_preserves_canonical_wire_and_native_codec_failure` in the
+`hxrts-aura-signature` harness. Runtime key custody remains in `aura-agent`.

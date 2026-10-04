@@ -99,10 +99,21 @@ pub(super) async fn finish_enrollment_vm_slot<T>(
 }
 
 /// An invitee may not have imported its code when the issuer starts sending.
-
+///
 /// Only the initial request's actual unreachable-destination cause is retryable;
 /// routing, engine, receive, confirmation, and codec failures remain terminal.
 fn enrollment_request_peer_unreachable(error: &AgentError, subject: AuthorityId) -> bool {
+    enrollment_send_peer_unreachable(error, subject, "DeviceEnrollmentRequest")
+}
+pub(super) fn enrollment_notice_peer_unreachable(error: &AgentError, subject: AuthorityId) -> bool {
+    enrollment_send_peer_unreachable(error, subject, "DeviceEnrollmentTerminalNotice")
+}
+
+fn enrollment_send_peer_unreachable(
+    error: &AgentError,
+    subject: AuthorityId,
+    expected_label: &str,
+) -> bool {
     use crate::runtime::session_ingress::SessionIngressError;
     use crate::runtime::vm_host_bridge::AuraVmBridgeRoundError;
     use aura_core::effects::TransportError;
@@ -125,7 +136,7 @@ fn enrollment_request_peer_unreachable(error: &AgentError, subject: AuthorityId)
         {
             return from_role == "Initiator"
                 && to_role == "Invitee"
-                && label == "DeviceEnrollmentRequest"
+                && label == expected_label
                 && source
                     .downcast_ref::<TransportError>()
                     .is_some_and(|transport| {
@@ -144,7 +155,6 @@ const DEVICE_ENROLLMENT_INVITEE_RETRY_DELAY_MS: u64 = 500;
 /// Pause between initiator attempts while waiting for the new device.
 const DEVICE_ENROLLMENT_RETRY_DELAY_MS: u64 = 5_000;
 
-#[cfg(test)]
 fn enrollment_stage_error(
     stage: &'static str,
     source: impl std::error::Error + Send + Sync + 'static,
@@ -226,22 +236,90 @@ impl InvitationDeviceEnrollmentHandler {
     /// closes. The new device only becomes reachable as a device of this
     /// authority once a person imports the code on it, so each attempt re-opens
     /// the session and re-sends the request.
-    pub(super) async fn execute_device_enrollment_initiator(
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "EnrollmentWindowCapability",
+        family = "runtime_helper"
+    )]
+    pub(super) async fn execute_device_enrollment_initiator_owned(
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+        budget: crate::runtime::services::enrollment_window::EnrollmentWindowCapability,
     ) -> AgentResult<()> {
-        let InvitationType::DeviceEnrollment { ceremony_id, .. } = &invitation.invitation_type
-        else {
-            return Err(AgentError::internal(
-                "Expected DeviceEnrollment invitation type",
-            ));
-        };
-        let budget = ceremony_runner
-            .registered_enrollment_window(ceremony_id)
-            .await
+        let retained =
+            super::enrollment_trust::RetainedEnrollmentVmControl::load(effects.clone(), invitation)
+                .await?;
+        budget
+            .bind_registered_notice_control(&retained)
             .map_err(AgentError::from)?;
+        let mut slot = None;
+        let outcome = {
+            let progress = Box::pin(self.run_device_enrollment_initiator_window(
+                effects.clone(),
+                &retained,
+                &ceremony_runner,
+                &budget,
+                &mut slot,
+            ));
+            let cancellation = ceremony_runner.await_enrollment_cancellation(&retained);
+            futures::pin_mut!(progress, cancellation);
+            match futures::future::select(progress, cancellation).await {
+                futures::future::Either::Left((result, _)) => result.map(|_| None),
+                futures::future::Either::Right((result, _)) => {
+                    result.map(Some).map_err(AgentError::from)
+                }
+            }
+        };
+        let outcome = finish_enrollment_vm_slot(outcome, slot.take()).await?;
+        let Some(cancelled) = outcome else {
+            return Ok(());
+        };
+        loop {
+            let attempt = budget
+                .execute(effects.as_ref(), || {
+                    Box::pin(super::enrollment_terminal_notice::send_cancelled_notice(
+                        effects.clone(),
+                        &retained,
+                        &ceremony_runner,
+                        &cancelled,
+                        &budget,
+                        &mut slot,
+                    ))
+                })
+                .await
+                .map_err(|source| {
+                    budget.map_run_error("signed enrollment cancellation notice", source)
+                });
+            match finish_enrollment_vm_slot(attempt, slot.take()).await {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if enrollment_notice_peer_unreachable(&error, retained.manifest().subject) =>
+                {
+                    budget
+                        .retry_delay(effects.as_ref(), DEVICE_ENROLLMENT_RETRY_DELAY_MS)
+                        .await
+                        .map_err(|source| {
+                            budget.map_run_error(
+                                "enrollment cancellation notice retry",
+                                TimeoutRunError::Timeout(source),
+                            )
+                        })?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    async fn run_device_enrollment_initiator_window(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        retained: &super::enrollment_trust::RetainedEnrollmentVmControl,
+        ceremony_runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
+        budget: &EnrollmentWindowCapability,
+        session_slot: &mut Option<crate::runtime::session_ingress::OwnedVmSession>,
+    ) -> AgentResult<()> {
         loop {
             let attempt_budget = budget
                 .child(
@@ -253,22 +331,22 @@ impl InvitationDeviceEnrollmentHandler {
                     budget
                         .map_run_error("device enrollment window", TimeoutRunError::Timeout(source))
                 })?;
-            let mut session_slot = None;
+
             let attempt = attempt_budget
                 .execute(effects.as_ref(), || {
-                    self.run_device_enrollment_initiator_attempt(
+                    Box::pin(self.run_device_enrollment_initiator_attempt(
                         effects.clone(),
-                        invitation,
+                        retained,
                         ceremony_runner.clone(),
                         &attempt_budget,
-                        &mut session_slot,
-                    )
+                        session_slot,
+                    ))
                 })
                 .await
                 .map_err(|source| {
                     attempt_budget.map_run_error("device enrollment initiator attempt", source)
                 });
-            let attempt = finish_enrollment_vm_slot(attempt, session_slot).await;
+            let attempt = finish_enrollment_vm_slot(attempt, session_slot.take()).await;
             match attempt {
                 Ok(()) => return Ok(()),
                 Err(error)
@@ -276,11 +354,11 @@ impl InvitationDeviceEnrollmentHandler {
                         && (error.is_timeout()
                             || enrollment_request_peer_unreachable(
                                 &error,
-                                invitation.sender_id,
+                                retained.manifest().subject,
                             )) =>
                 {
                     tracing::debug!(
-                        invitation_id = %invitation.invitation_id,
+                        invitation_id = %retained.canonical_invitation().invitation_id,
                         error = %error,
                         "device enrollment initiator attempt ended; retrying until the new device accepts"
                     );
@@ -302,23 +380,20 @@ impl InvitationDeviceEnrollmentHandler {
     async fn run_device_enrollment_initiator_attempt(
         &self,
         effects: Arc<AuraEffectSystem>,
-        invitation: &Invitation,
+        retained: &super::enrollment_trust::RetainedEnrollmentVmControl,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
         budget: &EnrollmentWindowCapability,
         session_slot: &mut Option<crate::runtime::session_ingress::OwnedVmSession>,
     ) -> AgentResult<()> {
-        let retained =
-            super::enrollment_trust::RetainedEnrollmentVmControl::load(effects.clone(), invitation)
-                .await?;
         let invitation = retained.canonical_invitation();
         let response_verifier =
             super::enrollment_trust::PinnedEnrollmentResponseVerifierCapability::acquire(
                 effects.as_ref(),
-                &retained,
+                retained,
             )
             .await?;
         let subject_authority = retained.manifest().subject;
-        let request = enrollment_vm_admission::sign_request(effects.as_ref(), &retained).await?;
+        let request = enrollment_vm_admission::sign_request(effects.as_ref(), retained).await?;
         let session_id = InvitationHandler::invitation_session_id(&invitation.invitation_id);
         let initiator_role = ChoreographicRole::new(
             retained.manifest().initiator_device,
@@ -362,7 +437,7 @@ impl InvitationDeviceEnrollmentHandler {
             })?);
 
             let loop_result = budget
-                .execute(effects.as_ref(), || async {
+                .execute(effects.as_ref(), || Box::pin(async {
                     loop {
                         budget
                             .remaining_ms(effects.as_ref())
@@ -396,7 +471,7 @@ impl InvitationDeviceEnrollmentHandler {
                             budget.remaining_ms(effects.as_ref()).await.map_err(|source| budget.map_run_error("verified response publication", TimeoutRunError::Timeout(source)))?;
                             match verified {
                                 super::enrollment_trust::VerifiedEnrollmentResponseDispositionCapability::Accepted(verified) => {
-                                    ceremony_runner.record_verified_enrollment_response(verified).await.map_err(AgentError::from)?;
+                                    ceremony_runner.record_verified_enrollment_response(*verified).await.map_err(AgentError::from)?;
                                 }
                                 super::enrollment_trust::VerifiedEnrollmentResponseDispositionCapability::Refused(verified) => {
                                     ceremony_runner.record_verified_enrollment_rejection(verified).await.map_err(AgentError::from)?;
@@ -404,7 +479,7 @@ impl InvitationDeviceEnrollmentHandler {
                             }
                             let confirm = enrollment_vm_admission::sign_terminal_confirmation(
                                 effects.as_ref(),
-                                &retained,
+                                retained,
                                 &ceremony_runner,
                             )
                             .await?;
@@ -449,7 +524,7 @@ impl InvitationDeviceEnrollmentHandler {
                             break Ok(());
                         }
                     }
-                })
+                }))
                 .await
                 .map_err(|error| budget.map_run_error("device enrollment initiator VM", error));
 
@@ -467,6 +542,7 @@ impl InvitationDeviceEnrollmentHandler {
         &self,
         effects: Arc<AuraEffectSystem>,
         invitation: &Invitation,
+        tasks: &crate::task_registry::TaskGroup,
     ) -> AgentResult<()> {
         let admitted = super::enrollment_manifest_admission::load_admitted_baseline(
             effects.as_ref(),
@@ -478,7 +554,8 @@ impl InvitationDeviceEnrollmentHandler {
         match self
             .execute_device_enrollment_invitee_response(
                 effects,
-                &admitted,
+                Arc::new(admitted),
+                tasks,
                 EnrollmentInviteeChoice::Accept,
             )
             .await?
@@ -491,12 +568,14 @@ impl InvitationDeviceEnrollmentHandler {
     pub(super) async fn execute_device_enrollment_invitee_decline(
         &self,
         effects: Arc<AuraEffectSystem>,
-        admitted: &super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        admitted: Arc<super::enrollment_manifest_admission::AdmittedEnrollmentManifest>,
+        tasks: &crate::task_registry::TaskGroup,
     ) -> AgentResult<()> {
         match self
             .execute_device_enrollment_invitee_response(
                 effects,
                 admitted,
+                tasks,
                 EnrollmentInviteeChoice::Refuse,
             )
             .await?
@@ -512,12 +591,196 @@ impl InvitationDeviceEnrollmentHandler {
     async fn execute_device_enrollment_invitee_response(
         &self,
         effects: Arc<AuraEffectSystem>,
-        admitted: &super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        admitted: Arc<super::enrollment_manifest_admission::AdmittedEnrollmentManifest>,
+        tasks: &crate::task_registry::TaskGroup,
         choice: EnrollmentInviteeChoice,
     ) -> AgentResult<Option<aura_app::runtime_bridge::CeremonyFailureReason>> {
-        let budget = EnrollmentWindowCapability::admitted(effects.clone(), admitted)
+        let budget = EnrollmentWindowCapability::admitted(effects.clone(), admitted.as_ref())
             .await
             .map_err(AgentError::from)?;
+        let notice_group = tasks.group(format!(
+            "enrollment_terminal_notice.{}",
+            admitted.manifest().invitation
+        ));
+        let (stop_tx, stop) = futures::channel::oneshot::channel::<()>();
+        let (completed_tx, completed) = futures::channel::oneshot::channel();
+        let notice_effects = effects.clone();
+        let notice_admitted = admitted.clone();
+        let notice_budget = budget.clone();
+        let callback = Box::pin(async move {
+            let mut slot = None;
+            let result = {
+                let receive = notice_budget.execute(notice_effects.as_ref(), || {
+                    Box::pin(super::enrollment_terminal_notice::receive_cancelled_notice(
+                        notice_effects.clone(),
+                        notice_admitted.as_ref(),
+                        &notice_budget,
+                        &mut slot,
+                    ))
+                });
+                futures::pin_mut!(receive, stop);
+                match futures::future::select(receive, stop).await {
+                    futures::future::Either::Left((result, _)) => {
+                        result.map(Some).map_err(|source| {
+                            notice_budget.map_run_error("enrollment terminal notice", source)
+                        })
+                    }
+                    // Both an explicit stop and sender drop withdraw this owned
+                    // listener. Neither branch manufactures terminal evidence.
+                    futures::future::Either::Right((_, _)) => Ok(None),
+                }
+            };
+            let result = finish_enrollment_vm_slot(result, slot.take()).await;
+            let result = result.map_err(Arc::new);
+            let failure = result.as_ref().err().cloned();
+            // An abandoned receiver cannot authorize activation. On failure,
+            // the callback still retains the same actual cause in task health.
+            if completed_tx.send(result).is_err() {
+                tracing::debug!("enrollment terminal notice observer was withdrawn");
+            }
+            match failure {
+                None => Ok(()),
+                Some(source) => Err(aura_core::AuraError::Internal {
+                    message: "enrollment terminal notice listener failed".into(),
+                    source: Some(source),
+                }),
+            }
+        });
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _owned_notice = notice_group.spawn_local_try_named("receive_terminal_notice", callback);
+            } else {
+                let _owned_notice = notice_group.spawn_try_named("receive_terminal_notice", callback);
+            }
+        }
+        let mut slot = None;
+        enum Selected {
+            Response(AgentResult<Option<aura_app::runtime_bridge::CeremonyFailureReason>>),
+            Notice(
+                Result<
+                    Result<
+                        Option<super::enrollment_vm_admission::VerifiedEnrollmentFailureCapability>,
+                        Arc<AgentError>,
+                    >,
+                    futures::channel::oneshot::Canceled,
+                >,
+            ),
+        }
+        let selected = {
+            let response = Box::pin(self.run_device_enrollment_invitee_window(
+                effects.clone(),
+                admitted.as_ref(),
+                choice,
+                &budget,
+                &mut slot,
+            ));
+            futures::pin_mut!(response, completed);
+            match futures::future::select(response, completed.as_mut()).await {
+                futures::future::Either::Left((result, _)) => {
+                    let signalled = stop_tx.send(()).is_ok();
+                    tracing::debug!(signalled, "withdraw owned terminal notice listener");
+                    let closed = budget
+                        .execute(effects.as_ref(), || async {
+                            let outcome = completed.await.map_err(|source| {
+                                enrollment_stage_error("drain terminal notice owner", source)
+                            })?;
+                            notice_group
+                                .await_owned_task_completion()
+                                .await
+                                .map_err(|source| {
+                                    enrollment_stage_error(
+                                        "observe terminal notice task completion",
+                                        source,
+                                    )
+                                })?;
+                            Ok(outcome)
+                        })
+                        .await
+                        .map_err(|source| {
+                            budget.map_run_error("drain terminal notice owner", source)
+                        });
+                    match closed {
+                        Ok(Ok(None)) => Selected::Response(result),
+                        Ok(Ok(Some(failed))) => Selected::Notice(Ok(Ok(Some(failed)))),
+                        Ok(Err(source)) => Selected::Notice(Ok(Err(source))),
+                        Err(source) => {
+                            let abort = notice_group.force_abort_remaining();
+                            Selected::Response(finish_enrollment_vm_attempt(
+                                finish_enrollment_vm_attempt(result, Err(source)),
+                                abort,
+                            ))
+                        }
+                    }
+                }
+                futures::future::Either::Right((result, _)) => Selected::Notice(result),
+            }
+        };
+        match selected {
+            Selected::Response(result) => finish_enrollment_vm_slot(result, slot.take()).await,
+            Selected::Notice(result) => {
+                let evidence = result
+                    .map_err(|source| {
+                        enrollment_stage_error("observe terminal notice owner", source)
+                    })
+                    .and_then(|result| {
+                        result.map_err(|source| {
+                            AgentError::Aura(aura_core::AuraError::Internal {
+                                message: "enrollment terminal notice listener failed".into(),
+                                source: Some(source),
+                            })
+                        })
+                    });
+                let evidence = finish_enrollment_vm_slot(evidence, slot.take())
+                    .await?
+                    .ok_or_else(|| {
+                        AgentError::internal(
+                            "terminal notice owner withdrew before response settlement",
+                        )
+                    })?;
+                let drained = budget
+                    .execute(effects.as_ref(), || async {
+                        notice_group
+                            .await_owned_task_completion()
+                            .await
+                            .map_err(|source| {
+                                enrollment_stage_error(
+                                    "observe terminal notice task completion",
+                                    source,
+                                )
+                            })
+                    })
+                    .await
+                    .map_err(|source| budget.map_run_error("drain terminal notice owner", source));
+                if let Err(source) = drained {
+                    return finish_enrollment_vm_attempt(
+                        Err(source),
+                        notice_group.force_abort_remaining(),
+                    );
+                }
+                let acknowledged = budget
+                    .acknowledge_failure(effects.as_ref(), &evidence)
+                    .await
+                    .map_err(AgentError::from)?;
+                let retained = super::enrollment_manifest_admission::retain_verified_failure(
+                    effects.as_ref(),
+                    evidence,
+                    acknowledged,
+                )
+                .await
+                .map_err(AgentError::EnrollmentManifest)?;
+                Ok(Some(retained.evidence().reason()))
+            }
+        }
+    }
+
+    async fn run_device_enrollment_invitee_window(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        admitted: &super::enrollment_manifest_admission::AdmittedEnrollmentManifest,
+        choice: EnrollmentInviteeChoice,
+        budget: &EnrollmentWindowCapability,
+        session_slot: &mut Option<crate::runtime::session_ingress::OwnedVmSession>,
+    ) -> AgentResult<Option<aura_app::runtime_bridge::CeremonyFailureReason>> {
         loop {
             let attempt_budget = budget
                 .child(
@@ -529,22 +792,22 @@ impl InvitationDeviceEnrollmentHandler {
                     budget
                         .map_run_error("device enrollment window", TimeoutRunError::Timeout(source))
                 })?;
-            let mut session_slot = None;
+
             let attempt = attempt_budget
                 .execute(effects.as_ref(), || {
-                    self.run_device_enrollment_invitee_attempt(
+                    Box::pin(self.run_device_enrollment_invitee_attempt(
                         effects.clone(),
                         admitted,
                         &attempt_budget,
                         choice,
-                        &mut session_slot,
-                    )
+                        session_slot,
+                    ))
                 })
                 .await
                 .map_err(|source| {
                     attempt_budget.map_run_error("device enrollment invitee attempt", source)
                 });
-            match finish_enrollment_vm_slot(attempt, session_slot).await {
+            match finish_enrollment_vm_slot(attempt, session_slot.take()).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(error) if error.is_timeout() && !enrollment_attempt_failed_to_close(&error) => {
                     tracing::debug!(
@@ -616,7 +879,7 @@ impl InvitationDeviceEnrollmentHandler {
         );
 
         let loop_result = budget
-            .execute(effects.as_ref(), || async {
+            .execute(effects.as_ref(), || Box::pin(async {
                 let mut matched_request = None;
                 let mut confirmed = None;
                 loop {
@@ -701,7 +964,7 @@ impl InvitationDeviceEnrollmentHandler {
                         break confirmed.take().ok_or_else(|| aura_invitation::protocol::DeviceEnrollmentMessageError::NotEstablished.into());
                     }
                 }
-            })
+            }))
             .await
             .map_err(|error| budget.map_run_error("device enrollment invitee VM", error));
 

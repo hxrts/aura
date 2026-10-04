@@ -8,7 +8,9 @@ use super::shared::{
     HandlerUtilities,
 };
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::handlers::rendezvous_identity::retrieve_identity_keys;
+use crate::handlers::rendezvous_identity::{
+    require_active_identity_signing_context, require_identity_keys,
+};
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::{RendezvousManager, ServiceRegistry};
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
@@ -233,13 +235,15 @@ impl RendezvousHandler {
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Retrieve identity keys to get public key
-        let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
-        let (_, public_key) = keys.ok_or_else(|| {
-            AgentError::effects(format!(
-                "missing local identity key for authority {}",
-                self.context.authority.authority_id()
-            ))
-        })?;
+        let identity = require_active_identity_signing_context(
+            effects,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .map_err(AgentError::EnrollmentManifest)?;
+        let (_, public_key) = require_identity_keys(&identity)
+            .await
+            .map_err(AgentError::EnrollmentManifest)?;
 
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
@@ -402,13 +406,15 @@ impl RendezvousHandler {
             .await
             .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
-        let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
-        let (local_private_key, _) = keys.ok_or_else(|| {
-            AgentError::effects(format!(
-                "missing local identity key for authority {}",
-                self.context.authority.authority_id()
-            ))
-        })?;
+        let identity = require_active_identity_signing_context(
+            effects,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .map_err(AgentError::EnrollmentManifest)?;
+        let (local_private_key, _) = require_identity_keys(&identity)
+            .await
+            .map_err(AgentError::EnrollmentManifest)?;
 
         // Retrieve remote public key from descriptor
         let remote_public_key = peer_descriptor.public_key;
@@ -695,13 +701,15 @@ impl RendezvousHandler {
 
         let psk = derive_channel_psk(context_id, initiator, self.context.authority.authority_id());
 
-        let keys = retrieve_identity_keys(&*effects, &self.context.authority.authority_id()).await;
-        let (local_private_key, _) = keys.ok_or_else(|| {
-            AgentError::effects(format!(
-                "missing local identity key for authority {}",
-                self.context.authority.authority_id()
-            ))
-        })?;
+        let identity = require_active_identity_signing_context(
+            &effects,
+            &self.context.authority.authority_id(),
+        )
+        .await
+        .map_err(AgentError::EnrollmentManifest)?;
+        let (local_private_key, _) = require_identity_keys(&identity)
+            .await
+            .map_err(AgentError::EnrollmentManifest)?;
 
         let initiator_descriptor = self
             .get_peer_descriptor(context_id, initiator)
@@ -1076,13 +1084,12 @@ async fn execute_record_receipt(
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
+    use crate::runtime::services::ThresholdSigningService;
     use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
-    use aura_core::crypto::single_signer::SingleSignerKeyPackage;
     use aura_core::effects::secure::{
         SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
     };
-    use aura_core::effects::CryptoCoreEffects;
-    use aura_core::secrets::SecretExportContext;
+    use aura_core::effects::ThresholdSigningEffects;
     use aura_core::CapabilityName;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::GuardContextProvider;
@@ -1094,28 +1101,75 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
-    async fn install_identity_key(effects: &AuraEffectSystem, authority: AuthorityId) -> [u8; 32] {
-        let (signing_key, verifying_key) = effects
-            .ed25519_generate_keypair()
+    async fn install_identity_key(
+        effects: &std::sync::Arc<AuraEffectSystem>,
+        authority: AuthorityId,
+    ) -> [u8; 32] {
+        assert_eq!(effects.runtime_authority_id(), authority);
+        ThresholdSigningService::new(effects.clone())
+            .bootstrap_authority(&authority)
             .await
-            .expect("test signing keypair should generate");
-        let public_key: [u8; 32] = verifying_key
-            .clone()
-            .try_into()
-            .expect("test verifying key should be 32 bytes");
-        let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key);
-        let bytes = key_package
-            .export_for_secure_storage(SecretExportContext::secure_storage(
-                "aura-agent::handlers::rendezvous::retrieve_identity_keys",
-            ))
-            .expect("test signing key package should serialize");
-        let location =
-            SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
+            .expect("actual canonical threshold bootstrap");
+        let identity = require_active_identity_signing_context(effects.as_ref(), &authority)
+            .await
+            .expect("actual active physical participant context");
+        let (_, public) = require_identity_keys(&identity)
+            .await
+            .expect("actual canonical encrypted identity package");
+        public
+    }
+
+    #[tokio::test]
+    async fn required_identity_handler_rejects_corrupt_primary_without_fallback() {
+        let authority = create_test_authority(226);
+        let config = AgentConfig::default();
+        let effects = crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority.authority_id(),
+        );
+        install_identity_key(&effects, authority.authority_id()).await;
+        let identity =
+            require_active_identity_signing_context(effects.as_ref(), &authority.authority_id())
+                .await
+                .expect("actual original active identity");
+        let location = SecureStorageLocation::with_sub_key(
+            "signing_keys",
+            format!("{}:{}", authority.authority_id(), identity.epoch()),
+            "1",
+        );
+        let companion = SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", authority.authority_id(), identity.epoch()),
+            aura_core::threshold::ParticipantIdentity::device(effects.device_id()).storage_key(),
+        );
+        assert!(effects
+            .secure_exists(&companion)
+            .await
+            .expect("required companion exists"));
         effects
-            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+            .secure_store(&location, b"{", &[SecureStorageCapability::Write])
             .await
-            .expect("test signing key package should store");
-        public_key
+            .expect("actual provider stores corrupted primary payload");
+        let handler = RendezvousHandler::new(authority).expect("actual handler");
+        let error = handler
+            .publish_descriptor_inner(
+                effects.as_ref(),
+                ContextId::new_from_entropy([227; 32]),
+                vec![],
+            )
+            .await
+            .expect_err("corrupt authoritative package prevents descriptor publication");
+        assert!(matches!(&error, AgentError::EnrollmentManifest(_)));
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut codec = false;
+        while let Some(cause) = source {
+            codec |= cause.downcast_ref::<serde_json::Error>().is_some();
+            source = cause.source();
+        }
+        assert!(
+            codec,
+            "actual provider payload codec source must survive handler boundary"
+        );
     }
 
     fn install_biscuit_cache(
@@ -1329,7 +1383,10 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let effects = crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority_context.authority_id(),
+        );
         install_identity_key(&effects, authority_context.authority_id()).await;
 
         let context_id = ContextId::new_from_entropy([151u8; 32]);
@@ -1427,7 +1484,10 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
-        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let effects = crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority_context.authority_id(),
+        );
         let peer_public_key =
             install_identity_key(&effects, authority_context.authority_id()).await;
 

@@ -41,6 +41,7 @@ pub mod service_registry;
 pub mod session_manager;
 pub mod social_manager;
 pub mod state;
+pub(crate) mod sync_command_registry;
 pub mod sync_manager;
 pub mod threshold_signing;
 pub mod traits;
@@ -97,7 +98,7 @@ pub use selection_manager::{
 pub use service_registry::ServiceRegistry;
 pub(crate) use session_manager::SessionManager;
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};
-pub use sync_manager::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
+pub use sync_manager::{SyncManagerConfig, SyncManagerError, SyncManagerState, SyncServiceManager};
 pub use threshold_signing::ThresholdSigningService;
 pub use traits::{
     RuntimeService, RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth,

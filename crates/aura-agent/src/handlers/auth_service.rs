@@ -55,6 +55,7 @@ impl AuthServiceApi {
     /// # Returns
     /// An `AuthChallenge` that must be signed by the authenticating party
     pub async fn create_challenge(&self) -> AgentResult<AuthChallenge> {
+        let _operation = self.effects.admit_public_operation()?;
         self.handler.create_challenge(&self.effects).await
     }
 
@@ -66,6 +67,7 @@ impl AuthServiceApi {
     /// # Returns
     /// An `AuthResult` indicating whether authentication succeeded
     pub async fn verify(&self, response: &AuthResponse) -> AgentResult<AuthResult> {
+        let _operation = self.effects.admit_public_operation()?;
         let response = self.handler.build_response_ingress(response.clone())?;
         self.handler.verify_response(&self.effects, &response).await
     }
@@ -366,6 +368,7 @@ impl AuthServiceApi {
         &self,
         participant: AuthorityId,
     ) -> AgentResult<DkdSessionId> {
+        let _operation = self.effects.admit_public_operation()?;
         self.execute_dkd_initiator_vm(participant).await
     }
 
@@ -375,6 +378,7 @@ impl AuthServiceApi {
         initiator: AuthorityId,
         session_id: DkdSessionId,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         self.execute_dkd_participant_vm(initiator, session_id).await
     }
 
@@ -402,6 +406,7 @@ impl AuthServiceApi {
         context_id: ContextId,
         request: GuardianAuthRequest,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         self.execute_guardian_auth_as_account_vm(coordinator, guardian, context_id, request)
             .await
     }
@@ -426,6 +431,7 @@ impl AuthServiceApi {
         context_id: ContextId,
         request: GuardianAuthRequest,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         self.execute_guardian_auth_as_coordinator_vm(account, guardian, context_id, request)
             .await
     }
@@ -452,6 +458,7 @@ impl AuthServiceApi {
         request: GuardianAuthRequest,
         proof: GuardianAuthProof,
     ) -> AgentResult<()> {
+        let _operation = self.effects.admit_public_operation()?;
         self.execute_guardian_auth_as_guardian_vm(account, coordinator, context_id, request, proof)
             .await
     }

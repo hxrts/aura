@@ -33,6 +33,12 @@ Single source of truth for domain types and effect trait definitions. Provides f
 
 ## Invariants
 
+- `FrostPublicCommitment` is public protocol data, not signing authority.
+  The public-package effect accepts these entries rather than serialized
+  secret nonce bundles. Bound-message signing requires independently supplied
+  expected message, public package and threshold; runtime owners establish
+  their provenance and enforce one-use nonce custody.
+
 - Zero internal dependencies (foundation constraint).
 - `AuraError` preserves each concrete process-local cause as its immediate
   standard `Error::source`, including after cloning. Source traversal exposes
@@ -225,3 +231,63 @@ rollback from delayed earlier queries.
 ### Required task outcome contract
 
 `TaskSpawner` and `OwnedTaskSpawner` distinguish unit background work from required cancellable work returning `Result<(), AuraError>`. Required admission returns a native error immediately when the adapter cannot supervise it or the runtime owner has closed admission. Unsupported adapters cannot acknowledge successful required admission. The owned facade rejects unit futures for required work; its compile-fail guard enforces that distinction.
+
+### Individual participant key proofs
+
+The pure participant proof primitive establishes possession of one exact
+participant key. It does not establish device membership, ceremony admission,
+threshold agreement, or an authority signature. FROST shares retain their exact
+canonical scalar encoding and use the ciphersuite standard Schnorr signing and
+verification APIs. Runtime owners must independently bind the verifier to the
+current participant inventory before accepting the proof.
+
+Required secure retrieval preserves logical record absence as the concrete
+`SecureStorageRecordMissing` cause within the storage category. Observational
+`secure_exists` still reports absence as `false`; native provider failures
+retain their original sources. Logical absence never manufactures an OS error
+and never grants authority to select replacement signing material.
+
+`TimeoutBudget` supports pure fixed-deadline attenuation without changing the
+original start or observing a new clock value. The child shares the parent's
+clock owner and retains separate sticky exhaustion. Restored attenuation checks
+exact bounds and acknowledged parent/child high-water and rollback history;
+it does not grant storage provenance, signing or runtime admission. Those remain
+with the domain owner. Timeout law tests cover nonrenewal, independent child
+exhaustion, restored shared rollback and inconsistent paired snapshots.
+
+### Retained threshold backend policy
+
+Retained FROST package validation uses the unchanged authenticated threshold and ordered participant count. Zero or oversized thresholds are invalid domain policy. A threshold-one policy is domain-valid but unsupported by the selected FROST backend, and has a distinct typed capability failure. Validation never changes the policy or manufactures a solo package. Deterministic dependency tests verify the backend's actual `InvalidMinSigners` error.
+
+`crypto::signature_input` provides bounded pure parsing of public signature
+inputs with concrete native decoder sources. It does not verify a signature or
+mint signing, pinning, quorum or runtime ownership evidence.
+
+Ownership compile-fail tests use the shared host-only descriptor lock from
+`toolkit/test-support/process_lock.rs`, through the unpublished host-only aura-build-support test dependency.
+They require Cargo and fail on bounded acquisition errors. No other Aura crate
+is imported to provide foundational test locking.
+
+Allocation lifetime references are routing observations. Provider recovery and
+negative-decision custody are opaque, nonserializable owners; retirement dispatches
+through the original retained backend, with no caller-selected receiver.
+
+Shared `Arc<T>` crypto dispatch forwards every extended operation to the same
+provider. Optional defaults do not substitute for a selected implementation.
+Network adapter failures retain the original provider/guard cause rather than
+reducing it to display text.
+
+### Required fact envelope decoding
+
+`try_decode_envelope` validates an existing envelope's expected type, explicit
+schema range, payload bound and declared encoding. `try_decode_fact` delegates
+to this same pure validator after strict envelope decoding. Declared JSON
+failures retain their concrete `serde_json::Error` source in `FactError::Json`;
+DAG-CBOR failures retain the canonical serialization source. Neither entry
+point establishes commitment or authorizes materialization.
+
+A timeout owner drops the losing operation future before reacquiring its shared
+observation lease for final expiry/checkpoint acknowledgment. This prevents an
+operation's cancelled clock query from retaining the gate needed by its own
+timeout owner. Required source coverage exercises the actual delayed query,
+deadline wake, cancellation drop and unchanged sticky original interval.

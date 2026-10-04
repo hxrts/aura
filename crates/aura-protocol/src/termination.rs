@@ -84,6 +84,7 @@ impl TerminationProtocolClass {
             | "aura.invitation.exchange"
             | "aura.invitation.guardian"
             | "aura.invitation.device_enrollment"
+            | "aura.invitation.device_enrollment_terminal_notice"
             | "aura.rendezvous.exchange"
             | "aura.rendezvous.relay"
             | "aura.recovery.guardian_ceremony"
@@ -328,5 +329,14 @@ mod tests {
             err,
             TerminationBudgetError::InvalidMultiplier { .. }
         ));
+    }
+    #[test]
+    fn terminal_notification_uses_finite_enrollment_termination_class() {
+        assert_eq!(
+            TerminationProtocolClass::from_protocol_id(
+                "aura.invitation.device_enrollment_terminal_notice"
+            ),
+            Some(TerminationProtocolClass::RecoveryGrant)
+        );
     }
 }

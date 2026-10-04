@@ -121,6 +121,7 @@ fn send_transport_failure_code(error: &AuraError) -> SemanticFailureCode {
     while let Some(cause) = current {
         if let Some(native) = cause.downcast_ref::<RuntimeBridgeError>() {
             return match native.kind() {
+                K::BudgetExceeded => SemanticFailureCode::BudgetExceeded,
                 K::Unauthorized => SemanticFailureCode::PermissionDenied,
                 K::Validation => SemanticFailureCode::InvalidArgument,
                 K::NotFound | K::ContextNotFound => SemanticFailureCode::NotFound,

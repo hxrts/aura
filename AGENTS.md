@@ -40,6 +40,7 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 | Build | `just prune-inactive-lane wasm-debug --apply` | Guarded whole-lane cleanup when that lane is idle |
 | Build | `just check` | Check without building |
 | Build | `just clippy` | Lint (warnings as errors) |
+| Build | `just ci-policy-toolkit-clippy` | Strict all-target lint of the excluded repo-local policy toolkit; also runs in `just ci-clippy` |
 | Format | `just fmt` | Format code |
 | Format | `just fmt-check` | Check formatting |
 | Test | `just test` | Run all tests |
@@ -126,6 +127,13 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   parity-critical ownership/runtime boundaries; it is the default aggregate lane
   for compile-fail ownership guards, Rust-native ownership lints, retained
   runtime/integration checks, and governance wrappers
+- **Required VM lifecycle evidence**: run `just ci-vm-session-lifecycle` after
+  changing session close/reap, coroutine indexing, worker acknowledgment, VM
+  drop custody, session owner capabilities, or the pinned engine override. The ownership aggregate includes
+  this serialized lane. Its Rust inventory requires nonignored test declarations
+  and actual test-harness discovery before execution; a missing or zero-match
+  required fixture cannot pass as clean. Opaque session owner observation and
+  reconstruction doctests must also be published by the actual harness.
 - **Annotation ratchet gate**: new parity-critical workflow boundaries,
   runtime services, and first-party capability gates must pass the
   changed-files ratchets in `just ci-annotation-ratchet`;
@@ -397,3 +405,231 @@ Production enrollment uses the runtime-private sealed `EnrollmentWindowCapabilit
 ## Trusted enrollment verifier governance
 
 The trusted-key boundary gate uses lexical Rust AST scope and exact key origin for enrollment verifier owners. Canonical sealed admission/retained references must supply their own expected key; comments, nearby resolver names, raw remote fields and aliases cannot substitute for that origin. Manifest signature integrity is distinct from runtime admission and requires an independent verifier argument. Test exclusion must be an actual cfg(test) scope, including all/any semantics, and must not hide subsequent production code. Update AST negative fixtures for ownership changes and run `just _policy-check check security-boundary-policy` before broader CI.
+
+Cancelled enrollment notification recovery uses the original retained clock and
+its distinct negative-only capability. `just ci-vm-session-lifecycle` also requires
+negative-owner fault/expiry regressions and genuine two-runtime signed notice
+delivery after reopening the original persisted runtime. Local recovery ingress
+bounds cannot renew signed notice eligibility.
+
+Public FROST effect changes require `just ci-public-frost-signing`: actual
+nonignored audited signing/substitution tests and the public-only API guard must
+be discoverable. Primitive evidence does not establish runtime quorum custody,
+nonce retirement or recovery. Never replace failed real crypto in a verification
+test with synthetic success bytes.
+
+Confirmed enrollment public archive changes require `just ci-vm-session-lifecycle`
+with the actual confirmation fixture and non-cloneable/non-deserializable ownership
+guard. Preserve original immutable archive versions; explicit reverified receipt
+publication is required for a new version. These tests do not establish profile
+WAL or process restart continuity.
+
+Generation history/live-slot changes require the same lifecycle gate's actual
+legacy migration and same-epoch reissue tests. Retire wrapping secrets through
+their original allocation custody; generic immutable Delete stays forbidden.
+
+Admitted window persistence changes require that gate's actual anchor/checkpoint
+and interval regressions. Preserve the original protected deadline and reject
+missing checkpoints after ever-live acknowledgment; reimport cannot renew it.
+
+Historical enrollment response-policy changes must retain the genuine missing-field
+runtime fixture in the native VM lifecycle inventory. Protected original tracker
+registration and setup evidence are required for supplementation; reconstructed
+threshold arithmetic is not evidence. Run the lifecycle gate when changing this
+boundary and keep `docs/104_runtime.md`, `docs/804_testing_guide.md`, and the agent
+architecture aligned. Profile migration does not replace old-schema coverage.
+
+VM lifecycle enforcement must verify exact per-test executed success after source
+inventory and harness discovery. Do not treat a zero-test green Cargo process or
+listing-only evidence as coverage; retain the adversarial execution-evidence
+regressions when changing this gate.
+
+Enrollment signing-owner changes must retain the actual finalized-threshold
+native classification fixture in the VM lifecycle inventory. Genuine retained
+threshold material requiring a coordinator remains Service with its concrete
+QuorumOwnerRequired source; actual protected material loss remains Storage.
+Do not manufacture solo authority from one share or backend support from metadata.
+
+Required compile-fail ownership coverage must execute with Cargo available; missing or unsuccessful Cargo invocation is a failure. App/agent/signals suites use aura-testkit's one workspace-derived descriptor lock with bounded acquisition and never remove its lock inode. The ownership aggregate explicitly enables signals and runs its nonempty guard suite, agent guards, and the real forced-process lock recovery test. Do not restore directory polling locks or feature-disabled empty passing guard tests.
+
+Required ownership coverage checks three separate forms of evidence: Rust test attributes without ignore annotations, exact names published by the selected harness, and successful execution of every required test. The signals harness is selected with `--features signals`. The process-lock lane requires the forced termination, shared namespace and native IO source regressions; its child-process helper does not satisfy coverage. Captured pretty harness output keeps nested trybuild diagnostics from splitting result lines. Zero-test, ignored, failed and name-lookalike output cannot satisfy the gate. When adding a required ownership test, update the typed suite inventory and its validator regressions; do not replace execution evidence with a successful Cargo exit status.
+
+Runtime deterministic RNG clones must retain the original shared stream owner; never clone seeded generator state into a new lock. Ownership CI requires actual native interleaved-clone/continuation and independent-seed reproducibility regressions with source, discovery and execution evidence.
+
+Production task-spawn policy excludes only parsed configurations requiring
+`test`; do not weaken it with substring detection, `not(test)` or `any(test,
+unix)` exclusions. Concurrency fault-injection coverage stays test-only, and
+ownership CI requires exact execution of the configuration regression.
+
+All required compile-fail harnesses, including core/macros, share the persistent
+host-only descriptor lock in toolkit/test-support/process_lock.rs, reexported
+by aura-testkit. Foundation tests use its unpublished host package rather than importing
+higher-layer Aura crates. Never restore directory locks, per-suite lock names,
+or successful Cargo-unavailable skips.
+
+Capability-boundary changes require the full macro validator regressions and compile-fail suite, followed by ownership CI. Use an exact signature type; when a semantic capability label differs, add `capability_type = Type`. A held runtime receiver can declare `receiver_type = OwnerType` and must pass the generated concrete type check. Do not add decorative capability constants or annotate String/AuraError as authorization evidence. Classify pure validators and observed projections accurately. Readiness publication helpers retain the actual readiness capability through publication. The aggregate requires source attributes, actual discovery and successful exact execution of the full-validator adversarial tests; compile-fail snapshots must be checked against real compiler output.
+
+Every ownership lint test-only exception uses parsed cfg entailment, including
+semantic and enrollment-window policies. Do not introduce a second substring
+predicate or exempt a production-capable configuration by its spelling.
+
+Capability type matching retains configured type/const generic arguments.
+Borrow lifetimes may be omitted from nominal labels; do not erase unrelated
+value types while matching a configured owner or capability container.
+
+
+### Allocation lifetime provider ownership
+
+Selected allocation lifetime factories and provider identities originate only
+from the actual exclusive physical profile owner. Native crypto retirement
+requires the held original negative decision capability; positive sealing
+requires the original activation capability. A serialized allocation locator
+is observation, never recovery or retirement authority. Trusted custom effect
+implementations are an explicit provider boundary.
+
+Run `just _policy-check check security-boundary-policy` before broader CI when
+changing these seams. Its Rust syntax check covers factory references, UFCS
+aliases and macro tokens, while private constructors, declaration attributes
+and compile-fail guards enforce actual capability custody. Keep immutable
+legacy secrets permanent; allocation tombstone ACK is not a physical or backup
+erasure guarantee.
+
+Selected secret-lifetime changes must pass the security-boundary-policy gate's
+required source/discovery/execution inventory for all native provider regressions,
+including physical custody, ACK faults, legacy lifecycle loss, codec domains and
+whole-profile byte limits. Provider tests cannot silently disappear or be ignored.
+
+Capability-boundary result evidence follows only success values, including the
+canonical AgentResult alias. Error-arm types, labels and body markers never
+supply custody; retain negative full-validator coverage and actual compilation.
+
+Allocation lifetime syntax checks normalize source paths against the explicit
+checkout root before comparing sanctioned owner files. Outside-checkout sources
+fail closed. The security gate self-checks absolute owner and foreign paths;
+retain these regressions when changing file discovery or path handling.
+
+For a scoped secret-codec exception, run both
+`just _policy-check check secret-field-wrappers` and
+`just _policy-check check security-exception-metadata`. The complete security
+boundary gate includes both; a focused checker must name a registered command.
+
+`just _policy-check check secret-lifetime-regressions` runs the security
+gate's exact selected-provider source/discovery/execution inventory as a focused
+lane. It requires all declared native tests to execute successfully with no
+ignored or zero-test substitute. Run it for private lifetime codec/provider changes.
+
+Custom runtime provider changes must preserve selected-handler dispatch through
+async/sync assembly and persistent/auth/journal owners. Run the ownership
+aggregate's exact `custom_provider_fidelity` native harness; configured outages
+must retain their actual cause and cannot select default providers. Keep mutable
+provider sentinels in L8 and secure lifetime/profile custody independent of
+ordinary storage injection.
+
+Owned Testing profile assembly changes must preserve the three actual custody
+regressions in the required VM lifecycle source/discovery/execution inventory:
+lease retention through shutdown, foreign configuration rejection, and ordinary
+Testing rejection of production lease ingress. They supplement the connected
+enrollment history and cancelled-notice restart evidence.
+
+Required identity envelope changes retain the exact bootstrap codec/AEAD/bounds
+regression in the VM lifecycle execution inventory. The strongest original
+runtime/epoch/participant context remains required; failed canonical decoding
+cannot select a companion package or older identity. Preserve bounded encoded
+input and nonempty bounded ciphertext before cryptographic work.
+
+Active identity handler changes preserve required rendezvous corrupted-primary
+and contact missing-key regressions in the VM lifecycle inventory. Fixtures use
+actual canonical threshold bootstrap and matching runtime authority; do not
+install raw guessed-epoch packages. Failed signing identity selection or package
+reads must retain their typed cause and cannot report response success.
+
+Rendezvous manager identity ingress retains the actual selected runtime and
+active physical identity context. Preserve its required corrupted-primary
+regression, concrete provider/codec source, and absent-descriptor postcondition
+in the VM lifecycle inventory. Generic permissive storage/crypto mocks cannot
+prove authoritative identity selection.
+
+Capability declaration matching rejects foreign qualified container lookalikes.
+Preserve canonical wrapper paths, exact capability generic arguments, and the
+required full-validator foreign Result/Arc/AgentResult regressions. Unqualified
+names remain declaration syntax; opaque APIs and compiler checks establish actual
+custody independently.
+
+Nonproduction default-profile factory changes preserve required exclusive
+namespace collision/native creation-fault regressions in ownership CI. Return
+only freshly created paths; propagate original IO sources through runtime
+construction. Never reuse an unchecked fallback after collision exhaustion.
+
+Required invitation identity evidence belongs to `just ci-vm-session-lifecycle`.
+Its Rust inventory parses exact `large_stack_async_test!(name, { ... })`
+declarations and recursively rejects ignored attributes; actual harness
+discovery and successful execution remain mandatory. Do not replace required
+Contact success/refusal with wrapper tests or raw-key fixtures. Existing legacy
+stack-adapter execution is not ordinary-stack proof. Original signer recovery
+must be load-only after fresh issuance; missing protected records cannot renew
+the signer epoch.
+
+Required Guardian recovery pair and invitation transcript boundary changes retain
+actual owned-profile reopen/concurrent-pair/native-cause regressions in
+`just ci-vm-session-lifecycle`. Canonical codec evidence runs under
+`hxrts-aura-signature`, runtime custody evidence under `hxrts-aura-agent`.
+Preserve package-specific source discovery and exact execution. Partial-key
+rejection does not establish interrupted-birth recovery or authorize rekeying.
+
+Runtime activity observation must not expose admission closure or completed
+shutdown publication. Keep original gate/effects/facade lease factories annotated
+with their exact declaration-layer capability types and authoritative source.
+Retain all three actual activity getter doc guards in the VM lifecycle inventory.
+
+Contact response verification must retain its actual imported-record/decision
+capability through the primitive and terminal handoff. Raw public-key slices or
+copied metadata cannot replace the original verifier owner; code-key continuity
+does not authorize device membership. Run the trusted-key/security policy gates,
+required Contact regressions and toolkit strict lint after changing this boundary.
+
+### Sync failure provenance checks
+
+For new sync codec, transport, or journal producer adapters, compose a source-free `SyncDiagnostic` and retain the actual native error through `sync_error_with_cause`. Do not convert an existing error or terminal outcome into that diagnostic, replace a pre-existing source, or infer retry/permission from text. Run `just ci-vm-session-lifecycle` for the exact native-source and compile-fail inventory after changing these boundaries.
+
+### Guardian verification role discipline
+
+Guardian primitive verification requires the exact private original-pair,
+imported-confirmation or issued-invitation possession capability for that role.
+Raw keys and response fields cannot replace its owner. Keep local pair integrity,
+imported issuer continuity and first-binding recovery possession distinct from
+trusted device membership. Changes must preserve actual runtime/lease checks and
+pass the Rust key-origin validators plus `just _policy-check check security-boundary-policy`.
+
+The owned Guardian verifier sites use Rust-native canonical transcript byte-origin
+validation. Preserve the actual SecurityTranscript declaration, required encoding
+and immutable byte binding; raw bytes, shadowed bindings and fallback encodings
+are rejected even when nearby text mentions a transcript. Run the signed-transcript
+boundary gate with the required security policy after changing this source flow.
+
+Security bypass test exclusions use lexical Rust cfg(test) ownership. Mixed
+`cfg(any(test, production_feature))`, test-like names and nearby comments do not
+exempt production code; preserve the actual-source scope rejection regressions.
+
+## Required reactive publication ownership
+
+Required runtime processing uses a scheduler-issued exact target retained from
+accepted publication. Keep original runtime ingress and operation/startup window
+through mutation, replay and retries. Diagnostic Batch subscriptions cannot
+prove completion; standalone or foreign ingress cannot attach to canonical
+runtime publication. Preserve native queue/watch/time failures and exact required
+lifecycle source/discovery/execution evidence. Configured-view processing does
+not replace canonical entity or app semantic readiness.
+
+Registered Sync commands retain actual runtime-issued admission and task-root
+custody. Required peer work uses the original resource window; manager stop
+precedes root cancellation under the same original shutdown capability. Idle
+peer discovery and local session retirement do not prove peer synchronization
+or remote teardown.
+
+### Checked runtime entropy admission
+
+Production runtime assembly must reject deterministic seeds before profile acquisition and configured provider invocation, including custom real-crypto assembly. Deterministic crypto and RNG producers require the private checked nonproduction seed owner. Preserve the exact rooted source path, actual qualified execution-mode type, canonical Result/Option/error provenance, and factory/receiver metadata in the entropy-origin gate; comments and simulation names do not authorize its private seed source. Run `just _policy-check check security-boundary-policy` and the required secret-lifetime inventory when changing this boundary. The inventory requires actual constructor and absolute-path/adversarial AST execution evidence; excluded toolkit targets use their explicit manifest, never the workspace package selector alone.
+
+- Raw threshold service enforcement uses the shared Rust cfg classifier through
+  the toolkit policy API. Test-only scope must be established by cfg semantics;
+  mixed production/test predicates remain production for quorum primitive fences.

@@ -38,7 +38,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{physical_time_from_ms, sync_session_error, SyncResult};
+use crate::core::{physical_time_from_ms, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 use aura_authorization::BiscuitTokenManager;
@@ -434,7 +434,14 @@ impl JournalSyncProtocol {
                     .anti_entropy
                     .execute(effects, peer)
                     .await
-                    .map_err(|e| sync_session_error(format!("Anti-entropy sync failed: {e}")))?;
+                    .map_err(|e| {
+                        crate::core::errors::sync_error_with_cause(
+                            crate::core::errors::SyncDiagnostic::session(format!(
+                                "Anti-entropy sync failed: {e}"
+                            )),
+                            e,
+                        )
+                    })?;
 
                 tracing::debug!(
                 "Anti-entropy sync with peer {} completed: {} applied, {} duplicates, {} rounds",

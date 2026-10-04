@@ -165,18 +165,45 @@ impl std::error::Error for ServiceError {
 pub struct RuntimeServiceContext {
     tasks: Arc<TaskSupervisor>,
     time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+    startup_window: aura_core::TimeoutBudget,
 }
 
 impl RuntimeServiceContext {
     /// Create one runtime service context from shared runtime dependencies.
-    pub fn new(
+    pub(crate) fn new(
         tasks: Arc<TaskSupervisor>,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+        startup_window: aura_core::TimeoutBudget,
     ) -> Self {
         Self {
             tasks,
             time_effects,
+            startup_window,
         }
+    }
+
+    /// Test assembly retains its actual supplied supervisor/time owner and
+    /// admits a local original startup resource window before service work.
+    #[cfg(test)]
+    pub(crate) async fn test_original(
+        tasks: Arc<TaskSupervisor>,
+        time: Arc<dyn PhysicalTimeEffects + Send + Sync>,
+    ) -> Self {
+        let started = time
+            .physical_time()
+            .await
+            .expect("actual fixture startup clock");
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &started,
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original fixture startup policy");
+        Self::new(tasks, time, original)
+    }
+
+    /// Borrow the original shared startup window; service replay cannot renew it.
+    pub(crate) fn startup_window(&self) -> &aura_core::TimeoutBudget {
+        &self.startup_window
     }
 
     /// Borrow the shared supervised task root for service-owned child groups.
@@ -290,6 +317,37 @@ pub trait RuntimeServiceCollection {
     fn services_in_stop_order(&self) -> Vec<&dyn RuntimeService>;
 }
 
+/// Preserve a service's actual operation failure or structurally classify its
+/// original window fault; only a genuine deadline is a timeout.
+pub(crate) fn service_window_failure(
+    service: &'static str,
+    error: aura_core::time::timeout::TimeoutRunError<ServiceError>,
+) -> ServiceError {
+    match error {
+        aura_core::time::timeout::TimeoutRunError::Operation(source) => source,
+        aura_core::time::timeout::TimeoutRunError::Timeout(source) => {
+            let kind = match &source {
+                aura_core::TimeoutBudgetError::DeadlineExceeded { .. } => ServiceErrorKind::Timeout,
+                aura_core::TimeoutBudgetError::ClockRollback { .. }
+                | aura_core::TimeoutBudgetError::TimeSourceUnavailable { .. } => {
+                    ServiceErrorKind::Unavailable
+                }
+                aura_core::TimeoutBudgetError::InvalidPolicy { .. } => {
+                    ServiceErrorKind::InvalidConfiguration
+                }
+                aura_core::TimeoutBudgetError::ObservationUnavailable
+                | aura_core::TimeoutBudgetError::CheckpointDiscontinuity { .. }
+                | aura_core::TimeoutBudgetError::CheckpointFailure { .. }
+                | aura_core::TimeoutBudgetError::AttemptBudgetExhausted { .. } => {
+                    ServiceErrorKind::Internal
+                }
+            };
+            ServiceError::new(service, kind, "required original lifecycle window failed")
+                .with_cause(source)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,12 +392,24 @@ mod tests {
         assert!(err.to_string().contains("failed to connect"));
     }
 
-    #[test]
-    fn runtime_service_context_exposes_shared_dependencies() {
+    #[tokio::test]
+    async fn runtime_service_context_exposes_shared_dependencies() {
         let tasks = Arc::new(TaskSupervisor::new());
         let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
             Arc::new(aura_effects::time::PhysicalTimeHandler::new());
-        let context = RuntimeServiceContext::new(tasks.clone(), time_effects.clone());
+        let original = aura_core::TimeoutBudget::from_start_and_timeout(
+            &time_effects
+                .physical_time()
+                .await
+                .expect("actual startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original actual startup window");
+        let context =
+            RuntimeServiceContext::new(tasks.clone(), time_effects.clone(), original.clone());
+        assert!(context
+            .startup_window()
+            .shares_observation_owner_with(&original));
 
         assert!(Arc::ptr_eq(&context.tasks(), &tasks));
         assert!(Arc::ptr_eq(&context.time_effects(), &time_effects));

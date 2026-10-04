@@ -350,3 +350,91 @@ Secure storage distinguishes atomic initial publication of mutable owner state
 new publication; an interrupted call requires rereading the actual original.
 Atomic creation alone does not authorize later mutation or generation renewal.
 Providers without the atomic-create contract return a typed unsupported failure.
+
+### Secure publication classes
+
+Secure storage distinguishes atomic initial mutable publication from lifetime immutable publication. Both preserve an existing original. Mutable records permit subsequent updates under their domain owner. Immutable records carry authenticated provider protection in the same atomic publication and reject generic replacement, deletion, and key-generation writes. Legacy sealing preserves the exact original bytes. A capability list or caller-supplied retirement label cannot override lifetime protection. Unsupported providers fail with a typed error. Interrupted writes have an uncertain publication outcome; successful retries validate and acknowledge the original record. Ordinary storage has no authority over the secure provider's physical subtree.
+
+Required secure retrieval reports an absent record through a typed logical
+absence cause with the exact requested location. This differs from a provider
+I/O failure, whose concrete native cause remains intact. Observational existence
+checks may report `false`; required absence cannot authorize replacement keys,
+default signing policy or a weaker record selection.
+
+The crypto extended effect exposes individual participant-key proof signing
+separately from authority threshold signing. A handler that lacks this primitive
+returns a typed unsupported cause; it cannot fabricate a proof or substitute a
+group signature. The stateless handler signs the supplied actual package, while
+the runtime owner supplies current-device/epoch/ceremony authorization.
+
+Required runtime construction adapters preserve native initialization causes in
+both production and testing/simulation presets. Returning-profile authorization
+failure cannot be converted into a flat runtime diagnostic or treated as fresh
+credential absence. Serialized presentation remains separate from the native
+source chain used to diagnose the failing provider or verification boundary.
+
+### Fixed window attenuation and restore
+
+A physical timeout window may be narrowed to an earlier authenticated deadline
+while preserving its original start and clock observation owner. Attenuation
+does not observe a synthetic timestamp, allocate a new allowance, or modify the
+original interval. A child retains its own sticky exhaustion; parent and child
+share high-water and rollback evidence. Restoring a child requires the exact
+attenuated bounds and matching acknowledged clock history. It must preserve
+exhaustion and cannot enlarge either deadline.
+
+These pure continuity checks do not establish checkpoint provenance or runtime
+admission. The domain owner must authenticate the policy, retain actual custody,
+and acknowledge the original and attenuated snapshots through its required
+checkpoint path. Generation/epoch windows do not authorize physical expiry.
+
+### Selected-provider allocation custody
+
+Allocation references are observations, not authority. A selected physical
+profile owner transfers opaque whole-inventory custody before runtime sharing.
+Provider transitions dispatch through the retained original backend and preserve
+actual storage, codec and cryptographic failures. Recovery may complete an
+acknowledged pre-live birth using its original retained evidence. Missing
+once-live allocation or checkpoint evidence fails closed. Unsupported selected
+providers fail structurally; provider substitution does not repair custody.
+
+
+### Selected provider migration contract
+
+A legacy selected profile may adopt allocation lifetime custody only through its
+original exclusive physical provider owner and original retained decryption
+material. Required bounded inventory authentication precedes immutable root
+birth acknowledgment. Existing permanent secret policy and ciphertext are
+preserved. The independently acknowledged completed-handoff evidence prevents
+missing live checkpoint data from being treated as a new or unmigrated profile.
+Recovery retains original allocation identity and first-decision history; a
+serialized locator grants no recovery authority.
+
+A provider acknowledgment confirms its transactional persistence contract. It
+does not attest physical media erasure, external backup deletion, or absence of
+a complete rollback of all local evidence.
+
+### Selected provider continuity
+
+An explicitly configured effect provider remains the source of its required
+operations after shared runtime ownership transfer. Shared crypto handles
+preserve extended operations as well as core operations; shared ownership
+cannot substitute optional defaults for the selected implementation. Required
+provider faults retain their original cause across persistence, journal and
+network adapter boundaries. Such faults do not authorize implicit selection of
+a default provider. Ordinary storage customization preserves encrypted storage
+and the independent selected secure profile's lifetime custody.
+
+Required invitation transcript encoding and Guardian cryptographic calls retain
+process-local native error sources. A verified invalid signature is a boolean
+rejection; codec failure or selected cryptographic provider failure is a typed
+error and cannot be converted into absence or a successful response. Native
+sources are local diagnostic evidence, not serialized protocol authority.
+
+### Newly composed diagnostics and retained causes
+
+A diagnostic category and message contain no causal provenance or mutation authority. Attaching a native failure to a new diagnostic preserves the original concrete standard error and its existing source chain. Existing cause-bearing errors and terminal outcomes are not converted to source-free diagnostics or overwritten by a later cause. Cloning a cause-bearing error preserves its original native source identity.
+
+### Deterministic entropy admission
+
+A production assembly rejects an explicit deterministic entropy seed before acquiring profile custody or invoking configured providers. Simulated cryptographic handlers and deterministic random streams require a private seed capability admitted from the actual nonproduction execution mode. Selecting a custom cryptographic handler does not bypass this admission decision.

@@ -61,6 +61,12 @@ pub struct TransportEnvelope {
 /// Transport operation errors
 #[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum TransportError {
+    /// Required runtime ingress exceeded its bounded retained queue.
+    #[error("Transport ingress capacity exceeded ({capacity} envelopes)")]
+    IngressCapacityExceeded {
+        /// Actual configured runtime queue bound.
+        capacity: usize,
+    },
     /// Failed to send message to destination
     #[error("Transport send failed to {destination}: {reason}")]
     SendFailed {
@@ -92,7 +98,10 @@ pub enum TransportError {
 
 impl From<TransportError> for AuraError {
     fn from(err: TransportError) -> Self {
-        AuraError::network(err.to_string())
+        AuraError::Network {
+            message: err.to_string(),
+            source: Some(std::sync::Arc::new(err)),
+        }
     }
 }
 

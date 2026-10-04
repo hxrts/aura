@@ -745,3 +745,466 @@ record alone cannot substitute. Only regular lifecycle status overlays the
 retained original. The regular decoder is bounded to 1 MiB and the retained
 secret decoder to 4 MiB. Cancellation status publication redacts the hydrated
 payload again and preserves the secure original bytes.
+
+Supervised execution identity comes from successful bounded registry admission,
+not from a caller identifier or an executor thread. Each registered future poll
+and destructor has its original owned identity; nested scopes restore their
+caller and cancellation cannot leave an ambient owner installed. Identity is
+stable across suspension and executor migration and distinguishes sibling groups
+with identical local task counters. Native and browser choreography session
+bindings use that identity for supervised tasks. Identity observation grants no
+ability to admit a task or enter an execution scope, and identity carries no
+cryptographic peer, membership or signing authority.
+
+### Forced VM owner retirement
+
+Session owner authority includes the physical identity of the actual claim or
+transfer. Session IDs, labels, generations and scopes are read-only observations
+and cannot reconstruct that authority. A capability from another runtime is
+invalid even when all of those observations are identical. Copying a current
+capability retains its original claim; transfer invalidates all copies of the
+previous claim.
+
+A dropped move-owned VM session retires its exact registered choreography owner
+and local fragment custody synchronously. Owner generation and scope validation
+share the ownership-transfer lock order, so stale handles cannot retire a newer
+owner. This resource retirement supplies no signed terminal decision and performs
+no asynchronous close or physical-time observation. Ordinary paths retain the
+required explicit close contract. Unknown transport delivery remains unknown;
+retirement neither acknowledges nor replays pending frames.
+
+Registered task destructors retain concrete retirement failures in the existing
+service task health owner before cancellation completion and idle publication.
+Task poll identity scopes remain lexical during destructors.
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.
+
+### Exact notice identity and bounded execution
+
+The original registered enrollment window retains a single sealed notice
+identity from the actual retained issued control. It binds the canonical
+manifest transcript and digest, including signed expiry, to the original
+runtime and registered generation. Clones use the same binding; rebinding to a
+different digest, transcript or expiry fails closed. Admitted notice guards
+match the retained original expiry explicitly. No serialized value constructs
+this runtime-local binding.
+
+Enrollment progression preserves its original lexical owner and acceptance
+window across delegated work. Caller futures have a bounded size independent
+of executor stack settings; delegation cannot acquire a second execution owner
+or extend the original window.
+
+### Signed notice validity attenuation
+
+Issuer notice execution is bounded by both the original registered ceremony
+interval and signed manifest validity. An original owner derives its child
+endpoint from one acknowledged physical observation; a later read cannot shift
+that endpoint forward. The child shares original lease, observations and
+checkpoint, and never renews the registration. An already elapsed manifest
+validity is a retained typed domain expiry, not an invented clock failure or
+retryable transport diagnosis. Active cancellation checks this signed validity
+before the durable terminal CAS. Already-cancelled idempotent local replay
+retains the first decision without authorizing a new expired notification.
+
+### Required session teardown failures
+
+Required VM close and runtime choreography close retain their concrete producer
+errors through the standard error source chain. Forced retirement retains a VM
+close failure even when exact ownership retirement succeeds. If both fail, the
+close failure is primary and the ownership failure remains separately typed.
+Cleanup failure cannot acknowledge successful terminal publication or remote
+delivery. A provider that exposes only textual lifecycle detail retains that
+limitation; wrapping it does not establish additional structured evidence.
+
+### Enrollment custody ordering
+
+All enrollment publication and activation owners share one physical signing
+custody order: generation, tracker decision, then tree mutation. A composite
+runtime capability retains the actual generation and decision guards for the
+same effect system and tracker; a foreign runtime, a deserialized record or a
+caller-supplied lock cannot manufacture that custody. Fresh roster preparation,
+original allocation recovery and activation retain this owner through their
+tree decision. Registration and supersession reuse the held decision instead
+of reacquiring it. Verified signing activation requires the same physical
+generation capability and does not acquire that guard a second time. Readiness,
+immutable receipts and canonical identifiers remain evidence, rather than
+substitutes for a held lifecycle owner.
+
+### Original cancellation preparation scope
+
+An active enrollment cancellation observes the actual original registered clock
+and checkpoint owner. Its preparation authority is distinct from protocol
+execution admission: it does not reacquire the execution lease or admit another
+VM session. Required guard preparation, first terminal decision and local
+publication share the original fixed deadline attenuated to signed validity.
+Required observation acknowledgment precedes continuation, and a replaced clock
+or allocation fails closed.
+
+The complete cancellation ingress request has a separate local bound of five
+seconds, covering selector lookup, active preparation and historical negative
+publication. Active preparation is additionally bounded by the original
+registered/signed interval; the tighter bound stops continuation. Neither bound can
+extend enrollment validity or authorize protocol execution. An existing durable
+Cancelled decision supplies a negative publication capability, preserving the
+first decision and original interval without reopening execution or permitting
+new expired notification signing.
+
+An enrollment registration handoff retains the actual runtime owner reference.
+Original protected record validation and matching logical identifiers alone do
+not permit a different runtime to consume that live registration capability.
+The generation decision lease can end after durable registration; the physical
+owner binding continues through protocol and deferred delivery admission.
+
+### Targeted VM disposal acknowledgment
+
+Required VM retirement disposes only the owned target session, including live or
+blocked coroutines, scheduling eligibility, handoffs and scoped communication
+and resource state. Unrelated sessions remain usable. Host metadata removal
+follows the actual backend acknowledgment. The cooperative backend retains
+stable coroutine IDs through its existing index rebuild; the threaded backend
+validates and rebuilds its explicit ID index after removal.
+
+Threaded worker execution is joined by the engine's synchronous worker scope
+before exclusive disposal begins. Acknowledgment means no target job remains;
+it does not require destroying the shared pool or other sessions. Naturally
+terminal session status and epoch are preserved, and repeated disposal returns
+its original compact acknowledgment. New close epoch advancement is checked
+only for a genuinely active target.
+
+Concrete backend failure remains in the standard native source chain. Required
+closure cannot succeed by parsing or suppressing an unsupported error, merely
+removing host metadata, or disposing an entire engine containing other sessions.
+Historical compact summaries and diagnostic traces follow the dependency's
+explicit archive policy. Shared global guard state is not claimed as exclusively
+owned by the target session. VM disposal is local cleanup and does not establish
+remote delivery, a signed terminal decision or protocol completion.
+
+### Final active enrollment inventory custody
+
+The issuer captures final active verification material while the original generation, tracker decision and tree reservation remains held. The exporter requires that sealed capture and compares the exact manifest binding before signing; caller-supplied manifest tuples do not authorize export. Receiver admission requires the signed final inventory and authenticates its roster against baseline membership. Existing-peer recording retains its original registered issuance capability rather than reloading weaker identifiers. Exact nonroot package persistence remains required before nonroot enrollment can be admitted; an absent provider fails closed and cannot be replaced by the root package.
+
+### Cancelled enrollment notification recovery
+
+Post-bootstrap recovery distinguishes a retained Cancelled first decision from an
+active enrollment registration. Pending generation secrets remain retired. A
+separate move-owned notice capability binds the independently retained issued
+manifest, actual runtime, immutable first decision, original clock checkpoint and
+original execution semaphore. It authorizes only the finite signed terminal-notice
+protocol; it grants no Request, Accept, Confirm, activation or membership authority.
+
+Notification eligibility ends at the earlier of the original registered deadline
+and the signed manifest expiry. Restoring a terminal decision does not renew either
+bound. Required observation and checkpoint acknowledgment precede signing and
+continuation. Signing uses the currently owned issuer identity only while its key
+still matches the independently retained issuer verifier. Known original or signed expiry completes the finite recovery owner with a typed
+eligibility-ended disposition and prevents further sends. Required clock,
+checkpoint, signer, transport and teardown faults retain their original typed
+cause through task failure and drain. Both preserve the Cancelled decision.
+
+### Failed enrollment generation retirement
+
+A failed generation retires its required secret inventory before publishing and
+acknowledging the exact immutable retirement receipt. That receipt makes
+retirement retries idempotent. The original protected allocation record remains
+immutable evidence; generic secure deletion cannot release or rewrite it. An
+explicitly mutable pending slot has a separate owned release contract. Immutable
+participant wrapping secrets likewise require an explicit retirement lifetime.
+Fresh allocation ownership must distinguish that history from its live pending
+slot, including when the next canonical epoch is unchanged by a failed ceremony.
+
+### Enrollment allocation history and live epoch slots
+
+An enrollment allocation's original ordered policy, independent setup binding,
+reserved invitation, prestate and clock interval are immutable history. Its
+registered first decision has a separate immutable seal. An epoch-addressed
+mutable live slot identifies the currently held allocation; neither its phase
+flag nor its participant vector independently authorizes registration or recovery.
+Required reads compare the slot against its protected original history and
+registered seal before exposing a live generation capability. A registered seal
+acknowledged before an interrupted slot update remains the first decision.
+
+Retirement releases the mutable slot only after required cleanup and the exact
+completed cleanup receipt are acknowledged. A negative decision recorded before
+cleanup does not certify that cleanup completed. Replaying that decision permits
+only cleanup of the same original generation, never resumed signing. Original
+allocation and registration evidence remains protected when a later ceremony
+allocates the same pending epoch. Legacy protected epoch records require explicit
+original-history validation before migration into a separate mutable slot.
+
+Participant wrapping secrets require generation-specific lifetime ownership.
+Their creator custody must survive reconstruction under the original selected
+profile and distinguish two ceremonies at the same pending epoch. A generic
+Delete capability, namespace match or caller-supplied digest does not authorize
+retirement of such a secret.
+
+### Admitted enrollment clock publication
+
+The original invitee admission interval is retained as immutable evidence,
+separate from the mutable highwater checkpoint. Fresh admission retains the full
+signed manifest interval beginning at the original recorded admission time.
+Explicit migration of a legacy clock preserves its actually recorded attenuation;
+it cannot extend that interval to the newer fresh policy.
+
+Finishing an interrupted initial publication requires the original protected
+admission, cryptographic revalidation and exclusive execution custody of the
+actual runtime. It may publish only the original clock bytes. Required observation
+and reimport do not allocate clocks. The immutable first-live decision ends this
+initial completion authority: subsequent missing original or checkpoint records
+fail closed, rather than deriving another clock from the current time. Required
+publication, reread and checkpoint faults retain their concrete causes.
+
+### Enrollment signing and response policies
+
+An enrollment generation commits its signing threshold and ordered signing
+roster separately from the remote response policy. The local issuer belongs to
+the signing roster and is not a remote responder. The original allocation fixes
+the response threshold and responder count before registration; subsequent
+registration, recovery and interrupted completion compare those committed values
+exactly. A signing threshold does not become response-policy evidence through
+clamping recovered records. Historical allocations lacking a distinct protected
+response-policy commitment require explicit proved migration before live reuse.
+
+### Historical enrollment response-policy evidence
+
+An old allocation without a distinct response commitment may acquire a separate
+immutable supplement only from its original protected allocation and original
+protected tracker registration. The supplement binds the exact bytes of both
+records and retains the registration's response threshold and count directly.
+Original subject, ceremony, epoch, prestate, setup and responder roster must
+agree. Missing original proof cannot be replaced by arithmetic on the signing
+threshold or a reconstructed participant count.
+
+Explicit migration holds the actual generation owner. Required reads validate
+the supplement and its original evidence without writing new authority. Neither
+old allocation bytes nor the original clock interval are changed. Deserializing
+an old allocation cannot reconstruct this verified supplemental authority;
+missing or contradictory supplemental evidence fails closed.
+
+### Verified enrollment parent heads
+
+A commitment change within an epoch does not change the original signing-key
+policy. An enrollment AddLeaf followed by RotateEpoch therefore has an
+intermediate original-epoch parent head. Required verifier inventory captures
+that exact parent only after its operation cryptographically verifies against
+the independently admitted node key and policy. Neither an epoch match nor a
+public package template independently authorizes a new parent commitment.
+
+Sealed committed-transition and local-extension evidence retains the captured
+inventory. Archive consumers require that evidence and its original manifest
+binding before exposing verifier data. The immutable archive continues binding
+the complete original committed-history digest and admitted public policies;
+operation verification reconstructs exact intermediate heads. A replayed fence,
+another node/epoch, substituted policy or divergent history cannot supply the
+required evidence.
+
+### Registered notice identity assignment
+
+A registered enrollment window retains one runtime-local notice identity binding
+for its original manifest digest, canonical transcript and expiration. Repeated
+submission must compare all three fields against that original assignment;
+contradictory submission cannot replace it. This binding is not decoded from peer
+or storage data and does not establish signing authority or freshness on its own.
+
+Registered enrollment execution-window admission requires the original registered
+generation capability, bound to its actual runtime, tracker and signed canonical
+invitation. An observed ceremony snapshot or a ceremony identifier alone cannot
+reacquire execution custody. Pre-live allocation clock ownership and registered
+execution ownership remain distinct stages.
+
+### Original enrollment allocation policy
+
+Device enrollment has a maximum original allocation interval of 600,000 physical
+milliseconds. A signed quorum request must be validated against this same policy.
+A longer setup-code validity interval cannot widen that allocation. Signed expiry
+attenuates the active child while preserving the original interval and its
+retained observation continuity.
+
+### Enrollment allocation lifetime ownership
+
+Enrollment wrapping births retain the authenticated rotation plan and original
+immutable allocation scope. Read, activation and retirement capabilities bind to
+the actual runtime registry. Negative cleanup retains original generation and
+first-decision custody through provider acknowledgment before releasing the
+generation. Restart recovers that original custody and deadline; same-epoch
+reissuance cannot be retired by replaying an earlier allocation's negative owner.
+
+### Configured provider fidelity
+
+An explicitly configured runtime effect provider remains the provider for its
+required operations throughout assembly and service ownership. Ordinary
+storage configuration preserves unified encryption at rest and does not replace
+secure allocation custody. A configured provider failure remains a failure of
+that operation with its native cause. It cannot authorize selecting an implicit
+default provider. Configured transport selection precedes emission; receive
+absence permits inspection of another configured provider, while a typed fault
+terminates that attempt. Synchronous and asynchronous builders have the same
+provider-fidelity contract.
+
+### Rendezvous identity selection failures
+
+Local rendezvous descriptor and channel identity material is bound to the
+selected runtime's active physical participant and epoch policy. The retained
+identity context authorizes the canonical package read. Failure of that read
+retains its concrete cause and prevents publication or channel preparation;
+a companion package or historical epoch cannot replace failed authoritative
+material. Contact response signing retains the original issued identity under
+the same required physical package-read contract.
+
+Filesystem lifetime initialization may finish an acknowledged pre-link intent
+only under original selected profile custody and protected pre-live origin.
+Staged observations do not count as acknowledged once-live metadata. Recovery
+preserves the original root and finishes Preparing/Birth/Ready/Handed ordering
+without a new root allocation; ambiguous, conflicting or missing live evidence
+returns a retained failure.
+
+Contact, guardian and channel invitation issuance captures its original physical
+signer under the fresh reservation before publication. Subsequent export,
+response and profile reopen load that protected identity and canonical sender
+record; neither active-epoch replacement nor a historical search can repair
+missing original evidence. The identity capability binds the actual runtime,
+physical device, original epoch, invitation digest and public verifier. Export
+preserves native selected-provider signing failures through its typed error chain.
+
+Initial staged-publication recovery retains the opened source through link,
+linked-target identity and ciphertext validation, then acknowledges the target
+before removing staged evidence. Conflict or substitution cannot acknowledge
+handoff. Interruption after link and before staged-name removal may leave two
+names for one original private ciphertext inode. Only the exact original
+source/target pair, authenticated under held profile custody, admits this
+initialization exception; unrelated aliases and missing once-live targets fail.
+Target acknowledgement precedes stage removal and its directory acknowledgement.
+Stage inventories and exact target-prefix lookup stream entries under
+retained directory descriptors, without imposing a total ordinary-record cap.
+Traversal bounds follow the secure-storage namespace/key/subkey layout; full
+native scan latency remains proportional to the stored directory inventory.
+
+## Required shutdown completion provenance
+
+Closing runtime admission establishes Stopping, not completed shutdown. A shutdown request observing an already closed owner fails with its native state and cannot publish Stopped. Recorded task-tree, service or lifecycle teardown failures retain Stopping. Only the internal successful completion path publishes Stopped; an observed activity handle cannot mint that state. The complete admitted-operation and owned-service drainage protocol remains a separate prerequisite for profile handoff.
+
+### Contact confirmation operation windows
+
+A Contact confirmation continuation retains the original acceptance operation's attenuated physical interval and observation owner. Retrying the same signed acceptance cannot renew that interval. Physical rollback after observed progress is a required failure even when the new timestamp is later than the original start. Required clock and sleep failures retain their native causes and do not become invitation expiry. A runtime-owned decision lease serializes required imported-state verification and the resulting materialization and status publication.
+
+### Required current identity signing availability
+
+A supported active threshold identity reports quorum-service unavailability only after its current native public verifier, exact ordered physical participant policy and actual local encrypted share have been validated together. Malformed or unsupported native packages remain cryptographic failures; missing local backing records remain storage failures with their original record location. A local share alone never establishes completed group signing.
+
+Guardian recovery pair access is serialized by the original runtime's private
+keypair lease. A response identity capability retains that runtime and its
+zeroizing private bytes; partial or mismatched original evidence fails before
+response publication. Both fresh writes must acknowledge before capability
+issuance. The in-process lease is not a durable recovery witness for interrupted
+initial pair publication or complete historical loss.
+
+Required regular imported-invitation reads and terminal decisions share the
+original runtime's imported-invitation decision lease across Contact and
+Guardian handlers. Required Guardian response code reads bounded stored metadata,
+retains native read/codec failures, and checks the imported invocation binding
+before allocating recovery keys or opening the VM. A cached invitation cannot
+turn failed backing reads into absence. VM, canonical codec, physical clock and
+confirmation storage failures retain process-local original causes.
+
+Guardian sender-code context and the receiver-local materialized context are
+distinct. The response binds retained original payload fields and actual receiver
+authority while retaining original code context/version as import evidence;
+re-encoding a receiver-local projection cannot reconstruct the original code.
+
+Guardian principal and receiver operations establish their original effect-backed
+physical window before the first required import, key, or VM await. Preparation
+and the VM loop consume the same budget and observation owner; waiting for import
+custody cannot start a new window. Required clock/provider failures retain native
+causes. Expiration/cancellation is failure evidence and does not acknowledge
+session disposal or authorize a runtime/profile transfer.
+
+Guardian VM terminal processing consumes the actual owned session and requires
+its close acknowledgment before a successful return. A failed primary operation
+and failed close retain both typed process-local causes; standard source traversal
+follows the primary, while the terminal failure retains cleanup separately. The
+primary timeout category survives a combined failure. Outer-window cancellation
+may still force owner retirement; it is failure evidence, never close ACK or
+completed runtime/profile drain.
+
+### Original runtime shutdown window and retained operation admission
+
+Public invitation, authentication, chat, OTA, recovery and session mutations
+retain one admission lease from their actual runtime until completion or
+cancellation. Admission closure and operation count changes are atomic. Each
+runtime admits at most 256 simultaneous public operations; exhaustion rejects
+before mutation and only the original lease's destruction releases its slot.
+This local resource policy grants no ceremony, signing, or membership authority.
+
+Shutdown closes admission and owns one required physical resource window of
+30 seconds. It settles admitted operations before stopping their reactive
+publication scheduler, then waits for actual supervised descendant destruction
+and required service teardown under that same original window. Failed clock,
+checkpoint, deadline, service, or destruction evidence withholds successful
+stopped publication. Forced abort requests do not constitute destruction ACK.
+Cancellation does not reopen the original runtime.
+
+This shutdown contract does not establish transferable profile custody.
+Unleased advanced effects, lower signing/bridge mutation routes, current
+membership validation, provider-preserving profile reassembly and genuine
+quorum signing require their own completed ownership boundaries.
+
+Runtime admission observations expose state without authority to close admission
+or publish shutdown completion. Closure remains internal to runtime ownership;
+external callers use the sanctioned shutdown operation. Runtime operation leases
+are issued through declaration-layer proof boundaries and retain the actual
+activity gate; a foreign gate cannot authorize an original runtime continuation.
+
+## Original runtime service-stop continuation
+
+Successful public admission closure creates a move-only shutdown window tied to
+the actual gate, effect system and task root. Required service disposal and health
+acknowledgments consume that same original resource window; the common service
+helper cannot allocate another deadline. Authority termination is published only
+after all required pipeline, task-tree, service-health and lifecycle acknowledgments,
+within the original window.
+Provider, deadline and authority-state failures retain their native causes and
+withhold successful runtime termination.
+
+This contract does not authorize profile transfer. Internal service cleanup
+windows and whole provider/registry/RNG reassembly require their own completed
+owner integration before a full handoff can be acknowledged.
+
+### Exact reactive publication observation
+
+An exact processing target is issued by the original scheduler ingress after accepted ordered enqueue. Its queue envelope and retained processing observation are bound to that same ingress owner. The scheduler acknowledges only after all registered views complete the selected batch. Retained highwater allows exact completed targets to be observed despite coalesced or missed diagnostic notifications. Original scheduler failures retain their native causes for pending targets. Processing acknowledgment establishes completion of configured view updates; canonical commit provenance and protocol eligibility remain bound to their respective runtime-issued evidence.
+
+Required Chat mutation and processing share one admitted operation owner and its original physical resource window. Runtime startup shares one physical resource window across service admission, start, health and required initial replay. Startup readiness requires that replay's exact target to be processed. Failed partial startup owns cleanup of its admitted services and retains primary and secondary failures. Optional descriptor publication has subsidiary supervision and cannot delay primary startup readiness. Latency diagnostics explicitly represent unavailable measurement rather than inventing physical timestamps.
+
+Canonical runtime ingress retains the exact runtime captured by pipeline construction. A standalone scheduler cannot authorize runtime attachment, and a foreign runtime cannot adopt another pipeline's processing acknowledgment. Processing completion does not assert successful signal emission or application semantic readiness. Observers retain receive-only diagnostic subscriptions; a diagnostic notification never supplies publication sequence or processing authority.
+
+### Runtime-issued command services
+
+A public command's startup admission is handed into the actual registered
+runtime service before the startup lease is released. Long-lived service
+lifetime is owned by the runtime task root, rather than an ordinary admitted
+operation held while awaiting user input. Each required command round has one
+original effect-backed resource interval shared by its helper awaits. The local
+public-operation resource policy is thirty seconds; it cannot replace or renew
+a signed protocol interval or a stronger existing operation window.
+
+Managed command cleanup acknowledges actual service stop and task completion
+under the original shutdown owner before disposal of reactive processing and
+root tasks. Required cleanup failure withholds whole-runtime completion.

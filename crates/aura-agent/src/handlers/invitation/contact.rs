@@ -119,6 +119,7 @@ impl<'a> InvitationContactHandler<'a> {
     async fn publish_channel_acceptance_chat_projection(
         &self,
         effects: &AuraEffectSystem,
+        original: &aura_core::TimeoutBudget,
         context_id: ContextId,
         home_id: ChannelId,
         home_name: &str,
@@ -136,11 +137,13 @@ impl<'a> InvitationContactHandler<'a> {
             now_ms,
             sender_id,
         );
-        effects
-            .commit_relational_facts(vec![fact.to_generic()])
+        let committed = effects
+            .commit_relational_facts_required(vec![fact.to_generic()])
             .await
-            .map_err(|error| AgentError::effects(error.to_string()))?;
-        effects.await_next_view_update().await;
+            .map_err(AgentError::from)?;
+        committed
+            .await_processed_in_original_window(original)
+            .await?;
         Ok(())
     }
 
@@ -245,30 +248,18 @@ impl<'a> InvitationContactHandler<'a> {
         })
     }
 
-    /// Signs this authority's acceptance of a contact invitation. Returns
-    /// `None` when the invitation is unknown, not a contact invitation, or our
-    /// own.
+    /// Signs acceptance from the required retained Contact import owner.
+    #[aura_macros::capability_boundary(category = "capability_gated",
+    capability = "required_contact_acceptance", capability_type = super::contact_confirmation::RequiredContactAcceptanceCapability,
+    family = "runtime_helper")]
     pub(super) async fn build_contact_invitation_acceptance(
         &self,
-        effects: &AuraEffectSystem,
-        invitation_id: &InvitationId,
-    ) -> AgentResult<Option<(Invitation, Vec<u8>)>> {
-        let Some(invitation) = self
-            .handler
-            .load_invitation_for_choreography(effects, invitation_id)
-            .await
-        else {
-            return Ok(None);
-        };
-
-        if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-            return Ok(None);
-        }
-
+        original: &super::contact_confirmation::RequiredContactAcceptanceCapability<'_>,
+    ) -> AgentResult<Vec<u8>> {
+        original.require_handler(self.handler)?;
+        let effects = original.effects();
+        let invitation = original.invitation();
         let acceptor_id = self.handler.context.authority.authority_id();
-        if invitation.sender_id == acceptor_id {
-            return Ok(None);
-        }
         if let Err(error) = self
             .ensure_sender_peer_channel(effects, invitation.sender_id)
             .await
@@ -287,7 +278,7 @@ impl<'a> InvitationContactHandler<'a> {
             effects,
             acceptor_id,
             &contact_invitation_acceptance_transcript(
-                &invitation,
+                invitation,
                 acceptor_id,
                 nickname_suggestion.clone(),
             ),
@@ -299,18 +290,27 @@ impl<'a> InvitationContactHandler<'a> {
             signature,
             nickname_suggestion,
         };
-        let payload =
-            serde_json::to_vec(&acceptance).map_err(|e| AgentError::internal(e.to_string()))?;
-        Ok(Some((invitation, payload)))
+        let payload = serde_json::to_vec(&acceptance).map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "encode required contact acceptance".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        Ok(payload)
     }
 
     /// Sends a signed acceptance to the inviter.
+    #[aura_macros::capability_boundary(category = "capability_gated",
+    capability = "contact_acceptance_continuation", capability_type = super::contact_confirmation::ContactAcceptanceContinuationCapability,
+    family = "runtime_helper")]
     pub(super) async fn send_contact_invitation_acceptance(
         &self,
-        effects: &AuraEffectSystem,
-        invitation: &Invitation,
-        payload: Vec<u8>,
+        continuation: &super::contact_confirmation::ContactAcceptanceContinuationCapability<'_>,
     ) -> AgentResult<()> {
+        continuation.require_handler(self.handler)?;
+        let effects = continuation.effects();
+        let invitation = continuation.invitation();
+        let payload = continuation.payload().to_vec();
         let acceptor_id = self.handler.context.authority.authority_id();
         let delivery_context = default_context_id_for_authority(invitation.sender_id);
         let flow_receipt = execute_charge_flow_budget(
@@ -615,7 +615,6 @@ impl<'a> InvitationContactHandler<'a> {
                         effects.as_ref(),
                     )
                     .await?;
-                    effects.await_next_view_update().await;
 
                     let contact_fact = ContactFact::Added {
                         context_id,
@@ -640,7 +639,6 @@ impl<'a> InvitationContactHandler<'a> {
                         )
                         .await
                         .map_err(|e| AgentError::effects(e.to_string()))?;
-                    effects.await_next_view_update().await;
 
                     let mut updated = invitation.clone();
                     updated.status = InvitationStatus::Accepted;
@@ -665,6 +663,7 @@ impl<'a> InvitationContactHandler<'a> {
                             require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
                         self.publish_channel_acceptance_chat_projection(
                             effects.as_ref(),
+                            &budget,
                             updated.context_id,
                             *home_id,
                             &home_name,
@@ -856,7 +855,7 @@ impl<'a> InvitationContactHandler<'a> {
                         effects.as_ref(),
                     )
                     .await?;
-                    effects.await_next_view_update().await;
+                    effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
 
                     let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
                     let membership = ChannelMembershipFact::new(
@@ -876,7 +875,7 @@ impl<'a> InvitationContactHandler<'a> {
                         .commit_relational_facts(vec![membership])
                         .await
                         .map_err(AgentError::from)?;
-                    effects.await_next_view_update().await;
+                    effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
 
                     let now_ms =
                         InvitationHandler::best_effort_current_timestamp_ms(effects.as_ref())
@@ -917,6 +916,7 @@ impl<'a> InvitationContactHandler<'a> {
                         require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
                     self.publish_channel_acceptance_chat_projection(
                         effects.as_ref(),
+                            &budget,
                         updated.context_id,
                         *home_id,
                         &home_name,
@@ -1000,7 +1000,7 @@ impl<'a> InvitationContactHandler<'a> {
                         .commit_relational_facts(vec![fact.clone()])
                         .await
                         .map_err(|e| AgentError::effects(e.to_string()))?;
-                    effects.await_next_view_update().await;
+                    effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
                     if let Err(error) = self.send_delivery_receipt(effects.as_ref(), fact).await {
                         tracing::debug!(error = %error, "message delivery receipt not sent");
                     }

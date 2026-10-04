@@ -169,10 +169,17 @@ pub(crate) struct VerifiedEnrollmentConfirmation {
 /// verification against the independent admission can construct this value.
 /// It proves the original signed checkpoint, never absence of future revocation.
 pub(crate) struct VerifiedEnrollmentCommittedTransition {
+    parent_inventory: Vec<aura_invitation::enrollment_manifest::EnrollmentParentVerifier>,
     ops: Vec<aura_core::AttestedOp>,
     state: Box<aura_journal::commitment_tree::state::TreeState>,
 }
 impl VerifiedEnrollmentCommittedTransition {
+    pub(crate) fn parent_inventory(
+        &self,
+    ) -> &[aura_invitation::enrollment_manifest::EnrollmentParentVerifier] {
+        &self.parent_inventory
+    }
+
     pub(crate) fn ops(&self) -> &[aura_core::AttestedOp] {
         &self.ops
     }
@@ -184,9 +191,21 @@ impl VerifiedEnrollmentCommittedTransition {
 /// Verified cryptographic history; it does not prove global freshness and is
 /// not an activation capability without the actual runtime tree owner lease.
 pub(crate) struct VerifiedEnrollmentTreeExtension {
+    manifest_digest: [u8; 32],
+    parent_inventory: Vec<aura_invitation::enrollment_manifest::EnrollmentParentVerifier>,
     state: Box<aura_journal::commitment_tree::state::TreeState>,
 }
 impl VerifiedEnrollmentTreeExtension {
+    pub(crate) fn manifest_digest(&self) -> [u8; 32] {
+        self.manifest_digest
+    }
+
+    pub(crate) fn parent_inventory(
+        &self,
+    ) -> &[aura_invitation::enrollment_manifest::EnrollmentParentVerifier] {
+        &self.parent_inventory
+    }
+
     pub(crate) fn state(&self) -> &aura_journal::commitment_tree::state::TreeState {
         &self.state
     }
@@ -265,7 +284,7 @@ impl VerifiedEnrollmentConfirmation {
         current: &[aura_core::AttestedOp],
     ) -> AgentResult<VerifiedEnrollmentTreeExtension> {
         let original = self.committed_transition.ops();
-        if current.len() < original.len() {
+        if current.len() < original.len() || current.len() > 2 * aura_invitation::enrollment_manifest::EnrollmentTrustManifest::MAX_BASELINE_OPS {
             return Err(failure(EnrollmentVmAdmissionError::Binding));
         }
         for (left, right) in current.iter().zip(original) {
@@ -275,6 +294,7 @@ impl VerifiedEnrollmentConfirmation {
                 return Err(failure(EnrollmentVmAdmissionError::Binding));
             }
         }
+        let mut parent_inventory = self.committed_transition.parent_inventory().to_vec();
         let mut ops = original.to_vec();
         let mut state = self.committed_transition.state().clone();
         for op in current.iter().skip(original.len()) {
@@ -286,18 +306,21 @@ impl VerifiedEnrollmentConfirmation {
                     _ => None,
                 })
                 .ok_or_else(|| failure(EnrollmentVmAdmissionError::Binding))?;
-            check_admitted_node_operation(
+            let parent = check_admitted_node_operation(
                 &self.manifest,
                 &self.canonical_invitation,
                 &state,
                 op,
                 target,
             )?;
+            retain_verified_parent(&mut parent_inventory, parent)?;
             ops.push(op.clone());
             state = aura_journal::commitment_tree::reduce(&ops).map_err(stage)?;
             retain_admitted_node_keys(&self.manifest, &self.canonical_invitation, &mut state)?;
         }
         Ok(VerifiedEnrollmentTreeExtension {
+            manifest_digest: self.manifest_digest,
+            parent_inventory,
             state: Box::new(state),
         })
     }
@@ -429,6 +452,21 @@ impl EnrollmentControlFrame {
             }
         }
     }
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "VerifiedEnrollmentFailureCapability",
+        family = "proof_issuer"
+    )]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(super) async fn verify_terminal_notice(
+        &self,
+        effects: &AuraEffectSystem,
+        admitted: &AdmittedEnrollmentManifest,
+    ) -> AgentResult<VerifiedEnrollmentFailureCapability> {
+        let now = effects.physical_time().await.map_err(stage)?;
+        self.verify_failure_at(effects, admitted, now.ts_ms).await
+    }
+
     async fn verify_failure_at(
         &self,
         effects: &AuraEffectSystem,
@@ -498,8 +536,9 @@ pub(super) fn expected_request(admitted: &AdmittedEnrollmentManifest) -> DeviceE
         device_id: manifest.invitee_device,
     }
 }
-/// Required producer guard over an authenticated snapshot. This does not mint
-/// a receiver freshness witness or serialize signing against later revocation.
+/// Required producer check while the caller retains generation and tree custody.
+/// Establishes current local membership at signing, without proving absence of
+/// later remote revocation to the receiver.
 async fn require_current_confirmation_membership(
     effects: &AuraEffectSystem,
     manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
@@ -610,7 +649,11 @@ fn retain_admitted_node_keys(
         }
     }
     let mut pinned = std::collections::BTreeMap::new();
-    for parent in &manifest.parents {
+    for parent in manifest
+        .parents
+        .iter()
+        .chain(manifest.final_inventory().map_err(stage)?.iter())
+    {
         if parent.epoch != state.epoch.value() {
             continue;
         }
@@ -721,16 +764,107 @@ impl aura_core::tree::verification::TreeStateView for AdmittedNodeVerificationVi
         self.state.root_commitment
     }
 }
+/// Called only after this exact operation passed admitted-node crypto/policy
+/// verification. The authenticated intermediate head supplies the commitment;
+/// signer policy and public material remain the original admitted inventory.
+fn captured_admitted_parent(
+    manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    canonical: &super::Invitation,
+    state: &aura_journal::commitment_tree::state::TreeState,
+    target: aura_core::tree::NodeIndex,
+) -> AgentResult<aura_invitation::enrollment_manifest::EnrollmentParentVerifier> {
+    use aura_invitation::enrollment_manifest::{EnrollmentParentVerifier, EnrollmentTrustManifest};
+    if state.epoch.value() == manifest.pending_epoch {
+        if target != aura_core::tree::NodeIndex(0) {
+            return Err(failure(EnrollmentVmAdmissionError::Binding));
+        }
+        let super::InvitationType::DeviceEnrollment {
+            public_key_package,
+            threshold_config,
+            ..
+        } = &canonical.invitation_type
+        else {
+            return Err(failure(EnrollmentVmAdmissionError::Binding));
+        };
+        if aura_core::hash::hash(public_key_package) != manifest.pending_public_key_package_digest
+            || aura_core::hash::hash(threshold_config)
+                != *manifest.pending_threshold_config_digest.as_bytes()
+        {
+            return Err(failure(EnrollmentVmAdmissionError::Binding));
+        }
+        let policy =
+            EnrollmentTrustManifest::decode_pending_policy(threshold_config).map_err(stage)?;
+        return Ok(EnrollmentParentVerifier {
+            epoch: state.epoch.value(),
+            commitment: state.root_commitment,
+            signing_node: target,
+            mode: policy.signing_mode(),
+            threshold: policy.threshold(),
+            participants: policy.participants().to_vec(),
+            public_key_package: public_key_package.clone(),
+            agreement: policy.agreement(),
+        });
+    }
+    let mut selected: Option<EnrollmentParentVerifier> = None;
+    for origin in manifest
+        .parents
+        .iter()
+        .chain(manifest.final_inventory().map_err(stage)?.iter())
+        .filter(|origin| origin.epoch == state.epoch.value() && origin.signing_node == target)
+    {
+        let mut captured = origin.clone();
+        captured.commitment = state.root_commitment;
+        if let Some(previous) = &selected {
+            if aura_core::util::serialization::to_vec(previous).map_err(stage)?
+                != aura_core::util::serialization::to_vec(&captured).map_err(stage)?
+            {
+                return Err(failure(EnrollmentVmAdmissionError::Binding));
+            }
+        } else {
+            selected = Some(captured);
+        }
+    }
+    selected.ok_or_else(|| failure(EnrollmentVmAdmissionError::Binding))
+}
+fn retain_verified_parent(
+    inventory: &mut Vec<aura_invitation::enrollment_manifest::EnrollmentParentVerifier>,
+    parent: aura_invitation::enrollment_manifest::EnrollmentParentVerifier,
+) -> AgentResult<()> {
+    if let Some(existing) = inventory.iter().find(|existing| {
+        existing.epoch == parent.epoch
+            && existing.commitment == parent.commitment
+            && existing.signing_node == parent.signing_node
+    }) {
+        if aura_core::util::serialization::to_vec(existing).map_err(stage)?
+            != aura_core::util::serialization::to_vec(&parent).map_err(stage)?
+        {
+            return Err(failure(EnrollmentVmAdmissionError::Binding));
+        }
+        return Ok(());
+    }
+    if inventory.len()
+        >= 2 * aura_invitation::enrollment_manifest::EnrollmentTrustManifest::MAX_PARENTS
+    {
+        return Err(failure(EnrollmentVmAdmissionError::Binding));
+    }
+    inventory.push(parent);
+    Ok(())
+}
+
 fn check_admitted_node_operation(
     manifest: &aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
     canonical: &super::Invitation,
     state: &aura_journal::commitment_tree::state::TreeState,
     op: &aura_core::AttestedOp,
     target: aura_core::tree::NodeIndex,
-) -> AgentResult<()> {
+) -> AgentResult<aura_invitation::enrollment_manifest::EnrollmentParentVerifier> {
     let mut policies = std::collections::BTreeMap::new();
     let mut signing_rosters = std::collections::BTreeMap::new();
-    for parent in &manifest.parents {
+    for parent in manifest
+        .parents
+        .iter()
+        .chain(manifest.final_inventory().map_err(stage)?.iter())
+    {
         if parent.epoch != state.epoch.value() {
             continue;
         }
@@ -808,7 +942,8 @@ fn check_admitted_node_operation(
             "verify independently admitted exact-node enrollment operation",
             std::sync::Arc::new(source),
         ))
-    })
+    })?;
+    captured_admitted_parent(manifest, canonical, state, target)
 }
 
 fn verify_committed_ops(
@@ -823,6 +958,7 @@ fn verify_committed_ops(
     if encoded.len() > 1_000_000 {
         return Err(failure(EnrollmentVmAdmissionError::Binding));
     }
+    let mut parent_inventory = admitted.manifest().parents.clone();
     let mut ops = admitted.baseline().ops().to_vec();
     let mut state = aura_journal::commitment_tree::reduce(&ops).map_err(stage)?;
     retain_admitted_node_keys(
@@ -841,13 +977,14 @@ fn verify_committed_ops(
             .ok_or_else(|| failure(EnrollmentVmAdmissionError::Binding))?;
         // Both signing key and threshold derive exclusively from the already
         // admitted state, never from a key included by this incoming frame.
-        check_admitted_node_operation(
+        let parent = check_admitted_node_operation(
             admitted.manifest(),
             admitted.canonical_invitation(),
             &state,
             op,
             target,
         )?;
+        retain_verified_parent(&mut parent_inventory, parent)?;
         ops.push(op.clone());
         state = aura_journal::commitment_tree::reduce(&ops).map_err(stage)?;
         retain_admitted_node_keys(
@@ -867,6 +1004,7 @@ fn verify_committed_ops(
         return Err(failure(EnrollmentVmAdmissionError::CurrentMembership));
     }
     Ok(VerifiedEnrollmentCommittedTransition {
+        parent_inventory,
         ops,
         state: Box::new(state),
     })
@@ -888,8 +1026,14 @@ async fn sign_control(
     if matches!(&decision, EnrollmentControlDecision::Committed(_)) {
         require_current_confirmation_membership(effects, manifest).await?;
     }
+    let identity_context =
+        crate::handlers::rendezvous_identity::require_retained_identity_signing_context(
+            effects, retained,
+        )
+        .await
+        .map_err(stage)?;
     let (private, public) =
-        crate::handlers::rendezvous_identity::require_identity_keys(effects, &manifest.subject)
+        crate::handlers::rendezvous_identity::require_identity_keys(&identity_context)
             .await
             .map_err(stage)?;
     if public.as_slice() != manifest.initiator_confirmation_verifier.as_slice()
@@ -1501,7 +1645,7 @@ mod committed_receipt_tests {
             // The genuine original signer roster stays one while AddLeaf creates
             // two authenticated root children before the original-key epoch fence.
             let history = verified.committed_transition().ops();
-            let fence = history.last().expect("real signed epoch fence");
+            let fence = history.last().expect("real signed epoch fence").clone();
             let mut before_fence =
                 aura_journal::commitment_tree::reduce(&history[..history.len() - 1]).unwrap();
             let parent = admitted
@@ -1524,14 +1668,32 @@ mod committed_receipt_tests {
                 &mut before_fence,
             )
             .unwrap();
-            check_admitted_node_operation(
+            let captured = check_admitted_node_operation(
                 admitted.manifest(),
                 admitted.canonical_invitation(),
                 &before_fence,
-                fence,
+                &fence,
                 aura_core::tree::NodeIndex(0),
             )
             .unwrap();
+            assert_eq!(captured.epoch, before_fence.epoch.value());
+            assert_eq!(captured.commitment, fence.op.parent_commitment);
+            assert_eq!(captured.public_key_package, parent.public_key_package);
+            assert_eq!(captured.participants, parent.participants);
+            assert!(verified
+                .committed_transition()
+                .parent_inventory()
+                .iter()
+                .any(|tuple| tuple.epoch == fence.op.parent_epoch.value()
+                    && tuple.commitment == fence.op.parent_commitment
+                    && tuple.signing_node == aura_core::tree::NodeIndex(0)));
+            assert!(admitted
+                .manifest()
+                .parents
+                .iter()
+                .chain(admitted.manifest().final_inventory().unwrap().iter())
+                .all(|tuple| tuple.epoch != captured.epoch
+                    || tuple.commitment != captured.commitment));
             let mut inflated_roster_claim = fence.clone();
             inflated_roster_claim.signer_count = 2;
             assert!(check_admitted_node_operation(
@@ -1576,6 +1738,161 @@ mod committed_receipt_tests {
                 recovered.confirmation().manifest_digest(),
                 durable.confirmation().manifest_digest()
             );
+            // Reload the public archive through the original actual confirmed
+            // receipt; cached tuples and a foreign physical runtime are insufficient.
+            // Real pre-change archive encoding from this actual independently
+            // pinned/confirmed fixture. Legacy bytes are audit evidence, never
+            // automatically promoted into the new pending inventory source.
+            #[derive(serde::Serialize)]
+            struct HistoricalArchiveV1 {
+                version: u16,
+                physical_device: aura_core::DeviceId,
+                provisional: aura_core::AuthorityId,
+                subject: aura_core::AuthorityId,
+                invitation: aura_core::InvitationId,
+                manifest_digest: [u8; 32],
+                confirmed_history_digest: [u8; 32],
+                tuples: Vec<u8>,
+            }
+            let mut old_tuples = admitted.manifest().parents.clone();
+            old_tuples.extend_from_slice(admitted.manifest().final_inventory().unwrap());
+            let historical_bytes = aura_core::util::serialization::to_vec(&HistoricalArchiveV1 {
+                version: 1,
+                physical_device: invitee_effects.device_id(),
+                provisional: invitation.receiver_id,
+                subject: admitted.manifest().subject,
+                invitation: invitation.invitation_id.clone(),
+                manifest_digest: durable.confirmation().manifest_digest(),
+                confirmed_history_digest: aura_core::hash::hash(
+                    &aura_core::util::serialization::to_vec(
+                        &durable.confirmation().committed_transition().ops().to_vec(),
+                    )
+                    .unwrap(),
+                ),
+                tuples: aura_core::util::serialization::to_vec(&old_tuples).unwrap(),
+            })
+            .unwrap();
+            let historical_key = SecureStorageLocation::with_sub_key(
+                "confirmed_enrollment_parent_inventory_v1",
+                invitee_effects.device_id().to_string(),
+                format!(
+                    "{}:{}",
+                    admitted.manifest().subject,
+                    invitation.invitation_id
+                ),
+            );
+            invitee_effects
+                .secure_store_immutable(
+                    &historical_key,
+                    &historical_bytes,
+                    &[SecureStorageCapability::Write],
+                )
+                .await
+                .unwrap();
+            assert!(
+                super::super::enrollment_parent_archive::load_confirmed_parent_archive(
+                    invitee_effects.as_ref(),
+                    invitation.receiver_id,
+                    &invitation.invitation_id
+                )
+                .await
+                .is_err()
+            );
+            super::super::enrollment_parent_archive::retain_confirmed_parent_archive(
+                invitee_effects.as_ref(),
+                &durable,
+            )
+            .await
+            .unwrap();
+            let archive = super::super::enrollment_parent_archive::load_confirmed_parent_archive(
+                invitee_effects.as_ref(),
+                invitation.receiver_id,
+                &invitation.invitation_id,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                invitee_effects
+                    .secure_retrieve(&historical_key, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                historical_bytes
+            );
+            let history = durable.confirmation().committed_transition().ops();
+            let inventory = invitee_effects
+                .collect_imported_enrollment_parent_inventory(&archive, history)
+                .await
+                .unwrap();
+            assert!(!inventory.is_empty());
+            let mut replayed_extension = history.to_vec();
+            replayed_extension.push(fence.clone());
+            assert!(
+                invitee_effects
+                    .collect_imported_enrollment_parent_inventory(&archive, &replayed_extension)
+                    .await
+                    .is_err(),
+                "original-epoch fence cannot authorize a pending-epoch successor"
+            );
+
+            assert!(archive
+                .verify_imported_history(
+                    issuer_effects.as_ref(),
+                    admitted.manifest().subject,
+                    history
+                )
+                .is_err());
+            let mut substituted_history = history.to_vec();
+            substituted_history.remove(0);
+            assert!(invitee_effects
+                .collect_imported_enrollment_parent_inventory(&archive, &substituted_history)
+                .await
+                .is_err());
+            let archive_reloaded =
+                super::super::enrollment_parent_archive::load_confirmed_parent_archive(
+                    invitee_effects.as_ref(),
+                    invitation.receiver_id,
+                    &invitation.invitation_id,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                aura_core::util::serialization::to_vec(&archive.inventory().to_vec()).unwrap(),
+                aura_core::util::serialization::to_vec(&archive_reloaded.inventory().to_vec())
+                    .unwrap()
+            );
+            #[cfg(unix)]
+            {
+                let archive_location = SecureStorageLocation::with_sub_key(
+                    "confirmed_enrollment_parent_inventory_v2",
+                    invitee_effects.device_id().to_string(),
+                    format!(
+                        "{}:{}",
+                        admitted.manifest().subject,
+                        invitation.invitation_id
+                    ),
+                );
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&archive_location)
+                    .await
+                    .unwrap());
+                assert!(
+                    super::super::enrollment_parent_archive::load_confirmed_parent_archive(
+                        invitee_effects.as_ref(),
+                        invitation.receiver_id,
+                        &invitation.invitation_id,
+                    )
+                    .await
+                    .is_err()
+                );
+                // Explicit original proof publication can recover only the exact
+                // same public archive; a loader never repairs missing evidence.
+                super::super::enrollment_parent_archive::retain_confirmed_parent_archive(
+                    invitee_effects.as_ref(),
+                    &durable,
+                )
+                .await
+                .unwrap();
+            }
             let package_location = SecureStorageLocation::with_sub_key(
                 "threshold_pubkey",
                 admitted.manifest().subject.to_string(),
@@ -1587,28 +1904,78 @@ mod committed_receipt_tests {
                 .unwrap();
             let mut substituted = original_package.clone();
             substituted[0] ^= 1;
-            invitee_effects
+            let immutable_denial = invitee_effects
                 .secure_store(
                     &package_location,
                     &substituted,
                     &[SecureStorageCapability::Write],
                 )
                 .await
-                .unwrap();
-            assert!(invitee
-                .runtime()
-                .threshold_signing()
-                .activate_confirmed_enrollment(recovered)
-                .await
-                .is_err());
-            invitee_effects
-                .secure_store(
-                    &package_location,
-                    &original_package,
-                    &[SecureStorageCapability::Write],
-                )
-                .await
-                .unwrap();
+                .expect_err("ordinary storage cannot substitute an immutable public package");
+            assert!(matches!(
+                immutable_denial,
+                aura_core::AuraError::PermissionDenied { .. }
+            ));
+            let mut cause = std::error::Error::source(&immutable_denial);
+            let mut found_mutation = false;
+            while let Some(error) = cause {
+                if let Some(mutation) = error
+                    .downcast_ref::<aura_core::effects::secure::ImmutableSecureRecordMutation>(
+                ) {
+                    assert_eq!(mutation.operation, "secure_store");
+                    found_mutation = true;
+                    break;
+                }
+                cause = error.source();
+            }
+            assert!(
+                found_mutation,
+                "denial retains the actual provider lifetime cause"
+            );
+            assert_eq!(
+                invitee_effects
+                    .secure_retrieve(&package_location, &[SecureStorageCapability::Read])
+                    .await
+                    .unwrap(),
+                original_package
+            );
+            #[cfg(unix)]
+            {
+                // Corruption uses selected-provider backing loss, never a generic
+                // overwrite authority that production deliberately forbids.
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&package_location)
+                    .await
+                    .unwrap());
+                invitee_effects
+                    .secure_store_immutable(
+                        &package_location,
+                        &substituted,
+                        &[SecureStorageCapability::Write],
+                    )
+                    .await
+                    .unwrap();
+                assert!(invitee
+                    .runtime()
+                    .threshold_signing()
+                    .activate_confirmed_enrollment(recovered)
+                    .await
+                    .is_err());
+                assert!(invitee_effects
+                    .fault_remove_secure_record_for_test(&package_location)
+                    .await
+                    .unwrap());
+                invitee_effects
+                    .secure_store_immutable(
+                        &package_location,
+                        &original_package,
+                        &[SecureStorageCapability::Write],
+                    )
+                    .await
+                    .unwrap();
+            }
+            #[cfg(not(unix))]
+            drop(recovered);
             let recovered = super::super::enrollment_manifest_admission::load_confirmed_enrollment(
                 invitee_effects.as_ref(),
                 invitation.receiver_id,
@@ -1616,6 +1983,107 @@ mod committed_receipt_tests {
             )
             .await
             .unwrap();
+            // A second real issuance after the first attested epoch fence must
+            // export the actual active threshold package, although its history
+            // contains only old-epoch signature parents.
+            {
+                use aura_app::runtime_bridge::RuntimeBridge;
+                let third_authority = aura_core::AuthorityId::new_from_entropy([181; 32]);
+                let third_config = crate::core::AgentConfig {
+                    device_id: aura_core::DeviceId::new_from_entropy([182; 32]),
+                    storage: crate::core::config::StorageConfig {
+                        base_path: tempfile::Builder::new()
+                            .prefix("aura-second-enrollment-")
+                            .tempdir()
+                            .unwrap()
+                            .keep(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let third_context = aura_core::context::EffectContext::new(
+                    third_authority,
+                    aura_core::ContextId::new_from_entropy([183; 32]),
+                    aura_core::effects::ExecutionMode::Testing,
+                );
+                let third_runtime = crate::runtime::EffectSystemBuilder::testing()
+                    .with_authority(third_authority)
+                    .with_config(third_config)
+                    .build(&third_context)
+                    .await
+                    .unwrap();
+                let third =
+                    std::sync::Arc::new(crate::AuraAgent::new(third_runtime, third_authority));
+                let third_bridge = crate::runtime_bridge::AgentRuntimeBridge::new(third.clone());
+                third_bridge.bootstrap_signing_keys().await.unwrap();
+                let setup = third_bridge
+                    .export_device_enrollment_setup_request()
+                    .await
+                    .unwrap();
+                let issuer_bridge = std::sync::Arc::new(
+                    crate::runtime_bridge::AgentRuntimeBridge::new(issuer.clone()),
+                );
+                let issuer_app = std::sync::Arc::new(async_lock::RwLock::new(
+                    aura_app::AppCore::with_runtime(
+                        aura_app::AppConfig::default(),
+                        issuer_bridge.clone(),
+                    )
+                    .unwrap(),
+                ));
+                let setup=aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&issuer_app,setup).await.unwrap();
+                let second = issuer_bridge
+                    .initiate_device_enrollment_ceremony("Second actual device".into(), setup)
+                    .await
+                    .unwrap();
+                let transfer = second.manifest_transfer.as_ref().unwrap();
+                let third_app = std::sync::Arc::new(async_lock::RwLock::new(
+                    aura_app::AppCore::with_runtime(
+                        aura_app::AppConfig::default(),
+                        std::sync::Arc::new(third_bridge),
+                    )
+                    .unwrap(),
+                ));
+                let selected =
+                    aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
+                        &third_app,
+                        transfer.manifest_code.clone(),
+                        transfer.initiator_verifier_code.clone(),
+                    )
+                    .await
+                    .unwrap();
+                let manifest = selected.manifest();
+                assert_eq!(manifest.version, 2);
+                assert_eq!(manifest.final_epoch, admitted.manifest().pending_epoch);
+                assert!(manifest
+                    .parents
+                    .iter()
+                    .all(|parent| parent.epoch < manifest.final_epoch));
+                let active = manifest.final_inventory().unwrap();
+                assert_eq!(active.len(), 1);
+                assert_eq!(active[0].epoch, manifest.final_epoch);
+                assert_eq!(active[0].commitment, manifest.final_commitment);
+                assert_eq!(
+                    active[0].mode,
+                    aura_core::crypto::single_signer::SigningMode::Threshold
+                );
+                assert_eq!(active[0].threshold, 2);
+                assert_eq!(active[0].participants.len(), 2);
+                assert_eq!(active[0].public_key_package, original_package);
+                assert_ne!(
+                    active[0].public_key_package,
+                    manifest.parents[0].public_key_package
+                );
+                crate::runtime_bridge::AgentRuntimeBridge::new(third.clone())
+                    .import_enrollment_invitation(&second.enrollment_code, selected)
+                    .await
+                    .unwrap();
+                third
+                    .runtime()
+                    .tasks()
+                    .shutdown_gracefully(std::time::Duration::from_secs(5))
+                    .await
+                    .unwrap();
+            }
             let original_account = serde_json::json!({
                 "authority_id": admitted.manifest().invitee_authority,
                 "context_id": crate::core::context::default_context_id_for_authority(admitted.manifest().invitee_authority),

@@ -59,6 +59,7 @@ static SEMANTIC_POSTCONDITION_PROOF_CAPABILITY: LazyLock<PostconditionProofCapab
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_lifecycle",
+    capability_type = LifecyclePublicationCapability,
     family = "capability_accessor"
 )]
 pub(in crate::workflows) fn semantic_lifecycle_publication_capability(
@@ -69,6 +70,7 @@ pub(in crate::workflows) fn semantic_lifecycle_publication_capability(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_readiness",
+    capability_type = ReadinessPublicationCapability,
     family = "capability_accessor"
 )]
 pub(in crate::workflows) fn semantic_readiness_publication_capability(
@@ -79,6 +81,7 @@ pub(in crate::workflows) fn semantic_readiness_publication_capability(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_postcondition_proof",
+    capability_type = PostconditionProofCapability,
     family = "capability_accessor"
 )]
 pub(in crate::workflows) fn semantic_postcondition_proof_capability(
@@ -89,6 +92,7 @@ pub(in crate::workflows) fn semantic_postcondition_proof_capability(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_readiness",
+    capability_type = AuthorizedReadinessPublication<AuthoritativeSemanticFact>,
     family = "authorizer"
 )]
 pub(super) fn authorize_readiness_publication(
@@ -350,6 +354,7 @@ impl SemanticWorkflowOwner {
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "semantic_operation_context",
+    capability_type = SemanticOperationContext,
     family = "runtime_helper"
 )]
 pub(in crate::workflows) fn issue_semantic_operation_context(

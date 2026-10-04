@@ -882,6 +882,14 @@ close runs before retry or result return and preserves execution and close
 causes. An actual-runtime regression selects timeout while the operation
 borrows the VM, then verifies owner retirement after close.
 
+Required VM close retains `AuraChoreoEngineError`; required runtime close retains
+`ChoreographyError` through the standard native error source chain. Forced drop
+retains the first concrete close or retirement failure, with a typed secondary
+owner failure available through the composite cause. This does not recover
+structured detail already represented as text by the upstream session lifecycle
+provider. Required source preservation does not turn forced drop into an
+asynchronously acknowledged terminal proof.
+
 ### First enrollment decision publication
 
 The retained setup verifier, response receipt, pending signing-generation binding, pending registration, and issued manifest publish through actual immutable secure-provider admission. Owner APIs retain their sealed setup/generation/acceptance/manifest inputs. Existing records are bounded and compared against exact bindings; receipt and manifest reuse reverify original cryptographic evidence and canonical decision rather than requiring identical randomized signature bytes. Mutable secure-store capability flags do not authorize enrollment decisions.
@@ -957,3 +965,817 @@ Choreography receives own a fixed local `TimeoutBudget` instead of registering
 timer handles. Notification wakes retain that deadline; dropping the receive
 future leaves no timer registry entry. Required read/sleep failures remain typed,
 and successful sleep alone cannot establish deadline expiry.
+
+### Physical bootstrap signer representation
+
+New single-device bootstrap signing contexts retain the actual physical Device
+participant that the authenticated genesis leaf names. Solo signing and local
+key agreement select the participant from the authoritative retained signing
+context; they do not substitute a guardian label for a device. Legacy guardian
+contexts remain distinct and cannot establish an enrollment device roster.
+Historical conversion requires original genesis, device and key evidence.
+Required envelope reads retain their original wrapping key and cannot create a
+replacement when it is missing. Both initial wrapping-key producers use atomic
+immutable publication and adopt only the exact retained winner.
+
+### Registered task execution identity
+
+`task_registry` mints move-only registration custody only after actual bounded
+registry admission. Its private future wrapper installs an opaque owned identity
+for each poll and destructor, restoring the caller lexically before returning to
+the executor. Identity combines actual task-tree custody, group and task, so
+separate groups cannot collide on their local counters. It is stable across
+awaits, executor thread migration and native/browser local execution.
+
+Choreography session binding prefers this actual registered identity over
+executor or thread fallback. Browser siblings therefore do not share one thread
+owner. Observing or cloning an identity cannot enter a scope, admit a task, or
+construct registration custody. The fallback remains for direct callers outside
+runtime supervision; it is not used for service-owned sibling tasks. Tests cover
+real native/local registry execution, the browser-local sibling state contract,
+nested polls, panics, cancellation and drop before first poll. These ownership
+laws do not establish authenticated enrollment protocol completion by themselves.
+
+### Forced VM owner retirement
+
+`SessionOwnerCapability` is an opaque token issued only by the choreography
+claim/transfer owner. A private per-claim identity distinguishes real owners
+even when separate runtimes use identical session IDs, labels and counters.
+Metadata getters expose observations; the actual claim remains required for
+validation, transfer and retirement. External constructor, field-mutation and
+wire-deserialization compile-fail tests cover reconstruction; the equal-metadata
+two-registry regression proves rejected mutation leaves both real owners intact.
+
+A dropped move-owned VM session retires its exact registered choreography owner
+and local fragment custody synchronously. Owner generation and scope validation
+share the ownership-transfer lock order, so stale handles cannot retire a newer
+owner. This resource retirement supplies no signed terminal decision and performs
+no asynchronous close or physical-time observation. Ordinary paths retain the
+required explicit close contract. Unknown transport delivery remains unknown;
+retirement neither acknowledges nor replays pending frames.
+
+Registered task destructors retain concrete retirement failures in the existing
+service task health owner before cancellation completion and idle publication.
+Task poll identity scopes remain lexical during destructors.
+
+### Enrollment negative terminal notification
+
+Authenticated enrollment cancellation uses the separately admitted finite
+`aura.invitation.device_enrollment_terminal_notice` protocol. Its session identity
+is domain separated from the request/response session and binds the original
+invitation and admitted manifest digest. A notification never advances the
+request/response VM's program counter. The wire envelope is untrusted: only the
+independently pinned issuer signature and exact original manifest, invitation,
+ceremony and physical-device bindings issue negative terminal evidence.
+
+The issuer sends only after the durable cancelled terminal decision. The
+receiver's listener belongs to the existing invitation service task tree and
+shares the original admitted window's lease, checkpoint and observations. It
+retains a distinct immutable signed failure receipt before reporting failure.
+Negative evidence cannot authorize device adoption or committed recovery.
+Cancellation and ordinary response races close their actual owned session slots;
+forced drop retires exact session custody without claiming asynchronous close
+or terminal evidence. Required failure causes remain in native observation and
+service task health. Notification retries retain the original deadline and
+only reconcile definitely unsent, exactly scoped transport failures.
+
+### Original enrollment reservation and identity context
+
+The enrollment reservation owner retains the original invitation ID, subject, physical issuer device and creation timestamp as bounded immutable first-decision evidence before any pending signing packages are generated. The live reservation privately retains its actual effect-system owner; equal authority/device identifiers in another runtime cannot authorize retention, rotation or invitation preparation. Held rotation requires that exact retained reservation. Repeated publication observes the original clock anchor rather than renewing invitation eligibility. This reservation identifies the original operation; it cannot grant setup trust or authorize registration by itself. Same-original continuation additionally requires independently retained setup, protected original allocation/window, exact signing generation and a fresh held authenticated roster decision. Missing original evidence fails closed.
+
+Required issuer identity readers accept a sealed local signing context and read one exact epoch and physical participant. Fresh issuance uses actual required active policy and passes the same context into manifest export. Later control signing selects the original epoch only from its locally retained issued-manifest owner and checks its original verifier; current membership remains a separate held decision. Arbitrary current/one/zero epoch search and envelope-selected participant identity are forbidden. Canonical single-signer participant-share presence commits the required read to that row; explicit absence alone permits its exact same-context historical solo companion. Legacy Guardian-labelled bootstrap migration still requires original authenticated creation/key evidence and crash-safe conversion; unproved aliases do not pass physical roster admission.
+
+Declaration guards reject adding `Clone` or `Deserialize` to live issuance
+reservations. Actual runtime fixtures check equal-ID foreign-owner rejection
+before protected reservation publication and preserve the original clock anchor
+on repeated publication.
+
+### Exact notice identity and bounded lexical delegates
+
+The original registered enrollment window retains a single sealed notice
+identity from the actual retained issued control. It binds the canonical
+manifest transcript and digest, including signed expiry, to the original
+runtime and registered generation. Clones use the same binding; rebinding to a
+different digest, transcript or expiry fails closed. Admitted notice guards
+match the retained original expiry explicitly. No serialized value constructs
+this runtime-local binding.
+
+Enrollment facade, attempt and VM progression delegates use bounded heap
+allocation while retaining the same lexical owner, references and time window.
+Caller future size is constrained independently of executor stack settings.
+
+### Signed notice validity attenuation
+
+Issuer notice execution is bounded by both the original registered ceremony
+interval and signed manifest validity. An original owner derives its child
+endpoint from one acknowledged physical observation; a later read cannot shift
+that endpoint forward. The child shares original lease, observations and
+checkpoint, and never renews the registration. An already elapsed manifest
+validity is a retained typed domain expiry, not an invented clock failure or
+retryable transport diagnosis. Active cancellation checks this signed validity
+before the durable terminal CAS. Already-cancelled idempotent local replay
+retains the first decision without authorizing a new expired notification.
+
+### Lexical invitation command dispatch
+
+Invitation effect command dispatch allocates the selected typed dispatch future
+before the command loop or its timeout facade embeds it. The same lexical owner
+retains the command, authority/effect references and mutable pending receipt.
+This does not add a task, change required versus best-effort command policy, or
+allocate a replacement eligibility window. A type-only caller frame guard and
+the actual default-stack enrollment flow cover this boundary.
+
+### Lexical reserved invitation preparation
+
+The device-enrollment invitation factory moves its actual reserved issuance and
+secret payload into a heap allocated delegated future before returning to its
+caller. Its private body retains the required reservation-backed handler path
+and deferred delivery owner. No separate task, profile owner or fresh eligibility
+window is created for allocation. Default-stack execution remains the required
+integration check beyond caller frame measurement.
+
+### Lexical signed manifest preparation
+
+The owned enrollment manifest exporter allocates its delegated future before
+returning to the initiation caller. The original reservation, independently
+selected setup and exact signer context remain borrowed by that same lexical
+task. Cancellation drops the delegated owner without creating another task,
+renewing its window or resolving signer identity from weaker IDs. The actual
+enrollment caller runs on the default test stack; successful unpolled frame
+measurement alone does not establish execution safety.
+
+### Lexical runtime assembly allocation
+
+`EffectSystemBuilder::build` allocates its private delegated future before
+returning it to an async caller. The delegated future retains the same selected
+profile lease and context borrow; it has no independent task or supervisor.
+Dropping the caller drops that construction owner. The unpolled enrollment frame
+regression measures the production builder and its actual fixture caller against
+a 16 KiB frame budget, while the actual enrollment caller also runs on the
+default test stack. Frame size coverage does not establish successful runtime
+execution or protocol completion.
+
+### Required active signing material
+
+The runtime effect signer selects its epoch, policy, participant, and public
+package from required retained state under signing-generation custody. Missing
+or malformed state is a source-bearing failure. A solo signature additionally
+requires agreement between the retained public package and the public key
+derived by the cryptographic effect from the selected private package. A local
+share does not establish quorum; multi-party signing requires its owned
+threshold-agreement producer. Historical enrollment confirmation keys remain
+selected only by the retained original issuance witness.
+
+### Required fact commit causes
+
+Canonical fact commit retains original order-clock, serialization, storage and
+publication failures through the native error chain. Shared handler adapters
+retain that `AuraError` instead of replacing it with an effect error string.
+Native diagnostics can therefore differ from earlier flat effect messages;
+message text is not a policy discriminator. A closed fact sink is a required
+publication failure even if journal persistence or an enrollment terminal CAS
+already succeeded. That partial outcome does not report full publication
+success, overwrite the first terminal decision or renew the original window.
+
+### Original cancellation preparation window
+
+Active cancellation preparation retains a tracker-issued observation capability
+for the original shared clock, expiry state and checkpoint allocation. It does
+not acquire the initiator's execution semaphore. Guard preparation, first-decision
+CAS and local publication are bounded by the original physical window attenuated
+to signed manifest validity. Their required observations acknowledge the same
+durable original checkpoint, and replacing an allocation or observation owner
+fails closed. The preparation capability cannot admit a VM session.
+
+An already persisted Cancelled decision yields a distinct negative publication
+capability. It cannot reopen execution or renew eligibility. Initial selector
+lookup and historical negative publication require their own bounded ingress
+scope; that local bound is not enrollment admission authority.
+
+### Ceremony cancellation ingress
+
+Device-enrollment runtime cancellation IDs select the protected original issued
+manifest. A bounded required reader verifies that issuer artifact, hydrates its
+exact sender record, and retains its independent setup-bound control through the
+original-window cancellation CAS. The selector alone cannot authorize terminal
+publication. The bridge does not convert cancellation into a generic runtime
+failure or delete the pending signer before its signed notification owner runs.
+Guardian rollback uses its separate decision owner.
+
+### Proved legacy physical bootstrap migration
+
+Epoch-zero Guardian encoding is converted to the actual physical Device only
+under generation, signing-transition, and tree custody. The migration verifies
+the original retained secret/public package, authenticated creation operation,
+and durable creation index. It rewraps the same secret and records an immutable
+original decision before publishing canonical Device policy. The policy carries
+that decision digest; required effect reads, service restore, and live solo
+reads revalidate it. Missing origin evidence fails without selecting a fresh
+bootstrap or regenerating keys. Other epochs, mixed rosters, and quorum contexts
+are outside this migration.
+
+Enforcement includes real encrypted historical-layout migration, idempotent
+service restart, protected-decision physical loss, and durable creation-index
+loss regressions. Metadata omission preserves fresh canonical encoding.
+
+### Required startup authorization hydration
+
+Persisted Biscuit hydration returns a required result consumed by runtime
+assembly. Only exact typed secure-record absence permits the fresh bootstrap
+path. Existing records are bounded and cryptographically verified before cache
+publication; malformed record and verification failures retain typed causes.
+The runtime builder retains the native hydration cause through its initialization
+error. Regression coverage uses actual profile storage and token production to
+separate absence, truncation, valid restoration and corrupted token rejection.
+
+Production authorization-cache publication is private to runtime assembly and
+bootstrap. Malformed observed-cache fixtures use a test-only crate-local setter.
+The external `observed_cache_cannot_publish` compile-fail case is part of the
+agent UI guard inventory and prevents restoring a public mutation escape hatch.
+
+### Enrollment generation and decision custody
+
+`EnrollmentGenerationCustodyCapability` is minted only by the effect system's
+actual generation gate. `EnrollmentGenerationDecisionCapability` combines it
+with the actual tracker decision guard and verifies both runtime owners. Live
+roster plans, generation reservations and activation capabilities retain this
+composite before taking a tree lease. Owned registration and supersession reuse
+the reservation's tracker decision; they cannot introduce a recursive lock.
+Verified signing activation checks the activation's physical generation owner.
+Negative orphan cleanup remains a separate capability without live publication
+rights. Private fields, declaration attributes, compile-fail guards and actual
+runtime contention tests enforce this boundary. These guarantees do not imply
+remote freshness or a distributed quorum producer.
+
+Required reserved invitation creation reads physical time, verified Biscuit
+frontier and flow budget without defaulting provider failures. Missing frontier
+remains an actual missing capability; evaluator and journal failures retain their
+concrete sources. Canonical original creation/expiry survive resumption while
+current capability evaluation remains current. This prerequisite does not prove
+same-original issuance continuation or distributed charge/send atomicity.
+
+Completed enrollment registration evidence retains a borrowed reference to the
+actual physical effect owner after releasing generation/decision/tree custody.
+The issuer service must validate this reference before starting protocol or
+delivery tasks. Equal authority/device identifiers from a distinct runtime do
+not authorize handoff; an actual two-runtime regression enforces this boundary.
+
+### Required targeted VM retirement
+
+Required VM retirement disposes only the owned target session, including live or
+blocked coroutines, scheduling eligibility, handoffs and scoped communication
+and resource state. Unrelated sessions remain usable. Host metadata removal
+follows the actual backend acknowledgment. The cooperative backend retains
+stable coroutine IDs through its existing index rebuild; the threaded backend
+validates and rebuilds its explicit ID index after removal.
+
+Threaded worker execution is joined by the engine's synchronous worker scope
+before exclusive disposal begins. Acknowledgment means no target job remains;
+it does not require destroying the shared pool or other sessions. Naturally
+terminal session status and epoch are preserved, and repeated disposal returns
+its original compact acknowledgment. New close epoch advancement is checked
+only for a genuinely active target.
+
+Concrete backend failure remains in the standard native source chain. Required
+closure cannot succeed by parsing or suppressing an unsupported error, merely
+removing host metadata, or disposing an entire engine containing other sessions.
+Historical compact summaries and diagnostic traces follow the dependency's
+explicit archive policy. Shared global guard state is not claimed as exclusively
+owned by the target session. VM disposal is local cleanup and does not establish
+remote delivery, a signed terminal decision or protocol completion.
+
+### Final enrollment verifier capture
+
+EnrollmentFinalVerifierInventoryCapability borrows the actual held EnrollmentGenerationReservation and is neither Clone nor deserializable. Capture checks the exact physical history, current protected epoch/configuration/public package and authenticated device roster. Export requires the capture and exact original invitation/ceremony/setup/pending binding. Historical parent tuples cannot select the active final epoch. Root-only physical package storage currently rejects nonroot histories; exact-node package ownership/persistence remains a required implementation task, not a duplicated-root fallback.
+
+### Registered enrollment execution admission
+
+The original registered execution window is admitted before any initiator task
+is spawned. Its actual semaphore lease and persisted clock owner move into the
+initiator. A second facade sharing the same runtime observes structural
+`AlreadyRunning` and does not spawn another initiator, sole finalizer, or peer
+rotation owner. Closed lease, original checkpoint, and clock faults retain their
+sources and remain failures. Task admission faults retain supervisor evidence;
+an already-owned window never authorizes ceremony failure or retirement.
+
+The runtime identity and immutable original registration remain prerequisites.
+The lease bounds concurrent execution; it does not prove remote acceptance,
+new quorum agreement, or completed profile activation. Recovered runtimes must
+reauthorize the exact original window before claiming a new execution lease.
+
+### Original enrollment history identity
+
+A fresh authenticated roster plan seals the canonical baseline count and digest
+into the protected original generation allocation. An unissued continuation
+requires that exact prefix of the still-authenticated current history under the
+held generation, tracker decision, and tree custody. Equal reduced state and
+ordered physical membership alone cannot authorize a different original
+manifest. The mutable generation profile must equal the original protected
+allocation before it can be resumed as unregistered custody.
+
+Older records may decode with missing baseline identity for observation or
+negative reconciliation, but cannot authorize renewed live issuance. Missing or
+diverged original history is a typed refusal; a new fingerprint is never repaired
+from the current snapshot. This prerequisite does not complete original issuance
+continuation, which additionally requires the original setup, reservation,
+window, signed manifest, retained material, and registration-before-delivery.
+
+The admission boundary requires the actual registered-generation capsule and
+retains its actual tracker owner. It revalidates the exact immutable canonical
+registration under the decision gate before leasing its original execution
+window. Equal physical IDs or a second tracker sharing effects are insufficient.
+
+### Cancelled enrollment notification recovery
+
+Post-bootstrap recovery distinguishes a retained Cancelled first decision from an
+active enrollment registration. Pending generation secrets remain retired. A
+separate move-owned notice capability binds the independently retained issued
+manifest, actual runtime, immutable first decision, original clock checkpoint and
+original execution semaphore. It authorizes only the finite signed terminal-notice
+protocol; it grants no Request, Accept, Confirm, activation or membership authority.
+
+Notification eligibility ends at the earlier of the original registered deadline
+and the signed manifest expiry. Restoring a terminal decision does not renew either
+bound. Required observation and checkpoint acknowledgment precede signing and
+continuation. Signing uses the currently owned issuer identity only while its key
+still matches the independently retained issuer verifier. Known original or signed expiry completes the finite recovery owner with a typed
+eligibility-ended disposition and prevents further sends. Required clock,
+checkpoint, signer, transport and teardown faults retain their original typed
+cause through task failure and drain. Both preserve the Cancelled decision.
+
+Failed enrollment retirement acknowledges its exact immutable receipt after
+required secret cleanup and retains the immutable original allocation record.
+Restart must not attempt generic deletion of that immutable evidence or immutable
+wrapping secrets; an explicitly mutable pending slot has a distinct lifetime. Distinct allocation
+history and live pending-slot ownership must also prevent a later same-epoch
+ceremony from overwriting or reusing an old allocation grant.
+
+Successful public cancellation and retries preserve retained issued control
+through primary negative publication, then admit the same finite original-window
+notice owner used during bootstrap recovery. No raw ceremony re-resolution is
+needed. An existing execution lease is a typed duplicate disposition. Required
+subsidiary preparation/admission failures remain in the task group's health and
+drain without rewriting the primary Cancelled result or spawning diagnostics.
+
+### Confirmed imported public parent archive
+
+The invitee activation owner publishes immutable public parent inventory before
+exposing its imported signing context. The archive is bound to the actual physical
+device, original provisional authority, subject, invitation, independent manifest
+digest, and exact verified committed history. Its loader revalidates the original
+secure admission, frozen acknowledged clock and issuer committed proof; decoded
+archive bytes cannot mint evidence. The resulting capability borrows the actual
+effect system and imported history collection requires that exact capability.
+Historical tuples come from the pinned signed manifest. Only its exact signed
+pending public generation may extend that inventory, after canonical provisional
+policy and package digest checks. Missing native metadata does not trigger archive
+selection. Nonroot generations and later unsigned inventories remain rejected.
+
+The connected real-confirmation fixture exercises durable archive reload, foreign
+runtime rejection and substituted history rejection. This coverage does not prove
+process restart/profile handoff: the native/browser WAL and runtime reconstruction
+must still preserve and recover the original provider and confirmed receipt.
+
+The public archive v2 additionally retains the exact pending root verifier from
+the original confirmed invitation's signed package/policy commitments and verified
+committed head. Imported parent collection consumes this explicit source during
+activation, before exposing signing context; it does not require a retired private
+share or read a missing epoch package into a different layout. Only already verified
+same-epoch extension heads can reuse that exact root policy/package. A later epoch
+or another signing node needs additional independently authenticated evidence.
+
+Immutable v1 archive bytes remain audit evidence. They are never rewritten or
+implicitly promoted. Explicit publication from the reverified original confirmed
+receipt creates v2 under its separate namespace. The real confirmation fixture
+encodes the historical v1 shape, verifies no automatic v2 admission, and checks
+that explicit v2 publication leaves original v1 bytes unchanged.
+
+### Enrollment generation history and mutable slot ownership
+
+`read_owned_enrollment_generation_profile` validates the bounded canonical live
+slot against immutable original allocation bytes and the immutable registered
+first-decision seal. `complete_registration` acknowledges that seal before
+updating the mutable phase. A slot phase downgrade therefore cannot reopen a
+registered allocation. All generic activation fences include explicitly proved
+legacy records until an owned migration validates their original history.
+
+Legacy migration consumes the actual generation-custody capability. Registered
+legacy records additionally require the existing protected registration binding;
+no historical record is overwritten or implicitly admitted on a read failure.
+Pinned and orphan retirement release only the mutable live slot, after exact
+completed cleanup evidence. Interrupted orphan cleanup restores a separate
+negative-only capability from its original first decision and original allocation;
+missing partially deleted material cannot mint a live reservation.
+
+The encoded-layout fixture checks protected legacy migration and mutable-slot
+corruption. The real same-epoch reissue fixture retains the original public setup
+and issuer runtime, checks immutable history preservation, and rejects mutable
+registration and roster forgery. Its retirement success requires the provider's
+closed immutable-secret retirement API; the slot split alone supplies no
+cryptographic erasure or generation-specific wrapping-key lifetime.
+
+### Admitted clock anchor and checkpoint boundary
+
+`EnrollmentWindowCapability::admitted` retains the actual
+`AdmittedEnrollmentWindowLeaseCapability` through original publication recovery.
+The lease checks physical effect-owner identity. Recovery rereads and revalidates
+the original protected admission before completing missing initial bytes. Ordinary
+required/reimport readers never invoke this completion producer.
+
+`admitted_enrollment_clock_anchor_v2` retains the immutable original binding and
+interval; `admitted_enrollment_clock_checkpoint_v2` is the independently mutable
+highwater record. `admitted_enrollment_clock_ever_live_v2` acknowledges the first
+execution admission before checkpoint-backed execution. After that decision, loss
+of either required clock record cannot cause initialization. Legacy v1 migration
+under the same held owner retains its original capped interval and bytes.
+
+The actual public enrollment fixture exercises checkpoint updates against the
+protected anchor, interrupted initial publication, restoration without deadline
+renewal and missing checkpoint after live admission. The interval regression
+distinguishes original legacy attenuation from the fresh signed interval. Actual
+same-profile AgentBuilder reconstruction and legacy-layout provider-fault cases
+remain required broader integration validation; these checks alone do not prove
+full restart closure.
+
+### Protected enrollment response policy
+
+`EnrollmentResponsePolicy` is stored in the original protected generation before
+allocation. Its private constructor selects the established remote response
+policy from the fresh authenticated signing plan: nonissuer responders form the
+response roster, with a required count bounded by that roster. The held generation
+reservation exposes this original commitment to the actual issuer registration
+producer; recovered registration never computes it from weaker response fields.
+
+Required allocation and registration compare the response threshold/count
+exactly, independently of the full key signing threshold/ordered roster.
+`HeldEnrollmentRegistrationError::ResponsePolicyBinding` retains expected and
+observed values structurally. Missing historical response commitments fail as
+`ResponsePolicyMissing`; proving and publishing a separate historical commitment
+is remaining migration scope. Pure tests exercise distinct signing/response
+policy and source-bearing mismatches; actual public fixture registration remains
+the integration gate. No response policy grants a distributed signing quorum.
+
+### Proved old response-policy supplementation
+
+`StoredLegacyEnrollmentResponsePolicy` binds the exact protected old allocation
+and allocated-registration digests. The migration producer consumes actual
+`EnrollmentGenerationCustodyCapability`, validates original setup and responder
+bindings, and retains the original registration's exact required/count values.
+There is no recovered-threshold clamp and no new start or deadline.
+
+Required slot and recovery readers revalidate the immutable supplement. A private
+serde-skipped cache carries the reverified policy into synchronous held-generation
+checks; serialized allocation bytes remain the historical shape. Lost or changed
+proof cannot restore that cache. The truly old schema fixture removes the new
+response field from the encoded historical owner while retaining genuine
+protected original registration. It checks explicit migration, unchanged original
+bytes/deadline, cache non-restoration through serde and actual provider proof loss.
+
+This fixture exercises protected historical schema under a real runtime, not full
+AgentBuilder profile reconstruction. Legacy clock/profile reconstruction and
+original eligible unissued continuation remain required integration scope. Old
+allocations missing their original tracker/setup evidence remain ineligible; the
+supplement producer cannot fabricate either proof.
+
+### Captured parent inventory from actual verification
+
+`check_admitted_node_operation` returns a parent tuple only after the exact
+operation passes signature, parent-state and admitted node-policy verification.
+The tuple takes its commitment from that authenticated intermediate state and
+its public policy from the independent admitted inventory. Conflicting original
+node policy, absent node material and unsupported later epochs fail closed.
+
+`VerifiedEnrollmentCommittedTransition` retains baseline and captured suffix
+parents. `VerifiedEnrollmentTreeExtension` carries the resulting verified parent
+inventory and original manifest digest; it remains nonserializable crypto
+evidence, not current activation/freshness authority. The archive collector
+consumes this strongest reference, verifies original manifest/policy ownership,
+and has no pending-epoch or ambient-package fallback. Original immutable v2
+archive encoding remains unchanged: its full-history digest and admitted policy
+are reverified before captured heads are reconstructed.
+
+The actual committed-confirmation fixture checks the intermediate original
+epoch created by AddLeaf, the captured RotateEpoch parent and rejection of that
+old fence as a pending-epoch successor. Existing divergent-prefix and foreign
+runtime negatives remain. This does not close genuine distributed quorum,
+nonroot inventory production or independent postcommit freshness scope.
+
+Registered enrollment window notice binding uses `OnceLock<Arc<...>>` for its
+single assignment. Candidate construction performs no awaited work inside cell
+initialization; all repeated bindings still require exact original
+manifest/transcript/expiration equality. The observed Arc does not duplicate the
+terminal or signing owner. Strict Clippy's disallowed blocking mutex rule and
+actual public cancellation/retry coverage enforce this boundary.
+
+### Current enrollment identity signing ownership
+
+Required enrollment identity selection validates the actual active epoch, ordered physical-device signing policy, exact public package, and locally retained encrypted participant package. A valid threshold share does not produce a solo identity capability. It returns the retained `RequiredSigningParticipantError::QuorumOwnerRequired` source through the native Service category; malformed policy, missing material, codec failures, and private/public mismatch retain their own failure categories. The actual finalizer regression exercises genuine transition from single-device bootstrap to threshold policy before selecting the next signing owner. The connected second-issuance regression remains required until an owned multi-party manifest signature and corresponding confirmation owner are integrated.
+
+The required reader separates a domain-valid threshold-one policy from FROST backend support. `BackendThresholdUnsupported` identifies the unsupported retained policy without inventing a provider error; deterministic dependency coverage requires the actual dealer call to return native `InvalidMinSigners`. Required material loss is independently tested through the actual selected-provider backing fault and remains Storage, rather than quorum-unavailable Service.
+
+Registered execution-window admission accepts only the original
+`RegisteredEnrollmentGenerationCapability`. A ceremony ID cannot reacquire an
+execution window. Pre-live allocation clock tests exercise their held reservation;
+registered execution tests first issue the real signed invitation and preserve its
+tracker/runtime binding through window admission.
+
+Unregistered original-generation continuation consumes the actual held first-
+decision recovery producer. Its returned reservation retains the original
+runtime generation and tree guards through exact selector validation and
+registration completion. Duplicate reconstruction in the caller is removed;
+public canonical invitation evidence remains required before the registered
+capability can be published. Library strict Clippy rejects unused production
+ownership seams; changed interrupted-resume integration requires real coverage.
+
+Compile-fail test harnesses share aura-testkit's workspace process lock with app and signals suites. Descriptor custody releases on process exit, and bounded acquisition retains native IO or contention causes. Tests never remove/recreate the lock inode or create a parallel suite-specific lock namespace. See docs/804_testing_guide.md.
+
+### Crypto RNG clone ownership
+
+`CryptoRng::Deterministic` retains its original `Arc<Mutex<StdRng>>`; subsystem clones share custody rather than copy generator state. Synchronous draw methods release the mutex before any awaited work. Native ownership coverage requires interleaved clone draws and post-original-drop continuation to equal an independently seeded reference stream, plus independently seeded runtime reproducibility. Production thread-local entropy behavior is unchanged. No fallible provider operation is introduced by this ownership correction.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.
+
+Enrollment-owned wrapping births retain the authenticated rotation plan and
+original immutable generation scope. Private child capabilities bind to the
+actual shared runtime allocation registry. Failed/orphan cleanup retains original
+first-decision and generation custody through provider retirement ACK; activation
+retains positive custody. Recovery reconciles unhanded original pre-live births,
+never reconstructs once-live secrets or upgrades legacy permanent records.
+
+### Custom provider custody and dispatch
+
+The complete custom typestate builder transfers its configured crypto, ordinary
+storage, random, console and bounded transport inventory before subsystem
+assembly in both asynchronous and synchronous construction. Persistent tree,
+sync, leakage, authorization and journal owners retain the same selected
+handlers; ordinary storage remains beneath unified encrypted storage. Secure
+allocation lifetimes retain the concrete selected profile provider and its
+physical brand independently of ordinary storage customization. Runtime random
+draws and receipt initialization use the configured random owner. Configured
+crypto failures never select default primitives. Production rejects a simulated
+crypto handler. The random trait is infallible and has no entropy-quality probe;
+the supplied provider is responsible for its cryptographic contract.
+
+Configured transport selection uses declaration order and chooses the first
+provider reporting an established channel, otherwise the first configured
+provider. A send failure never changes providers or enters native/shared
+transport. Receives inspect the bounded configured inventory in declaration
+order; only typed `NoMessage` permits the next provider. Provider receive calls
+must obey the trait's no-message contract; blocking provider implementations
+can delay subsequent providers. Native sources remain attached to crypto,
+console and storage failures. Transport errors retain the existing typed domain
+value; its diagnostic-only variants do not gain fabricated native causes.
+
+`tests/custom_provider_fidelity.rs` exercises actual custom async/sync assembly,
+encrypted selected storage, configured entropy/console, native outages and
+stable transport failure selection. Required execution belongs to the ownership
+aggregate; zero/ignored tests do not satisfy provider fidelity.
+
+Configured receive consumers drain their matching retained inbox before physical
+provider access. Device/content-specific receive pumps physical-only ingress
+after retained absence; unmatched frames remain with their existing runtime or
+choreography queue owner. Provider faults cannot hide an already-retained
+matching frame, and retained unrelated frames cannot cycle and starve new
+ingress. Receipt/source/context/physical-recipient checks precede delivery.
+The interleaved custom-ingress regression verifies these real consumer paths.
+
+### Physical integration profiles in Testing mode
+
+Ordinary Testing assembly does not own a selected physical profile and cannot authorize allocation-lifetime operations. The native unit-test adapter accepts a move-only `TestingOwnedProfileCapability`, acquired from the actual profile handler before provider construction and signing bootstrap. The adapter preserves shared transport and configured custom providers, and the runtime retains that exact physical lease and selected lifetime registry. Production-lease ingress still rejects nonproduction modes. A foreign configuration fails before selecting its secure provider. Restart fixtures drain and drop the old runtime, acquire the original physical profile again, and recover original ledger evidence; they never fabricate a root or treat missing custody as success. Native keyring and browser lifetime support have their separate provider contracts.
+
+### Canonical participant envelope reader
+
+Threshold signing service retrieval delegates to the runtime crypto owner's
+versioned participant envelope reader. Version 1 binds authority, epoch and
+participant through metadata and authenticated encryption. Version 2 additionally
+requires the original allocation owner and selected-provider lifetime custody.
+A service cannot reinterpret an owned envelope as a legacy package or accept raw
+package bytes as compatibility evidence. Real enrollment retention and restart
+fixtures exercise the version 2 producer and this shared consumer.
+
+The required identity-key reader retains its exact runtime, epoch and physical
+participant witness through canonical envelope decryption. Every supported
+envelope version admits at most 131072 encoded bytes and a nonempty ciphertext
+of at most 65536 bytes before cryptographic work. Bound violations retain their
+native structural cause and cannot select a companion or older epoch. The
+required bootstrap corruption regression exercises actual codec, ciphertext
+bounds and authentication failures without fallback.
+
+Rendezvous descriptor and channel handlers select the active physical identity
+once, retain its runtime-issued signing context, and require its exact package.
+Contact response publication follows the same rule: missing identity material
+is a required typed failure, not successful omission of a signed response.
+Neither path chooses a historical epoch after active-policy or package failure.
+
+Rendezvous manager cryptographic ingress requires the actual runtime effect
+system, selects one active physical identity context, and carries it into the
+required canonical package reader. Storage-only mock providers and historical
+epoch scans cannot authorize descriptor or Noise preparation. Native identity
+failures retain their source chain and prevent descriptor materialization.
+The required manager corruption regression uses real bootstrap and a present
+canonical companion to prove that failure does not select alternate material.
+
+Nonproduction default-profile factories return only a newly and exclusively
+created isolated namespace. Exhausted collisions and native creation faults
+return retained errors; an unchecked fallback path is never selected. Explicit
+persistent-profile configuration remains an owned caller decision.
+
+### Original non-enrollment invitation signing ownership
+
+Contact, guardian and channel invitation creation retains one original physical
+signer identity from the actual fresh `ReservedInvitationIssuance` before local
+publication. Protected immutable public metadata binds the exact original
+invitation, recipient, context, creation time, device, epoch and verifier. Export
+and response selection are load-only: missing original evidence cannot select
+the active or another historical epoch or initialize replacement metadata.
+`IssuedInvitationIdentityCapability` retains either the original required owned
+sender record or a scoped borrow of the actual dispatch runtime and its required
+canonical sender record. Plain deserialized records never become the capability.
+Crypto reads use the existing exact physical identity context and canonical
+versioned package owner; IO, codec and signing errors retain native causes.
+Existing enrollment export continues to require its distinct pinned manifest
+and original enrollment window. Legacy raw-package/history lookup helpers exist
+only in test compilation.
+
+Contact response signing and verification invoke the actual crypto provider on
+the canonical typed transcript. Verifier/provider failures retain their native
+source and cannot become a false signature result or an ignored response. Only
+a successfully evaluated invalid signature is ordinary rejection evidence.
+
+## Runtime shutdown completion owner
+
+The activity handle exposes observation and admission closure, while stopped-state publication is private to RuntimeSystem. Already-closed admission is a native shutdown failure, not teardown evidence. The public agent facade retains native shutdown causes. Required native lifecycle execution includes the real agent already-closed shutdown regression; paired activity-handle doctests prove observation remains usable and stopped-state publication is unavailable through the public getter. These contracts do not replace complete operation/service drainage or original provider transfer.
+
+### Required Contact confirmation custody
+
+Contact acceptance derives its confirmation child from the original operation budget. Signed payload retries share that child, its physical observation owner and fixed deadline. Required imported metadata reads propagate storage, codec, identity and size failures; observed caches cannot substitute for those reads. A runtime-owned decision lease covers verified response selection through contact fact and imported status publication. The move-only verified response carries the retained complete import, so materialization does not re-resolve an invitation id. Native clock, transport and sleep faults retain their original standard error sources. Only an exact destination-unreachable fault permits acceptance retransmission.
+
+Contact fact publication does not wait for an unrelated later view batch. Canonical commit and observed handler cache recording complete under the decision lease; app semantic readiness remains owned by its bounded authoritative refresh.
+
+### Required threshold identity boundary regression
+
+The real activated-enrollment identity test distinguishes a valid native threshold identity requiring the quorum service from malformed public-package bytes, unsupported native policy and actual local-share backing loss. Its required native lifecycle suite executes the exact named test; concrete native decoder, quorum-owner and missing-record causes survive the bridge. This classification boundary does not implement distributed signing.
+
+### Guardian recovery pair custody
+
+First-binding Guardian acceptance recording requires the retained
+`IssuedInvitationIdentityCapability`. The boundary checks its actual runtime,
+Guardian subject and original sender verifier before checking the response's
+recovery-key possession proof. A raw invitation or response-carried issuer key
+cannot replace that owner. Recording a recovery key does not confer device
+membership. The actual regression creates the canonical invitation and rejects
+foreign runtimes and substituted issuer or recovery keys before publication.
+
+The runtime owns the private Guardian keypair lease; invitation code obtains a
+move-only identity capability after required native reads, pair validation, or
+both acknowledged fresh writes. Private bytes remain in `Zeroizing` storage.
+Partial original key loss, mismatched retained keys and foreign runtime authority
+fail with typed source chains; none authorizes a replacement pair. Required
+Guardian response signing/verification uses canonical source-preserving
+transcript encoding and actual selected cryptographic effects. The lifecycle
+inventory executes actual owned-profile reopen/concurrent pair and native
+failure regressions. Interrupted fresh publication and historical loss of both
+halves still require independent durable lifetime evidence.
+
+Regular imported invitation decision custody is shared by Contact and Guardian
+through `ImportedInvitationDecisionLeaseCapability`, issued only by the original
+runtime. Guardian required response reads bounded original metadata and preserves
+native codec/read failure before key allocation. Its receiver-local materialized
+context is distinct from the retained sender code context; payload binding must
+retain the latter as original import evidence. Required VM/clock/codec/storage
+failures keep native causes. Original public-operation windows and acknowledged
+session teardown remain separate required boundaries.
+
+Guardian protocol entry owns one physical operation window before required
+preparation. The receiver's imported decision-lease wait, keypair preparation,
+VM admission and VM loop are bounded by this original window; helpers borrow
+its shared observation owner. Required held-import deadline and native timer
+failure coverage runs in the VM lifecycle inventory. Timeout/drop is not
+session-close acknowledgment or completed runtime drain.
+
+Guardian terminal processing consumes `OwnedVmSession` and checks its native
+close result. Failed primary+close retains both typed local causes, with primary
+source traversal and timeout category preserved. The required regression uses
+actual retired runtime owner and VM ingress/close, rather than a mocked close
+result. Outer cancellation and full runtime drain remain separate boundaries.
+
+### Retained public admission and original shutdown resource owner
+
+The actual effects assembly and RuntimeSystem share one private atomic admission
+owner. Retained public mutation leases span awaits in invitation,
+authentication, chat, OTA, recovery and sessions; nested recovery continuations
+borrow their original lease. Resource capacity is 256 concurrent operations.
+The advanced admitted-effects facade retains its original lease and checks both
+runtime gate and effects identity; it does not remove all legacy raw escapes.
+
+The shutdown resource window is born once at shutdown entry (30 seconds).
+Admission closes before drain; admitted operations settle before scheduler stop.
+Scheduler disposal closes and drains accepted fact ingress before natural
+completion; it does not cancel the callback before its final publication ACK.
+TaskGroup and TaskSupervisor original-budget disposal reuse that same physical
+window and acknowledge actual callback destruction. Clock/deadline/native
+cleanup failures remain observable and prevent stopped success. A count-only
+drain capability cannot authorize selected-provider or secret-registry transfer.
+The required native lifecycle gate inventories and executes the finite capacity,
+foreign-profile, stale service, cancellation, original-clock and real descendant
+regressions; discovery alone does not satisfy enforcement.
+
+## Original runtime service-stop continuation
+
+Successful public admission closure creates a move-only shutdown window tied to
+the actual gate, effect system and task root. Required service disposal and health
+acknowledgments consume that same original resource window; the common service
+helper cannot allocate another deadline. Authority termination is published only
+after all required pipeline, task-tree, service-health and lifecycle acknowledgments,
+within the original window.
+Provider, deadline and authority-state failures retain their native causes and
+withhold successful runtime termination.
+
+This contract does not authorize profile transfer. Internal service cleanup
+windows and whole provider/registry/RNG reassembly require their own completed
+owner integration before a full handoff can be acknowledged.
+
+### Exact reactive processing ownership
+
+Reactive scheduler ingress issues ordered publication targets only after actual enqueue, retaining its original identity in both envelope and target. Required processing uses a retained watch highwater acknowledged after all actual registered view updates. Native scheduler failure is retained alongside completed highwater; completed targets stay completed while pending targets receive that native fault. Canonical required commits carry their actual stored facts and exact target. Chat operations retain one admitted runtime lease and one original local resource window through all mutation and processing awaits. Runtime startup carries one shared original resource window through service start, health and initial replay; partial startup owns reverse cleanup, retaining secondary faults. Optional initial LAN descriptor work remains in the same supervisor and original window after primary readiness.
+
+Guardian recovery-key continuity uses a private typed transcript under
+`aura.guardian.recovery-keypair`, schema 1, with the original authority/public-key
+payload. Both signing and verification use the required native-source helpers.
+This local proof checks retained pair integrity; it grants no acceptance,
+replacement-key birth or independent historical-loss recovery authority.
+
+Contact response verification borrows a private required-response capability
+that retains the original imported record, awaited acceptance digest, actual
+handler/effects identity and decision lease. Its key accessor checks the same
+physical runtime owner before returning the original code key. Successful
+verification transfers that same record and lease into the terminal response
+owner; a raw key, copied record or foreign effects reference cannot replace it.
+This continuity grants no verified device-membership authority.
+
+Required local Guardian pair verification retains its actual keypair lease and
+original required reads in a private move-owned capability until continuity
+verification completes. The native primitive borrows that owner's verifier;
+matching authority ids cannot substitute another runtime. The lease is released
+after verification, while the validated signing identity retains its original
+key material. It is not extended into the returned identity across unrelated
+pair reads. The required regression uses two genuinely owned profiles under the
+same authority to verify this runtime distinction.
+
+Guardian imported-code confirmation verification retains the bounded original
+import record and actual decision lease in a private required capability. After
+binding the invocation to original imported fields, the native primitive borrows
+only the original record's sender verifier through that capability's runtime
+check. The acceptance payload may carry a copy for transcript binding; that copy
+is not verification authority. This continuity role stays distinct from local
+pair integrity and first-binding recovery-key possession.
+
+### Registered Sync command ownership
+
+`RuntimeSystem` issues `AdmittedSyncCommandCapability` after startup using its
+actual public-operation lease, effects and task root. The registered command
+survives foreground cancellation in `SyncCommandRegistryService`; the startup
+lease is released after that handoff. Each foreground or periodic round obtains
+one bounded operation from the same runtime. Requested peers are never omitted
+by recent-attempt suppression. No tracked peers is an idle disposition, not
+successful peer synchronization.
+
+The registry stops the actual manager and waits for its exact issued task groups
+under the original shutdown capability before reactive processing or root tasks
+are stopped. A stopped flag or observed health is not a cleanup acknowledgment.
+Command-local stop has its own bounded cleanup policy; it cannot mint runtime
+shutdown authority. Required protocol, time, cleanup and supervision errors
+retain original native causes. Exact local session removal is not remote
+transport teardown evidence.
+
+### Execution-mode entropy custody
+
+The private `NonProductionEntropySeed` is minted only by the checked actual-mode factory. Both seeded crypto and the shared deterministic RNG stream borrow it; custom real crypto does not authorize seeded production randomness. Invalid production seed configuration retains `ProductionSeededEntropyError` before profile IO, instead of panicking after custody acquisition. Required tests exercise the complete constructor with a custom real crypto handler and verify no selected provider is called.
+
+Sync command admission carries the configured journal/anti-entropy protocol
+policy into the actual L5 service. Retry configuration changes attempt resource
+use but cannot extend the admitted original operation window. Native-fault
+fixtures select a single actual provider attempt, retaining the real protocol,
+transport, task and session owners.
+
+## Raw threshold signing boundary
+
+The generic `SigningContext` service and enrollment setup export validate actual current native policy and the local physical participant package before reporting a missing quorum owner. These raw inputs cannot authorize reading other participants' private shares, allocating a distributed round, or aggregating a group signature. Valid threshold state reports the native quorum-owner requirement; missing or malformed required local state retains its original storage or crypto cause. A successful threshold operation requires the separate admitted distributed producer, with each runtime retaining only its own share and one-use nonce.
+
+### Required projection failures
+
+`ReactiveView` callbacks and `ViewAdapter` delta application return a typed
+`Result<(), AuraError>`. The scheduler stops a failed batch before later views,
+processing acknowledgment, or successful batch diagnostics. The original
+failure is retained in the processing progress channel for issued target
+observers. Signal snapshot and publication failures retain their concrete
+`ReactiveError`; display-only error publication cannot establish completion.
+
+Failed service startup can retain partial runtime resources. The lifecycle permits
+`Failed -> Stopping -> Stopped` so their original owner can dispose them; failed
+startup alone is not a disposal acknowledgment. The required startup replay
+clock-failure regression exercises this cleanup path.

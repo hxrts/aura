@@ -1069,6 +1069,21 @@ pub enum SocialFact {
 }
 
 impl SocialFact {
+    /// Decode required social evidence with explicit schema and native codec failures.
+    ///
+    /// # Errors
+    /// Returns domain, schema, payload-bound or declared-codec failures.
+    pub fn try_from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_decode_envelope(
+            &aura_core::types::facts::FactTypeId::from(SOCIAL_FACT_TYPE_ID),
+            1,
+            1,
+            envelope,
+        )
+    }
+
     /// Default storage limit for blocks: 10 MB
     pub const DEFAULT_BLOCK_STORAGE_LIMIT: u64 = 10 * 1024 * 1024;
 

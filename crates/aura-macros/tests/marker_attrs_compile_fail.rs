@@ -3,7 +3,8 @@ mod trybuild_support;
 
 #[test]
 fn marker_attribute_validation() {
-    let _lock = trybuild_support::acquire_trybuild_lock("trybuild-lock-marker-attrs");
+    let _lock =
+        trybuild_support::acquire_trybuild_lock().expect("required shared compile-fail lock");
     let t = trybuild::TestCases::new();
     t.pass("tests/boundaries/authoritative_source_valid.rs");
     t.pass("tests/boundaries/strong_reference_valid.rs");

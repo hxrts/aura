@@ -343,13 +343,21 @@ impl From<RequiredModerationQueryError> for aura_core::AuraError {
     }
 }
 
-fn decode_required_moderation_fact<T: DomainFact + serde::de::DeserializeOwned>(
+pub(crate) fn decode_required_moderation_fact<T: DomainFact + serde::de::DeserializeOwned>(
     envelope: &aura_core::types::facts::FactEnvelope,
     outer: ContextId,
+    expected_type: &str,
 ) -> Result<T, RequiredModerationQueryError> {
     use aura_core::types::facts::{
         FactEncoding, FactError, FactSchemaCompatibility, MAX_FACT_PAYLOAD_BYTES,
     };
+    if envelope.type_id.as_str() != expected_type {
+        return Err(FactError::TypeMismatch {
+            expected: expected_type.to_owned(),
+            actual: envelope.type_id.to_string(),
+        }
+        .into());
+    }
     FactSchemaCompatibility::range(1, 1).ensure_supported(envelope.schema_version)?;
     if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
         return Err(FactError::PayloadTooLarge {
@@ -431,8 +439,7 @@ pub fn try_is_user_banned_and_muted(
         }
         match kind {
             ModerationRecordKind::Ban => {
-                let decoded =
-                    decode_required_moderation_fact::<HomeBanFact>(envelope, *context_id)?;
+                let decoded = HomeBanFact::try_from_envelope_in_context(envelope, *context_id)?;
                 if context_id == context {
                     let status = BanStatus::from_fact(&decoded);
                     bans.insert(
@@ -442,8 +449,7 @@ pub fn try_is_user_banned_and_muted(
                 }
             }
             ModerationRecordKind::Unban => {
-                let decoded =
-                    decode_required_moderation_fact::<HomeUnbanFact>(envelope, *context_id)?;
+                let decoded = HomeUnbanFact::try_from_envelope_in_context(envelope, *context_id)?;
                 if context_id == context {
                     remove_if_newer(
                         &mut bans,
@@ -455,8 +461,7 @@ pub fn try_is_user_banned_and_muted(
                 }
             }
             ModerationRecordKind::Mute => {
-                let decoded =
-                    decode_required_moderation_fact::<HomeMuteFact>(envelope, *context_id)?;
+                let decoded = HomeMuteFact::try_from_envelope_in_context(envelope, *context_id)?;
                 if context_id == context {
                     let status = MuteStatus::from_fact(&decoded);
                     mutes.insert(
@@ -466,8 +471,7 @@ pub fn try_is_user_banned_and_muted(
                 }
             }
             ModerationRecordKind::Unmute => {
-                let decoded =
-                    decode_required_moderation_fact::<HomeUnmuteFact>(envelope, *context_id)?;
+                let decoded = HomeUnmuteFact::try_from_envelope_in_context(envelope, *context_id)?;
                 if context_id == context {
                     remove_if_newer(
                         &mut mutes,

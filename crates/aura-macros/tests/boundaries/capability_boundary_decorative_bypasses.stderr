@@ -1,0 +1,38 @@
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:9:20
+   |
+ 9 |   fn string_marker() {
+   |  ____________________^
+10 | |     let _CAPABILITY = "ActualCapability";
+11 | | }
+   | |_^
+
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:17:40
+   |
+17 | fn unrelated_type(_: &OtherCapability) {}
+   |                                        ^^
+
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:23:45
+   |
+23 | fn substring_type(_: &FakeActualCapability) {}
+   |                                             ^^
+
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:37:61
+   |
+37 | fn qualified_result(_: unrelated::Result<ActualCapability>) {}
+   |                                                             ^^
+
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:43:55
+   |
+43 | fn qualified_arc(_: unrelated::Arc<ActualCapability>) {}
+   |                                                       ^^
+
+error: capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract
+  --> tests/boundaries/capability_boundary_decorative_bypasses.rs:49:72
+   |
+49 | fn qualified_agent_result(_: unrelated::AgentResult<ActualCapability>) {}
+   |                                                                        ^^

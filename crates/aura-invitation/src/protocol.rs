@@ -346,6 +346,29 @@ pub mod exchange {
     tell!(include_str!("src/protocol.invitation_exchange.tell"));
 }
 
+/// Untrusted envelope for the separately admitted negative terminal channel.
+/// Only the signed runtime control inside it can issue a failure capability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceEnrollmentTerminalNotice {
+    pub invitation_id: InvitationId,
+    pub ceremony_id: CeremonyId,
+    pub signed_control: Vec<u8>,
+}
+impl DeviceEnrollmentTerminalNotice {
+    pub const MAX_WIRE_BYTES: usize = 16_384;
+}
+
+/// The negative notice never advances the enrollment response VM.
+pub mod device_enrollment_terminal_notice {
+    #![allow(unused_imports)]
+    use super::*;
+    use aura_macros::tell;
+    tell!(include_str!(
+        "src/protocol.device_enrollment_terminal_notice.tell"
+    ));
+}
+
 /// Guardian invitation protocol module
 pub mod guardian {
     #![allow(unused_imports)]

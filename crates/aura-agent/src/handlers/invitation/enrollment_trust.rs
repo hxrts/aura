@@ -262,7 +262,7 @@ impl VerifiedEnrollmentRejectionCapability {
 }
 
 pub(crate) enum VerifiedEnrollmentResponseDispositionCapability {
-    Accepted(VerifiedEnrollmentResponse),
+    Accepted(Box<VerifiedEnrollmentResponse>),
     Refused(VerifiedEnrollmentRejectionCapability),
 }
 /// Loaded from the actual immutable issuer control and retained setup pin.
@@ -276,6 +276,7 @@ impl PinnedEnrollmentResponseVerifierCapability {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "pinned_enrollment_response_verifier",
+        capability_type = PinnedEnrollmentResponseVerifierCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn acquire(
@@ -313,6 +314,7 @@ impl PinnedEnrollmentResponseVerifierCapability {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "pinned_enrollment_response_verifier",
+        capability_type = VerifiedEnrollmentResponseDispositionCapability,
         family = "runtime_helper"
     )]
     pub(crate) async fn verify_received_response(
@@ -411,7 +413,7 @@ impl PinnedEnrollmentResponseVerifierCapability {
             ))
         } else {
             Ok(Some(
-                VerifiedEnrollmentResponseDispositionCapability::Accepted(
+                VerifiedEnrollmentResponseDispositionCapability::Accepted(Box::new(
                     VerifiedEnrollmentResponse {
                         ceremony: pin.ceremony.clone(),
                         invitation: self.canonical_invitation.invitation_id.clone(),
@@ -423,7 +425,7 @@ impl PinnedEnrollmentResponseVerifierCapability {
                         canonical_invitation: self.canonical_invitation.clone(),
                         admitted_at_ms: now,
                     },
-                ),
+                )),
             ))
         }
     }
@@ -1800,6 +1802,70 @@ struct StoredIssuedEnrollmentManifest {
     confirmation_verifier: Vec<u8>,
 }
 
+/// Initial owned-storage selector. It grants no terminal authority; required
+/// sender hydration and the independent retained verifier must still agree.
+pub(crate) struct RequiredIssuedEnrollmentSelectorCapability {
+    runtime_owner: Arc<AuraEffectSystem>,
+    manifest: aura_invitation::enrollment_manifest::EnrollmentTrustManifest,
+    digest: [u8; 32],
+}
+impl RequiredIssuedEnrollmentSelectorCapability {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "required_issued_enrollment_selector",
+        capability_type = RequiredIssuedEnrollmentSelectorCapability,
+        family = "runtime_helper"
+    )]
+    pub(crate) async fn load(
+        effects: Arc<AuraEffectSystem>,
+        ceremony: &CeremonyId,
+    ) -> AgentResult<RequiredIssuedEnrollmentSelectorCapability> {
+        use aura_invitation::enrollment_manifest::{
+            EnrollmentTrustManifest, SignedEnrollmentTrustManifest,
+        };
+        let subject = effects.runtime_authority_id();
+        let key = issued_manifest_location(subject, ceremony);
+        // Absence is an error, never permission to derive an invitation ID.
+        let bytes = effects
+            .secure_retrieve(&key, &[SecureStorageCapability::Read])
+            .await?;
+        if bytes.len() > EnrollmentTrustManifest::MAX_BYTES * 2 {
+            return Err(EnrollmentVerifierError::Oversized.into());
+        }
+        let stored: StoredIssuedEnrollmentManifest =
+            serde_json::from_slice(&bytes).map_err(EnrollmentVerifierError::Codec)?;
+        let digest = verify_stored_issued_manifest(&effects, &stored, subject, ceremony).await?;
+        let manifest = SignedEnrollmentTrustManifest::decode(&stored.signed_code)
+            .map_err(manifest_error)?
+            .manifest;
+        Ok(Self {
+            runtime_owner: effects,
+            manifest,
+            digest,
+        })
+    }
+
+    pub(crate) fn runtime_owner(&self) -> Arc<AuraEffectSystem> {
+        self.runtime_owner.clone()
+    }
+
+    pub(crate) fn invitation_id(&self) -> &aura_core::InvitationId {
+        &self.manifest.invitation
+    }
+
+    pub(crate) fn require_control(&self, control: &RetainedEnrollmentVmControl) -> AgentResult<()> {
+        control.require_runtime_owner(&self.runtime_owner)?;
+        if control.digest() != self.digest
+            || control.manifest().subject != self.manifest.subject
+            || control.manifest().ceremony != self.manifest.ceremony
+            || control.canonical_invitation().invitation_id != self.manifest.invitation
+        {
+            return Err(EnrollmentVerifierError::RecordBinding.into());
+        }
+        Ok(())
+    }
+}
+
 fn issued_manifest_location(subject: AuthorityId, ceremony: &CeremonyId) -> SecureStorageLocation {
     SecureStorageLocation::with_sub_key(
         "device_enrollment_issued_manifest_v1",
@@ -1822,6 +1888,7 @@ pub(crate) async fn retain_issued_enrollment_manifest(
     effects: &AuraEffectSystem,
     issued: &crate::handlers::invitation_service::IssuedEnrollmentManifestBinding,
 ) -> AgentResult<()> {
+    issued.require_effects(effects)?;
     let manifest = issued.manifest();
     if manifest.initiator_device != effects.device_id()
         || manifest.initiator_confirmation_verifier != issued.confirmation_verifier()
@@ -2085,6 +2152,7 @@ fn allocated_registration_location(ceremony: &CeremonyId) -> SecureStorageLocati
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "validate_allocated_registration",
+    capability_type = EnrollmentGenerationReservation,
     family = "runtime_helper"
 )]
 pub(crate) async fn persist_allocated_enrollment_registration(
@@ -2145,7 +2213,7 @@ pub(crate) async fn finish_interrupted_canonical_registration(
     invitation: &super::Invitation,
     prestate: aura_core::Hash32,
     ordered_signing_roster: &[aura_core::threshold::ParticipantIdentity],
-    signing_threshold: u16,
+    response_policy: &crate::runtime::effects::EnrollmentResponsePolicy,
 ) -> AgentResult<()> {
     let bytes = effects
         .secure_retrieve(
@@ -2189,7 +2257,8 @@ pub(crate) async fn finish_interrupted_canonical_registration(
             .cloned()
             .collect::<std::collections::HashSet<_>>()
             != expected_roster
-        || raw.registration.threshold != signing_threshold.min(raw.registration.total)
+        || raw.registration.threshold != response_policy.required()
+        || raw.registration.total != response_policy.total()
     {
         return Err(EnrollmentVerifierError::RecordBinding.into());
     }
@@ -2273,6 +2342,12 @@ impl RetainedEnrollmentVmControl {
                 source: Some(Arc::new(EnrollmentVerifierError::RuntimeOwner)),
             })
         }
+    }
+
+    pub(crate) async fn load_required_sender(
+        record: &super::SenderInvitationRecordCapability,
+    ) -> AgentResult<Self> {
+        Self::load(record.runtime_owner(), record.invitation()).await
     }
 
     pub(crate) async fn load(

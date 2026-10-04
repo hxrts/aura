@@ -7,7 +7,7 @@ fn invitation_stage_runtime_error(
     scope: &'static str,
     stage: &'static str,
     action: &'static str,
-    error: impl std::fmt::Display,
+    error: impl std::error::Error + Send + Sync + 'static,
 ) -> AgentError {
     let mut detail = String::from(scope);
     detail.push_str(" `");
@@ -16,28 +16,10 @@ fn invitation_stage_runtime_error(
     detail.push_str(action);
     detail.push_str(": ");
     detail.push_str(&error.to_string());
-    AgentError::runtime(detail)
-}
-
-fn invitation_stage_timeout_error(
-    scope: &'static str,
-    stage: &'static str,
-    timeout_ms: u64,
-) -> AgentError {
-    let mut detail = String::from(scope);
-    detail.push_str(" `");
-    detail.push_str(stage);
-    detail.push_str("` timed out after ");
-    detail.push_str(&timeout_ms.to_string());
-    detail.push_str("ms");
-    AgentError::runtime(detail)
-}
-
-fn invitation_stage_effects_error(stage: &'static str, detail: &str) -> AgentError {
-    let mut message = String::from(stage);
-    message.push_str(": ");
-    message.push_str(detail);
-    AgentError::effects(message)
+    AgentError::Aura(aura_core::AuraError::Internal {
+        message: detail,
+        source: Some(Arc::new(error)),
+    })
 }
 
 pub(super) fn invitation_timeout_profile(effects: &AuraEffectSystem) -> TimeoutExecutionProfile {
@@ -73,8 +55,14 @@ pub(super) async fn invitation_timeout_budget(
                 error,
             )
         })?;
-    TimeoutBudget::from_start_and_timeout(&started_at, scaled_timeout)
-        .map_err(|error| AgentError::runtime(error.to_string()))
+    TimeoutBudget::from_start_and_timeout(&started_at, scaled_timeout).map_err(|error| {
+        invitation_stage_runtime_error(
+            "invitation stage",
+            stage,
+            "could not construct timeout budget",
+            error,
+        )
+    })
 }
 
 pub(super) async fn timeout_invitation_stage_with_budget<T>(
@@ -84,42 +72,41 @@ pub(super) async fn timeout_invitation_stage_with_budget<T>(
     timeout_ms: u64,
     future: impl Future<Output = AgentResult<T>>,
 ) -> AgentResult<T> {
-    let now = effects.physical_time().await.map_err(|error| {
-        invitation_stage_runtime_error(
-            "invitation stage",
-            stage,
-            "could not read physical time",
-            error,
-        )
-    })?;
-    let scaled_timeout = invitation_timeout_profile(effects)
-        .scale_duration(Duration::from_millis(timeout_ms))
-        .map_err(|error| {
+    // One shared observation owner orders the required physical read and child
+    // allocation; no competing branch can capture a stale time then publish it.
+    let child_budget = {
+        let _observation = budget.acquire_observation().await;
+        let now = effects.physical_time().await.map_err(|error| {
             invitation_stage_runtime_error(
                 "invitation stage",
                 stage,
-                "could not scale timeout budget",
+                "could not read physical time",
                 error,
             )
         })?;
-    let child_budget = budget.child_budget(&now, scaled_timeout).map_err(|error| {
-        AgentError::timeout(format!(
-            "invitation stage `{stage}` could not allocate remaining timeout budget: {error}"
-        ))
-    })?;
+        let scaled_timeout = invitation_timeout_profile(effects)
+            .scale_duration(Duration::from_millis(timeout_ms))
+            .map_err(|error| {
+                invitation_stage_runtime_error(
+                    "invitation stage",
+                    stage,
+                    "could not scale timeout budget",
+                    error,
+                )
+            })?;
+        budget
+            .child_budget(&now, scaled_timeout)
+            .map_err(|source| {
+                super::vm_loop::map_invitation_vm_timeout(
+                    stage,
+                    budget,
+                    TimeoutRunError::Timeout(source),
+                )
+            })?
+    };
     execute_with_timeout_budget(effects, &child_budget, || future)
         .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => AgentError::timeout({
-                let mut detail = String::from("invitation stage `");
-                detail.push_str(stage);
-                detail.push_str("` timed out after ");
-                detail.push_str(&child_budget.timeout_ms().to_string());
-                detail.push_str("ms");
-                detail
-            }),
-            TimeoutRunError::Operation(error) => error,
-        })
+        .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &child_budget, error))
 }
 
 pub(super) async fn timeout_prepare_invitation_stage<T>(
@@ -139,17 +126,17 @@ pub(super) async fn timeout_prepare_invitation_stage<T>(
         &started_at,
         Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
     )
-    .map_err(|error| AgentError::runtime(error.to_string()))?;
+    .map_err(|error| {
+        invitation_stage_runtime_error(
+            "invitation stage",
+            stage,
+            "could not construct timeout budget",
+            error,
+        )
+    })?;
     execute_with_timeout_budget(effects, &budget, || future)
         .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => invitation_stage_timeout_error(
-                "invitation.prepare stage",
-                stage,
-                INVITATION_PREPARE_STAGE_TIMEOUT_MS,
-            ),
-            TimeoutRunError::Operation(error) => error,
-        })
+        .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &budget, error))
 }
 
 pub(super) async fn timeout_deferred_network_stage<T>(
@@ -169,17 +156,17 @@ pub(super) async fn timeout_deferred_network_stage<T>(
         &started_at,
         Duration::from_millis(INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS),
     )
-    .map_err(|error| AgentError::runtime(error.to_string()))?;
+    .map_err(|error| {
+        invitation_stage_runtime_error(
+            "invitation stage",
+            stage,
+            "could not construct timeout budget",
+            error,
+        )
+    })?;
     execute_with_timeout_budget(effects, &budget, || future)
         .await
-        .map_err(|error| match error {
-            TimeoutRunError::Timeout(_) => invitation_stage_timeout_error(
-                "invitation best-effort network stage",
-                stage,
-                INVITATION_BEST_EFFORT_NETWORK_TIMEOUT_MS,
-            ),
-            TimeoutRunError::Operation(error) => error,
-        })
+        .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &budget, error))
 }
 
 pub(super) async fn attempt_network_send_envelope(
@@ -193,22 +180,39 @@ pub(super) async fn attempt_network_send_envelope(
             match send_guarded_transport_envelope(effects, envelope.clone()).await {
                 Ok(()) => return Ok(()),
                 Err(error) => {
-                    last_error = Some(error.to_string());
+                    last_error = Some(error);
+                    let retryable = matches!(last_error.as_ref(),
+                        Some(TransportError::DestinationUnreachable { destination })
+                            if *destination == envelope.destination);
+                    if !retryable {
+                        break;
+                    }
                     if attempt + 1 < INVITATION_BEST_EFFORT_NETWORK_SEND_ATTEMPTS {
-                        let _ = effects
+                        effects
                             .sleep_ms(INVITATION_BEST_EFFORT_NETWORK_SEND_BACKOFF_MS)
-                            .await;
+                            .await
+                            .map_err(|source| {
+                                invitation_stage_runtime_error(
+                                    "invitation network stage",
+                                    stage,
+                                    "required retry timer failed",
+                                    source,
+                                )
+                            })?;
                     }
                 }
             }
         }
 
-        Err(invitation_stage_effects_error(
-            stage,
-            last_error
-                .as_deref()
-                .unwrap_or("transport send failed without detail"),
-        ))
+        match last_error {
+            Some(source) => Err(AgentError::Aura(aura_core::AuraError::Network {
+                message: format!("{stage}: {source}"),
+                source: Some(Arc::new(source)),
+            })),
+            None => Err(AgentError::invalid(
+                "invitation send requires at least one attempt",
+            )),
+        }
     })
     .await
 }
@@ -233,3 +237,93 @@ pub(super) fn emit_browser_harness_debug_event(event: &str, detail: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn emit_browser_harness_debug_event(_event: &str, _detail: &str) {}
+
+#[cfg(test)]
+mod required_stage_source_tests {
+    use super::*;
+
+    #[test]
+    fn required_stage_budget_failure_preserves_generated_cause_and_timeout_kind() {
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            },
+            Duration::from_millis(20),
+        )
+        .expect("actual original budget");
+        budget
+            .remaining_at(&PhysicalTime {
+                ts_ms: 110,
+                uncertainty: None,
+            })
+            .expect("actual progress observation");
+        let rollback = budget
+            .child_budget(
+                &PhysicalTime {
+                    ts_ms: 109,
+                    uncertainty: None,
+                },
+                Duration::from_millis(5),
+            )
+            .expect_err("actual child allocation must reject rollback above original start");
+        let error = super::super::vm_loop::map_invitation_vm_timeout(
+            "required-stage",
+            &budget,
+            TimeoutRunError::Timeout(rollback),
+        );
+        assert!(!error.is_timeout(), "rollback is not a deadline");
+        let cause = std::error::Error::source(&error)
+            .and_then(|source| source.source())
+            .and_then(|source| source.downcast_ref::<aura_core::TimeoutBudgetError>())
+            .expect("actual generated rollback survives standard source chain");
+        assert!(matches!(
+            cause,
+            aura_core::TimeoutBudgetError::ClockRollback { .. }
+        ));
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            },
+            Duration::from_millis(20),
+        )
+        .expect("distinct actual deadline owner");
+        let deadline = budget
+            .child_budget(
+                &PhysicalTime {
+                    ts_ms: 120,
+                    uncertainty: None,
+                },
+                Duration::from_millis(5),
+            )
+            .expect_err("actual original deadline is exhausted");
+        let error = super::super::vm_loop::map_invitation_vm_timeout(
+            "required-stage",
+            &budget,
+            TimeoutRunError::Timeout(deadline),
+        );
+        assert!(error.is_timeout());
+        let invalid = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            },
+            Duration::ZERO,
+        )
+        .expect_err("actual physical timeout policy rejects zero");
+        let error = invitation_stage_runtime_error(
+            "invitation stage",
+            "required-stage",
+            "construct budget",
+            invalid,
+        );
+        assert!(!error.is_timeout());
+        assert!(std::error::Error::source(&error)
+            .and_then(|source| source.source())
+            .is_some_and(|source| matches!(
+                source.downcast_ref::<aura_core::TimeoutBudgetError>(),
+                Some(aura_core::TimeoutBudgetError::InvalidPolicy { .. })
+            )));
+    }
+}

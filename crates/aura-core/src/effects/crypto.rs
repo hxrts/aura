@@ -77,6 +77,18 @@ impl FrostKeyGenResult {
     }
 }
 
+/// Public round-one commitment. This wire value contains no secret nonce and
+/// grants no signing authority; handlers validate its native encoding and the
+/// runtime owner binds its participant index to the admitted roster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrostPublicCommitment {
+    /// One-based native FROST signer index in the admitted ordered roster.
+    pub participant_index: u16,
+    /// Native serialized public signing commitments, never a local nonce bundle.
+    pub commitment_bytes: Vec<u8>,
+}
+
 /// FROST signing package for threshold signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrostSigningPackage {
@@ -257,6 +269,21 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         self.generate_signing_keys(threshold, max_signers).await
     }
 
+    /// Individual possession of a supplied participant package. This does not
+    /// produce an authority threshold signature or establish membership.
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (message, key_package, mode);
+        Err(AuraError::crypto_with_source(
+            "individual participant key proofs unsupported",
+            std::sync::Arc::new(crate::crypto::participant_proof::ParticipantKeyProofUnsupported),
+        ))
+    }
+
     async fn sign_with_key(
         &self,
         message: &[u8],
@@ -292,6 +319,77 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let _ = key_package;
         Err(AuraError::crypto("frost_generate_nonces not supported"))
+    }
+
+    /// Extract audited public commitments from a participant-local nonce bundle.
+    /// The secret bundle must remain with its move-owned, one-use runtime owner.
+    async fn frost_public_commitment(
+        &self,
+        participant_index: u16,
+        local_nonce_bundle: &[u8],
+    ) -> Result<FrostPublicCommitment, CryptoError> {
+        let _ = (participant_index, local_nonce_bundle);
+        Err(AuraError::crypto("frost_public_commitment not supported"))
+    }
+
+    /// Build a signing package using only public round-one entries. The returned
+    /// participant list is sorted; aggregation shares must follow that order.
+    /// The supplied threshold is an admitted policy, not inferred from a native
+    /// public package (which does not encode the quorum).
+    ///
+    /// ```no_run
+    /// use aura_core::effects::CryptoEffects;
+    /// use aura_core::effects::crypto::{CryptoError, FrostPublicCommitment, FrostSigningPackage};
+    /// async fn transport_public_commitments(
+    ///     crypto: &dyn CryptoEffects, public: &[FrostPublicCommitment], key_package: &[u8],
+    /// ) -> Result<FrostSigningPackage, CryptoError> {
+    ///     crypto.frost_create_public_signing_package(b"intent", public, key_package, 2).await
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use aura_core::effects::CryptoEffects;
+    /// async fn transport_secret_nonces(crypto: &dyn CryptoEffects, secrets: &[Vec<u8>]) {
+    ///     crypto.frost_create_public_signing_package(b"intent", secrets, b"package", 2).await;
+    /// }
+    /// ```
+    async fn frost_create_public_signing_package(
+        &self,
+        message: &[u8],
+        commitments: &[FrostPublicCommitment],
+        public_key_package: &[u8],
+        threshold: u16,
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        let _ = (message, commitments, public_key_package, threshold);
+        Err(AuraError::crypto(
+            "frost_create_public_signing_package not supported",
+        ))
+    }
+
+    /// Sign only the exact independently admitted message and public policy.
+    /// Audit native package bytes as well as the outer DTO, own key index,
+    /// verifying share, quorum and local nonce commitment before signing.
+    /// Runtime admission and durable one-use nonce retirement remain separate.
+    async fn frost_sign_share_for_message(
+        &self,
+        package: &FrostSigningPackage,
+        local_key_share: &[u8],
+        local_nonce_bundle: &[u8],
+        expected_message: &[u8],
+        expected_public_key_package: &[u8],
+        expected_threshold: u16,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let _ = (
+            package,
+            local_key_share,
+            local_nonce_bundle,
+            expected_message,
+            expected_public_key_package,
+            expected_threshold,
+        );
+        Err(AuraError::crypto(
+            "frost_sign_share_for_message not supported",
+        ))
     }
 
     async fn frost_create_signing_package(
@@ -509,5 +607,235 @@ impl<T: CryptoCoreEffects + ?Sized> CryptoCoreEffects for std::sync::Arc<T> {
 
     fn secure_zero(&self, data: &mut [u8]) {
         (**self).secure_zero(data);
+    }
+}
+
+// Shared provider custody must forward optional operations, not invoke defaults.
+#[async_trait]
+impl<T: CryptoExtendedEffects + ?Sized> CryptoExtendedEffects for std::sync::Arc<T> {
+    async fn generate_signing_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        (**self).generate_signing_keys(threshold, max_signers).await
+    }
+    async fn generate_signing_keys_with(
+        &self,
+        method: KeyGenerationMethod,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<SigningKeyGenResult, CryptoError> {
+        (**self)
+            .generate_signing_keys_with(method, threshold, max_signers)
+            .await
+    }
+    async fn sign_participant_key_proof(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .sign_participant_key_proof(message, key_package, mode)
+            .await
+    }
+    async fn sign_with_key(
+        &self,
+        message: &[u8],
+        key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).sign_with_key(message, key_package, mode).await
+    }
+    async fn verify_signature(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key_package: &[u8],
+        mode: SigningMode,
+    ) -> Result<bool, CryptoError> {
+        (**self)
+            .verify_signature(message, signature, public_key_package, mode)
+            .await
+    }
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        (**self).frost_generate_keys(threshold, max_signers).await
+    }
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        (**self).frost_generate_nonces(key_package).await
+    }
+    async fn frost_public_commitment(
+        &self,
+        participant_index: u16,
+        local_nonce_bundle: &[u8],
+    ) -> Result<FrostPublicCommitment, CryptoError> {
+        (**self)
+            .frost_public_commitment(participant_index, local_nonce_bundle)
+            .await
+    }
+    async fn frost_create_public_signing_package(
+        &self,
+        message: &[u8],
+        commitments: &[FrostPublicCommitment],
+        public_key_package: &[u8],
+        threshold: u16,
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        (**self)
+            .frost_create_public_signing_package(
+                message,
+                commitments,
+                public_key_package,
+                threshold,
+            )
+            .await
+    }
+    async fn frost_sign_share_for_message(
+        &self,
+        package: &FrostSigningPackage,
+        local_key_share: &[u8],
+        local_nonce_bundle: &[u8],
+        expected_message: &[u8],
+        expected_public_key_package: &[u8],
+        expected_threshold: u16,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .frost_sign_share_for_message(
+                package,
+                local_key_share,
+                local_nonce_bundle,
+                expected_message,
+                expected_public_key_package,
+                expected_threshold,
+            )
+            .await
+    }
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        (**self)
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
+            .await
+    }
+    async fn frost_sign_share(
+        &self,
+        signing_package: &FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .frost_sign_share(signing_package, key_share, nonces)
+            .await
+    }
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .frost_aggregate_signatures(signing_package, signature_shares)
+            .await
+    }
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        (**self)
+            .frost_verify(message, signature, group_public_key)
+            .await
+    }
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        (**self).ed25519_public_key(private_key).await
+    }
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).chacha20_encrypt(plaintext, key, nonce).await
+    }
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).chacha20_decrypt(ciphertext, key, nonce).await
+    }
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).aes_gcm_encrypt(plaintext, key, nonce).await
+    }
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).aes_gcm_decrypt(ciphertext, key, nonce).await
+    }
+    async fn aes_gcm_encrypt_with_aad(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .aes_gcm_encrypt_with_aad(plaintext, key, nonce, aad)
+            .await
+    }
+    async fn aes_gcm_decrypt_with_aad(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .aes_gcm_decrypt_with_aad(ciphertext, key, nonce, aad)
+            .await
+    }
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        (**self)
+            .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
+            .await
+    }
+    async fn convert_ed25519_to_x25519_public(
+        &self,
+        ed25519_public_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        (**self)
+            .convert_ed25519_to_x25519_public(ed25519_public_key)
+            .await
+    }
+    async fn convert_ed25519_to_x25519_private(
+        &self,
+        ed25519_private_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        (**self)
+            .convert_ed25519_to_x25519_private(ed25519_private_key)
+            .await
     }
 }

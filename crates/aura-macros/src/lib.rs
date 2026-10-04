@@ -608,6 +608,8 @@ struct CapabilityBoundaryAttr {
     category: LitStr,
     capability: LitStr,
     family: LitStr,
+    capability_type: Option<Type>,
+    receiver_type: Option<Type>,
 }
 
 struct AuthoritativeSourceAttr {
@@ -917,35 +919,33 @@ impl Parse for SemanticOwnerAttr {
 
 impl Parse for CapabilityBoundaryAttr {
     fn parse(input: ParseStream<'_>) -> SynResult<Self> {
-        let metas = parse_meta_name_values(input)?;
         let mut category = None;
         let mut capability = None;
         let mut family = None;
+        let mut capability_type = None;
+        let mut receiver_type = None;
 
-        for meta in metas {
-            if meta.path.is_ident("category") {
-                category = Some(expect_string_literal(
-                    &meta,
-                    "category",
-                    "capability_boundary",
-                )?);
-            } else if meta.path.is_ident("capability") {
-                capability = Some(expect_string_literal(
-                    &meta,
-                    "capability",
-                    "capability_boundary",
-                )?);
-            } else if meta.path.is_ident("family") {
-                family = Some(expect_string_literal(
-                    &meta,
-                    "family",
-                    "capability_boundary",
-                )?);
-            } else {
+        let mut seen = std::collections::BTreeSet::new();
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            if !seen.insert(key.to_string()) {
                 return Err(Error::new_spanned(
-                    meta,
-                    "unsupported capability_boundary attribute key; expected `category`, `capability`, or `family`",
+                    key,
+                    "duplicate capability_boundary attribute key",
                 ));
+            }
+            input.parse::<Token![=]>()?;
+            match key.to_string().as_str() {
+                "category" => category = Some(input.parse::<LitStr>()?),
+                "capability" => capability = Some(input.parse::<LitStr>()?),
+                "family" => family = Some(input.parse::<LitStr>()?),
+                "capability_type" => capability_type = Some(input.parse::<Type>()?),
+                "receiver_type" => receiver_type = Some(input.parse::<Type>()?),
+                _ => return Err(Error::new_spanned(key,
+                    "unsupported capability_boundary attribute key; expected `category`, `capability`, `family`, `capability_type`, or `receiver_type`")),
+            }
+            if !input.is_empty() {
+                input.parse::<Token![,]>()?;
             }
         }
 
@@ -959,6 +959,8 @@ impl Parse for CapabilityBoundaryAttr {
                 "capability_boundary requires `capability = \"...\"`",
             )?,
             family: require_attr_field(family, "capability_boundary requires `family = \"...\"`")?,
+            capability_type,
+            receiver_type,
         })
     }
 }
@@ -1756,7 +1758,7 @@ fn validate_capability_boundary_signature(
     validate_capability_boundary_parts(
         &function.attrs,
         &function.sig.inputs,
-        function.sig.output.to_token_stream().to_string(),
+        &function.sig.output,
         &function.block,
         config,
     )
@@ -1769,35 +1771,178 @@ fn validate_capability_boundary_impl_signature(
     validate_capability_boundary_parts(
         &function.attrs,
         &function.sig.inputs,
-        function.sig.output.to_token_stream().to_string(),
+        &function.sig.output,
         &function.block,
         config,
     )
 }
 
+/// Match actual parsed type names, including borrowed capabilities and nested
+/// Result outputs. Annotation text and parameter names are not type evidence.
+/// This is declaration validation; actual opaque fields/owner checks establish
+/// runtime custody and remain required independently of this syntax rule.
+fn signature_names_declared_capability(
+    inputs: &syn::punctuated::Punctuated<FnArg, Token![,]>,
+    output: &syn::ReturnType,
+    declared: &str,
+) -> bool {
+    fn same_segment(actual: &syn::PathSegment, expected: &syn::PathSegment) -> bool {
+        actual.ident == expected.ident
+            && match (&actual.arguments, &expected.arguments) {
+                (_, PathArguments::None) => match &actual.arguments {
+                    PathArguments::None => true,
+                    PathArguments::AngleBracketed(arguments) => arguments
+                        .args
+                        .iter()
+                        .all(|arg| matches!(arg, GenericArgument::Lifetime(_))),
+                    PathArguments::Parenthesized(_) => false,
+                },
+                (actual, expected) => actual == expected,
+            }
+    }
+    fn carries(ty: &Type, declared: &str) -> bool {
+        match ty {
+            Type::Reference(reference) => carries(&reference.elem, declared),
+            Type::Paren(paren) => carries(&paren.elem, declared),
+            Type::Group(group) => carries(&group.elem, declared),
+            Type::Array(array) => carries(&array.elem, declared),
+            Type::Slice(slice) => carries(&slice.elem, declared),
+            Type::Tuple(tuple) => tuple.elems.iter().any(|ty| carries(ty, declared)),
+            Type::Path(path) if path.qself.is_none() => {
+                let Ok(expected) = syn::parse_str::<syn::TypePath>(declared) else {
+                    return false;
+                };
+                let Some(last) = path.path.segments.last() else {
+                    return false;
+                };
+                let exact = if expected.path.segments.len() > 1 {
+                    path.path.leading_colon == expected.path.leading_colon
+                        && path.path.segments.len() == expected.path.segments.len()
+                        && path
+                            .path
+                            .segments
+                            .iter()
+                            .zip(&expected.path.segments)
+                            .all(|(actual, expected)| same_segment(actual, expected))
+                } else {
+                    expected
+                        .path
+                        .segments
+                        .last()
+                        .is_some_and(|segment| same_segment(last, segment))
+                };
+                if exact {
+                    return true;
+                }
+                // Only actual value containers preserve declaration evidence.
+                // Result's error arm is diagnostic, never a success capability.
+                if !matches!(
+                    last.ident.to_string().as_str(),
+                    "Result"
+                        | "AgentResult"
+                        | "Option"
+                        | "Arc"
+                        | "Box"
+                        | "Vec"
+                        | "RwLock"
+                        | "MutexGuard"
+                        | "OwnedMutexGuard"
+                ) {
+                    return false;
+                }
+                if path.path.segments.len() > 1 {
+                    let canonical_path = path
+                        .path
+                        .segments
+                        .iter()
+                        .map(|segment| segment.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::");
+                    if !matches!(
+                        canonical_path.as_str(),
+                        "std::result::Result"
+                            | "core::result::Result"
+                            | "std::option::Option"
+                            | "core::option::Option"
+                            | "std::sync::Arc"
+                            | "alloc::sync::Arc"
+                            | "std::boxed::Box"
+                            | "alloc::boxed::Box"
+                            | "std::vec::Vec"
+                            | "alloc::vec::Vec"
+                            | "std::sync::RwLock"
+                            | "tokio::sync::RwLock"
+                            | "parking_lot::RwLock"
+                            | "async_lock::RwLock"
+                            | "std::sync::MutexGuard"
+                            | "tokio::sync::MutexGuard"
+                            | "parking_lot::MutexGuard"
+                            | "tokio::sync::OwnedMutexGuard"
+                            | "crate::core::AgentResult"
+                            | "crate::core::error::AgentResult"
+                            | "aura_agent::core::AgentResult"
+                            | "aura_agent::AgentResult"
+                    ) || path
+                        .path
+                        .segments
+                        .iter()
+                        .take(path.path.segments.len() - 1)
+                        .any(|segment| !matches!(segment.arguments, PathArguments::None))
+                    {
+                        return false;
+                    }
+                }
+                let PathArguments::AngleBracketed(arguments) = &last.arguments else {
+                    return false;
+                };
+                arguments
+                    .args
+                    .iter()
+                    .find_map(|argument| match argument {
+                        GenericArgument::Type(ty) => Some(carries(ty, declared)),
+                        _ => None,
+                    })
+                    .unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+    inputs
+        .iter()
+        .any(|input| matches!(input, FnArg::Typed(argument) if carries(&argument.ty, declared)))
+        || matches!(output, syn::ReturnType::Type(_, ty) if carries(ty, declared))
+}
+
 fn validate_capability_boundary_parts(
     attrs: &[Attribute],
     inputs: &syn::punctuated::Punctuated<FnArg, Token![,]>,
-    output_tokens: String,
+    output: &syn::ReturnType,
     block: &Block,
     config: &CapabilityBoundaryAttr,
 ) -> SynResult<()> {
-    let capability_name = config.capability.value();
-    let inputs_tokens = inputs.to_token_stream().to_string();
-    let block_tokens = block.to_token_stream().to_string();
-    if !inputs_tokens.contains("Capability")
-        && !output_tokens.contains("Capability")
-        && !output_tokens.contains("Authorized")
-        && !block_tokens.contains(&capability_name)
-        && !block_tokens.contains("issue_operation_context")
-        && !block_tokens.contains("_CAPABILITY")
-    {
+    let capability_name = match &config.capability_type {
+        Some(Type::Path(path)) if path.qself.is_none() => Some(path.to_token_stream().to_string()),
+        Some(_) => None,
+        None => syn::parse_str::<syn::Ident>(&config.capability.value())
+            .ok()
+            .map(|ident| ident.to_string()),
+    };
+    let declared_in_signature = capability_name
+        .as_deref()
+        .is_some_and(|name| signature_names_declared_capability(inputs, output, name));
+    let has_receiver = inputs
+        .iter()
+        .any(|input| matches!(input, FnArg::Receiver(_)));
+    if config.receiver_type.is_some() && !has_receiver {
         return Err(Error::new_spanned(
-            block,
-            "capability_boundary requires a capability-bearing signature or body",
+            inputs,
+            "receiver_type requires an actual self receiver",
         ));
     }
-
+    if !declared_in_signature && config.receiver_type.is_none() {
+        return Err(Error::new_spanned(block,
+            "capability_boundary requires its exact declared type in the signature or an explicit typed self receiver contract"));
+    }
     let family = config.family.value();
     if !matches!(
         family.as_str(),
@@ -1809,6 +1954,12 @@ fn validate_capability_boundary_parts(
         ));
     }
 
+    if config.receiver_type.is_some() && family != "runtime_helper" {
+        return Err(Error::new_spanned(
+            &config.family,
+            "typed receiver contracts are restricted to runtime_helper boundaries",
+        ));
+    }
     match family.as_str() {
         "capability_accessor" => {
             if !inputs.is_empty() {
@@ -1817,22 +1968,32 @@ fn validate_capability_boundary_parts(
                     "capability_accessor boundaries must not take inputs",
                 ));
             }
-            if !output_tokens.contains("Capability") {
+            if !capability_name.as_deref().is_some_and(|name| {
+                signature_names_declared_capability(&Default::default(), output, name)
+            }) {
                 return Err(Error::new_spanned(
                     &config.family,
-                    "capability_accessor boundaries must return a capability-bearing type",
+                    "capability_accessor boundaries must return their exact declared type",
                 ));
             }
         }
         "authorizer" => {
-            if !block_tokens.contains("Authorized") && !block_tokens.contains("authorize") {
+            if !declared_in_signature {
                 return Err(Error::new_spanned(
                     block,
-                    "authorizer boundaries must mint or route an authorized value explicitly",
+                    "authorizer boundaries require their exact typed authorization input or output",
                 ));
             }
         }
         "proof_issuer" => {
+            if !capability_name.as_deref().is_some_and(|name| {
+                signature_names_declared_capability(&Default::default(), output, name)
+            }) {
+                return Err(Error::new_spanned(
+                    output,
+                    "proof_issuer boundaries must return their exact declared proof type",
+                ));
+            }
             if authoritative_source_kind(attrs).as_deref() != Some("proof_issuer") {
                 return Err(Error::new_spanned(
                     &config.family,
@@ -1850,7 +2011,14 @@ fn validate_capability_boundary_parts(
 fn authoritative_source_kind(attrs: &[Attribute]) -> Option<String> {
     attrs.iter().find_map(|attr| {
         let segment = attr.path().segments.last()?;
-        if segment.ident != "authoritative_source" {
+        let known_namespace = attr.path().segments.len() == 1
+            || (attr.path().segments.len() == 2
+                && attr
+                    .path()
+                    .segments
+                    .first()
+                    .is_some_and(|segment| segment.ident == "aura_macros"));
+        if segment.ident != "authoritative_source" || !known_namespace {
             return None;
         }
         let metas = attr
@@ -2082,6 +2250,14 @@ fn transform_capability_boundary(item: TokenStream, config: CapabilityBoundaryAt
         if let Err(error) = validate_capability_boundary_signature(&function, &config) {
             return error.to_compile_error().into();
         }
+        if let Some(receiver_type) = &config.receiver_type {
+            function.block.stmts.insert(
+                0,
+                parse_quote! {
+                    let _: &#receiver_type = &self;
+                },
+            );
+        }
         let capability = config.capability;
         function.block.stmts.insert(
             0,
@@ -2102,6 +2278,14 @@ fn transform_capability_boundary(item: TokenStream, config: CapabilityBoundaryAt
     if let Ok(mut function) = syn::parse::<ImplItemFn>(item.clone()) {
         if let Err(error) = validate_capability_boundary_impl_signature(&function, &config) {
             return error.to_compile_error().into();
+        }
+        if let Some(receiver_type) = &config.receiver_type {
+            function.block.stmts.insert(
+                0,
+                parse_quote! {
+                    let _: &#receiver_type = &self;
+                },
+            );
         }
         let capability = config.capability;
         function.block.stmts.insert(
@@ -2402,4 +2586,212 @@ fn type_path_contains_operation_context(type_path: &TypePath) -> bool {
             }
             _ => false,
         })
+}
+
+#[cfg(test)]
+mod declared_capability_signature_tests {
+    use super::*;
+    fn recognized(function: ItemFn, name: &str) -> bool {
+        signature_names_declared_capability(&function.sig.inputs, &function.sig.output, name)
+    }
+    #[test]
+    fn recognizes_borrowed_actual_reservation_and_nested_cleanup_output() {
+        assert!(recognized(
+            parse_quote! {
+                fn supersede(owner:&crate::effects::EnrollmentGenerationReservation<'_>)->Result<(),Error>{}
+            },
+            "EnrollmentGenerationReservation"
+        ));
+        assert!(recognized(
+            parse_quote! {
+                fn recover(guard:MutexGuard<'_,()>)->Result<RecoveredEnrollmentCleanupCustody<'_>,Error>{}
+            },
+            "RecoveredEnrollmentCleanupCustody"
+        ));
+    }
+    #[test]
+    fn full_boundary_validator_accepts_actual_declared_custody_types() -> SynResult<()> {
+        let reservation: ItemFn = parse_quote! {
+            fn supersede(owner:&crate::effects::EnrollmentGenerationReservation<'_>)->Result<(),Error>{}
+        };
+        let cleanup: ItemFn = parse_quote! {
+            fn recover(guard:MutexGuard<'_,()>)->Result<RecoveredEnrollmentCleanupCustody<'_>,Error>{}
+        };
+        for (function, name) in [
+            (reservation, "EnrollmentGenerationReservation"),
+            (cleanup, "RecoveredEnrollmentCleanupCustody"),
+        ] {
+            let config = CapabilityBoundaryAttr {
+                category: parse_quote!("capability_gated"),
+                capability: LitStr::new(name, proc_macro2::Span::call_site()),
+                family: parse_quote!("runtime_helper"),
+                capability_type: None,
+                receiver_type: None,
+            };
+            validate_capability_boundary_signature(&function, &config)?;
+        }
+        Ok(())
+    }
+    #[test]
+    fn declaration_names_and_substring_types_do_not_supply_type_evidence() {
+        assert!(!recognized(
+            parse_quote! {
+                fn supersede(EnrollmentGenerationReservation:&str)->Result<(),Error>{}
+            },
+            "EnrollmentGenerationReservation"
+        ));
+        assert!(!recognized(
+            parse_quote! {
+                fn supersede(owner:&FakeEnrollmentGenerationReservation)->Result<(),Error>{}
+            },
+            "EnrollmentGenerationReservation"
+        ));
+        assert!(!recognized(
+            parse_quote! {
+                fn supersede(owner:&str)->Result<(),Error>{ let _CAPABILITY="EnrollmentGenerationReservation"; }
+            },
+            "EnrollmentGenerationReservation"
+        ));
+    }
+    fn full_config(family: &str) -> CapabilityBoundaryAttr {
+        CapabilityBoundaryAttr {
+            category: parse_quote!("capability_gated"),
+            capability: parse_quote!("ActualCapability"),
+            family: LitStr::new(family, proc_macro2::Span::call_site()),
+            capability_type: None,
+            receiver_type: None,
+        }
+    }
+
+    #[test]
+    fn full_validator_rejects_all_decorative_evidence() {
+        let config = full_config("runtime_helper");
+        for function in [
+            parse_quote! { fn f(x:&str)->() { let _CAPABILITY="ActualCapability"; } },
+            parse_quote! { fn f(x:&str)->() { issue_operation_context(); } },
+            parse_quote! { fn f(x:&OtherCapability)->() {} },
+            parse_quote! { fn f(x:&FakeActualCapability)->() {} },
+            parse_quote! { fn f(x:&str)->AuthorizedUnrelated {} },
+            parse_quote! { fn f()->Result<(),ActualCapability> {} },
+            parse_quote! { fn f(x:Result<(),ActualCapability>)->() {} },
+            parse_quote! { fn f()->AgentResult<(),ActualCapability> {} },
+            parse_quote! { fn f(x:Unrelated<ActualCapability>)->() {} },
+            parse_quote! { fn f(x:unrelated::Result<ActualCapability>)->() {} },
+            parse_quote! { fn f(x:unrelated::Arc<ActualCapability>)->() {} },
+            parse_quote! { fn f(x:unrelated::AgentResult<ActualCapability>)->() {} },
+            parse_quote! { fn f(ActualCapability:&str)->() {} },
+            parse_quote! { fn f(marker:std::marker::PhantomData<ActualCapability>)->() {} },
+            parse_quote! { fn f(x:&<ActualCapability as Trait>::Projection)->() {} },
+        ] {
+            assert!(validate_capability_boundary_signature(&function, &config).is_err());
+        }
+    }
+
+    #[test]
+    fn full_validator_checks_accessor_authorizer_and_issuer_contracts() {
+        let accessor: ItemFn = parse_quote! { fn original()-> &'static ActualCapability {} };
+        assert!(validate_capability_boundary_signature(
+            &accessor,
+            &full_config("capability_accessor")
+        )
+        .is_ok());
+        let accessor_input: ItemFn = parse_quote! { fn wrong(x:&ActualCapability)->String {} };
+        assert!(validate_capability_boundary_signature(
+            &accessor_input,
+            &full_config("capability_accessor")
+        )
+        .is_err());
+        let authorizer: ItemFn =
+            parse_quote! { fn publish(original:&ActualCapability)->Result<(),Error> {} };
+        assert!(
+            validate_capability_boundary_signature(&authorizer, &full_config("authorizer")).is_ok()
+        );
+        for function in [
+            parse_quote! { fn f(x:std::result::Result<ActualCapability, Error>)->() {} },
+            parse_quote! { fn f(x:core::option::Option<ActualCapability>)->() {} },
+            parse_quote! { fn f(x:std::sync::Arc<ActualCapability>)->() {} },
+        ] {
+            assert!(validate_capability_boundary_signature(
+                &function,
+                &full_config("runtime_helper")
+            )
+            .is_ok());
+        }
+        let agent_result: ItemFn =
+            parse_quote! { fn produce()->AgentResult<Option<ActualCapability>> {} };
+        assert!(validate_capability_boundary_signature(
+            &agent_result,
+            &full_config("runtime_helper")
+        )
+        .is_ok());
+        let issuer: ItemFn = parse_quote! {
+            #[aura_macros::authoritative_source(kind="proof_issuer")]
+            fn issue()->Result<ActualCapability,Error> {}
+        };
+        assert!(
+            validate_capability_boundary_signature(&issuer, &full_config("proof_issuer")).is_ok()
+        );
+        let unrelated_source: ItemFn = parse_quote! {
+            #[unrelated::authoritative_source(kind="proof_issuer")]
+            fn issue()->ActualCapability {}
+        };
+        assert!(validate_capability_boundary_signature(
+            &unrelated_source,
+            &full_config("proof_issuer")
+        )
+        .is_err());
+        let unowned_issuer: ItemFn = parse_quote! { fn issue()->ActualCapability {} };
+        assert!(validate_capability_boundary_signature(
+            &unowned_issuer,
+            &full_config("proof_issuer")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn full_validator_supports_exact_semantic_label_and_typed_receiver_contract() {
+        let mut config = full_config("runtime_helper");
+        config.capability = parse_quote!("semantic_operation");
+        config.capability_type = Some(parse_quote!(ActualCapability));
+        let function: ItemFn = parse_quote! { fn f(original:&crate::ActualCapability)->() {} };
+        assert!(validate_capability_boundary_signature(&function, &config).is_ok());
+        config.capability_type = Some(parse_quote!(trusted::ActualCapability));
+        let wrong: ItemFn = parse_quote! { fn f(original:&peer::ActualCapability)->() {} };
+        assert!(validate_capability_boundary_signature(&wrong, &config).is_err());
+        let actual: ItemFn = parse_quote! { fn f(original:&trusted::ActualCapability)->() {} };
+        assert!(validate_capability_boundary_signature(&actual, &config).is_ok());
+        config.capability_type = Some(parse_quote!(trusted::Owner<ActualCapability>));
+        let unrelated_generic: ItemFn =
+            parse_quote! { fn f(original:&trusted::Owner<OtherCapability>)->() {} };
+        assert!(validate_capability_boundary_signature(&unrelated_generic, &config).is_err());
+        let absent_generic: ItemFn = parse_quote! { fn f(original:&trusted::Owner)->() {} };
+        assert!(validate_capability_boundary_signature(&absent_generic, &config).is_err());
+        let actual_generic: ItemFn =
+            parse_quote! { fn f(original:&trusted::Owner<ActualCapability>)->() {} };
+        assert!(validate_capability_boundary_signature(&actual_generic, &config).is_ok());
+        let parsed: CapabilityBoundaryAttr = syn::parse2(quote! {
+            category = "capability_gated", capability = "semantic_operation",
+            capability_type = trusted::Owner<ActualCapability>, family = "runtime_helper",
+        })
+        .expect("generic capability declaration parses as a type");
+        assert!(validate_capability_boundary_signature(&actual_generic, &parsed).is_ok());
+        assert!(syn::parse2::<CapabilityBoundaryAttr>(quote! {
+            category = "capability_gated", capability = "semantic_operation",
+            capability_type = trusted::Owner<ActualCapability>, capability_type = Other,
+            family = "runtime_helper",
+        })
+        .is_err());
+        config.capability_type = Some(parse_quote!(Vec<ActualCapability>));
+        let misleading_container: ItemFn = parse_quote! { fn f(original:Vec<u8>)->() {} };
+        assert!(validate_capability_boundary_signature(&misleading_container, &config).is_err());
+        config.capability_type = None;
+
+        config.receiver_type = Some(parse_quote!(ActualOwner));
+        let method: ImplItemFn = parse_quote! { fn f(&self)->() {} };
+        assert!(validate_capability_boundary_impl_signature(&method, &config).is_ok());
+        let free: ItemFn = parse_quote! { fn f()->() {} };
+        assert!(validate_capability_boundary_signature(&free, &config).is_err());
+        config.family = parse_quote!("authorizer");
+        assert!(validate_capability_boundary_impl_signature(&method, &config).is_err());
+    }
 }

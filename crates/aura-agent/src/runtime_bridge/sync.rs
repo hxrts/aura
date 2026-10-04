@@ -25,6 +25,7 @@ const RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY: &str = "runtime_bridge_sync_p
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_status_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn get_sync_status(
@@ -53,6 +54,7 @@ pub(super) async fn get_sync_status(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_peer_online_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityId) -> bool {
@@ -76,6 +78,7 @@ pub(super) async fn is_peer_online(bridge: &AgentRuntimeBridge, peer: AuthorityI
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_peer_query",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn get_sync_peers(
@@ -89,6 +92,7 @@ pub(super) async fn get_sync_peers(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_trigger",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
@@ -178,6 +182,7 @@ pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), Inte
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_ceremony_processing",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn process_ceremony_messages(
@@ -255,6 +260,7 @@ pub(super) async fn process_ceremony_messages(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_with_peer",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn sync_with_peer(
@@ -277,6 +283,7 @@ pub(super) async fn sync_with_peer(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "runtime_bridge_sync_peer_channel",
+    capability_type = AgentRuntimeBridge,
     family = "runtime_helper"
 )]
 pub(super) async fn ensure_peer_channel(

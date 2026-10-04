@@ -6,6 +6,8 @@ pub mod hpke;
 pub mod kdf;
 pub mod key_derivation;
 pub mod merkle;
+pub mod participant_proof;
+pub mod signature_input;
 pub mod single_signer;
 pub mod tree_signing;
 

@@ -55,6 +55,20 @@ pub enum AuraChoreoEngineError {
         /// Session lifecycle failure reason.
         message: String,
     },
+    /// Required cooperative target disposal failure from the owned VM backend.
+    #[error("cooperative session lifecycle error: {source}")]
+    CooperativeSessionLifecycle {
+        /// Concrete residency/epoch/index failure from the actual dependency.
+        #[source]
+        source: telltale_machine::SessionDisposalError,
+    },
+    /// Required threaded session disposal failure from the owned VM backend.
+    #[error("threaded session lifecycle error: {source}")]
+    ThreadedSessionLifecycle {
+        /// Concrete dependency producer failure, never inferred from text.
+        #[source]
+        source: telltale_machine::ThreadedSessionLifecycleError,
+    },
     /// Effect interpreter execution failure.
     #[error("effect interpreter error: {message}")]
     Interpreter {
@@ -777,15 +791,17 @@ impl<H: ProtocolMachineEffectHandler> AuraChoreoEngine<H> {
 
     /// Explicitly close a tracked session.
     pub fn close_session(&mut self, sid: SessionId) -> Result<(), AuraChoreoEngineError> {
-        let vm = self.backend.as_cooperative_mut().ok_or_else(|| {
-            AuraChoreoEngineError::SessionLifecycle {
-                message: "explicit close is not available for threaded runtime sessions yet"
-                    .to_string(),
+        match &mut self.backend {
+            AuraVmBackend::Cooperative(vm) => {
+                vm.close_and_reap_session(sid).map_err(|source| {
+                    AuraChoreoEngineError::CooperativeSessionLifecycle { source }
+                })?;
             }
-        })?;
-        vm.sessions_mut()
-            .close(sid)
-            .map_err(|message| AuraChoreoEngineError::SessionLifecycle { message })?;
+            AuraVmBackend::Threaded(vm) => {
+                vm.close_and_reap_session(sid)
+                    .map_err(|source| AuraChoreoEngineError::ThreadedSessionLifecycle { source })?;
+            }
+        }
         self.active_sessions.remove(&sid);
         self.session_protocol_classes.remove(&sid);
         self.session_determinism_profiles.remove(&sid);

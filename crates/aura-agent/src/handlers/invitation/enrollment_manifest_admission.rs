@@ -226,6 +226,7 @@ async fn validate(
         .verify_signature(effects, &record.selected_verifier, &signed.signature)
         .await?;
     let manifest = verified.manifest();
+    manifest.final_inventory()?;
     let (shareable, proof, transport) =
         ShareableInvitation::from_code_with_proof_and_transport(&record.code).map_err(boundary)?;
     let proof = proof.ok_or(EnrollmentManifestError::Signature)?;
@@ -394,6 +395,7 @@ fn failure_location(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "authenticated_enrollment_failure_receipt",
+    capability_type = VerifiedEnrollmentFailureCapability,
     family = "runtime_helper"
 )]
 pub(super) async fn retain_verified_failure(

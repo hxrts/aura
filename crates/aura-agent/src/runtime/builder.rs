@@ -27,11 +27,53 @@ use aura_core::types::identifiers::AuthorityId;
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;
 
+#[cfg(test)]
+pub(crate) struct TestingOwnedProfileCapability {
+    owner: Arc<aura_effects::profile_storage::OwnedProfileLease>,
+}
+#[cfg(test)]
+impl TestingOwnedProfileCapability {
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "TestingOwnedProfileCapability",
+        family = "proof_issuer"
+    )]
+    #[aura_macros::authoritative_source(kind = "proof_issuer")]
+    pub(crate) fn acquire(
+        config: &AgentConfig,
+    ) -> Result<TestingOwnedProfileCapability, crate::core::AgentError> {
+        #[cfg(unix)]
+        {
+            let owner = aura_effects::profile_storage::FilesystemProfileStorageHandler::new(
+                config.storage.base_path.clone(),
+            )
+            .acquire_owned_native()
+            .map_err(|source| {
+                crate::core::AgentError::from(aura_core::AuraError::Storage {
+                    message: "acquire actual isolated testing profile".into(),
+                    source: Some(Arc::new(source)),
+                })
+            })?;
+            Ok(Self {
+                owner: Arc::new(owner),
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error().into())
+        }
+    }
+    pub(super) fn into_owner(self) -> Arc<aura_effects::profile_storage::OwnedProfileLease> {
+        self.owner
+    }
+}
+
 /// Authority-first runtime system builder
 pub struct EffectSystemBuilder {
     config: Option<AgentConfig>,
     authority_id: Option<AuthorityId>,
     physical_time_provider: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>>,
+    custom_providers: Option<super::effects::SelectedCustomProviders>,
     execution_mode: ExecutionMode,
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
@@ -39,6 +81,8 @@ pub struct EffectSystemBuilder {
     receipt_config: Option<ReceiptManagerConfig>,
     shared_transport: Option<SharedTransport>,
     selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+    #[cfg(test)]
+    testing_profile_owner: Option<TestingOwnedProfileCapability>,
 }
 
 impl EffectSystemBuilder {
@@ -48,6 +92,7 @@ impl EffectSystemBuilder {
             config: None,
             authority_id: None,
             physical_time_provider: None,
+            custom_providers: None,
             execution_mode: ExecutionMode::Production,
             sync_config: None,
             rendezvous_config: None,
@@ -55,6 +100,8 @@ impl EffectSystemBuilder {
             receipt_config: None,
             shared_transport: None,
             selected_profile_owner: None,
+            #[cfg(test)]
+            testing_profile_owner: None,
         }
     }
 
@@ -62,7 +109,7 @@ impl EffectSystemBuilder {
     /// Every adapter retains this same resource until the last owner is dropped.
     ///
     /// ```compile_fail
-    /// use aura_agent::runtime::EffectSystemBuilder;
+    /// use aura_agent::EffectSystemBuilder;
     /// EffectSystemBuilder::production().with_profile_owner(std::sync::Arc::new(()));
     /// ```
     pub fn with_profile_owner(
@@ -73,12 +120,27 @@ impl EffectSystemBuilder {
         self
     }
 
+    /// Actual selected profile custody for integration tests, kept separate from
+    /// production-lease ingress and the ordinary unowned Testing constructor.
+    #[cfg(test)]
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "TestingOwnedProfileCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn testing_with_owned_profile(profile: TestingOwnedProfileCapability) -> Self {
+        let mut builder = Self::testing();
+        builder.testing_profile_owner = Some(profile);
+        builder
+    }
+
     /// Create a testing builder
     pub fn testing() -> Self {
         Self {
             config: None,
             authority_id: None,
             physical_time_provider: None,
+            custom_providers: None,
             execution_mode: ExecutionMode::Testing,
             sync_config: None,
             rendezvous_config: None,
@@ -86,6 +148,8 @@ impl EffectSystemBuilder {
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
             selected_profile_owner: None,
+            #[cfg(test)]
+            testing_profile_owner: None,
         }
     }
 
@@ -95,6 +159,7 @@ impl EffectSystemBuilder {
             config: None,
             authority_id: None,
             physical_time_provider: None,
+            custom_providers: None,
             execution_mode: ExecutionMode::Simulation { seed },
             sync_config: None,
             rendezvous_config: None,
@@ -102,7 +167,17 @@ impl EffectSystemBuilder {
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
             selected_profile_owner: None,
+            #[cfg(test)]
+            testing_profile_owner: None,
         }
+    }
+
+    pub(crate) fn with_custom_providers(
+        mut self,
+        providers: super::effects::SelectedCustomProviders,
+    ) -> Self {
+        self.custom_providers = Some(providers);
+        self
     }
 
     /// Set shared transport wiring for multi-agent simulations.
@@ -121,7 +196,6 @@ impl EffectSystemBuilder {
     }
 
     /// Set configuration
-
     pub fn with_config(mut self, config: AgentConfig) -> Self {
         self.config = Some(config);
         self
@@ -178,8 +252,20 @@ impl EffectSystemBuilder {
         self
     }
 
-    /// Build the runtime system (async)
-    pub async fn build(
+    /// Build the runtime under the caller's lexical owner.
+    ///
+    /// The delegated future is allocated before it enters an async caller's
+    /// frame. This does not spawn a task or transfer the selected profile lease
+    /// to another supervisor. Cancellation drops the same owned builder future.
+    pub fn build(
+        self,
+        ctx: &EffectContext,
+    ) -> impl std::future::Future<Output = Result<RuntimeSystem, crate::builder::error::BuildError>> + '_
+    {
+        Box::pin(self.build_owned(ctx))
+    }
+
+    async fn build_owned(
         self,
         _ctx: &EffectContext,
     ) -> Result<RuntimeSystem, crate::builder::error::BuildError> {
@@ -219,20 +305,29 @@ impl EffectSystemBuilder {
                         let owner = profile.acquire_owned_browser().await;
                         #[cfg(not(target_arch = "wasm32"))]
                         let owner = profile.acquire_owned_native();
-                        let owner = owner.map(Arc::new).map_err(|e| {
+                        owner.map(Arc::new).map_err(|e| {
                             crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
                                 e,
                             ))
-                        })?;
-                        owner
+                        })?
                     }
                 };
                 let executor = EffectExecutor::production(authority_id, registry.clone());
-                let system = super::AuraEffectSystem::production_for_authority_shared_profile(
-                    config.clone(),
-                    authority_id,
-                    owner,
-                )
+                let system = match self.custom_providers {
+                    Some(providers) => super::AuraEffectSystem::custom_for_authority(
+                        config.clone(),
+                        authority_id,
+                        self.execution_mode,
+                        providers,
+                        Some(owner),
+                        self.shared_transport,
+                    ),
+                    None => super::AuraEffectSystem::production_for_authority_shared_profile(
+                        config.clone(),
+                        authority_id,
+                        owner,
+                    ),
+                }
                 .map_err(|e| {
                     crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
                 })?;
@@ -243,17 +338,41 @@ impl EffectSystemBuilder {
                 // Runtime builder intentionally uses explicit execution-mode constructors.
                 // Test-only callsites must use simulation_for_test* helpers instead.
                 #[allow(clippy::disallowed_methods)]
-                let system = if let Some(shared) = self.shared_transport {
-                    super::AuraEffectSystem::testing_with_shared_transport(
+                let unowned = |providers, transport| {
+                    if let Some(providers) = providers {
+                        super::AuraEffectSystem::custom_for_authority(
+                            config.clone(),
+                            authority_id,
+                            self.execution_mode,
+                            providers,
+                            None,
+                            transport,
+                        )
+                    } else if let Some(shared) = transport {
+                        super::AuraEffectSystem::testing_with_shared_transport(
+                            &config,
+                            authority_id,
+                            shared,
+                        )
+                    } else {
+                        super::AuraEffectSystem::testing_for_authority(&config, authority_id)
+                    }
+                };
+                #[cfg(test)]
+                let system = match self.testing_profile_owner {
+                    Some(profile) => super::AuraEffectSystem::testing_with_owned_profile(
                         &config,
                         authority_id,
-                        shared,
-                    )
-                } else {
-                    super::AuraEffectSystem::testing_for_authority(&config, authority_id)
-                }
-                .map_err(|e| {
-                    crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
+                        self.shared_transport,
+                        profile,
+                        self.custom_providers,
+                    ),
+                    None => unowned(self.custom_providers, self.shared_transport),
+                };
+                #[cfg(not(test))]
+                let system = unowned(self.custom_providers, self.shared_transport);
+                let system = system.map_err(|source| {
+                    crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(source))
                 })?;
                 (executor, system)
             }
@@ -261,7 +380,21 @@ impl EffectSystemBuilder {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
                 // Use shared transport inbox if provided, otherwise standard simulation mode
                 #[allow(clippy::disallowed_methods)]
-                let system = if let Some(shared) = self.shared_transport {
+                let system = if let Some(providers) = self.custom_providers {
+                    super::AuraEffectSystem::custom_for_authority(
+                        config.clone(),
+                        authority_id,
+                        self.execution_mode,
+                        providers,
+                        None,
+                        self.shared_transport,
+                    )
+                    .map_err(|error| {
+                        crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(
+                            error,
+                        ))
+                    })?
+                } else if let Some(shared) = self.shared_transport {
                     super::AuraEffectSystem::simulation_with_shared_transport_for_authority(
                         &config,
                         seed,
@@ -269,12 +402,12 @@ impl EffectSystemBuilder {
                         shared,
                     )
                     .map_err(|e| {
-                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                        crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
                     })?
                 } else {
                     super::AuraEffectSystem::simulation_for_authority(&config, seed, authority_id)
                         .map_err(|e| {
-                        crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                        crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
                     })?
                 };
                 (executor, system)
@@ -286,6 +419,8 @@ impl EffectSystemBuilder {
             Some(provider) => effect_system.with_physical_time_provider(provider),
             None => effect_system,
         };
+
+        effect_system.initialize_selected_receipt_key().await;
 
         // Create service managers
 
@@ -399,7 +534,7 @@ impl EffectSystemBuilder {
             let authority_context =
                 AuthorityContext::new_with_device(authority_id, config.device_id);
             let handler = RendezvousHandler::new(authority_context).map_err(|e| {
-                crate::builder::error::BuildError::RuntimeConstruction(e.to_string())
+                crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
             })?;
             let handler = if let Some(manager) = rendezvous_manager.as_ref() {
                 handler.with_rendezvous_manager(manager.clone())
@@ -427,7 +562,13 @@ impl EffectSystemBuilder {
         // Load persisted Biscuit tokens into the in-memory cache.
         // For returning users this restores guard chain authorization.
         // For new users the cache stays empty until bootstrap_authority() creates tokens.
-        effect_system.initialize_biscuit_cache().await;
+        effect_system
+            .initialize_biscuit_cache()
+            .await
+            .map_err(|source| crate::builder::BuildError::EffectInitSource {
+                effect: "persisted Biscuit authorization",
+                source: Box::new(source),
+            })?;
 
         // Build runtime system with configured services
         let system = RuntimeSystem::new_with_services(
@@ -457,16 +598,15 @@ impl EffectSystemBuilder {
         // This prevents "SignalNotFound" races during startup.
         aura_app::signal_defs::register_app_signals(&system.effects().reactive_handler())
             .await
-            .map_err(|e| crate::builder::error::BuildError::EffectInit {
+            .map_err(|e| crate::builder::error::BuildError::EffectInitSource {
                 effect: "app_signals",
-                message: e.to_string(),
+                source: Box::new(e),
             })?;
 
         // Start runtime services (sync, rendezvous, social, etc).
-        system
-            .start_services()
-            .await
-            .map_err(|e| crate::builder::error::BuildError::RuntimeConstruction(e.to_string()))?;
+        system.start_services().await.map_err(|e| {
+            crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
+        })?;
 
         Ok(system)
     }
@@ -499,9 +639,8 @@ impl EffectSystemBuilder {
                     let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
 
                     // Use a minimal async runtime just for building
-                    let rt = tokio::runtime::Runtime::new().map_err(|e| {
-                        BuildError::RuntimeConstruction(format!("tokio runtime: {e}"))
-                    })?;
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| BuildError::RuntimeConstructionSource(Box::new(e)))?;
                     rt.block_on(self.build(&ctx))
                 }
             }
@@ -593,5 +732,118 @@ mod tests {
                 crate::runtime::RuntimeActivityState::Stopped
             );
         });
+    }
+}
+
+#[cfg(all(test, unix))]
+mod owned_testing_profile_tests {
+    use super::*;
+    fn config(path: &std::path::Path) -> AgentConfig {
+        AgentConfig {
+            storage: crate::core::config::StorageConfig {
+                base_path: path.to_path_buf(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    fn context(authority: AuthorityId) -> EffectContext {
+        EffectContext::new(
+            authority,
+            aura_core::ContextId::new_from_entropy([83; 32]),
+            ExecutionMode::Testing,
+        )
+    }
+    fn actual_invalid_profile_source(error: &impl std::error::Error) -> bool {
+        let mut source = error.source();
+        while let Some(error) = source {
+            if matches!(
+                error.downcast_ref::<aura_core::effects::profile_storage::ProfileStorageError>(),
+                Some(aura_core::effects::profile_storage::ProfileStorageError::Invalid(_))
+            ) {
+                return true;
+            }
+            source = error.source();
+        }
+        false
+    }
+    #[tokio::test]
+    async fn testing_owned_profile_retains_actual_lease_until_runtime_shutdown() {
+        let directory = tempfile::tempdir().expect("isolated owned runtime profile");
+        let config = config(directory.path());
+        let capability =
+            TestingOwnedProfileCapability::acquire(&config).expect("actual exclusive descriptor");
+        let physical = Arc::downgrade(&capability.owner);
+        let authority = AuthorityId::new_from_entropy([81; 32]);
+        let context = context(authority);
+        let runtime = EffectSystemBuilder::testing_with_owned_profile(capability)
+            .with_authority(authority)
+            .with_config(config)
+            .build(&context)
+            .await
+            .expect("actual owned Testing assembly");
+        assert!(
+            physical.upgrade().is_some(),
+            "selected provider and runtime retain original physical lease"
+        );
+        runtime
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("acknowledged actual service teardown");
+        drop(runtime);
+        assert!(
+            physical.upgrade().is_none(),
+            "drained runtime releases physical ownership before restart"
+        );
+    }
+    #[tokio::test]
+    async fn ordinary_testing_cannot_accept_production_profile_lease() {
+        let directory = tempfile::tempdir().expect("isolated production lease guard");
+        let config = config(directory.path());
+        let capability =
+            TestingOwnedProfileCapability::acquire(&config).expect("actual exclusive descriptor");
+        let authority = AuthorityId::new_from_entropy([82; 32]);
+        let context = context(authority);
+        let error = match EffectSystemBuilder::testing()
+            .with_profile_owner(capability.into_owner())
+            .with_authority(authority)
+            .with_config(config)
+            .build(&context)
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("ordinary Testing must reject production lease ingress"),
+        };
+        assert!(
+            actual_invalid_profile_source(&error),
+            "original typed guard retained"
+        );
+    }
+    #[tokio::test]
+    async fn testing_owned_profile_cannot_retarget_a_foreign_configuration() {
+        let original = tempfile::tempdir().expect("original physical profile");
+        let foreign = tempfile::tempdir().expect("foreign physical profile");
+        let capability = TestingOwnedProfileCapability::acquire(&config(original.path()))
+            .expect("actual original lease");
+        let authority = AuthorityId::new_from_entropy([84; 32]);
+        let context = context(authority);
+        let error = match EffectSystemBuilder::testing_with_owned_profile(capability)
+            .with_authority(authority)
+            .with_config(config(foreign.path()))
+            .build(&context)
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("strong capability cannot select another physical profile"),
+        };
+        assert!(
+            actual_invalid_profile_source(&error),
+            "actual profile mismatch source preserved"
+        );
+        assert!(
+            !foreign.path().join("secure_storage").exists(),
+            "mismatch rejected before foreign provider construction"
+        );
     }
 }

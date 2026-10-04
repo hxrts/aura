@@ -44,6 +44,37 @@ pub enum SessionStartFailureReason {
     Other,
 }
 
+/// Required close failures retain the concrete producing service error.
+#[derive(Debug, Error)]
+pub enum SessionCloseFailure {
+    #[error("VM close failed: {0}")]
+    Engine(#[source] super::choreo_engine::AuraChoreoEngineError),
+    #[error("runtime choreography close failed: {0}")]
+    Choreography(#[source] aura_protocol::effects::ChoreographyError),
+}
+
+/// A forced drop may fail in both close and exact owner retirement. Its standard
+/// source is the first failure; any secondary owner failure remains typed here.
+#[derive(Debug, Error)]
+pub enum ForcedVmRetirementFailure {
+    #[error("VM close failed: {source}; secondary owner failure: {ownership:?}")]
+    Vm {
+        #[source]
+        source: super::choreo_engine::AuraChoreoEngineError,
+        ownership: Option<SessionOwnershipError>,
+    },
+    #[error("owner retirement failed: {0}")]
+    Ownership(#[source] SessionOwnershipError),
+}
+impl ForcedVmRetirementFailure {
+    pub fn ownership_failure(&self) -> Option<&SessionOwnershipError> {
+        match self {
+            Self::Vm { ownership, .. } => ownership.as_ref(),
+            Self::Ownership(error) => Some(error),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SessionIngressError {
     #[error("runtime session {session_id} has no owner record")]
@@ -83,11 +114,18 @@ pub enum SessionIngressError {
         #[source]
         source: super::vm_host_bridge::AuraVmBridgeRoundError,
     },
-    #[error("failed to close owned runtime session {session_id} for {owner_label}: {message}")]
+    #[error("failed to close owned runtime session {session_id} for {owner_label}: {source}")]
     SessionClose {
         session_id: RuntimeChoreographySessionId,
         owner_label: String,
-        message: String,
+        #[source]
+        source: SessionCloseFailure,
+    },
+    #[error("forced retirement of runtime session {session_id} failed: {source}")]
+    ForcedRetirement {
+        session_id: RuntimeChoreographySessionId,
+        #[source]
+        source: ForcedVmRetirementFailure,
     },
     #[error(
         "failed to transfer owned runtime session {session_id} from {from_owner_label} to {to_owner_label}: {message}"
@@ -110,6 +148,7 @@ impl SessionIngressError {
             Self::Round { .. } => "round",
             Self::BridgeRound { .. } => "bridge_round",
             Self::SessionClose { .. } => "session_close",
+            Self::ForcedRetirement { .. } => "forced_retirement",
             Self::OwnerTransfer { .. } => "owner_transfer",
         }
     }
@@ -196,6 +235,48 @@ pub struct OwnedVmSession {
     engine: AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     handler: Arc<AuraQueuedVmBridgeHandler>,
     vm_session_id: SessionId,
+    retirement_armed: bool,
+}
+
+impl Drop for OwnedVmSession {
+    fn drop(&mut self) {
+        if !self.retirement_armed {
+            return;
+        }
+        self.retirement_armed = false;
+        // The backend's delivery lease preserves unknown-delivery custody;
+        // retirement never retries or acknowledges an in-flight frame.
+        let vm_close = if self.engine.active_sessions().contains(&self.vm_session_id) {
+            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).err()
+        } else {
+            None
+        };
+        let ownership = self
+            .effects
+            .retire_dropped_vm_owner(&self.owner.capability)
+            .err();
+        let failure = match (vm_close, ownership) {
+            (Some(source), ownership) => Some(ForcedVmRetirementFailure::Vm { source, ownership }),
+            (None, Some(source)) => Some(ForcedVmRetirementFailure::Ownership(source)),
+            (None, None) => None,
+        };
+        if let Some(source) = failure {
+            let source = SessionIngressError::ForcedRetirement {
+                session_id: self.owner.session_id,
+                source,
+            };
+            let retained = crate::task_registry::retain_current_task_cleanup_failure(
+                aura_core::AuraError::Internal {
+                    message: source.to_string(),
+                    source: Some(Arc::new(source)),
+                },
+            );
+            if !retained {
+                tracing::error!(session_id=%self.owner.session_id,
+                    "VM retirement failure has no registered task health owner");
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -213,7 +294,7 @@ fn log_session_owner_assigned(
         event = RuntimeSessionEvent::OwnerAssigned.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
-        capability_generation = owner.capability.generation,
+        capability_generation = owner.capability.generation(),
         protocol_id,
         context,
         "Assigned runtime session owner"
@@ -248,9 +329,9 @@ fn log_session_owner_transferred(
         event = RuntimeSessionEvent::OwnerTransferred.as_event_name(),
         session_id = %previous_owner.session_id,
         from_owner_label = %previous_owner.owner_label,
-        from_generation = previous_owner.capability.generation,
+        from_generation = previous_owner.capability.generation(),
         to_owner_label = %next_owner.owner_label,
-        to_generation = next_owner.capability.generation,
+        to_generation = next_owner.capability.generation(),
         protocol_id,
         context,
         "Transferred runtime session owner"
@@ -268,7 +349,7 @@ fn log_session_owner_transfer_rejected(
         event = RuntimeSessionEvent::OwnerTransferRejected.as_event_name(),
         session_id = %previous_owner.session_id,
         from_owner_label = %previous_owner.owner_label,
-        from_generation = previous_owner.capability.generation,
+        from_generation = previous_owner.capability.generation(),
         to_owner_label = next_owner_label,
         protocol_id,
         context,
@@ -290,7 +371,7 @@ fn log_session_ingress_received(
         event = RuntimeSessionEvent::IngressReceived.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
-        capability_generation = owner.capability.generation,
+        capability_generation = owner.capability.generation(),
         ingress_kind,
         active_role,
         from_role,
@@ -310,7 +391,7 @@ fn log_session_ingress_dropped(
         event = RuntimeSessionEvent::IngressDropped.as_event_name(),
         session_id = %owner.session_id,
         owner_label = %owner.owner_label,
-        capability_generation = owner.capability.generation,
+        capability_generation = owner.capability.generation(),
         ingress_kind,
         active_role,
         error_kind = error.error_kind(),
@@ -495,17 +576,22 @@ impl OwnedVmSession {
         // owner still owns the runtime binding and fragments after VM completion,
         // so releasing those must not depend on closing an already-reaped VM.
         if self.engine.active_sessions().contains(&self.vm_session_id) {
-            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|message| {
+            close_and_reap_vm_session(&mut self.engine, self.vm_session_id).map_err(|source| {
                 SessionIngressError::SessionClose {
                     session_id: self.owner.session_id,
                     owner_label: self.owner.owner_label.clone(),
-                    message,
+                    source: SessionCloseFailure::Engine(source),
                 }
             })?;
         }
-        self.effects
+        let result = self
+            .effects
             .end_owned_choreography_session(&self.owner)
-            .await
+            .await;
+        if result.is_ok() {
+            self.retirement_armed = false;
+        }
+        result
     }
 
     pub fn transfer_owner_in_place(
@@ -576,6 +662,7 @@ pub async fn open_owned_manifest_vm_session_admitted(
             engine,
             handler,
             vm_session_id,
+            retirement_armed: true,
         }),
         Err(error) => {
             log_session_owner_rejected(
@@ -763,13 +850,13 @@ impl AuraEffectSystem {
             details: RuntimeBoundaryError::CapabilityRejected { details: error },
         })?;
 
-        if !boundary.is_allowed_by(&owner.capability.scope) {
+        if !boundary.is_allowed_by(owner.capability.scope()) {
             return Err(SessionIngressError::InvalidIngressRouting {
                 session_id: owner.session_id,
                 owner_label: owner.owner_label.clone(),
                 details: RuntimeBoundaryError::BoundaryScopeRejected {
                     boundary: boundary.clone(),
-                    capability_scope: owner.capability.scope.clone(),
+                    capability_scope: owner.capability.scope().clone(),
                 },
             });
         }
@@ -847,7 +934,7 @@ impl AuraEffectSystem {
             .map_err(|error| SessionIngressError::SessionClose {
                 session_id: owner.session_id,
                 owner_label: owner.owner_label.clone(),
-                message: error.to_string(),
+                source: SessionCloseFailure::Choreography(error),
             })
     }
 }
@@ -1162,5 +1249,195 @@ mod tests {
             .end_owned_choreography_session(&original)
             .await
             .expect("close original session");
+    }
+    async fn live_drop_fixture(effects: Arc<AuraEffectSystem>, id: u8) -> OwnedVmSession {
+        let manifest = linked_manifest("aura.test.owned-drop", "drop-fragment");
+        let roles = vec![ChoreographicRole::for_authority(
+            test_authority(id),
+            RoleIndex::new(0).expect("actual role index"),
+        )];
+        let owner = effects
+            .start_owned_choreography_session(
+                "actual-drop-owner",
+                Uuid::from_bytes([id; 16]),
+                roles,
+            )
+            .await
+            .expect("actual runtime admission");
+        effects
+            .claim_vm_fragments_for_manifest(&owner.owner_label, &manifest)
+            .expect("actual registered fragment custody");
+        let (engine, handler, vm_session_id) =
+            crate::runtime::vm_host_bridge::open_drop_fixture_vm_session()
+                .expect("real VM engine allocation");
+        OwnedVmSession {
+            effects,
+            owner,
+            routing_boundary: AuraLinkBoundary::for_manifest(&manifest),
+            engine,
+            handler,
+            vm_session_id,
+            retirement_armed: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn dropping_live_vm_retires_exact_runtime_binding_and_fragment_custody() {
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc1),
+            )
+            .expect("owned-drop effect system"),
+        );
+        let session = live_drop_fixture(effects.clone(), 0xc1).await;
+        assert!(session
+            .engine
+            .active_sessions()
+            .contains(&session.vm_session_id));
+        assert!(!effects.vm_fragment_snapshot().is_empty());
+        drop(session);
+        assert!(effects.current_runtime_choreography_session_id().is_none());
+        assert!(effects.vm_fragment_snapshot().is_empty());
+        let next = live_drop_fixture(effects.clone(), 0xc1).await;
+        next.close()
+            .await
+            .expect("same physical task admits new owner after retirement");
+    }
+
+    #[tokio::test]
+    async fn guardian_terminal_requires_actual_vm_close_and_preserves_both_native_failures() {
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc8),
+            )
+            .expect("one original actual runtime custody"),
+        );
+        for fail_primary in [false, true] {
+            let mut session = live_drop_fixture(effects.clone(), 0xc8).await;
+            effects
+                .end_owned_choreography_session(session.owner())
+                .await
+                .expect("actual runtime owner retirement before terminal close");
+            let primary = if fail_primary {
+                let native = session
+                    .advance_round("actual-drop-owner", &BTreeMap::new())
+                    .await
+                    .expect_err("retired actual owner cannot advance VM");
+                Err(crate::core::AgentError::Aura(
+                    aura_core::AuraError::Internal {
+                        message: "actual retired VM operation".into(),
+                        source: Some(Arc::new(native)),
+                    },
+                ))
+            } else {
+                Ok(())
+            };
+            let error = crate::handlers::invitation::finish_guardian_vm_operation(primary, session)
+                .await
+                .expect_err("successful primary cannot conceal failed actual close");
+            let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            let mut native_found = false;
+            let mut dual_found = false;
+            while let Some(source) = cursor {
+                native_found |= source.is::<SessionIngressError>();
+                if let Some(dual) =
+                    source.downcast_ref::<crate::handlers::invitation::GuardianVmTerminalFailure>()
+                {
+                    dual_found = true;
+                    assert!(std::error::Error::source(&dual.primary).is_some());
+                    assert!(matches!(
+                        dual.cleanup,
+                        SessionIngressError::InvalidIngressRouting {
+                            details: RuntimeBoundaryError::MissingTaskBinding,
+                            ..
+                        }
+                    ));
+                }
+                cursor = source.source();
+            }
+            assert!(native_found, "actual runtime failure remains native");
+            assert_eq!(dual_found, fail_primary);
+            assert!(effects.current_runtime_choreography_session_id().is_none());
+            assert!(effects.vm_fragment_snapshot().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_dropped_vm_cannot_retire_transferred_runtime_owner() {
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc2),
+            )
+            .expect("transferred-drop effect system"),
+        );
+        let mut session = live_drop_fixture(effects.clone(), 0xc2).await;
+        let stale = session.owner.clone();
+        session
+            .transfer_owner_in_place("new-drop-owner", session.routing_boundary.clone())
+            .expect("actual transfer advances capability generation");
+        let error = effects
+            .retire_dropped_vm_owner(&stale.capability)
+            .expect_err("old generation cannot cancel new custody");
+        assert!(matches!(
+            error,
+            crate::runtime::subsystems::choreography::SessionOwnershipError::OwnerMismatch { .. }
+        ));
+        effects
+            .assert_owned_choreography_boundary(&session.owner, &session.routing_boundary)
+            .expect("new owner remains authoritative");
+        assert!(!effects.vm_fragment_snapshot().is_empty());
+        drop(session);
+        assert!(effects.current_runtime_choreography_session_id().is_none());
+        assert!(effects.vm_fragment_snapshot().is_empty());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn actual_supervisor_abort_retires_live_vm_before_idle_publication() {
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                test_authority(0xc3),
+            )
+            .expect("forced-abort effect system"),
+        );
+        let supervisor = crate::task_registry::TaskSupervisor::new();
+        let group = supervisor.group("actual-vm-abort");
+        let (ready_tx, ready) = futures::channel::oneshot::channel();
+        let owned_effects = effects.clone();
+        let _handle = group.spawn_try_named("live-vm", async move {
+            let session = live_drop_fixture(owned_effects, 0xc3).await;
+            ready_tx
+                .send(session.owner.clone())
+                .expect("parent sees actual live allocation");
+            futures::future::pending::<()>().await;
+            drop(session);
+            Ok(())
+        });
+        let owner = ready
+            .await
+            .expect("actual registered VM task reaches live state");
+        assert!(!effects.vm_fragment_snapshot().is_empty());
+        assert!(matches!(
+            group.force_abort_remaining(),
+            Err(crate::task_registry::TaskSupervisionError::ForcedAbort { .. })
+        ));
+        let drained = group.wait_for_idle(std::time::Duration::from_secs(2)).await;
+        drained.expect("cancelled actual task retires and reaches quiescence");
+        assert!(
+            effects.vm_fragment_snapshot().is_empty(),
+            "idle cannot publish before owned VM destructor retires fragments"
+        );
+        assert!(
+            effects
+                .ensure_runtime_choreography_session_owner_capability(
+                    owner.session_id,
+                    &owner.capability
+                )
+                .is_err(),
+            "forced drop removes exact runtime owner as well as VM resources"
+        );
     }
 }

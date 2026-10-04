@@ -12,6 +12,8 @@ pub enum RuntimeBridgeErrorKind {
     Crypto,
     Serialization,
     Unauthorized,
+    /// An actual required flow-budget guard denied the operation.
+    BudgetExceeded,
     Validation,
     Journal,
     Internal,
@@ -151,6 +153,7 @@ impl RuntimeBridgeError {
             return kind;
         }
         match &self.diagnostic {
+            IntentError::BudgetExceeded { .. } => RuntimeBridgeErrorKind::BudgetExceeded,
             IntentError::Unauthorized { .. } => RuntimeBridgeErrorKind::Unauthorized,
             IntentError::ValidationFailed { .. } => RuntimeBridgeErrorKind::Validation,
             IntentError::JournalError { .. } => RuntimeBridgeErrorKind::Journal,
@@ -214,7 +217,8 @@ impl RuntimeBridgeErrorKind {
             Self::NotFound | Self::ContextNotFound => A::NotFound { message, source },
             Self::Network => A::Network { message, source },
             Self::Storage => A::Storage { message, source },
-            Self::Journal
+            Self::BudgetExceeded
+            | Self::Journal
             | Self::Internal
             | Self::Reactive
             | Self::NoAgent

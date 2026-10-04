@@ -422,3 +422,16 @@ reasons exhaustively before generic native categories; cancellation and rejectio
 remain distinct from crypto verification faults. The reason is a diagnostic, not
 a signed-proof constructor or retry witness. The foreign IntentError payload
 contract remains unchanged.
+
+Required flow accounting denial projects to `BudgetExceeded` across native UI,
+semantic operation and command terminal contracts. Authorization remains a
+separate category. Exhaustive enum mappings and source-boundary regressions
+enforce this distinction; foreign display diagnostics never supply policy proof.
+
+Compile-fail test harnesses share aura-testkit's workspace process lock with agent and signals suites. Descriptor custody releases on process exit, and bounded acquisition retains native IO or contention causes. Tests never remove/recreate the lock inode or create a parallel suite-specific lock namespace. See docs/804_testing_guide.md.
+
+### Exact capability declaration evidence
+
+A capability boundary declares its exact capability type in a parsed input or output. Semantic labels may specify `capability_type = Type`; labels and body text do not establish custody. Accessors return that exact type, authorizers retain that typed input or output, and proof issuers also declare their authoritative proof source. Runtime helpers with an actual held receiver may specify `receiver_type = OwnerType`; expansion checks the concrete receiver against that type. This receiver contract does not apply to free functions or replace authorization inputs in authorizers.
+
+Constants, capability-like substrings, incidental body calls, phantom markers and associated projections do not satisfy the declaration. The declaration verifies API shape; private constructors and actual runtime ownership validation establish authority. Pure validators, pure execution-plan builders and observed projections are not capability issuers and carry no decorative capability-boundary declarations. Their domain tests and effect-placement rules remain required.

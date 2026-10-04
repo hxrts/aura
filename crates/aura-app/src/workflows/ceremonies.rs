@@ -633,6 +633,7 @@ fn enrollment_setup_failure(
             | EnrollmentSetupError::InvalidValidity
             | EnrollmentSetupError::OutsideValidity
             | EnrollmentSetupError::InvalidSigningPolicy
+            | EnrollmentSetupError::InputEncoding(_)
             | EnrollmentSetupError::Codec(_)
             | EnrollmentSetupError::Transcript(_) => SemanticFailureCode::InvalidArgument,
             EnrollmentSetupError::ProofBinding | EnrollmentSetupError::InvalidSignature => {

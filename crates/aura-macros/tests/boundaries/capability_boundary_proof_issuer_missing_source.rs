@@ -6,12 +6,14 @@ static SEMANTIC_POSTCONDITION_PROOF_CAPABILITY: std::sync::LazyLock<
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "semantic_postcondition_proof",
+    capability = "semantic_postcondition_proof", capability_type = DemoProof,
     family = "proof_issuer"
 )]
-fn issue_pending_invitation_consumed_proof(invitation_id: &str) -> String {
+fn issue_pending_invitation_consumed_proof(invitation_id: &str) -> DemoProof {
     let _ = &*SEMANTIC_POSTCONDITION_PROOF_CAPABILITY;
-    invitation_id.to_string()
+    DemoProof(invitation_id.to_string())
 }
 
 fn main() {}
+
+struct DemoProof(String);

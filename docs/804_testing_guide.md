@@ -1060,3 +1060,720 @@ Use an actual prepared unissued rotation reservation to reject another runtime's
 ### Persistent allocation owner regression
 
 In the actual prepared unissued-rotation fixture, attempt generic tracker registration while the real generation reservation is held. Assert typed `HeldEnrollmentRegistrationError::RequiredOwner` and absence of the durable allocated record. Existing actual issuance fixtures exercise successful owned registration. Persistent enrollment clock tests must obtain the real held reservation; do not re-enable raw snapshot allocation or add a test-only authorization bypass to simplify those fixtures. Nonpersistent tracker state-model tests can keep generic registration because they cannot authorize production activation.
+
+## Actual secure-provider fault validation
+
+The optional native credential-provider lane uses the selected OS keyring with
+a private fixture service and the actual profile and namespace owners:
+
+```sh
+cargo test -p hxrts-aura-effects --features test-support platform_secure_record_fault_tests
+```
+
+The lane checks legacy original sealing, mutation refusal, actual wrapping-key
+loss without replacement, and legacy payload collisions with the protected
+record format. Provider unavailability is a typed failure; tests do not skip or
+switch to the filesystem fallback. Fixture cleanup targets only its private
+service and is a test-owned backing-provider fault operation. A successful
+filesystem lane does not validate this OS-provider lane or the browser
+WebLocks/IndexedDB lane. Cross-process OS-provider recovery and actual browser
+multi-context fault coverage remain separate required validation.
+
+### Enrollment peer epoch fence migration
+
+Run the sync enrollment_epoch_commit_migration_tests lane to verify that the
+actual historical schema encoded by the runtime DAG-CBOR codec decodes with no
+v2 fence and cannot authorize enrollment. The old rotation/removal transcript
+must remain byte-identical. The pure v2 transcript tests check domain separation
+and binding to each operation hash; they do not substitute for genuine quorum
+participation, held peer activation, or process-restart tests.
+
+### Enrollment notice identity and production compilation
+
+Run the exact retained notice identity regression alongside the actual
+default-stack enrollment caller fixture. The former rejects digest, transcript
+and expiry rebinding; the latter uses real setup, registration and admission
+before checking the issuer/invitee 16 KiB caller-future budget. Neither pure
+identity tests nor increased stack settings establish complete cancellation
+delivery or restart behavior.
+
+Check the agent and simulator libraries without `cfg(test)` as a distinct
+validation lane. Notice draining must retain its native failures in production
+builds as well as unit tests; a test-only helper cannot supply production
+cleanup. Run `cargo check -p hxrts-aura-agent -p aura-simulator --lib` in the Nix
+environment with the same bounded build queue used for the focused tests.
+
+### Startup authorization fault coverage
+
+Run the agent `required_biscuit_hydration_` test filter when changing credential
+restoration or builder error adapters. Its real profile/token fixtures cover
+confirmed absence, malformed payload, successful retained-token hydration,
+returning-runtime rejection and encrypted backing corruption. The corruption
+fixture changes selected provider ciphertext under native test support; ordinary
+production overwrite/delete protections must remain enforced. Check native
+error causes as well as the serialized failure classification, and separately
+compile the production agent library so test-only methods cannot hide missing
+required runtime APIs.
+
+### Enrollment custody contention regressions
+
+The runtime tests `enrollment_custody_waits_generation_then_decision_then_tree`
+and `physical_generation_cannot_enter_another_runtime_tracker` use the actual
+export, app pin, retained manifest and physical storage fixture. They poll an
+owned future once to verify a held mutex dependency, rather than sleeping for
+an assumed ordering. The first test holds the physical generation gate and
+checks that activation has not acquired the tracker decision, then holds the
+tree lease and checks that fresh roster preparation has already acquired the
+tracker decision. It also checks that a second real owner advances only after
+the first composite owner releases. The second test rejects custody from a
+different real runtime. Run these tests with the agent suite and ownership
+compile-fail lane when changing the custody hierarchy; a count-only tracker
+fixture does not verify physical generation ownership.
+
+Reserved issuance regressions must exercise the actual pure guard outcome and
+native boundary, distinguish insufficient budget from missing capability, and
+assert the concrete structural source remains reachable. Canonical original
+creation/expiry are tested against a newer guard clock and expired reservations.
+
+### Pinned VM lifecycle regressions
+
+The lifecycle gate resolves the locked crates.io `telltale-machine` release
+`17.0.1` through Cargo metadata and rejects local overrides or other versions.
+Its unit tests have their own development dependencies and run using the resolved
+package manifest. Run the required source, discovery and execution inventory:
+
+```sh
+just ci-vm-session-lifecycle
+```
+
+These regressions exercise actual scoped worker completion, unrelated-session
+survival after coroutine compaction, stable IDs for later sessions, and required
+lock/index/epoch failures before mutation. They must accompany changes to the
+dependency lifecycle API. Also run actual Aura backend close/cancellation tests;
+dependency success alone does not verify host binding or fragment retirement.
+Cooperative teardown needs its own nonterminal-session and surviving-session
+coverage. A closed status or removal from the host's active set alone does not
+prove target coroutine/resource disposal. Regenerate `Cargo.nix` when changing
+the pinned dependency release.
+
+Deadline attenuation regressions in `aura-core::time::timeout` must prove that
+shorter signed validity retains the original start and parent deadline, child
+exhaustion stays sticky after restore, and parent/child rollback history is shared.
+The pure tests reject mismatched paired snapshots; they do not prove durable
+checkpoint provenance. Pair them with the actual domain owner's required-write,
+restart, expiry and missing-checkpoint fault tests when changing peer admission.
+
+### Required VM disposal regression lane
+
+Run `just ci-vm-session-lifecycle` after changing a VM backend, targeted session
+close/reap, coroutine index ownership, worker acknowledgment or forced-drop
+custody. `just ci-ownership-policy` includes the same lane. The Rust inventory
+checks actual nonignored test declarations and published harness names before
+running the dependency and runtime suites in sequence. A renamed, absent,
+feature-excluded or ignored required fixture fails instead of producing a
+successful zero-test result.
+
+The dependency tests exercise targeted removal, same-role surviving sessions,
+new-session dispatch, genuine scoped worker acknowledgment, actual poison and
+epoch faults, natural terminal epoch preservation and cooperative deserialization
+index continuity. Runtime tests exercise both real backends, original error
+source chains, exact forced-drop owner retirement, stale-owner rejection and
+cleanup before supervisor idle publication.
+
+Session owner coverage additionally uses equal metadata in two actual runtime
+registries to prove that foreign claims cannot validate, release or transfer
+ownership. The lane discovers and executes the opaque capability doctests,
+including a valid observation consumer and rejected construction, field mutation
+and wire deserialization. Their actual harness inventory prevents absent guards
+from becoming a successful zero-test run.
+
+The dependency override is outside the workspace. This lane invokes its actual
+manifest with the multi-thread feature and shares the selected target directory
+with runtime validation. It does not run competing builds. Keep its original
+release provenance and license together with the patch record; update Cargo/Nix
+pins when replacing the override. Disposal acknowledgment is local cleanup;
+signed protocol outcome and remote delivery retain their separate owners.
+
+### Final active enrollment inventory regression gates
+
+Exercise a genuine first enrollment through authoritative commit, then a second independently pinned issuance after its attested epoch fence. Assert that the new final inventory uses the actual active threshold package while all historical parents remain at their authentic earlier epochs. Test canonical prechange version-1 schema bytes, original signature-domain compatibility, missing-inventory rejection, v2 old-domain signature rejection, prefix/version mismatch and tuple substitution. Internal trait assertions guard capture cloning/deserialization. Keep nonroot persistence, existing-peer response restart, distributed quorum and native/browser profile WAL coverage explicitly outstanding until exercised.
+
+### Public FROST primitive evidence
+
+Run `just ci-public-frost-signing` when changing public commitment construction
+or independently bound-message signing. The native gate requires real harness
+publication of both nonignored primitive regressions and the public-only API
+compile-fail guard before running them. The positive test verifies a native
+2-of-3 signature; the negative test rejects transcript, roster, policy and nonce
+substitutions. Synthetic key bytes cannot substitute for failed dealer
+execution. Passing this lane establishes primitive behavior; runtime quorum
+admission, durable one-use nonce custody and multi-runtime recovery require
+separate owned protocol tests.
+
+The VM lifecycle lane requires public live cancellation/retry to retain its
+primary Cancelled decision and original interval. It also requires an actual
+task-registry source-chain/drain regression for subsidiary failures recorded
+after primary completion. These checks complement signed notice delivery after
+real runtime reopening; observing local cancellation alone does not establish
+remote delivery.
+
+The required VM lifecycle inventory also discovers and executes the confirmed
+parent archive ownership guard and the actual committed-confirmation fixture.
+That fixture covers immutable v1 preservation, explicit v2 publication, selected
+provider reload, substituted history and foreign-runtime rejection. It does not
+establish process restart or native/browser profile WAL handoff; those require
+their own connected runtime tests.
+
+The same required inventory executes generation-history migration and actual
+same-epoch reissue. Those tests must preserve original allocation/registration
+bytes, reject forged mutable slot policy, and complete genuine wrapping-secret
+retirement before reuse. A slot-only test or a bypass of immutable provider
+protection cannot satisfy this gate.
+
+Required admitted-clock regressions distinguish immutable original anchors from
+mutable checkpoints, verify repeated progression/restoration, and reject missing
+ever-live checkpoints. Legacy intervals remain attenuated; fresh intervals use
+the signed manifest endpoint. Full process reconstruction and legacy builder
+migration require additional connected tests.
+
+The lifecycle gate also requires the distinct response-policy regression:
+remote response quorum and signing-key quorum are separate protected policies.
+Recovery compares each original commitment exactly, including typed mismatch
+causes; it cannot clamp recovered signing quorum into a response quorum.
+
+Historical enrollment response-policy coverage must exercise an encoded allocation
+that actually lacks the newer response commitment. The required agent fixture
+`runtime::effects::crypto::missing_response_policy_history_tests::truly_old_missing_response_policy_uses_protected_original_registration_and_preserves_bytes`
+uses genuine protected original registration/setup evidence and selected-provider
+fault injection. It checks unchanged historical bytes and deadline, absence of
+verified policy after serialization, and source-bearing failure on supplement
+loss. The native VM lifecycle inventory requires discovery and actual execution;
+profile-layout migration alone does not prove this old-schema contract. Full
+AgentBuilder reconstruction remains separate required integration coverage.
+
+The VM lifecycle gate checks each required suite at three boundaries: nonignored
+source declaration, publication by the actual harness, and exact executed
+`test <required-name> ... ok` evidence after successful Cargo execution. A green
+process status or test listing alone cannot satisfy execution coverage. Its
+adversarial unit coverage rejects zero-test, ignored, failed, listing-only, and
+similar-name outputs.
+
+Registered notice binding changes must retain the actual public live cancellation
+and retry fixture, original-window assertions and exact manifest/transcript/expiry
+substitution negatives. A single-assignment cell must compare every candidate
+against its original value; replacing a blocking mutex does not excuse dropping
+those checks. Strict Clippy and the connected ownership lane remain required.
+
+Threshold enrollment signing-owner selection must cover actual finalization into
+a threshold epoch before invoking the next identity selector. Required native
+coverage distinguishes genuine `QuorumOwnerRequired` Service from actual protected
+share loss (Storage). A separate deterministic native FROST dealer regression
+checks unsupported threshold-one construction; domain-valid metadata alone does
+not establish backend support. The second-issuance runtime fixture remains required
+until distributed signing and bounded owner assembly are connected.
+
+Registered enrollment window regressions must use the real signed issuance path
+before acquiring the strongest registered generation. Retain the original manual
+clock and tracker/runtime provenance; do not create a test-only canonical
+invitation or weaken admission to a raw ceremony ID. Releasing the sender owner
+must preserve actual active eligibility, and contention must retain typed
+AlreadyOwned plus the concrete semaphore cause. Pre-live clock laws use their
+actual held allocation separately.
+
+The public FROST signing gate requires exact per-test executed `ok` evidence for
+its native dealer and public-only threshold fixtures, in addition to source
+inventory and harness discovery. A successful command with zero, ignored or
+merely listed tests cannot establish the required primitive evidence. Unified
+threshold verification must decode the canonical public package and verify with
+its group point; the real two-of-three fixture also rejects substituted messages
+and malformed public signature inputs. These tests do not prove distributed
+runtime quorum custody or profile recovery.
+Rustdoc discovery omits the execution suffixes ` - compile` and ` - compile fail`.
+The execution validator normalizes those two suffixes when matching exact test
+names; changed source lines, failed/ignored results and discovery-only output
+remain rejected. The API guard inventory requires both the positive compile
+consumer and the negative compile-fail case to execute successfully.
+
+### Compile-fail process lock recovery
+
+App, signal-workflow and agent compile-fail harnesses acquire one `TrybuildProcessLock` from aura-testkit for the workspace. The helper derives `target/tests/.aura-trybuild.lock`; suites must not introduce package-specific or signal-specific lock namespaces. It owns an actual file descriptor and uses fs2 0.4.3's Unix/Windows advisory locking, without requiring post-MSRV standard-library file-lock APIs. Closing the descriptor or terminating its process releases the lock. The lock file stays in place, so no removal/recreation can split the lock inode. Old `trybuild-lock` directories no longer authorize or block acquisition.
+
+Acquisition waits at most 900 seconds in compile-fail suites. A timeout retains the actual last native contention error; opening/locking failures retain the original IO error. The process-lock integration test launches a real holding subprocess, proves contention, kills it without Rust cleanup, and verifies bounded acquisition of the same persistent lock file. Its namespace test also covers stale legacy directories and ordinary descriptor release. Run `cargo test -p aura-testkit --test process_lock` before the existing app/agent compile-fail ownership gate. Dependency changes require Cargo.lock and Cargo.nix regeneration/validation before integration.
+
+`just ci-ownership-policy` executes the app/agent compile-fail suites, explicitly enabled signals compile-fail suite and native process-lock integration regression sequentially. Required suites fail when Cargo is unavailable or returns an unsuccessful version status; a signals-disabled build contains no pretend passing guard. The fs2 implementation is pinned to 0.4.3 and uses pre-MSRV descriptor APIs; Windows and Unix use their native process-scoped locks.
+
+Required ownership coverage checks three separate forms of evidence: Rust test attributes without ignore annotations, exact names published by the selected harness, and successful execution of every required test. The signals harness is selected with `--features signals`. The process-lock lane requires the forced termination, shared namespace and native IO source regressions; its child-process helper does not satisfy coverage. Captured pretty harness output keeps nested trybuild diagnostics from splitting result lines. Zero-test, ignored, failed and name-lookalike output cannot satisfy the gate. When adding a required ownership test, update the typed suite inventory and its validator regressions; do not replace execution evidence with a successful Cargo exit status.
+
+### Public signature ingress provenance regressions
+
+Run both `crypto::signature_input::tests` cases in `hxrts-aura-core` for real
+SingleSigner inputs and genuine dealer public-package parsing. Run
+`enrollment_setup::tests::malformed_peer_encoding_is_distinct_from_required_provider_failure`
+in `hxrts-aura-invitation` for a genuinely signed request and the Layer 8
+`aura-testkit` verification-outage mock.
+
+Malformed peer package and fixed-length signature inputs must produce
+`InputEncoding` before provider invocation. A correctly encoded signed request
+must reach the injected provider and retain the exact original native cause as
+`Crypto`. These tests cover input and error provenance; they do not establish
+independent pinning, runtime quorum or restart ownership.
+
+The native `public-frost-signing` gate requires all three tests as nonignored
+source declarations, discovers their exact names from the actual library
+harnesses, and checks successful per-test `--exact` execution. Missing, ignored
+or zero-test coverage fails the gate.
+
+The native `public-frost-signing` gate requires all three ingress tests as
+nonignored source declarations, discovers their exact names from the actual
+library harnesses, and checks successful per-test `--exact` execution. Missing,
+ignored or zero-test coverage fails the gate.
+
+The ownership aggregate also discovers and executes the two native agent deterministic RNG custody regressions individually with exact test names. The interleaved clone/continuation regression compares actual subsystem draws against one independently seeded reference, including after original handles are dropped. The independent-seed regression proves reproducibility without shared custody. Missing or ignored coverage cannot satisfy the gate.
+
+The production task-spawn lint permits concurrency fault-injection inside
+provably test-only configurations. Its parsed configuration rule accepts
+`cfg(test)` and `cfg(all(test, unix))`, and continues checking `cfg(not(test))`,
+`cfg(any(test, unix))` and feature names containing `test`. Ownership CI requires
+actual execution of the adversarial configuration regression.
+
+Core and macros guard suites depend on the same host-only descriptor lock package
+that aura-testkit reexports: `toolkit/test-support/process_lock.rs`. This keeps
+L1/L2 test infrastructure free of upward Aura dependencies. Core, choreography,
+marker and service-surface suites are part of the exact required ownership
+source/discovery/execution inventory; successful zero-test exits do not count.
+
+`just ci-agent-wasm`, invoked by the existing conformance CI workflow, runs
+warnings-as-errors Clippy for the wasm effects library before the agent backend
+matrix. This gates browser secure-provider API and lint regressions that native
+Clippy cannot observe.
+
+Capability-boundary changes require the full macro validator regressions and compile-fail suite, followed by ownership CI. Use an exact signature type; when a semantic capability label differs, add `capability_type = Type`. A held runtime receiver can declare `receiver_type = OwnerType` and must pass the generated concrete type check. Do not add decorative capability constants or annotate String/AuraError as authorization evidence. Classify pure validators and observed projections accurately. Readiness publication helpers retain the actual readiness capability through publication. The aggregate requires source attributes, actual discovery and successful exact execution of the full-validator adversarial tests; compile-fail snapshots must be checked against real compiler output.
+
+The parsed test-only cfg rule applies to the common ownership lint helper,
+including enrollment window and semantic boundary visitors. Tests must cover
+production-capable negations and disjunctions; substring-based exceptions are
+not permitted in those visitors.
+
+The security boundary gate requires exact source, discovery and executed results
+for the selected filesystem allocation lifetime inventory. The 24 native tests
+cover first physical-provider attachment, original seals and checkpoints,
+retirement ACK/replay, legacy immutable preservation, lifecycle loss, codec
+classification and total ciphertext limits. Zero-test or ignored output does
+not satisfy this lane. Native keyring/browser parity needs separate tests.
+
+Allocation lifetime syntax checks normalize source paths against the explicit
+checkout root before comparing sanctioned owner files. Outside-checkout sources
+fail closed. The security gate self-checks absolute owner and foreign paths;
+retain these regressions when changing file discovery or path handling.
+
+The private lifetime codec also requires byte-array compatibility and
+malformed/oversized/later-field decoder regressions. Secret fields retain
+Zeroizing ownership during incomplete deserialization, before record Drop.
+
+For a scoped secret-codec exception, run both
+`just _policy-check check secret-field-wrappers` and
+`just _policy-check check security-exception-metadata`. The complete security
+boundary gate includes both; a focused checker must name a registered command.
+
+`just _policy-check check secret-lifetime-regressions` runs the security
+gate's exact selected-provider source/discovery/execution inventory as a focused
+lane. It requires all declared native tests to execute successfully with no
+ignored or zero-test substitute. Run it for private lifetime codec/provider changes.
+
+Custom builder changes must run the required `custom_provider_fidelity` native
+integration harness through the ownership aggregate. Its async and sync tests
+exercise actual selected storage/crypto/random/console owners and native outage
+chains; transport tests reject fallback after selecting a failing provider. Keep
+stateful fault providers in L8. Successful construction or a compile-only
+typestate guard alone does not prove configured providers reach dispatch.
+
+### Allocation lifetime integration fixtures
+
+Use the crate-private native unit-test `TestingOwnedProfileCapability::acquire(&config)` and `EffectSystemBuilder::testing_with_owned_profile(capability)` when a real enrollment test requires selected filesystem custody. Acquire it before signing bootstrap. The ordinary Testing builder intentionally has no physical lifetime owner; supplying its production `with_profile_owner` ingress is an error. Keep the capability paired with the original configuration and use the shared transport and physical-time provider builder methods normally.
+
+For restart evidence, acknowledge old task shutdown, drop the old runtime and any retained effect handles, then acquire the same original profile for the new owned Testing assembly. Preserve original allocation, decision and window checkpoints. Do not copy or synthesize a lifetime root or use a missing-custody fallback. The ownership adapter regression covers actual lease retention, foreign configuration rejection and the unchanged production-lease guard; the real enrollment retirement/reissue and cancelled-notice restart tests exercise ledger recovery end to end.
+
+Owned Testing profile assembly changes must preserve the three actual custody
+regressions in the required VM lifecycle source/discovery/execution inventory:
+lease retention through shutdown, foreign configuration rejection, and ordinary
+Testing rejection of production lease ingress. They supplement the connected
+enrollment history and cancelled-notice restart evidence.
+
+For canonical participant envelope changes, run the actual threshold-signing
+producer/consumer regression and connected enrollment history, cancelled-notice
+restart, and secret-retirement/reissue restart tests. The required VM lifecycle
+inventory checks their declarations, actual harness discovery and successful
+execution. Preserve explicit foreign-authority and raw-package rejection and
+concrete codec sources. A legacy-only fixture cannot prove allocation-version
+consumer custody.
+
+Required identity envelope changes retain the exact bootstrap codec/AEAD/bounds
+regression in the VM lifecycle execution inventory. The strongest original
+runtime/epoch/participant context remains required; failed canonical decoding
+cannot select a companion package or older identity. Preserve bounded encoded
+input and nonempty bounded ciphertext before cryptographic work.
+
+Active identity handler changes preserve required rendezvous corrupted-primary
+and contact missing-key regressions in the VM lifecycle inventory. Fixtures use
+actual canonical threshold bootstrap and matching runtime authority; do not
+install raw guessed-epoch packages. Failed signing identity selection or package
+reads must retain their typed cause and cannot report response success.
+
+Rendezvous manager identity ingress retains the actual selected runtime and
+active physical identity context. Preserve its required corrupted-primary
+regression, concrete provider/codec source, and absent-descriptor postcondition
+in the VM lifecycle inventory. Generic permissive storage/crypto mocks cannot
+prove authoritative identity selection.
+
+Native test profile allocation is fallible and uses exclusive creation. The
+required ownership gate executes collision exhaustion/preexisting-permission
+and native creation-fault regressions. Old temporary directories are never
+reused, deleted or chmodded to repair a fixture.
+
+The selected-lifetime required inventory includes a real subprocess killed
+after protected ciphertext staging and before final link at eight initial
+publication boundaries. It also requires malformed/anonymous/conflicting-stage,
+once-live loss and actual positive-first-decision preservation regressions.
+The subprocess helper itself is not counted as coverage. Older anonymous stages
+and interrupted mutable replacement remain explicit fail-closed cases, not
+authorization to clear a profile or allocate a replacement root.
+
+Required lifecycle source inventories parse the sanctioned
+`large_stack_async_test!(name, { ... })` declaration as a typed Rust macro
+invocation. Ignored, malformed, unrelated and qualified invocations cannot
+satisfy required evidence. Source recognition is followed by actual Cargo
+harness discovery and exact successful execution; declaration presence alone
+never establishes coverage. Required ownership coverage also executes the
+persistent tree's held-decision replacement and authenticated-extension tests.
+
+Required invitation stage adapters retain actual clock, policy and timeout
+sources. Their child budgets share the original observation owner; rollback and
+required checkpoint faults must not be classified as elapsed deadlines. Required
+network retry timers propagate failure, and automatic transport retries are
+limited to native definitely-unsent destination-unreachable errors for the exact
+requested destination. The lifecycle gate includes the generated rollback,
+original deadline and invalid-policy source regression.
+
+### Original invitation identity evidence
+
+Run `just ci-vm-session-lifecycle` after changing invitation signer birth,
+retention, recovery, package selection or required test declarations. It requires
+actual Contact success and revoked refusal, original Contact/Guardian rotation
+and profile restart, copied-record rejection and equal-ID foreign-owner rejection.
+Positive fixtures bootstrap real canonical physical identity packages; raw
+`SingleSignerKeyPackage` fixtures do not authorize production export.
+
+The inventory parses the exact `large_stack_async_test!(name, { ... })` source
+grammar as well as real test functions, rejects ignored/malformed/unrelated
+declarations, discovers exact harness names, and requires successful execution.
+This recognizes existing legacy contact fixtures; it does not establish their
+ordinary-stack compatibility. New original-issuer ownership regressions use
+ordinary Tokio tests. Missing required records retain their logical absence
+cause; tests must not fabricate an operating-system error for absence.
+
+The required contact verifier regression exercises actual Ed25519 signing and
+verification, an actual provider key-length failure, and a well-formed invalid
+signature. The provider failure must survive standard `Error::source` downcast;
+only the invalid signature may return `Ok(false)`. Run the exact required
+`required_contact_verifier_retains_native_failure_and_distinguishes_invalid_signature`
+case through `just ci-vm-session-lifecycle`.
+
+Required selected-lifetime coverage includes the actual target-insertion
+interleavings after staged observation and between the held source check and
+link (including equal ciphertext on a substituted inode), identical ciphertext acknowledgment,
+foreign stages in nested namespaces before and after initial handoff, and an
+allowed filename carrying invalid ciphertext. The Rust-native required gate
+checks source declarations, test discovery and exact execution; zero executed
+tests cannot satisfy this coverage. Mutable successor process-death recovery
+requires separate original monotonic-transition evidence and coverage.
+
+Stage-inventory coverage also scans the maximum supported allocation-leaf
+layout together with more than 4096 ordinary leaves, and verifies actual typed
+ambiguity/depth failures retain backing evidence. The scan is constant-memory
+with respect to ordinary leaf count; its native IO latency is linear and
+original builder execution-window integration remains open.
+
+The exact original-stage reader also streams unrelated namespace entries while
+retaining at most one candidate name. Required execution reopens a genuinely
+initialized profile with more than 4096 namespace siblings and acknowledges only
+its identical original protected seal. An ordinary namespace count is not a
+new lifetime-admission limit.
+
+Required initialization tests also terminate the actual writer after successful
+link and before stage removal at seven original immutable targets, then reopen
+the same original selected profile. They verify inode link counts return from
+two to one, root identity and immutable ciphertext remain unchanged, and an
+unrelated identical ciphertext alias is rejected with retained native evidence.
+Mutable successor publication remains a separately verified transition scope.
+
+### Contact continuation ownership regression inventory
+
+The VM lifecycle lane requires the actual signed-import corruption, decision lease, original-parent deadline/shared rollback and native clock failure tests in `owned_contact_continuation_tests`. Run the existing Contact confirmed and revoked integration cases in the same serialized lane. `ManualPhysicalClock::provider_faults_are_one_shot_and_wake_original_waiting_sleep` verifies provider fault injection without physical progress. Automatic recovery of an interrupted Contact wait requires retained original-window and payload evidence; these in-process tests do not establish that recovery contract.
+
+The required VM lifecycle lane executes Contact continuation regressions through
+the agent harness and the one-shot physical clock fault/wakeup regression through
+the testkit harness. Each suite must provide nonignored source declarations,
+actual harness discovery and successful exact-name execution; tests assigned to
+a different package cannot satisfy the requirement.
+
+Required transcript encoding evidence runs in the `hxrts-aura-signature` library
+harness within `just ci-vm-session-lifecycle`; Guardian partial-key reopen,
+concurrent original-pair birth, and native signer/verifier failure evidence runs
+in the `hxrts-aura-agent` harness. The inventory requires real source declarations,
+harness discovery, and successful execution by exact name. Partial-key tests
+reopen actual exclusively owned encrypted profiles and verify that retained
+original bytes survive without a replacement half. This evidence does not cover
+interrupted initial pair publication or complete historical loss of both halves.
+
+The mandatory signed Guardian offline-response regression also corrupts actual
+retained imported metadata before invoking the response handler. It requires a
+native JSON codec failure and absence of both recovery key halves, restores the
+original stored record, and retains the original offline-principal timeout
+expectation. Cached imported state cannot substitute for required backing evidence.
+
+Required Guardian window coverage holds the actual owned runtime's imported
+decision lease before polling the public response operation. Advancing its
+selected manual physical provider past the original deadline, or failing the
+already waiting provider sleep, must terminate with the corresponding typed
+cause before any recovery key birth. This is actual operation/preparation
+coverage; acknowledged VM teardown remains a separate requirement.
+
+The required Guardian terminal-close regression uses the actual VM engine and
+runtime session owner. It retires that owner before advance/close, checks that a
+successful primary cannot hide failed close, and checks that simultaneous native
+operation and close failures both survive. It also verifies no runtime binding or
+fragment custody remains. Generic mocked close results do not prove this boundary.
+
+### Required original runtime shutdown regressions
+
+The native VM lifecycle gate runs the exact operation-drain, capacity and actual
+effects-admission suites plus the retained invitation-service clone and original
+TaskGroup shutdown tests. Each required name must be discovered and reported as
+executed successfully. These fixtures cover original lease retention through
+awaits, equal-valued foreign profiles, closed admission, cancellation, required
+clock source retention, and actual supervised descendant destruction. Run the
+existing required lifecycle/ownership lane after changing these contracts.
+Passing this slice does not certify quorum enrollment or provider handoff.
+
+Runtime activity observation doc guards require three real cases in ownership
+CI: permitted state observation, compile-fail external admission closure, and
+compile-fail external shutdown-completion publication. Required discovery and
+execution must retain both privacy negatives rather than accepting only a
+positive getter example.
+
+### Architecture lint scan inputs
+
+Architecture syntax lints validate each requested path and inspect tracked plus
+new untracked Rust sources. Directory scans exclude ignored artifacts; explicitly
+requested Rust files remain inputs even when ignored. Missing input or malformed
+new source fails the command. Run `cargo test -p hxrts-aura-macros --test
+lint_input_discovery` for the actual CLI discovery regressions.
+A scan with no Rust inputs fails explicitly. An empty Git inventory does not
+fall back to traversing ignored artifacts; filesystem fallback is reserved for
+unavailable Git discovery.
+
+Run `just _policy-check check secret-lifetime-regressions` after changing original
+initialization cutover or recovery. The required native inventory covers actual
+child termination at journal stage/ACK, individual custody publications, atomic
+exchange, ACK and archival, plus source/target substitution, consecutive original
+index transitions, historical corruption, unknown metadata and first-decision
+preservation. Worker helpers are not standalone coverage. Preserve the original
+selected lease and use backing filesystem faults in negative fixtures; never
+weaken immutable-provider APIs to corrupt evidence. The initial transaction tests
+do not complete live mutable checkpoint or original builder-window recovery.
+
+The archived-custody regression physically removes or substitutes each predecessor, successor and displaced record with identical ciphertext at a different inode. Actual reopen must retain the original native failure and preserve both conflicting evidence and original bytes.
+
+Required archived-custody validation also rejects ciphertext corruption at each of the three retained paths, preserving the original birth and current root checkpoint bytes without replacement.
+
+## Original service-stop regression
+
+The required VM lifecycle lane executes the exact
+`required_service_stop_retains_original_shutdown_deadline_under_actual_state_contention`
+regression. It holds actual threshold-service state across the original shutdown
+deadline, checks retained native time/provider failures, and verifies that failed
+required disposal leaves authority status nonterminal. A second actual owned-task
+failure regression verifies that successful later service cleanup cannot publish
+authority termination after prior task-tree failure. Run `just ci-ownership-policy`
+when changing this boundary; discovery without actual execution is insufficient.
+
+The required original service-stop suite also blocks the actual threshold
+service's health read after its stop completes, using its real fair lifecycle
+lock. Deadline expiry must leave runtime/authority termination unpublished.
+Retrying with a rolled-back then restored physical clock retains the original
+sticky rollback cause rather than starting another observation window.
+
+The required Guardian native-provider regression constructs the actual custom
+runtime with `CustomCryptoProbe`, then faults generation, continuity signing and
+verification, and canonical response signing/verification. It requires retained
+native provider causes, no key publication after failed generation, unchanged
+original keys on later faults, and genuine verification after restoring the
+same provider. This does not certify interrupted key birth or VM disposal.
+
+Required session-owner and runtime-admission doctests use exact rustdoc discovery
+and execution evidence in the VM lifecycle lane. Every unique published guard
+must pass; a successful Cargo exit or duplicate/name-lookalike listings cannot
+replace execution. Adding or removing guards requires updating the expected
+inventory and its validator regressions. Run `just ci-ownership-policy` when
+changing these ownership boundaries.
+
+Repo-local policy validators have a separate strict lint lane:
+`just ci-policy-toolkit-clippy`. The crate is excluded from the Aura Cargo
+workspace, so workspace Clippy does not validate it. `just ci-clippy` includes
+both lanes. Pair validator changes with the relevant toolkit tests; warnings
+must be repaired without weakening validation predicates or adding suppressions.
+
+The mandatory Guardian lifecycle inventory also verifies exact recovery-key
+continuity transcript encoding against the original domain/schema/payload.
+Continuity uses the required typed signing and verification helpers, so concrete
+provider faults remain errors rather than signature refusal or replacement-key
+permission. The signed-transcript policy must pass without widening exceptions.
+
+The Contact required-verifier regression uses a genuinely issued and imported
+invitation, acknowledged acceptance and original retained issuer signing context.
+It checks actual matching-key verification, foreign-runtime rejection, exclusive
+custody across verification, signature refusal without terminal proof, and native
+provider failure from a malformed required stored key. The typed syntax validator
+requires the primitive key to come from the original capability's checked
+accessor, rejecting peer keys, fallback repair, shadowed inputs and deserialization.
+
+The mandatory lifecycle lane also discovers and executes the public invitation
+handler's three verifier guards: public observation compiles, private verifier
+construction fails, and observed envelopes cannot call internal terminal response
+publication. Preserve both the positive control and exact compile-fail execution;
+private helpers must not become raw-key or observation-based authority APIs.
+
+### Required sync native-source evidence
+
+`ci-vm-session-lifecycle` also executes the exact `aura-sync` native-source inventory: real malformed JSON decoding with direct concrete downcast and Clone, pure diagnostic category preservation, and retained nested/terminal causes. Source validation, Cargo discovery, and execution are all required. The same lane discovers and executes the `SyncDiagnostic` and `sync_error_with_cause` compile-fail guards, rejecting existing error/terminal conversion and string-only native causes. These tests establish provenance; they do not establish requested-peer success or remote teardown.
+
+### Guardian verifier role regression coverage
+
+Guardian verification has distinct required owners for original local-pair
+integrity, imported issuer continuity, and first-binding recovery possession.
+The Rust key-origin validator checks exact immutable helper inputs, retained key
+accessors and original runtime/lease checks. Its negative cases reject raw and
+peer keys, qualified or wrong-role types, public fields, reconstructed owners,
+and shadowed bindings. Production-source mutation cases also reject missing
+issued-runtime, invitation-id and issuer-key comparisons.
+
+Required runtime regressions use actual owned profiles, genuinely issued
+invitations and real two-runtime choreography. Same-authority foreign-runtime
+pair verification is rejected; original configured-provider faults retain native
+causes. Primitive provider-fault fixtures have no terminal publication authority.
+Run the strict toolkit lane and `just _policy-check check security-boundary-policy`
+with the required lifecycle inventory. A focused validator result does not prove
+whole-runtime teardown, durable historical recovery, or enrollment quorum handoff.
+
+Owned Guardian verifier byte origins also use a Rust AST check: a declared
+`SecurityTranscript` and the fallible required canonical encoder must produce
+immutable bytes passed into the primitive. Actual-source mutations reject raw
+or fallback bytes, shadowed bindings, missing trait declarations, wrong
+confirmation factory return types and replaced encoder origins. Unproved paths
+retain the existing syntax checks; a nearby transcript comment cannot override
+a rejected typed origin. Run `just _policy-check check signed-transcript-boundary`
+and then the complete security boundary policy.
+
+Security bypass test exclusions are lexical Rust `cfg(test)` scopes. Mixed
+`any(test, production_feature)` remains checked as production. Actual-source
+coverage removes the Contact fixture's test cfg and verifies that its test-like
+module name does not exempt the unsigned source. Nested test impls and later
+production items are covered separately; parse failures fail the policy check.
+
+### Required Sync command evidence
+
+The lifecycle aggregate discovers and executes exact Sync registry,
+requested-session and session-window tests. Registry coverage includes actual
+foreign admission rejection, clock failure before actor birth, admission release
+at registered handoff, real requested-peer authorization failure, idle-round
+classification, actual periodic protocol failure and whole-runtime stop ordering.
+Session tests cover exact local entry custody under cancellation, partial
+admission cleanup, endpoint overflow, original deadlines and sticky rollback.
+These tests do not establish remote session teardown, network delivery or durable
+restart continuation. Failed-start cleanup and retained command stop retries
+remain required integration scope.
+
+The required construction inventory includes `production_seed_rejection_precedes_profile_io_with_custom_real_crypto`. Typed entropy-origin syntax validation checks the exact private factory, capability signature and consumer receiver; decorative metadata, public seed fields, success/error generic substitution, raw seeds and an unchecked extra factory are rejected. Runtime rejection remains necessary evidence; syntax alone does not prove provider entropy quality.
+
+### Nonproduction constructor entropy fidelity
+
+The required secret-lifetime gate discovers and executes the actual Simulation
+constructor stream-continuation and configured-provider regressions. Constructor
+tests interleave effect dispatch with a clone of the constructed crypto subsystem
+and compare against an independently seeded reference, including the receipt-key
+draw performed during assembly. Configured crypto and random handlers must remain
+the actual dispatch owners even when deterministic fallback entropy is admitted.
+Owned Testing constructor coverage uses the original pre-IO build operation and
+selected profile custody; primitive unowned fixtures do not establish that contract.
+
+### Required committed Chat read faults
+
+The VM lifecycle gate also discovers and executes the two exact matching Chat
+fact corruption regressions. Each persists a matching malformed JSON or
+unsupported-schema envelope through the actual required journal ingress, then
+checks all three committed group/message/group-list readers. A matching corrupt
+record must retain its native codec/schema cause rather than report absence or
+an empty successful result. Test disposal awaits the actual scheduler under one
+effect-backed resource window.
+
+### Raw threshold route enforcement
+
+`public-frost-signing` parses the raw threshold service and rejects quorum primitive calls on that surface, including calls hidden in renamed helpers. This syntax fence complements the actual finalized-enrollment native-source regression `runtime_bridge::error_boundary::actual_enrolled_identity_quorum_tests::actual_activated_threshold_identity_requires_quorum_owner_with_native_source`, which checks both valid threshold state and actual local backing loss. The fence does not prove the distributed owner implementation. Genuine repeated enrollment after threshold activation remains required integration coverage.
+
+### Required reactive callback outcomes
+
+Reactive callback fixtures must return explicit typed outcomes. The scheduler
+regression `required_projection_failure_preserves_native_cause_and_blocks_batch_ack`
+checks native failure provenance, skipped later projection work, unchanged
+processing acknowledgment and absence of successful batch diagnostics. Issued
+target failure propagation and domain codec failures require their own runtime
+regressions; this batch-level test alone does not establish full readiness.
+
+The required VM lifecycle inventory also discovers and executes the actual
+fallible reactive batch, issued-target failure and all-five signal-view snapshot
+fault regressions. A required projection failure retains its native cause and
+cannot acknowledge processing progress for that batch or issued target.
+An unregistered required signal snapshot must fail explicitly on each view.
+
+The matching invitation and Chat projection codec regression feeds malformed
+JSON and unsupported schemas through actual registered signal views and checks
+that native causes are retained without advancing either projection revision.
+Invitation projection additionally validates the payload context against its
+journal wrapper. Codec failures are terminal outcomes, not display-only errors.
+
+The core regression
+`required_fact_json_decoder_retains_native_cause_through_both_entry_points`
+feeds the same malformed declared JSON through both the envelope and encoded
+fact APIs and requires the concrete JSON source. Domain projections must use
+required decoders on matching fact types; optional observational decoding does
+not establish processing success.
+
+The required source inventory includes actual matching Invitation/Chat projection
+codec faults and the core JSON decoder's native-source regression through both
+validated envelope and byte entry points. These tests must be discovered and
+executed in their actual package harnesses; corruption cannot become an empty
+successful projection or erase its original codec category.
+
+The projection codec regression also covers matching Contact, Friendship and
+Recovery records through their domain-owned required decoders. Malformed JSON
+and unsupported schemas must retain native causes and leave Contact and
+Recovery source revisions unchanged, alongside Invitation and Chat revisions.
+
+The required core timeout inventory executes
+`required_timeout_drops_cancelled_query_before_reacquiring_observation_owner`
+against the actual shared observation gate. Cancellation must destroy the
+losing query future before the timeout owner reacquires that gate. This
+regression proves cancellation custody; it does not establish bounded initial
+clock queries or final service cleanup acknowledgement.
+
+`required_signal_views_matching_domain_codec_faults_are_terminal` also covers all
+nine moderation domains before Home materialization. Declared corruption and
+unsupported schemas cannot be hidden behind absent Home state. The required
+lifecycle inventory tracks this expanded name and each native cause.
+
+Required Sync local session-custody tests inspect the actual retained session
+records, including initializing allocations. Operational `total_sessions`
+statistics count terminal outcomes and cannot prove allocation presence or
+retirement. Exact owner Drop, partial admission and cancelled-future regressions
+must establish removal of real original allocations and preservation of foreign
+records; a diagnostic zero count is insufficient.

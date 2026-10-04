@@ -348,8 +348,8 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Re-publish committed facts into the runtime's reactive views, after the
     /// frontend has registered its signals.
-    async fn replay_committed_facts(&self) -> Result<(), IntentError> {
-        Ok(())
+    async fn replay_committed_facts(&self) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("required reactive replay has no runtime owner").into())
     }
 
     /// LAN discovery counters, or `None` when LAN discovery is not running.

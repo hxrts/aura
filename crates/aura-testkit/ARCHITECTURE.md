@@ -146,3 +146,32 @@ The mock runtime bridge implements the native identity/settings `RuntimeBridgeEr
 ### Manual physical runtime clock
 
 `ManualPhysicalClock` is a shared injected physical-time provider for real runtime/ceremony fixtures. Sleep remains pending until the test explicitly publishes an observation that reaches the original sleep deadline. Tests can publish rollback without masking it. The provider does not advance time during sleep, avoiding background-service loops that silently consume ceremony budgets. Enrollment fixtures must obtain actual setup pins and held generation reservations; test clock control does not authorize registration or activation.
+
+MockEffects keeps secure records in a distinct typed-location map rather than a forgeable ordinary-key prefix. Initial mutable publication is atomic; immutable publication seals an existing original and rejects replacement, deletion, and key generation. Test fixture reset clears this test-owned state explicitly and does not model a production retirement capability.
+
+### Compile-fail lock custody
+
+Native compile-fail test infrastructure uses `process_lock::TrybuildProcessLock` as the sole descriptor owner for one workspace-derived lock namespace. Acquisition is bounded and IO/contention causes are retained. No cleanup removes the lock inode; OS process exit releases custody. This helper is native-only and fs2 supplies Unix/Windows locking compatible with the workspace MSRV. Tests exercise real forced process termination, same-file reacquisition, cross-suite namespace contention, stale legacy directories and original IO causes.
+
+`stateful_effects::verification_failure_fixture::VerificationFailureFixture`
+is a Layer 8 required-outage mock. It delegates core primitives and returns the
+exact injected native cause from unified signature verification. A Layer 5 dev
+dependency uses it to prove malformed peer encodings fail before the provider
+and correctly encoded requests retain actual required-provider failures.
+
+The process-lock module reexports `toolkit/test-support/process_lock.rs`, the
+same host-only implementation included by core/macros integration tests. This
+source depends only on std, fs2 and thiserror. Its native monotonic clock bounds
+lock contention and does not define application time or timeout policy.
+
+`stateful_effects::custom_provider` owns mutable custom-provider sentinels and
+native outage controls. Agent integration tests consume these through the real
+custom builder; mocks never live in production infrastructure handlers. The
+underlying byte inventory proves that configured storage remains encrypted.
+
+ManualPhysicalClock supports one-shot typed observation and sleep faults. Sleep faults wake an already waiting original sleep without advancing physical time or replacing its target. These injections exercise actual required provider boundaries.
+
+Configured crypto fidelity tests use `CustomCryptoProbe`, which delegates real
+primitives and can independently fault KDF, Ed25519 generation, signing or
+verification. Ed25519 failures retain the typed `CustomEd25519Fault` operation;
+they do not substitute keys, signatures or verification outcomes.

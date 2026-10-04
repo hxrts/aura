@@ -8,6 +8,9 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::sync::Arc;
 
+/// Infrastructure-owned physical subtree excluded from ordinary profile IO.
+pub(crate) const SECURE_PROVIDER_DIRECTORY: &str = "secure_store";
+
 #[derive(Debug, Clone)]
 /// Resource adapter for the selected profile directory and its lifetime lease.
 pub struct FilesystemProfileStorageHandler {
@@ -30,6 +33,10 @@ impl FilesystemProfileStorageHandler {
 /// let forged=OwnedProfileLease {};
 /// ```
 pub struct OwnedProfileLease {
+    pub(crate) secure_record_gate: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) lifetime_provider_identity:
+        aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity,
+    pub(crate) lifetime_root_claimed: std::sync::atomic::AtomicBool,
     #[cfg(any(
         target_os = "macos",
         target_os = "ios",
@@ -150,6 +157,9 @@ impl FilesystemProfileStorageHandler {
                 .ok_or_else(|| ProfileStorageError::Invalid("profile path is not UTF-8".into()))?
                 .to_owned();
             Ok(OwnedProfileLease {
+                secure_record_gate: Arc::new(tokio::sync::Mutex::new(())),
+                lifetime_provider_identity: aura_core::effects::secret_lifetime::SecretLifetimeProviderIdentity::new_trusted_provider_identity(),
+                lifetime_root_claimed: std::sync::atomic::AtomicBool::new(false),
                 #[cfg(any(
                     target_os = "macos",
                     target_os = "ios",
@@ -195,6 +205,7 @@ impl OwnedProfileLease {
 }
 
 #[cfg(target_arch = "wasm32")]
+/// Exclusive browser profile writer lease retaining its actual Web Locks owner.
 pub struct OwnedProfileLease {
     identity: String,
     release: Option<futures::channel::oneshot::Sender<()>>,
@@ -224,6 +235,7 @@ impl Drop for OwnedProfileLease {
 }
 #[cfg(target_arch = "wasm32")]
 impl OwnedProfileLease {
+    /// Check the requested logical profile against this retained writer lease.
     pub fn matches_profile(&self, path: &std::path::Path) -> Result<bool, ProfileStorageError> {
         Ok(path.to_str() == Some(self.identity.as_str()))
     }
@@ -279,6 +291,7 @@ pub(crate) fn browser_profile_error(
 
 #[cfg(target_arch = "wasm32")]
 impl FilesystemProfileStorageHandler {
+    /// Acquire exclusive Web Locks custody before exposing a browser profile writer.
     pub async fn acquire_owned_browser(&self) -> Result<OwnedProfileLease, ProfileStorageError> {
         use futures::future::{select, Either};
         use wasm_bindgen::{closure::Closure, JsCast, JsValue};

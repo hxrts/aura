@@ -16,16 +16,23 @@
 //! regardless of timing. All sleeps go through `PhysicalTimeEffects::sleep_ms` so
 //! the simulator can control time advancement.
 
+mod publication;
 use super::state::SchedulerStats;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::AuthorityId;
 use aura_core::util::graph::{CycleError, DagNode};
+use aura_core::{AuraError, TimeoutBudget, TimeoutBudgetError};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::FactRegistry;
+use publication::ProcessingProgress;
+pub use publication::{
+    FactIngress, FactProcessingError, FactProcessingTargetCapability, IssuedFactPublication,
+};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 /// Large channel because scheduler updates fan out to UI observers and commit
@@ -33,9 +40,10 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 const VIEW_UPDATE_CHANNEL_CAPACITY: usize = 1024;
 
 #[cfg(target_arch = "wasm32")]
-pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
+pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = Result<(), AuraError>> + 'a>>;
 #[cfg(not(target_arch = "wasm32"))]
-pub type ReactiveUpdateFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
+pub type ReactiveUpdateFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), AuraError>> + Send + 'a>>;
 
 type ApplyFuture<'a> = ReactiveUpdateFuture<'a>;
 type ApplyFn<V, Delta> = Arc<dyn for<'a> Fn(&'a V, Delta) -> ApplyFuture<'a> + Send + Sync>;
@@ -49,6 +57,8 @@ pub enum FactSource {
     Network(Vec<Fact>),
     /// Scheduled/deferred facts (timers, delayed operations)
     Timer(Vec<Fact>),
+    /// Actual original-ingress publication with a private issued processing target.
+    Published(IssuedFactPublication),
 }
 
 /// Pure function that transforms facts into view deltas
@@ -110,110 +120,8 @@ pub enum ViewUpdate {
     Stats {
         batch_count: u64,
         facts_processed: u64,
-        avg_batch_latency_ms: f64,
+        avg_batch_latency_ms: Option<f64>,
     },
-}
-
-/// Result of committing facts that allows awaiting reactive processing.
-///
-/// This type enforces explicit handling of the asynchronous gap between
-/// fact commitment and reactive view updates. Callers must choose between:
-/// - `await_processed()`: Wait for the reactive scheduler to process the fact
-/// - `fire_and_forget()`: Explicitly acknowledge they don't need to wait
-///
-/// # Example
-///
-/// ```ignore
-/// let result = effects.commit_contact_fact(fact).await?;
-///
-/// // Option 1: Wait for views to update (typesafe - compiler enforces choice)
-/// result.await_processed().await?;
-///
-/// // Option 2: Explicitly acknowledge we don't need to wait
-/// result.fire_and_forget();
-/// ```
-pub struct FactCommitResult<T> {
-    /// The committed fact(s)
-    pub value: T,
-    /// Subscription to view updates for awaiting processing
-    update_rx: Option<broadcast::Receiver<ViewUpdate>>,
-}
-
-/// Error when waiting for fact processing
-#[derive(Debug, Clone)]
-pub enum FactCommitError {
-    /// The reactive scheduler was shut down
-    SchedulerShutdown,
-}
-
-impl std::fmt::Display for FactCommitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::SchedulerShutdown => write!(f, "Reactive scheduler shut down"),
-        }
-    }
-}
-
-impl std::error::Error for FactCommitError {}
-
-impl<T> FactCommitResult<T> {
-    /// Create a new commit result with view update subscription
-    pub fn new(value: T, update_rx: Option<broadcast::Receiver<ViewUpdate>>) -> Self {
-        Self { value, update_rx }
-    }
-
-    /// Create a commit result without view update subscription (fire-and-forget only)
-    pub fn without_subscription(value: T) -> Self {
-        Self {
-            value,
-            update_rx: None,
-        }
-    }
-
-    /// Wait for the reactive scheduler to process this fact.
-    ///
-    /// This waits until the next `ViewUpdate::Batch` is received, which
-    /// indicates the scheduler has processed at least one batch of facts
-    /// (including this one, since facts are processed in order).
-    ///
-    /// Returns immediately if no view update subscription is available.
-    pub async fn await_processed(mut self) -> Result<T, FactCommitError> {
-        if let Some(ref mut rx) = self.update_rx {
-            loop {
-                match rx.recv().await {
-                    Ok(ViewUpdate::Batch { .. }) => return Ok(self.value),
-                    Ok(_) => continue, // Wait for Batch specifically
-                    Err(broadcast::error::RecvError::Closed) => {
-                        return Err(FactCommitError::SchedulerShutdown)
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        tracing::warn!(
-                            skipped,
-                            "Reactive scheduler subscriber lagged while awaiting processed batch"
-                        );
-                        continue;
-                    }
-                }
-            }
-        } else {
-            // No subscription available - return immediately
-            // This happens in tests or when reactive pipeline isn't running
-            Ok(self.value)
-        }
-    }
-
-    /// Explicitly acknowledge that we don't need to wait for processing.
-    ///
-    /// This consumes the result without waiting, making it clear at the
-    /// call site that the caller is aware of the async processing gap.
-    pub fn fire_and_forget(self) -> T {
-        self.value
-    }
-
-    /// Get a reference to the committed value without consuming the result.
-    pub fn value(&self) -> &T {
-        &self.value
-    }
 }
 
 /// Trait for reactive views that can be updated from journal facts
@@ -319,6 +227,9 @@ pub struct ReactiveScheduler {
     views: Vec<Arc<dyn AnyView>>,
     /// Fact ingestion channel (receiver side)
     fact_rx: mpsc::Receiver<FactSource>,
+    /// Retained exact acknowledgment, owned only by this actual scheduler.
+    processed_tx: watch::Sender<ProcessingProgress>,
+    original_ingress: FactIngress,
     /// View update broadcaster
     update_tx: broadcast::Sender<ViewUpdate>,
     /// Shutdown signal
@@ -338,7 +249,7 @@ struct ReactiveSchedulerShared {
 impl ReactiveScheduler {
     /// Create a new reactive scheduler
     ///
-    /// Returns a tuple of (scheduler, fact_sender, shutdown_sender, update_sender)
+    /// Returns a tuple of (scheduler, fact_ingress, shutdown_sender)
     ///
     /// # Parameters
     /// - `config`: Scheduler configuration
@@ -348,19 +259,42 @@ impl ReactiveScheduler {
         config: SchedulerConfig,
         fact_registry: Arc<FactRegistry>,
         time_effects: Arc<dyn PhysicalTimeEffects>,
-    ) -> (
-        Self,
-        mpsc::Sender<FactSource>,
-        mpsc::Sender<()>,
-        broadcast::Sender<ViewUpdate>,
-    ) {
-        let (fact_tx, fact_rx) = mpsc::channel(256);
+    ) -> (Self, FactIngress, mpsc::Sender<()>) {
+        Self::new_internal(config, fact_registry, time_effects, None)
+    }
+
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "pipeline_runtime_owner", capability_type = super::pipeline::PipelineRuntimeOwnerCapability, family = "runtime_helper")]
+    pub(super) fn new_owned(
+        config: SchedulerConfig,
+        fact_registry: Arc<FactRegistry>,
+        time_effects: Arc<dyn PhysicalTimeEffects>,
+        owner: super::pipeline::PipelineRuntimeOwnerCapability,
+    ) -> (Self, FactIngress, mpsc::Sender<()>) {
+        Self::new_internal(
+            config,
+            fact_registry,
+            time_effects,
+            Some(owner.into_runtime()),
+        )
+    }
+
+    fn new_internal(
+        config: SchedulerConfig,
+        fact_registry: Arc<FactRegistry>,
+        time_effects: Arc<dyn PhysicalTimeEffects>,
+        runtime: Option<std::sync::Weak<crate::runtime::AuraEffectSystem>>,
+    ) -> (Self, FactIngress, mpsc::Sender<()>) {
+        let (raw_fact_tx, fact_rx) = mpsc::channel(256);
+        let (processed_tx, processed_rx) = watch::channel(ProcessingProgress::default());
+        let fact_tx = FactIngress::original(raw_fact_tx, processed_rx, runtime);
         let (update_tx, _) = broadcast::channel(VIEW_UPDATE_CHANNEL_CAPACITY);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let scheduler = Self {
             config,
             views: Vec::new(),
             fact_rx,
+            processed_tx,
+            original_ingress: fact_tx.clone(),
             update_tx: update_tx.clone(),
             shutdown_rx,
             shared: Arc::new(ReactiveSchedulerShared {
@@ -370,7 +304,7 @@ impl ReactiveScheduler {
             time_effects,
         };
 
-        (scheduler, fact_tx, shutdown_tx, update_tx)
+        (scheduler, fact_tx, shutdown_tx)
     }
 
     /// Register a view with the scheduler
@@ -395,7 +329,16 @@ impl ReactiveScheduler {
     /// 4. Emits update events
     ///
     /// The loop runs until a shutdown signal is received.
-    pub async fn run(mut self) {
+    pub async fn run(mut self) -> Result<(), AuraError> {
+        let result = self.run_owned().await;
+        if let Err(source) = &result {
+            self.processed_tx
+                .send_modify(|progress| progress.failure = Some(source.clone()));
+        }
+        result
+    }
+
+    async fn run_owned(&mut self) -> Result<(), AuraError> {
         tracing::info!(
             "ReactiveScheduler starting (batch_window={:?})",
             self.config.batch_window
@@ -406,28 +349,36 @@ impl ReactiveScheduler {
 
         // Batching state: None = no batch in progress, Some(deadline_ms) = batch deadline
         let mut batch: Vec<Fact> = Vec::new();
-        let mut batch_deadline_ms: Option<u64> = None;
-        let batch_window_ms = self.config.batch_window.as_millis() as u64;
+        let mut batch_window: Option<TimeoutBudget> = None;
+        let mut processed_through: Option<u64> = None;
 
         loop {
-            // Calculate remaining sleep time if batch is in progress
-            let sleep_ms = if let Some(deadline_ms) = batch_deadline_ms {
-                let now_ms = self
-                    .time_effects
-                    .physical_time()
-                    .await
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(deadline_ms);
-                let remaining = deadline_ms.saturating_sub(now_ms);
-                if remaining == 0 {
-                    // Deadline already passed, process immediately
-                    batch_deadline_ms = None;
-                    self.process_batch(std::mem::take(&mut batch)).await;
-                    continue;
+            // The batch scheduler owns its performance window. Required caller
+            // readiness still uses its own original operation budget.
+            let sleep_ms = if let Some(window) = &batch_window {
+                let remaining = {
+                    let _observation = window.acquire_observation().await;
+                    let now = self
+                        .time_effects
+                        .physical_time()
+                        .await
+                        .map_err(required_scheduler_source)?;
+                    window.remaining_at(&now)
+                };
+                match remaining {
+                    Ok(remaining) => {
+                        u64::try_from(remaining.as_millis()).map_err(required_scheduler_source)?
+                    }
+                    Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {
+                        batch_window = None;
+                        self.process_batch(std::mem::take(&mut batch), processed_through.take())
+                            .await?;
+                        continue;
+                    }
+                    Err(source) => return Err(required_scheduler_source(source)),
                 }
-                remaining
             } else {
-                0 // Will be ignored by guard
+                0
             };
 
             // Clone time_effects for use in select! statement
@@ -436,16 +387,24 @@ impl ReactiveScheduler {
             tokio::select! {
                 // Priority 1: Receive fact from any source
                 Some(source) = self.fact_rx.recv() => {
-                    let facts = Self::extract_facts(source);
+                    let (facts, sequence) = self.extract_facts(source).map_err(required_scheduler_source)?;
+                    if let Some(sequence) = sequence {
+                        processed_through = Some(processed_through.map_or(sequence, |previous| previous.max(sequence)));
+                    }
                     let was_empty = batch.is_empty();
                     batch.extend(facts);
 
+                    if batch.is_empty() {
+                        self.acknowledge_processed(processed_through.take());
+                    }
                     // Start batching window if this is the first fact
                     if was_empty && !batch.is_empty() {
-                        let now_ms = self.time_effects.physical_time().await
-                            .map(|t| t.ts_ms)
-                            .unwrap_or(0);
-                        batch_deadline_ms = Some(now_ms + batch_window_ms);
+                        let now = self.time_effects.physical_time().await.map_err(required_scheduler_source)?;
+                        if self.config.batch_window.is_zero() {
+                            self.process_batch(std::mem::take(&mut batch), processed_through.take()).await?;
+                        } else {
+                            batch_window = Some(TimeoutBudget::from_start_and_timeout(&now, self.config.batch_window).map_err(required_scheduler_source)?);
+                        }
                     }
 
                     // Force flush if batch is too large
@@ -455,23 +414,31 @@ impl ReactiveScheduler {
                             batch.len(),
                             self.config.max_batch_size
                         );
-                        batch_deadline_ms = None;
-                        self.process_batch(std::mem::take(&mut batch)).await;
+                        batch_window = None;
+                        self.process_batch(std::mem::take(&mut batch), processed_through.take()).await?;
                     }
                 }
 
                 // Priority 2: Batch deadline expired (effect-based sleep for simulator control)
-                _ = async { let _ = time_effects.sleep_ms(sleep_ms).await; }, if batch_deadline_ms.is_some() => {
-                    batch_deadline_ms = None;
-                    self.process_batch(std::mem::take(&mut batch)).await;
+                slept = time_effects.sleep_ms(sleep_ms), if batch_window.is_some() => {
+                    slept.map_err(required_scheduler_source)?;
+                    let remaining = if let Some(window) = &batch_window {
+                        let _observation = window.acquire_observation().await;
+                        let now = self.time_effects.physical_time().await.map_err(required_scheduler_source)?;
+                        window.remaining_at(&now)
+                    } else { unreachable!("sleep branch requires an original batch window") };
+                    match remaining {
+                        Ok(_) => continue,
+                        Err(TimeoutBudgetError::DeadlineExceeded { .. }) => {},
+                        Err(source) => return Err(required_scheduler_source(source)),
+                    }
+                    batch_window = None;
+                    self.process_batch(std::mem::take(&mut batch), processed_through.take()).await?;
                 }
 
                 // Priority 3: Graceful shutdown
                 _ = self.shutdown_rx.recv() => {
-                    if !batch.is_empty() {
-                        tracing::info!("Shutdown signal received, flushing final batch");
-                        self.process_batch(batch).await;
-                    }
+                    self.flush_accepted_facts_on_shutdown(batch, processed_through.take()).await?;
                     break;
                 }
             }
@@ -482,40 +449,59 @@ impl ReactiveScheduler {
         // Emit final statistics if enabled
         if self.config.collect_stats {
             let stats = self.shared.stats.read().await;
-            let avg_latency = if stats.batch_count > 0 {
-                stats.total_batch_latency_ms / stats.batch_count as f64
-            } else {
-                0.0
-            };
-
             self.emit_view_update(ViewUpdate::Stats {
                 batch_count: stats.batch_count,
                 facts_processed: stats.facts_processed,
-                avg_batch_latency_ms: avg_latency,
+                avg_batch_latency_ms: None,
             });
         }
+        Ok(())
     }
 
-    /// Process a batch of facts
-    ///
-    /// This is the core update cycle:
-    /// 1. Update all views in topological order
-    /// 2. Emit update events
-    /// 3. Update statistics
-    async fn process_batch(&self, facts: Vec<Fact>) {
+    /// Close original ingress and process every accepted queue envelope before
+    /// acknowledging graceful completion. Pending exact targets are never
+    /// silently discarded merely because they have not entered a local batch.
+    async fn flush_accepted_facts_on_shutdown(
+        &mut self,
+        mut batch: Vec<Fact>,
+        mut processed_through: Option<u64>,
+    ) -> Result<(), AuraError> {
+        self.fact_rx.close();
+        while let Some(source) = self.fact_rx.recv().await {
+            let (facts, sequence) = self
+                .extract_facts(source)
+                .map_err(required_scheduler_source)?;
+            if let Some(sequence) = sequence {
+                processed_through =
+                    Some(processed_through.map_or(sequence, |previous| previous.max(sequence)));
+            }
+            batch.extend(facts);
+            if batch.len() >= self.config.max_batch_size {
+                self.process_batch(std::mem::take(&mut batch), processed_through.take())
+                    .await?;
+            }
+        }
+        if !batch.is_empty() {
+            self.process_batch(batch, processed_through.take()).await?;
+        } else {
+            self.acknowledge_processed(processed_through.take());
+        }
+        Ok(())
+    }
+
+    /// Process configured views in topological order before exact acknowledgment.
+    async fn process_batch(
+        &self,
+        facts: Vec<Fact>,
+        processed_through: Option<u64>,
+    ) -> Result<(), AuraError> {
         if facts.is_empty() {
-            return;
+            self.acknowledge_processed(processed_through);
+            return Ok(());
         }
 
         self.inspect_generic_facts(&facts);
 
-        // Get start time via effect for simulator determinism
-        let batch_start_ms = self
-            .time_effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
         let fact_count = facts.len();
 
         tracing::trace!("Processing batch of {} facts", fact_count);
@@ -523,26 +509,22 @@ impl ReactiveScheduler {
         // Update all views in topological order
         // This guarantees glitch-freedom: downstream views only see consistent state
         for view in &self.views {
-            view.update(&facts).await;
+            view.update(&facts).await?;
         }
+
+        self.acknowledge_processed(processed_through);
 
         // Emit update event
         self.emit_view_update(ViewUpdate::Batch { count: fact_count });
 
-        // Update statistics using effect-based time for determinism
+        // Counts reflect actual processing. Optional latency is unavailable here;
+        // metric clock sampling cannot delay required processing acknowledgment.
         if self.config.collect_stats {
-            let batch_end_ms = self
-                .time_effects
-                .physical_time()
-                .await
-                .map(|t| t.ts_ms)
-                .unwrap_or(0);
-            let batch_latency = (batch_end_ms.saturating_sub(batch_start_ms)) as f64;
             let mut stats = self.shared.stats.write().await;
             stats.batch_count += 1;
             stats.facts_processed += fact_count as u64;
-            stats.total_batch_latency_ms += batch_latency;
         }
+        Ok(())
     }
 
     fn inspect_generic_facts(&self, facts: &[Fact]) {
@@ -566,12 +548,29 @@ impl ReactiveScheduler {
     }
 
     /// Extract facts from a fact source
-    fn extract_facts(source: FactSource) -> Vec<Fact> {
-        match source {
-            FactSource::Journal(facts) => facts,
-            FactSource::Network(facts) => facts,
-            FactSource::Timer(facts) => facts,
+    fn acknowledge_processed(&self, through: Option<u64>) {
+        if let Some(sequence) = through {
+            self.processed_tx.send_modify(|processed| {
+                processed.processed = processed.processed.max(sequence);
+            });
         }
+    }
+
+    fn extract_facts(
+        &self,
+        source: FactSource,
+    ) -> Result<(Vec<Fact>, Option<u64>), publication::FactProcessingError> {
+        Ok(match source {
+            FactSource::Journal(facts) => (facts, None),
+            FactSource::Network(facts) => (facts, None),
+            FactSource::Timer(facts) => (facts, None),
+            FactSource::Published(publication) => {
+                self.original_ingress
+                    .require_publication_owner(&publication)?;
+                let (facts, sequence) = publication.into_parts();
+                (facts, Some(sequence))
+            }
+        })
     }
 
     fn emit_view_update(&self, update: ViewUpdate) {
@@ -656,7 +655,7 @@ where
     ) -> Self
     where
         F: Fn(&V, Delta) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
+        Fut: std::future::Future<Output = Result<(), AuraError>> + Send + 'static,
     {
         Self {
             view_id: view_id.into(),
@@ -681,8 +680,9 @@ where
 
             // Step 2: Apply each delta to the view
             for delta in deltas {
-                (self.apply_fn)(&self.view, delta).await;
+                (self.apply_fn)(&self.view, delta).await?;
             }
+            Ok(())
         })
     }
 
@@ -841,6 +841,14 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 // Delta Types and Reduction Functions
 // =============================================================================
 //
+
+fn required_scheduler_source(source: impl std::error::Error + Send + Sync + 'static) -> AuraError {
+    AuraError::Internal {
+        message: "required reactive scheduler operation failed".into(),
+        source: Some(Arc::new(source)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -892,6 +900,325 @@ mod tests {
         Fact::new(order, timestamp, content)
     }
 
+    struct SecondUpdateGate {
+        count: Arc<RwLock<usize>>,
+        release: Arc<tokio::sync::Notify>,
+    }
+    impl ReactiveView for SecondUpdateGate {
+        fn update<'a>(&'a self, _facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+            Box::pin(async move {
+                let ordinal = {
+                    let mut count = self.count.write().await;
+                    *count += 1;
+                    *count
+                };
+                if ordinal == 2 {
+                    self.release.notified().await;
+                }
+                Ok(())
+            })
+        }
+        fn view_id(&self) -> &str {
+            "exact-target-gated-view"
+        }
+    }
+
+    #[tokio::test]
+    async fn required_processing_target_ignores_older_batch_and_retains_completed_highwater() {
+        use futures::FutureExt;
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(1_000));
+        let (mut scheduler, ingress, shutdown) = ReactiveScheduler::new(
+            SchedulerConfig {
+                batch_window: Duration::ZERO,
+                max_batch_size: 1,
+                ..Default::default()
+            },
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        let count = Arc::new(RwLock::new(0));
+        let release = Arc::new(tokio::sync::Notify::new());
+        scheduler.register_view(Arc::new(SecondUpdateGate {
+            count: count.clone(),
+            release: release.clone(),
+        }));
+        let fact = make_test_fact(
+            91,
+            FactContent::Relational(RelationalFact::Generic {
+                context_id: test_context_id(),
+                envelope: aura_core::types::facts::FactEnvelope {
+                    type_id: aura_core::types::facts::FactTypeId::from("target_test"),
+                    schema_version: 1,
+                    encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                    payload: vec![1],
+                },
+            }),
+        );
+        let first = ingress
+            .publish_required(vec![fact.clone()])
+            .await
+            .expect("original accepted publication");
+        let second = ingress
+            .publish_required(vec![fact])
+            .await
+            .expect("later accepted publication");
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 1_000,
+                uncertainty: None,
+            },
+            Duration::from_secs(1),
+        )
+        .expect("original readiness window");
+        let run = scheduler.run();
+        tokio::pin!(run);
+        assert!(run.as_mut().now_or_never().is_none());
+        assert_eq!(
+            *count.read().await,
+            2,
+            "later actual view update has entered but not completed"
+        );
+        first
+            .await_processed(&ingress, clock.as_ref(), &budget)
+            .await
+            .expect("retained completed target works even after earlier notification");
+        let later = second.await_processed(&ingress, clock.as_ref(), &budget);
+        tokio::pin!(later);
+        assert!(
+            later.as_mut().now_or_never().is_none(),
+            "older completed batch cannot satisfy later target"
+        );
+        release.notify_one();
+        assert!(run.as_mut().now_or_never().is_none());
+        later
+            .await
+            .expect("actual second view completion acknowledges later target");
+        shutdown
+            .send(())
+            .await
+            .expect("owned test shutdown ingress");
+        run.await.expect("actual scheduler completed");
+    }
+
+    #[tokio::test]
+    async fn required_processing_target_closed_scheduler_retains_native_watch_source() {
+        let clock = aura_testkit::time::ManualPhysicalClock::new(2_000);
+        let (scheduler, ingress, _) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            Arc::new(clock.clone()),
+        );
+        let target = ingress
+            .publish_required(Vec::new())
+            .await
+            .expect("accepted original no-op still requires scheduler acknowledgment");
+        drop(scheduler);
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 2_000,
+                uncertainty: None,
+            },
+            Duration::from_secs(1),
+        )
+        .expect("original wait window");
+        let failure = target
+            .await_processed(&ingress, &clock, &budget)
+            .await
+            .expect_err("unprocessed target cannot claim readiness after scheduler Drop");
+        assert!(matches!(
+            failure,
+            aura_core::time::timeout::TimeoutRunError::Operation(
+                publication::FactProcessingError::SchedulerStopped { .. }
+            )
+        ));
+        let source = std::error::Error::source(&failure)
+            .and_then(|cause| cause.source())
+            .expect("original native watch cause");
+        assert!(source
+            .downcast_ref::<tokio::sync::watch::error::RecvError>()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn required_processing_target_preserves_actual_scheduler_clock_failure() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(3_000));
+        let (scheduler, ingress, _shutdown) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        let fact = make_test_fact(
+            92,
+            FactContent::Relational(RelationalFact::Generic {
+                context_id: test_context_id(),
+                envelope: aura_core::types::facts::FactEnvelope {
+                    type_id: aura_core::types::facts::FactTypeId::from("target_clock_test"),
+                    schema_version: 1,
+                    encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                    payload: vec![2],
+                },
+            }),
+        );
+        let target = ingress
+            .publish_required(vec![fact])
+            .await
+            .expect("accepted actual publication");
+        clock
+            .fail_next_observation(aura_core::effects::TimeError::OperationFailed {
+                reason: "scheduler provider fixture fault".into(),
+            })
+            .await;
+        scheduler
+            .run()
+            .await
+            .expect_err("required batch scheduling read failed before processing");
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 3_000,
+                uncertainty: None,
+            },
+            Duration::from_secs(1),
+        )
+        .expect("original processing window");
+        let failure = target
+            .await_processed(&ingress, clock.as_ref(), &budget)
+            .await
+            .expect_err("actual scheduler failure is not processing success");
+        let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut native = None;
+        while let Some(source) = cursor {
+            if let Some(cause) = source.downcast_ref::<aura_core::effects::TimeError>() {
+                native = Some(cause);
+                break;
+            }
+            cursor = source.source();
+        }
+        assert!(
+            matches!(native, Some(aura_core::effects::TimeError::OperationFailed { reason }) if reason == "scheduler provider fixture fault")
+        );
+    }
+
+    #[tokio::test]
+    async fn required_processing_target_original_deadline_and_foreign_owner_fail_closed() {
+        use futures::FutureExt;
+        let clock = aura_testkit::time::ManualPhysicalClock::new(4_000);
+        let (_scheduler, ingress, _) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            Arc::new(clock.clone()),
+        );
+        let (_foreign_scheduler, foreign, _) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            Arc::new(clock.clone()),
+        );
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 4_000,
+                uncertainty: None,
+            },
+            Duration::from_millis(100),
+        )
+        .expect("original operation window");
+        let foreign_target = ingress
+            .publish_required(Vec::new())
+            .await
+            .expect("original accepted target");
+        let foreign_failure = foreign_target
+            .await_processed(&foreign, &clock, &budget)
+            .await
+            .expect_err("another scheduler cannot stand in for original processed owner");
+        assert!(matches!(
+            foreign_failure,
+            aura_core::time::timeout::TimeoutRunError::Operation(
+                publication::FactProcessingError::ForeignOwner
+            )
+        ));
+        let target = ingress
+            .publish_required(Vec::new())
+            .await
+            .expect("next original accepted target");
+        let wait = target.await_processed(&ingress, &clock, &budget);
+        tokio::pin!(wait);
+        assert!(wait.as_mut().now_or_never().is_none());
+        clock.set_time(4_100);
+        let deadline = wait
+            .await
+            .expect_err("unprocessed original target times out without fresh budget");
+        assert!(matches!(
+            deadline,
+            aura_core::time::timeout::TimeoutRunError::Timeout(
+                TimeoutBudgetError::DeadlineExceeded {
+                    deadline_at_ms: 4_100,
+                    ..
+                }
+            )
+        ));
+    }
+
+    #[tokio::test]
+    async fn failed_publication_envelope_cannot_advance_foreign_scheduler_highwater() {
+        let clock = Arc::new(aura_testkit::time::ManualPhysicalClock::new(5_000));
+        let (original, original_ingress, _) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        drop(original);
+        let failed = original_ingress
+            .publish_required(Vec::new())
+            .await
+            .err()
+            .expect("actual original closed sink produces native failed-send envelope");
+        let publication::FactProcessingError::SinkClosed { source } = failed else {
+            panic!("actual required queue is closed");
+        };
+        let (foreign, foreign_ingress, _) = ReactiveScheduler::new(
+            SchedulerConfig::default(),
+            Arc::new(build_fact_registry()),
+            clock.clone(),
+        );
+        foreign_ingress
+            .send(source.0)
+            .await
+            .expect("adversarial replay reaches real foreign consumer");
+        let target = foreign_ingress
+            .publish_required(Vec::new())
+            .await
+            .expect("foreign real publication selects its own target");
+        foreign.run().await.expect_err(
+            "original-envelope identity mismatch fails before any foreign sequence acknowledgment",
+        );
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &PhysicalTime {
+                ts_ms: 5_000,
+                uncertainty: None,
+            },
+            Duration::from_secs(1),
+        )
+        .expect("original foreign operation budget");
+        let failure = target
+            .await_processed(&foreign_ingress, clock.as_ref(), &budget)
+            .await
+            .expect_err("foreign raw replay cannot manufacture own target completion");
+        let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&failure);
+        let mut found = false;
+        while let Some(cause) = source {
+            if matches!(
+                cause.downcast_ref::<publication::FactProcessingError>(),
+                Some(publication::FactProcessingError::ForeignOwner)
+            ) {
+                found = true;
+                break;
+            }
+            source = cause.source();
+        }
+        assert!(
+            found,
+            "actual consumer retains original typed foreign-owner cause"
+        );
+    }
+
     /// Mock view for testing
     struct MockView {
         id: String,
@@ -903,6 +1230,7 @@ mod tests {
             Box::pin(async move {
                 let mut count = self.update_count.write().await;
                 *count += facts.len();
+                Ok(())
             })
         }
 
@@ -960,19 +1288,16 @@ mod tests {
             drop(fact_tx); // Close channel to allow scheduler to exit
         };
 
-        let _ = tokio::join!(scheduler_task, exercise);
+        let (result, ()) = tokio::join!(scheduler_task, exercise);
+        result.expect("actual scheduler ownership completed without hidden failure");
     }
 
     fn scheduler_with_registry(
         config: SchedulerConfig,
-    ) -> (
-        ReactiveScheduler,
-        mpsc::Sender<FactSource>,
-        mpsc::Sender<()>,
-    ) {
+    ) -> (ReactiveScheduler, FactIngress, mpsc::Sender<()>) {
         use aura_effects::time::PhysicalTimeHandler;
         let time_effects = Arc::new(PhysicalTimeHandler);
-        let (scheduler, fact_tx, shutdown_tx, _update_tx) =
+        let (scheduler, fact_tx, shutdown_tx) =
             ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects);
         (scheduler, fact_tx, shutdown_tx)
     }
@@ -1112,7 +1437,8 @@ mod tests {
             drop(fact_tx);
         };
 
-        let _ = tokio::join!(scheduler_task, exercise);
+        let (result, ()) = tokio::join!(scheduler_task, exercise);
+        result.expect("actual scheduler ownership completed without hidden failure");
     }
 
     #[test]
@@ -1306,7 +1632,116 @@ mod tests {
     // Topological Sort Tests
     // =========================================================================
 
+    #[derive(Debug, thiserror::Error)]
+    #[error("selected projection fixture failed")]
+    struct SelectedProjectionFailure;
+
+    struct FailingProjection;
+
+    impl ReactiveView for FailingProjection {
+        fn update<'a>(&'a self, _facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
+            Box::pin(async {
+                Err(AuraError::Internal {
+                    message: "required projection failed".into(),
+                    source: Some(Arc::new(SelectedProjectionFailure)),
+                })
+            })
+        }
+
+        fn view_id(&self) -> &str {
+            "failing-projection"
+        }
+    }
+
+    #[tokio::test]
+    async fn required_projection_failure_preserves_native_cause_and_blocks_batch_ack() {
+        use std::error::Error;
+        let (mut scheduler, _ingress, _shutdown) =
+            scheduler_with_registry(SchedulerConfig::default());
+        let downstream_count = Arc::new(RwLock::new(0));
+        scheduler.register_view(Arc::new(FailingProjection));
+        scheduler.register_view(Arc::new(MockView {
+            id: "downstream-projection".into(),
+            update_count: downstream_count.clone(),
+        }));
+        let mut diagnostics = scheduler.subscribe();
+        let failed = scheduler
+            .process_batch(
+                vec![make_test_fact(
+                    1,
+                    FactContent::Relational(RelationalFact::Generic {
+                        context_id: test_context_id(),
+                        envelope: aura_core::types::facts::FactEnvelope {
+                            type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                            schema_version: 1,
+                            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                            payload: vec![1],
+                        },
+                    }),
+                )],
+                Some(1),
+            )
+            .await
+            .expect_err("required projection must fail the batch");
+        assert!(failed
+            .source()
+            .is_some_and(|source| source.is::<SelectedProjectionFailure>()));
+        assert_eq!(*downstream_count.read().await, 0);
+        assert_eq!(scheduler.processed_tx.borrow().processed, 0);
+        assert!(matches!(
+            diagnostics.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
     /// Test view for topological sort testing
+    #[tokio::test]
+    async fn required_issued_target_retains_failed_projection_without_processing_ack() {
+        use std::error::Error;
+        let (mut scheduler, ingress, _shutdown) = scheduler_with_registry(SchedulerConfig {
+            batch_window: Duration::ZERO,
+            ..SchedulerConfig::default()
+        });
+        scheduler.register_view(Arc::new(FailingProjection));
+        let target = ingress
+            .publish_required(vec![make_test_fact(
+                1,
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id: test_context_id(),
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![1],
+                    },
+                }),
+            )])
+            .await
+            .expect("actual admitted publication");
+        scheduler
+            .run()
+            .await
+            .expect_err("actual projection terminates scheduler");
+        let time = aura_effects::time::PhysicalTimeHandler::new();
+        let started = time
+            .physical_time()
+            .await
+            .expect("original observation clock");
+        let original = TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(30))
+            .expect("original target observation window");
+        let failed = target
+            .await_processed(&ingress, &time, &original)
+            .await
+            .expect_err("issued target cannot become processed after projection failure");
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&failed);
+        let mut retained = false;
+        while let Some(source) = cause {
+            retained |= source.is::<SelectedProjectionFailure>();
+            cause = source.source();
+        }
+        assert!(retained, "target retains actual projection source");
+    }
+
     struct TestView {
         id: String,
         deps: Vec<String>,
@@ -1330,7 +1765,7 @@ mod tests {
 
     impl ReactiveView for TestView {
         fn update<'a>(&'a self, _facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
-            Box::pin(async {})
+            Box::pin(async { Ok(()) })
         }
 
         fn view_id(&self) -> &str {
@@ -1438,5 +1873,167 @@ mod tests {
             Arc::new(TestView::with_deps("b", &["a"])),
         ];
         topological_sort(views);
+    }
+    #[tokio::test]
+    async fn required_processing_target_survives_actual_diagnostic_lag_and_coalescing() {
+        let config = SchedulerConfig {
+            batch_window: Duration::ZERO,
+            ..SchedulerConfig::default()
+        };
+        let (mut scheduler, ingress, shutdown) = scheduler_with_registry(config);
+        let count = Arc::new(RwLock::new(0));
+        scheduler.register_view(Arc::new(MockView {
+            id: "actual-lag-view".into(),
+            update_count: count.clone(),
+        }));
+        let mut diagnostics = scheduler.subscribe();
+        let time = aura_effects::time::PhysicalTimeHandler::new();
+        let started = time
+            .physical_time()
+            .await
+            .expect("actual original lag observation");
+        let original = TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(30))
+            .expect("original bounded processing scenario");
+        let publications = VIEW_UPDATE_CHANNEL_CAPACITY + 1;
+        let exercise = async {
+            let mut first = None;
+            let mut last = None;
+            for index in 0..publications {
+                let target = ingress
+                    .publish_required(vec![make_test_fact(
+                        u64::try_from(index).expect("bounded fixture index"),
+                        FactContent::Relational(RelationalFact::Generic {
+                            context_id: test_context_id(),
+                            envelope: aura_core::types::facts::FactEnvelope {
+                                type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                                schema_version: 1,
+                                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                                payload: vec![1],
+                            },
+                        }),
+                    )])
+                    .await
+                    .expect("actual accepted original ingress");
+                if index == 0 {
+                    first = Some(target);
+                } else {
+                    if let Some(previous) = last.replace(target) {
+                        previous.acknowledge_observed_only();
+                    }
+                }
+            }
+            last.expect("actual final target")
+                .await_processed(&ingress, &time, &original)
+                .await
+                .expect("actual latest target processing acknowledgment");
+            first
+                .expect("actual original retained target")
+                .await_processed(&ingress, &time, &original)
+                .await
+                .expect("coalesced retained highwater acknowledges previously completed target");
+            assert!(
+                matches!(
+                    diagnostics.recv().await,
+                    Err(broadcast::error::RecvError::Lagged(_))
+                ),
+                "diagnostic subscriber genuinely missed intermediate batches"
+            );
+            assert_eq!(*count.read().await, publications);
+            shutdown.send(()).await.expect("owned scheduler shutdown");
+        };
+        let (result, ()) = futures::join!(scheduler.run(), exercise);
+        result.expect("actual scheduler owner completion");
+    }
+
+    #[tokio::test]
+    async fn required_processing_cancelled_blocked_enqueue_releases_original_sequence_owner() {
+        use futures::FutureExt;
+        let (scheduler, ingress, shutdown) = scheduler_with_registry(SchedulerConfig::default());
+        // Fill the real bounded queue before the consumer is first polled.
+        for _ in 0..256 {
+            ingress
+                .publish_required(Vec::new())
+                .await
+                .expect("actual accepted queue entry")
+                .acknowledge_observed_only();
+        }
+        let mut blocked = Box::pin(ingress.publish_required(Vec::new()));
+        assert!(
+            blocked.as_mut().now_or_never().is_none(),
+            "real queue backpressure retains pending ownership"
+        );
+        drop(blocked);
+        let time = aura_effects::time::PhysicalTimeHandler::new();
+        let started = time
+            .physical_time()
+            .await
+            .expect("actual cancellation observation");
+        let original = TimeoutBudget::from_start_and_timeout(&started, Duration::from_secs(30))
+            .expect("original bounded cancellation scenario");
+        let exercise = async {
+            let target = ingress
+                .publish_required(Vec::new())
+                .await
+                .expect("cancellation releases original enqueue custody");
+            target
+                .await_processed(&ingress, &time, &original)
+                .await
+                .expect("actual newly accepted target resumes through original owner");
+            shutdown.send(()).await.expect("owned scheduler shutdown");
+        };
+        let (result, ()) = futures::join!(scheduler.run(), exercise);
+        result.expect("actual scheduler owner completion");
+    }
+
+    #[tokio::test]
+    async fn required_graceful_shutdown_processes_accepted_queued_ingress_before_completion() {
+        let config = SchedulerConfig {
+            batch_window: Duration::from_secs(60),
+            max_batch_size: 2,
+            ..SchedulerConfig::default()
+        };
+        let (mut scheduler, fact_tx, shutdown_tx) = scheduler_with_registry(config);
+        let update_count = Arc::new(RwLock::new(0));
+        scheduler.register_view(Arc::new(MockView {
+            id: "actual-shutdown-view".into(),
+            update_count: update_count.clone(),
+        }));
+        // Both ingress and shutdown are ready before the first scheduler poll.
+        // Selecting shutdown must drain accepted queued facts, whichever branch
+        // was selected first; this is not merely a local-batch flush.
+        for index in 0..4 {
+            fact_tx
+                .send(FactSource::Journal(vec![make_test_fact(
+                    index,
+                    FactContent::Relational(RelationalFact::Generic {
+                        context_id: test_context_id(),
+                        envelope: aura_core::types::facts::FactEnvelope {
+                            type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                            schema_version: 1,
+                            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                            payload: vec![u8::try_from(index).expect("bounded fixture index")],
+                        },
+                    }),
+                )]))
+                .await
+                .expect("actual accepted scheduler ingress");
+        }
+        shutdown_tx
+            .send(())
+            .await
+            .expect("actual graceful shutdown signal");
+        scheduler
+            .run()
+            .await
+            .expect("actual graceful scheduler completion");
+        assert_eq!(
+            *update_count.read().await,
+            4,
+            "owned completion follows all accepted view processing"
+        );
+        assert!(
+            fact_tx.send(FactSource::Journal(Vec::new())).await.is_err(),
+            "original ingress is closed after acknowledged destruction"
+        );
     }
 }

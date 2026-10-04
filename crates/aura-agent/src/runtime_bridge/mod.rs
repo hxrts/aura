@@ -205,6 +205,7 @@ async fn seed_authority_route_descriptor_if_needed(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "secure_storage_bootstrap",
+    capability_type = SecureStorageCapability,
     family = "runtime_helper"
 )]
 fn secure_storage_bootstrap_boundary(
@@ -216,6 +217,7 @@ fn secure_storage_bootstrap_boundary(
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "secure_storage_bootstrap_read_write",
+    capability_type = SecureStorageCapability,
     family = "runtime_helper"
 )]
 fn secure_storage_bootstrap_store_capabilities() -> [SecureStorageCapability; 2] {
@@ -1825,12 +1827,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
         rendezvous::get_bootstrap_candidates(self).await
     }
 
-    async fn replay_committed_facts(&self) -> Result<(), IntentError> {
+    async fn replay_committed_facts(
+        &self,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         self.agent
             .runtime()
             .replay_committed_facts()
             .await
-            .map_err(IntentError::internal_error)
+            .map_err(|source| {
+                error_boundary::bridge_runtime_internal("required reactive replay", source)
+            })
     }
 
     async fn try_get_lan_discovery_stats(
@@ -2639,8 +2645,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             return Err(IssueError::CurrentIdentity);
         }
 
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: prepare authenticated rotation");
+        let issuance_tracker = self.agent.ceremony_tracker().await;
         let plan = effects
-            .prepare_authenticated_enrollment_rotation(&setup)
+            .prepare_authenticated_enrollment_rotation(&setup, &issuance_tracker)
             .await
             .map_err(|source| IssueError::at(Stage::TreeRead, source))?;
         let participants = plan.participants().to_vec();
@@ -2679,6 +2688,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // The owner reserves identity before constructing signed admission or
         // manifest payloads. The complete invitation is then committed once.
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: reserve issued invitation");
         let reserved = invitation_service
             .reserve_device_enrollment_invitation()
             .await
@@ -2713,6 +2724,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             hex::encode(ceremony_hash.as_bytes())
         ));
 
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: prepare pinned generation");
         let (pending_epoch, key_packages, _public_key, generation_reservation) = effects
             .prepare_pinned_enrollment_rotation(&setup, &reserved, &ceremony_id, plan)
             .await
@@ -2769,9 +2782,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .copied()
             .map(ParticipantIdentity::device)
             .collect();
-        let acceptance_n = acceptors.len() as u16;
-        let acceptance_threshold = threshold_k.min(acceptance_n);
+        let response_policy = generation_reservation
+            .response_policy()
+            .map_err(|source| IssueError::at(Stage::CeremonyRegistration, source))?;
+        let acceptance_n = response_policy.total();
+        let acceptance_threshold = response_policy.required();
+        if usize::from(acceptance_n) != acceptors.len() {
+            return Err(IssueError::at(Stage::CeremonyRegistration, crate::runtime::effects::held_registration_error(crate::runtime::effects::HeldEnrollmentRegistrationError::ResponsePolicyMismatch)));
+        }
 
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: acquire ceremony runner");
         let runner = self.agent.ceremony_runner().await;
         let nickname_for_tracker = if nickname_suggestion.is_empty() {
             None
@@ -2791,7 +2812,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
         {
             runner
-                .supersede(
+                .supersede_owned_device_enrollment(
+                    &generation_reservation,
                     &old_id,
                     &ceremony_id,
                     SupersessionReason::NewerRequest,
@@ -2800,12 +2822,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await
                 .map_err(|e| IssueError::at(Stage::Supersession, e))?;
         }
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: capture retained generation");
         let generation = self
             .agent
             .threshold_signing()
             .capture_retained_pending_generation(&authority_id, pending_epoch.value())
             .await
             .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: retain original generation");
         crate::handlers::invitation::enrollment_trust::retain_pending_signing_generation(
             effects.as_ref(),
             &ceremony_id,
@@ -2824,6 +2850,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         )
         .await
         .map_err(|error| IssueError::at(Stage::SetupVerifierRetention, error))?;
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: register held generation");
         runner
             .start_owned_device_enrollment(
                 &generation_reservation,
@@ -2843,6 +2871,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
 
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: export original baseline");
         let baseline_tree_ops = effects
             .export_tree_ops()
             .await
@@ -2865,20 +2895,29 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .collect_enrollment_parent_inventory(&baseline_ops)
             .await
             .map_err(|e| IssueError::at(Stage::BaselineExport, e))?;
+        let final_inventory = effects
+            .capture_enrollment_final_inventory(&generation_reservation, &baseline_ops)
+            .await
+            .map_err(|e| IssueError::at(Stage::BaselineExport, e))?;
         let final_state = aura_journal::commitment_tree::reduce(&baseline_ops)
             .map_err(|e| IssueError::at(Stage::BaselineExport, e))?;
-        let (_, confirmation_key) = crate::handlers::rendezvous_identity::require_identity_keys(
-            effects.as_ref(),
-            &authority_id,
-        )
-        .await
-        .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
+        let identity_context =
+            crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                effects.as_ref(),
+                &authority_id,
+            )
+            .await
+            .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
+        let (_, confirmation_key) =
+            crate::handlers::rendezvous_identity::require_identity_keys(&identity_context)
+                .await
+                .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
         aura_invitation::enrollment_manifest::EnrollmentTrustManifest::validate_pending_policy(
             &threshold_config,
         )
         .map_err(|e| IssueError::at(Stage::PendingConfigRead, e))?;
         let manifest = aura_invitation::enrollment_manifest::EnrollmentTrustManifest {
-            version: 1,
+            version: 2,
             subject: authority_id,
             initiator_device: current_device_id,
             invitee_authority: invitee_authority_id,
@@ -2901,6 +2940,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             starting_epoch: 0,
             starting_commitment: [0; 32],
             parents,
+            final_inventory: Some(final_inventory.inventory().to_vec()),
             final_epoch: final_state.epoch.value(),
             final_commitment: final_state.root_commitment,
             pending_epoch: pending_epoch.value(),
@@ -2909,16 +2949,28 @@ impl RuntimeBridge for AgentRuntimeBridge {
             pending_threshold_config_digest: aura_core::Hash32::from_bytes(&threshold_config),
             initiator_confirmation_verifier: confirmation_key.to_vec(),
         };
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: export original manifest");
         let (manifest_transfer, issued_manifest) = invitation_service
-            .export_owned_enrollment_manifest(&reserved, &setup, manifest)
+            .export_owned_enrollment_manifest(
+                &reserved,
+                &setup,
+                &identity_context,
+                &final_inventory,
+                manifest,
+            )
             .await
             .map_err(|e| IssueError::at(Stage::InvitationExport, e))?;
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: retain original issued manifest");
         crate::handlers::invitation::enrollment_trust::retain_issued_enrollment_manifest(
             effects.as_ref(),
             &issued_manifest,
         )
         .await
         .map_err(|e| IssueError::at(Stage::SetupVerifierRetention, e))?;
+        #[cfg(test)]
+        eprintln!("enrollment initiation stage: create original enrollment invitation");
         let invitation = invitation_service
             .invite_device_enrollment(
                 reserved,
@@ -2962,18 +3014,25 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IssueError::at(Stage::CeremonyRegistration, e))?;
 
-        invitation_service
+        let admission = invitation_service
             .start_registered_device_enrollment(&registered_generation)
+            .await
             .map_err(|error| IssueError::at(Stage::CeremonyRegistration, error))?;
         // With no other devices, no rotation session will commit the enrollment;
         // finalize it here once the new device's signed acceptance is verified.
-        if other_device_ids.is_empty() {
+        if other_device_ids.is_empty()
+            && admission
+                == crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::Started
+        {
             self.spawn_sole_device_enrollment_finalizer(ceremony_id.clone());
         }
 
         // Launch device-scoped rotation sessions for existing devices so they can
         // stage and commit the new epoch through one protocol path.
-        if !other_device_ids.is_empty() {
+        if !other_device_ids.is_empty()
+            && admission
+                == crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::Started
+        {
             for device_id in &other_device_ids {
                 let Some(key_package) = key_package_by_device.get(device_id).cloned() else {
                     return Err(IssueError::MissingPackage(*device_id));
@@ -3003,7 +3062,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Use compile-time safe export since we already have the invitation
         let enrollment_code = invitation_service
-            .export_invitation_with_sender_hint(&invitation)
+            .export_owned_enrollment_invitation(&invitation, &identity_context, &issued_manifest)
             .await
             .map_err(|error| IssueError::at(Stage::InvitationExport, error))?;
 
@@ -3566,23 +3625,34 @@ impl RuntimeBridge for AgentRuntimeBridge {
             error_boundary::bridge_runtime_internal("Read cancellation ceremony", error)
         })?;
 
-        // Settle cancellation under the runtime decision gate before rollback.
-        // An activation owner that already won cannot be rolled back by this caller.
+        if state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment {
+            // The ID selects original owned issuance, never terminal authority.
+            // Its retained control gates the original-window Cancelled CAS and
+            // wakes the existing signed notification owner before retirement.
+            let invitations = self.agent.invitations().map_err(|error| {
+                error_boundary::bridge_runtime_internal(
+                    "Access enrollment cancellation owner",
+                    error,
+                )
+            })?;
+            invitations
+                .cancel_original_device_enrollment_ceremony(ceremony_id)
+                .await
+                .map_err(|error| {
+                    error_boundary::bridge_runtime_internal(
+                        "Cancel original device enrollment",
+                        error,
+                    )
+                })?;
+            return Ok(());
+        }
+
+        // Guardian cancellation remains under its runtime decision gate.
         runner
             .abort(ceremony_id, Some("Canceled".to_string()))
             .await
             .map_err(|error| error_boundary::bridge_runtime_internal("Cancel ceremony", error))?;
-        if state.kind == aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment {
-            tracker
-                .retire_failed_enrollment_generation(ceremony_id)
-                .await
-                .map_err(|error| {
-                    error_boundary::bridge_runtime_internal(
-                        "Retire cancelled enrollment generation",
-                        error,
-                    )
-                })?;
-        } else if !state.is_committed {
+        if !state.is_committed {
             self.rollback_guardian_key_rotation(Epoch::new(state.new_epoch))
                 .await?;
         }
@@ -3932,6 +4002,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_nickname_submission",
+        receiver_type = AgentRuntimeBridge,
         family = "runtime_helper"
     )]
     async fn set_nickname_suggestion(
@@ -3945,6 +4016,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_mfa_policy_submission",
+        receiver_type = AgentRuntimeBridge,
         family = "runtime_helper"
     )]
     async fn set_mfa_policy(
@@ -3975,6 +4047,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_physical_time_query",
+        receiver_type = AgentRuntimeBridge,
         family = "runtime_helper"
     )]
     async fn current_time_ms(&self) -> Result<u64, aura_app::runtime_bridge::RuntimeBridgeError> {
@@ -3985,6 +4058,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_required_sleep",
+        receiver_type = AgentRuntimeBridge,
         family = "runtime_helper"
     )]
     async fn sleep_ms(&self, ms: u64) -> Result<(), RuntimeBridgeError> {
@@ -3999,6 +4073,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "runtime_bridge_authentication_query",
+        receiver_type = AgentRuntimeBridge,
         family = "runtime_helper"
     )]
     async fn authentication_status(
@@ -4226,6 +4301,39 @@ impl AgentRuntimeBridge {
                 tracker
                     .retire_failed_enrollment_generation(&ceremony_id)
                     .await?;
+                if state.terminal_outcome
+                    == Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                        aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+                    ))
+                {
+                    let invitations = self.agent.invitations().map_err(|source| {
+                        aura_core::AuraError::Internal {
+                            message: "restore cancelled enrollment notice owner".into(),
+                            source: Some(std::sync::Arc::new(source)),
+                        }
+                    })?;
+                    let capability = invitations
+                        .prepare_cancelled_enrollment_notice_recovery(&ceremony_id)
+                        .await
+                        .map_err(|source| match source {
+                            crate::core::AgentError::Aura(cause) => cause,
+                            source => aura_core::AuraError::Internal {
+                                message: "restore cancelled enrollment notice owner".into(),
+                                source: Some(std::sync::Arc::new(source)),
+                            },
+                        })?;
+                    if let Some(capability) = capability {
+                        invitations
+                            .start_cancelled_enrollment_notice_recovery(capability)
+                            .map_err(|source| match source {
+                                crate::core::AgentError::Aura(cause) => cause,
+                                source => aura_core::AuraError::Internal {
+                                    message: "restore cancelled enrollment notice owner".into(),
+                                    source: Some(std::sync::Arc::new(source)),
+                                },
+                            })?;
+                    }
+                }
                 continue;
             }
             if state.terminal_outcome.is_some() {
@@ -4233,23 +4341,27 @@ impl AgentRuntimeBridge {
             }
             let registered_generation = effects
                 .resume_owned_enrollment_registration(
+                    tracker,
                     state.initiator_id,
                     state.new_epoch,
                     &ceremony_id,
                     state.prestate_hash,
                 )
                 .await?;
-            self.agent
+            let admission = self
+                .agent
                 .invitations()
                 .map_err(|error| aura_core::AuraError::Internal {
                     message: "restore enrollment invitation owner".into(),
                     source: Some(std::sync::Arc::new(error)),
                 })?
                 .start_registered_device_enrollment(&registered_generation)
+                .await
                 .map_err(|error| aura_core::AuraError::Internal {
                     message: "resume registered enrollment initiator".into(),
                     source: Some(std::sync::Arc::new(error)),
                 })?;
+            if admission == crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::AlreadyRunning { continue; }
             let invitee = state
                 .enrollment_device_id
                 .ok_or_else(|| aura_core::AuraError::invalid("missing restored invitee"))?;

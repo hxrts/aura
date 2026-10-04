@@ -3,7 +3,8 @@ mod trybuild_support;
 
 #[test]
 fn service_surface_validation() {
-    let _lock = trybuild_support::acquire_trybuild_lock("trybuild-lock-service-surface");
+    let _lock =
+        trybuild_support::acquire_trybuild_lock().expect("required shared compile-fail lock");
     let t = trybuild::TestCases::new();
     t.pass("tests/boundaries/service_surface_valid.rs");
     t.compile_fail("tests/boundaries/service_surface_missing_select.rs");

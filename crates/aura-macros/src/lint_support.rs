@@ -11,30 +11,53 @@ pub(crate) struct ParsedRustFile {
     pub(crate) syntax: File,
 }
 
-pub(crate) fn collect_tracked_rust_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn collect_tracked_rust_files(
+    paths: &[PathBuf],
+) -> Result<Option<Vec<PathBuf>>, String> {
+    for path in paths {
+        if !path.is_file() && !path.is_dir() {
+            return Err(format!("path does not exist: {}", path.display()));
+        }
+    }
     let mut command = Command::new("git");
-    command.arg("ls-files").arg("--cached").arg("--");
+    command.args([
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+    ]);
     for path in paths {
         command.arg(path);
     }
 
     let output = match command.output() {
         Ok(output) => output,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => return Ok(None),
     };
     if !output.status.success() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
 
     let stdout = String::from_utf8(output.stdout)
         .map_err(|error| format!("git ls-files output was not valid utf-8: {error}"))?;
 
-    Ok(stdout
+    let mut files: Vec<_> = stdout
         .lines()
         .map(PathBuf::from)
         .filter(|path| path.extension() == Some(OsStr::new("rs")))
         .filter(|path| path.exists())
-        .collect())
+        .collect();
+    // Explicit files are intentional inputs even when an ignore rule covers them.
+    files.extend(
+        paths
+            .iter()
+            .filter(|path| path.is_file() && path.extension() == Some(OsStr::new("rs")))
+            .cloned(),
+    );
+    files.sort();
+    files.dedup();
+    Ok(Some(files))
 }
 
 pub(crate) fn collect_rust_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {

@@ -61,8 +61,8 @@ use aura_core::{
 };
 use aura_guards::{
     BiscuitGuardEvaluator, DecodedIngress, GuardContextProvider, GuardError, IngressSource,
-    IngressVerificationError, IngressVerificationEvidence, VerifiedIngress,
-    VerifiedIngressMetadata, REQUIRED_INGRESS_VERIFICATION_CHECKS,
+    IngressVerificationEvidence, VerifiedIngress, VerifiedIngressMetadata,
+    REQUIRED_INGRESS_VERIFICATION_CHECKS,
 };
 use aura_journal::commitment_tree::apply_structurally_verified;
 use aura_protocol::effects::TreeEffects;
@@ -554,9 +554,12 @@ impl AntiEntropyProtocol {
                 evaluator.root_public_key(),
             )
             .map_err(|error| {
-                AuraError::permission_denied(format!(
-                    "sync Biscuit token verification failed: {error}"
-                ))
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::permission_denied(format!(
+                        "sync Biscuit token verification failed: {error}"
+                    ))
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
             let resource = ResourceScope::Authority {
                 authority_id: effects.authority_id(),
@@ -570,7 +573,12 @@ impl AntiEntropyProtocol {
                 .physical_time()
                 .await
                 .map_err(|error| {
-                    AuraError::internal(format!("sync auth time unavailable: {error}"))
+                    let diagnostic = {
+                        crate::core::errors::SyncDiagnostic::internal(format!(
+                            "sync auth time unavailable: {error}"
+                        ))
+                    };
+                    crate::core::errors::sync_error_with_cause(diagnostic, error)
                 })?
                 .ts_ms
                 / 1000;
@@ -735,10 +743,14 @@ impl AntiEntropyProtocol {
         E: JournalEffects + NetworkEffects + TreeEffects + Send + Sync,
     {
         // Step 1: Get local journal state and operations
-        let local_journal = effects
-            .get_journal()
-            .await
-            .map_err(|e| sync_session_error(format!("Failed to get local journal: {e}")))?;
+        let local_journal = effects.get_journal().await.map_err(|e| {
+            crate::core::errors::sync_error_with_cause(
+                crate::core::errors::SyncDiagnostic::session(format!(
+                    "Failed to get local journal: {e}"
+                )),
+                e,
+            )
+        })?;
 
         // Currently uses empty operations list; transport-level sync fills in ops
         // this would come from the journal's operation log
@@ -1022,29 +1034,38 @@ impl AntiEntropyProtocol {
         }
 
         effects.get_journal().await.map_err(|error| {
-            crate::core::errors::sync_protocol_with_peer(
-                "anti_entropy",
-                format!("journal load failed before remote batch verification: {error}"),
-                peer,
-            )
+            let diagnostic = {
+                crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                    "anti_entropy",
+                    format!("journal load failed before remote batch verification: {error}"),
+                    peer,
+                )
+            };
+            crate::core::errors::sync_error_with_cause(diagnostic, error)
         })?;
 
         let mut shadow_state = effects.get_current_state().await.map_err(|error| {
-            crate::core::errors::sync_protocol_with_peer(
-                "anti_entropy",
-                format!("tree state load failed before remote batch verification: {error}"),
-                peer,
-            )
+            let diagnostic = {
+                crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                    "anti_entropy",
+                    format!("tree state load failed before remote batch verification: {error}"),
+                    peer,
+                )
+            };
+            crate::core::errors::sync_error_with_cause(diagnostic, error)
         })?;
 
         let mut seen_fingerprints = HashSet::with_capacity(incoming.len());
         for (index, op) in incoming.iter().enumerate() {
             let fingerprint = fingerprint(op).map_err(|error| {
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("fingerprint remote operation {index} failed: {error}"),
-                    peer,
-                )
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                        "anti_entropy",
+                        format!("fingerprint remote operation {index} failed: {error}"),
+                        peer,
+                    )
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
 
             if !seen_fingerprints.insert(fingerprint) {
@@ -1063,11 +1084,15 @@ impl AntiEntropyProtocol {
                 .verify_aggregate_sig(op, &shadow_state)
                 .await
                 .map_err(|error| {
-                    crate::core::errors::sync_protocol_with_peer(
+                    let diagnostic =
+                        {
+                            crate::core::errors::SyncDiagnostic::protocol_with_peer(
                         "anti_entropy",
                         format!("remote operation {index} signature verification failed: {error}"),
                         peer,
                     )
+                        };
+                    crate::core::errors::sync_error_with_cause(diagnostic, error)
                 })?;
             if !signature_valid {
                 return Err(crate::core::errors::sync_protocol_with_peer(
@@ -1078,13 +1103,16 @@ impl AntiEntropyProtocol {
             }
 
             apply_structurally_verified(&mut shadow_state, op).map_err(|error| {
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!(
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                        "anti_entropy",
+                        format!(
                         "remote operation {index} failed causal or parent verification: {error}"
                     ),
-                    peer,
-                )
+                        peer,
+                    )
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
         }
 
@@ -1101,11 +1129,14 @@ impl AntiEntropyProtocol {
         E: TreeEffects + Send + Sync,
     {
         let current_state = effects.get_current_state().await.map_err(|error| {
-            crate::core::errors::sync_protocol_with_peer(
-                "anti_entropy",
-                format!("Tree state load failed before remote op verification: {error}"),
-                peer,
-            )
+            let diagnostic = {
+                crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                    "anti_entropy",
+                    format!("Tree state load failed before remote op verification: {error}"),
+                    peer,
+                )
+            };
+            crate::core::errors::sync_error_with_cause(diagnostic, error)
         })?;
         let current_commitment = Hash32(current_state.current_commitment());
 
@@ -1136,11 +1167,14 @@ impl AntiEntropyProtocol {
             .verify_aggregate_sig(op, &current_state)
             .await
             .map_err(|error| {
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Remote operation signature verification failed: {error}"),
-                    peer,
-                )
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                        "anti_entropy",
+                        format!("Remote operation signature verification failed: {error}"),
+                        peer,
+                    )
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
         if !signature_valid {
             return Err(crate::core::errors::sync_protocol_with_peer(
@@ -1154,11 +1188,14 @@ impl AntiEntropyProtocol {
             .apply_attested_op(op.clone())
             .await
             .map_err(|error| {
-                crate::core::errors::sync_protocol_with_peer(
-                    "anti_entropy",
-                    format!("Canonical remote op application failed: {error}"),
-                    peer,
-                )
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::protocol_with_peer(
+                        "anti_entropy",
+                        format!("Canonical remote op application failed: {error}"),
+                        peer,
+                    )
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
 
         Ok(updated_commitment != current_commitment)
@@ -1293,18 +1330,32 @@ impl AntiEntropyProtocol {
         journal: &Journal,
         operations: &[AttestedOp],
     ) -> SyncResult<JournalDigest> {
-        let fact_hash = hash_serialized(&journal.facts)
-            .map_err(|e| sync_session_error(format!("Failed to hash facts: {e}")))?;
+        let fact_hash = hash_serialized(&journal.facts).map_err(|e| {
+            crate::core::errors::sync_error_with_cause(
+                crate::core::errors::SyncDiagnostic::session(format!("Failed to hash facts: {e}")),
+                e,
+            )
+        })?;
 
-        let caps_hash = hash_serialized(&journal.caps)
-            .map_err(|e| sync_session_error(format!("Failed to hash caps: {e}")))?;
+        let caps_hash = hash_serialized(&journal.caps).map_err(|e| {
+            crate::core::errors::sync_error_with_cause(
+                crate::core::errors::SyncDiagnostic::session(format!("Failed to hash caps: {e}")),
+                e,
+            )
+        })?;
 
         let mut h = hash::hasher();
         let mut last_epoch: Option<u64> = None;
 
         for op in operations {
-            let fp = fingerprint(op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint op: {e}")))?;
+            let fp = fingerprint(op).map_err(|e| {
+                crate::core::errors::sync_error_with_cause(
+                    crate::core::errors::SyncDiagnostic::session(format!(
+                        "Failed to fingerprint op: {e}"
+                    )),
+                    e,
+                )
+            })?;
             h.update(&fp);
 
             let epoch = u64::from(op.op.parent_epoch);
@@ -1379,8 +1430,14 @@ impl AntiEntropyProtocol {
 
         let mut seen = HashSet::with_capacity(local_ops.len());
         for op in local_ops.iter() {
-            let fp = fingerprint(op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {e}")))?;
+            let fp = fingerprint(op).map_err(|e| {
+                crate::core::errors::sync_error_with_cause(
+                    crate::core::errors::SyncDiagnostic::session(format!(
+                        "Failed to fingerprint: {e}"
+                    )),
+                    e,
+                )
+            })?;
             seen.insert(fp);
         }
 
@@ -1389,8 +1446,14 @@ impl AntiEntropyProtocol {
         let mut applied_ops = Vec::new();
 
         for op in incoming.ops {
-            let fp = fingerprint(&op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {e}")))?;
+            let fp = fingerprint(&op).map_err(|e| {
+                crate::core::errors::sync_error_with_cause(
+                    crate::core::errors::SyncDiagnostic::session(format!(
+                        "Failed to fingerprint: {e}"
+                    )),
+                    e,
+                )
+            })?;
             if seen.insert(fp) {
                 applied_ops.push(op.clone());
                 local_ops.push(op);
@@ -1447,7 +1510,12 @@ fn verified_remote_ops_batch(
 ) -> SyncResult<VerifiedIngress<VerifiedRemoteOpsBatch>> {
     let batch = VerifiedRemoteOpsBatch::new(ops);
     let payload_hash = Hash32::from_value(&batch).map_err(|error| {
-        sync_session_error(format!("hash verified anti-entropy batch payload: {error}"))
+        let diagnostic = {
+            crate::core::errors::SyncDiagnostic::session(format!(
+                "hash verified anti-entropy batch payload: {error}"
+            ))
+        };
+        crate::core::errors::sync_error_with_cause(diagnostic, error)
     })?;
     let metadata = VerifiedIngressMetadata::new(
         metadata.source(),
@@ -1458,18 +1526,24 @@ fn verified_remote_ops_batch(
     );
     let evidence =
         IngressVerificationEvidence::new(metadata.clone(), REQUIRED_INGRESS_VERIFICATION_CHECKS)
-            .map_err(|error: IngressVerificationError| {
-                sync_session_error(format!(
-                    "build verified anti-entropy batch ingress evidence: {error}"
-                ))
+            .map_err(|error| {
+                let diagnostic = {
+                    crate::core::errors::SyncDiagnostic::session(format!(
+                        "build verified anti-entropy batch ingress evidence: {error}"
+                    ))
+                };
+                crate::core::errors::sync_error_with_cause(diagnostic, error)
             })?;
 
     DecodedIngress::new(batch, metadata)
         .verify(evidence)
         .map_err(|error| {
-            sync_session_error(format!(
-                "promote verified anti-entropy batch ingress: {error}"
-            ))
+            let diagnostic = {
+                crate::core::errors::SyncDiagnostic::session(format!(
+                    "promote verified anti-entropy batch ingress: {error}"
+                ))
+            };
+            crate::core::errors::sync_error_with_cause(diagnostic, error)
         })
 }
 

@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::AgentConfig;
 use crate::core::config::StorageConfig;
+use crate::core::AgentConfig;
 use crate::reactive::app_signal_views;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::CeremonyRunner;
@@ -9,19 +9,17 @@ use crate::runtime::TaskSupervisor;
 use aura_app::signal_defs::{register_app_signals, HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::views::home::{HomeRole, HomesState};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::ThresholdSignature;
-use aura_core::types::identifiers::{
-    AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
-};
+use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::DeviceId;
 use aura_invitation::guards::{EffectCommand, GuardOutcome};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::DomainFact;
-use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_social::moderation::facts::HomeGrantModeratorFact;
 use base64::Engine;
 use std::collections::HashMap;
@@ -29,6 +27,27 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
+
+// Issuance custody cannot be duplicated or reconstructed from observed bytes.
+trait ReservationAmbiguousIfClone<Marker> {
+    fn assert_absent() {}
+}
+impl<T: ?Sized> ReservationAmbiguousIfClone<()> for T {}
+struct ClonableReservation;
+impl<T: Clone> ReservationAmbiguousIfClone<ClonableReservation> for T {}
+const _: fn() = <ReservedInvitationIssuance as ReservationAmbiguousIfClone<_>>::assert_absent;
+
+trait ReservationAmbiguousIfDeserializable<Marker> {
+    fn assert_absent() {}
+}
+impl<T: ?Sized> ReservationAmbiguousIfDeserializable<()> for T {}
+struct DeserializableReservation;
+impl<T: serde::Deserialize<'static>> ReservationAmbiguousIfDeserializable<DeserializableReservation>
+    for T
+{
+}
+const _: fn() =
+    <ReservedInvitationIssuance as ReservationAmbiguousIfDeserializable<_>>::assert_absent;
 
 fn create_test_authority(seed: u8) -> AuthorityContext {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -76,10 +95,7 @@ async fn send_invitation_test_verified_envelope(
         .await
 }
 
-fn install_full_invitation_biscuit_cache(
-    effects: &Arc<AuraEffectSystem>,
-    authority: AuthorityId,
-) {
+fn install_full_invitation_biscuit_cache(effects: &Arc<AuraEffectSystem>, authority: AuthorityId) {
     let issuer = aura_authorization::TokenAuthority::new(authority);
     let token = issuer
         .create_token(
@@ -137,10 +153,10 @@ async fn bootstrap_test_signing_authority(
     effects: &Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
 ) {
-    effects
+    crate::runtime::services::ThresholdSigningService::new(effects.clone())
         .bootstrap_authority(&authority_id)
         .await
-        .expect("test signing authority should bootstrap");
+        .expect("actual physical signer and canonical epoch metadata should bootstrap");
 }
 
 async fn sign_test_channel_acceptance(
@@ -203,10 +219,11 @@ async fn attach_test_rendezvous_manager(
     );
     effects.attach_rendezvous_manager(manager.clone());
     let tasks = Arc::new(crate::runtime::TaskSupervisor::new());
-    let service_context = crate::runtime::services::RuntimeServiceContext::new(
+    let service_context = crate::runtime::services::RuntimeServiceContext::test_original(
         tasks.clone(),
         Arc::new(effects.time_effects().clone()),
-    );
+    )
+    .await;
     crate::runtime::services::RuntimeService::start(&manager, &service_context)
         .await
         .unwrap();
@@ -296,7 +313,10 @@ fn invitation_acceptance_caller_future_is_bounded() {
     let invitation = InvitationId::new("acceptance-future-budget");
     let future = service.accept(&invitation);
     let bytes = std::mem::size_of_val(&future);
-    assert!(bytes <= 16 * 1024, "acceptance facade future is {bytes} bytes");
+    assert!(
+        bytes <= 16 * 1024,
+        "acceptance facade future is {bytes} bytes"
+    );
 }
 
 fn unsigned_test_code_for_invitation(invitation: &Invitation) -> String {
@@ -326,22 +346,37 @@ pub(crate) struct ContactPair {
     _tasks: (Arc<TaskSupervisor>, Arc<TaskSupervisor>),
 }
 
-/// Effects for one side of a contact pair. Every pair is built here, so the
-/// authority names the test seed (registered, so reused seeds fail fast).
-#[track_caller]
+/// Each side retains its actual selected physical profile lease and provider.
+/// The shared transport does not replace profile or identity custody.
 fn contact_pair_effects(
     authority_id: AuthorityId,
     transport: crate::runtime::SharedTransport,
 ) -> Arc<AuraEffectSystem> {
-    Arc::new(
-        AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
-            &AgentConfig::default(),
-            &format!("contact-pair:{authority_id}"),
+    let config = AgentConfig {
+        storage: crate::core::config::StorageConfig {
+            base_path: tempfile::Builder::new()
+                .prefix("aura-contact-pair-owned-")
+                .tempdir()
+                .expect("isolated actual contact profile")
+                .keep(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let owner = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+        .expect("actual selected contact profile lease");
+    let effects = Arc::new(
+        AuraEffectSystem::testing_with_owned_profile(
+            &config,
             authority_id,
-            transport,
+            Some(transport),
+            owner,
+            None,
         )
-        .expect("contact pair effects should build"),
-    )
+        .expect("same physical provider, lifetime custody and shared transport"),
+    );
+    install_full_invitation_biscuit_cache(&effects, authority_id);
+    effects
 }
 
 pub(crate) async fn contact_pair(seed: u8) -> ContactPair {
@@ -373,14 +408,22 @@ pub(crate) async fn contact_pair(seed: u8) -> ContactPair {
     .await;
     bootstrap_test_signing_authority(&sender_effects, sender_id).await;
     bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
+    let sender_handler = handler_for(AuthorityContext::new_with_device(
+        sender_id,
+        sender_effects.device_id(),
+    ));
+    let receiver_handler = handler_for(AuthorityContext::new_with_device(
+        receiver_id,
+        receiver_effects.device_id(),
+    ));
     ContactPair {
         transport,
         sender_id,
         receiver_id,
         sender_effects,
         receiver_effects,
-        sender_handler: handler_for_id(sender_id),
-        receiver_handler: handler_for_id(receiver_id),
+        sender_handler,
+        receiver_handler,
         _tasks: (sender_tasks, receiver_tasks),
     }
 }
@@ -390,8 +433,7 @@ impl ContactPair {
     async fn with_new_inviter(&self, seed: u8) -> ContactPair {
         let sender_id = AuthorityId::new_from_entropy([seed; 32]);
         let sender_effects = contact_pair_effects(sender_id, self.transport.clone());
-        let sender_tasks =
-            attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+        let sender_tasks = attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
         let now_ms = 1_700_000_000_000;
         cache_test_peer_descriptor(
             sender_effects.as_ref(),
@@ -410,19 +452,23 @@ impl ContactPair {
         )
         .await;
         bootstrap_test_signing_authority(&sender_effects, sender_id).await;
+        let sender_handler = handler_for(AuthorityContext::new_with_device(
+            sender_id,
+            sender_effects.device_id(),
+        ));
         ContactPair {
             transport: self.transport.clone(),
             sender_id,
             receiver_id: self.receiver_id,
             sender_effects,
             receiver_effects: self.receiver_effects.clone(),
-            sender_handler: handler_for_id(sender_id),
+            sender_handler,
             receiver_handler: self.receiver_handler.clone(),
             _tasks: (sender_tasks, self._tasks.1.clone()),
         }
     }
 
-    async fn create_contact_invitation(&self) -> Invitation {
+    pub(crate) async fn create_contact_invitation(&self) -> Invitation {
         self.sender_handler
             .create_invitation(
                 self.sender_effects.clone(),
@@ -437,7 +483,7 @@ impl ContactPair {
 
     /// A code signed by the inviter, so the invitee can authenticate the
     /// inviter's response.
-    async fn signed_code(&self, invitation: &Invitation) -> String {
+    pub(crate) async fn signed_code(&self, invitation: &Invitation) -> String {
         crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
             self.sender_effects.as_ref(),
             invitation,
@@ -452,7 +498,7 @@ impl ContactPair {
         .expect("signed invitation code should export")
     }
 
-    async fn import(&self, code: &str) -> Invitation {
+    pub(crate) async fn import(&self, code: &str) -> Invitation {
         self.receiver_handler
             .import_invitation_code(&self.receiver_effects, code)
             .await
@@ -477,7 +523,7 @@ impl ContactPair {
         self.respond_while(Box::pin(
             handler.accept_invitation(self.receiver_effects.clone(), invitation_id),
         ))
-            .await
+        .await
     }
 
     /// Runs `work` while the inviter processes acceptances, as its runtime
@@ -558,7 +604,9 @@ impl Drop for EnvRestore {
 
 #[tokio::test]
 async fn channel_home_materialization_requires_registered_homes_signal() {
-    let effects = effects_for(&AuthorityContext::new(AuthorityId::new_from_entropy([2u8; 32])));
+    let effects = effects_for(&AuthorityContext::new(AuthorityId::new_from_entropy(
+        [2u8; 32],
+    )));
     let invitation = Invitation {
         invitation_id: InvitationId::new("registered-homes"),
         context_id: ContextId::new_from_entropy([3u8; 32]),
@@ -577,12 +625,15 @@ async fn channel_home_materialization_requires_registered_homes_signal() {
         receiver_nickname: None,
     };
     let evidence = app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
-        &invitation, "shared-parity-lab", 0,
+        &invitation,
+        "shared-parity-lab",
+        0,
     )
     .unwrap();
 
     let error = app_signal_views::materialize_home_signal_for_channel_acceptance(
-        effects.as_ref(), evidence,
+        effects.as_ref(),
+        evidence,
     )
     .await
     .unwrap_err();
@@ -631,16 +682,16 @@ fn accepted_home_evidence_rejects_pending_and_nonhome_invitations() {
         message: None,
         receiver_nickname: None,
     };
-    assert!(app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
-        &invitation, "Den", 0,
-    )
-    .is_err());
+    assert!(
+        app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(&invitation, "Den", 0,)
+            .is_err()
+    );
     invitation.status = InvitationStatus::Accepted;
     invitation.invitation_type = InvitationType::Contact { nickname: None };
-    assert!(app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(
-        &invitation, "Den", 0,
-    )
-    .is_err());
+    assert!(
+        app_signal_views::AcceptedHomeEvidence::from_accepted_invitation(&invitation, "Den", 0,)
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -700,12 +751,11 @@ async fn test_execute_notify_peer() {
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([135u8; 32]);
     let now_ms: u64 = 1_700_000_000_000;
-    let effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            authority.authority_id(),
-            shared_transport.clone(),
-        );
+    let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+        &config,
+        authority.authority_id(),
+        shared_transport.clone(),
+    );
     // Materialize a destination participant on the shared transport.
     let _peer_effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
@@ -715,8 +765,7 @@ async fn test_execute_notify_peer() {
         );
     let _authority_rendezvous_tasks =
         attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
-    let _peer_rendezvous_tasks =
-        attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
+    let _peer_rendezvous_tasks = attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
     cache_test_peer_descriptor(
         effects.as_ref(),
         authority.authority_id(),
@@ -760,10 +809,7 @@ async fn test_execute_notify_peer() {
         .expect("invitation delivery should not fail receipt validation");
     assert_eq!(received.destination, peer);
     assert_eq!(received.source, authority.authority_id());
-    assert_eq!(
-        received.context,
-        default_context_id_for_authority(peer)
-    );
+    assert_eq!(received.context, default_context_id_for_authority(peer));
     assert_eq!(
         received.metadata.get("content-type").map(String::as_str),
         Some("application/aura-invitation")
@@ -833,7 +879,8 @@ async fn send_invitation_records_receipt_in_peer_delivery_context() {
         }
     }
 
-    let (_, bytes) = found.expect("send invitation receipt should be stored under delivery context");
+    let (_, bytes) =
+        found.expect("send invitation receipt should be stored under delivery context");
     let stored: Receipt =
         serde_json::from_slice(&bytes).expect("stored invitation receipt should deserialize");
     assert_eq!(stored.ctx, delivery_context);
@@ -848,12 +895,11 @@ async fn test_execute_multiple_commands() {
     let config = AgentConfig::default();
     let peer = AuthorityId::new_from_entropy([139u8; 32]);
     let now_ms: u64 = 1_700_000_000_000;
-    let effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            authority.authority_id(),
-            shared_transport.clone(),
-        );
+    let effects = crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+        &config,
+        authority.authority_id(),
+        shared_transport.clone(),
+    );
     // Materialize a destination participant on the shared transport.
     let _peer_effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
@@ -863,8 +909,7 @@ async fn test_execute_multiple_commands() {
         );
     let _authority_rendezvous_tasks =
         attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
-    let _peer_rendezvous_tasks =
-        attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
+    let _peer_rendezvous_tasks = attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
     cache_test_peer_descriptor(
         effects.as_ref(),
         authority.authority_id(),
@@ -916,10 +961,7 @@ async fn test_execute_multiple_commands() {
         .expect("invitation delivery should not fail receipt validation");
     assert_eq!(received.destination, peer);
     assert_eq!(received.source, authority.authority_id());
-    assert_eq!(
-        received.context,
-        default_context_id_for_authority(peer)
-    );
+    assert_eq!(received.context, default_context_id_for_authority(peer));
     assert_eq!(
         received.metadata.get("content-type").map(String::as_str),
         Some("application/aura-invitation")
@@ -960,27 +1002,76 @@ async fn invitation_reservation_is_side_effect_free_and_rejects_another_issuer()
     let other = create_test_authority(182);
     let effects = effects_for(&issuer);
     let handler = handler_for(issuer.clone());
-    let before = effects.load_committed_facts(issuer.authority_id()).await.unwrap();
-    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
-    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
-    let error = handler_for(other).prepare_reserved_invitation_with_context(
-        effects.clone(), reserved, AuthorityId::new_from_entropy([183; 32]),
-        InvitationType::Contact { nickname: None }, None, None, None, None,
-    ).await.expect_err("another issuer cannot consume the reservation");
-    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
-    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
+    let before = effects
+        .load_committed_facts(issuer.authority_id())
+        .await
+        .unwrap();
+    let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
+    assert_eq!(
+        effects
+            .load_committed_facts(issuer.authority_id())
+            .await
+            .unwrap(),
+        before
+    );
+    let error = handler_for(other)
+        .prepare_reserved_invitation_with_context(
+            effects.clone(),
+            reserved,
+            AuthorityId::new_from_entropy([183; 32]),
+            InvitationType::Contact { nickname: None },
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect_err("another issuer cannot consume the reservation");
+    assert!(matches!(
+        error,
+        AgentError::Aura(aura_core::AuraError::Invalid { .. })
+    ));
+    assert_eq!(
+        effects
+            .load_committed_facts(issuer.authority_id())
+            .await
+            .unwrap(),
+        before
+    );
     let other_device = AuthorityContext::new_with_device(
-        issuer.authority_id(), DeviceId::new_from_entropy([186; 32]),
+        issuer.authority_id(),
+        DeviceId::new_from_entropy([186; 32]),
     );
     let other_effects = effects_for(&other_device);
-    let other_before = other_effects.load_committed_facts(issuer.authority_id()).await.unwrap();
-    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
-    let error = handler.prepare_reserved_invitation_with_context(
-        other_effects.clone(), reserved, AuthorityId::new_from_entropy([183; 32]),
-        InvitationType::Contact { nickname: None }, None, None, None, None,
-    ).await.expect_err("another physical device cannot consume the reservation");
-    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
-    assert_eq!(other_effects.load_committed_facts(issuer.authority_id()).await.unwrap(), other_before);
+    let other_before = other_effects
+        .load_committed_facts(issuer.authority_id())
+        .await
+        .unwrap();
+    let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
+    let error = handler
+        .prepare_reserved_invitation_with_context(
+            other_effects.clone(),
+            reserved,
+            AuthorityId::new_from_entropy([183; 32]),
+            InvitationType::Contact { nickname: None },
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect_err("another physical device cannot consume the reservation");
+    assert!(matches!(
+        error,
+        AgentError::Aura(aura_core::AuraError::Invalid { .. })
+    ));
+    assert_eq!(
+        other_effects
+            .load_committed_facts(issuer.authority_id())
+            .await
+            .unwrap(),
+        other_before
+    );
 }
 
 #[tokio::test]
@@ -989,12 +1080,19 @@ async fn invitation_preparation_caller_future_is_bounded() {
     let effects = effects_for(&issuer);
     let handler = handler_for(issuer);
     let future = handler.prepare_invitation_with_context(
-        effects, AuthorityId::new_from_entropy([188; 32]),
-        InvitationType::Contact { nickname: None }, None, None, None, None,
+        effects,
+        AuthorityId::new_from_entropy([188; 32]),
+        InvitationType::Contact { nickname: None },
+        None,
+        None,
+        None,
+        None,
     );
     let bytes = std::mem::size_of_val(&future);
-    assert!(bytes <= 16 * 1024,
-        "invitation preparation caller future exceeds the 16 KiB stack budget: {bytes}");
+    assert!(
+        bytes <= 16 * 1024,
+        "invitation preparation caller future exceeds the 16 KiB stack budget: {bytes}"
+    );
 }
 
 #[tokio::test]
@@ -1002,22 +1100,52 @@ async fn invitation_reservation_preserves_identity_and_rejects_deadline_overflow
     let issuer = create_test_authority(184);
     let effects = effects_for(&issuer);
     let handler = handler_for(issuer.clone());
-    let before = effects.load_committed_facts(issuer.authority_id()).await.unwrap();
-    let invalid = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    let before = effects
+        .load_committed_facts(issuer.authority_id())
+        .await
+        .unwrap();
+    let invalid = handler.reserve_invitation_issuance(&effects).await.unwrap();
     assert!(invalid.created_at_ms() > 0);
-    let error = handler.prepare_reserved_invitation_with_context(
-        effects.clone(), invalid, AuthorityId::new_from_entropy([185; 32]),
-        InvitationType::Contact { nickname: None }, None, None, None, Some(u64::MAX),
-    ).await.expect_err("overflow must fail before fact preparation");
-    assert!(matches!(error, AgentError::Aura(aura_core::AuraError::Invalid { .. })));
-    assert_eq!(effects.load_committed_facts(issuer.authority_id()).await.unwrap(), before);
-    let reserved = handler.reserve_invitation_issuance(effects.as_ref()).await.unwrap();
+    let error = handler
+        .prepare_reserved_invitation_with_context(
+            effects.clone(),
+            invalid,
+            AuthorityId::new_from_entropy([185; 32]),
+            InvitationType::Contact { nickname: None },
+            None,
+            None,
+            None,
+            Some(u64::MAX),
+        )
+        .await
+        .expect_err("overflow must fail before fact preparation");
+    assert!(matches!(
+        error,
+        AgentError::Aura(aura_core::AuraError::Invalid { .. })
+    ));
+    assert_eq!(
+        effects
+            .load_committed_facts(issuer.authority_id())
+            .await
+            .unwrap(),
+        before
+    );
+    let reserved = handler.reserve_invitation_issuance(&effects).await.unwrap();
     let identity = reserved.invitation_id().clone();
     let timestamp = reserved.created_at_ms();
-    let prepared = handler.prepare_reserved_invitation_with_context(
-        effects, reserved, AuthorityId::new_from_entropy([185; 32]),
-        InvitationType::Contact { nickname: None }, None, None, None, None,
-    ).await.expect("same owner consumes reservation");
+    let prepared = handler
+        .prepare_reserved_invitation_with_context(
+            effects,
+            reserved,
+            AuthorityId::new_from_entropy([185; 32]),
+            InvitationType::Contact { nickname: None },
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("same owner consumes reservation");
     assert_eq!(prepared.invitation.invitation_id, identity);
     assert_eq!(prepared.invitation.created_at, timestamp);
 }
@@ -1073,8 +1201,10 @@ async fn invitation_can_be_declined() {
         .await
         .unwrap();
 
+    let task_owner = crate::task_registry::TaskSupervisor::new();
+    let tasks = task_owner.group("decline_fixture");
     let result = handler
-        .decline_invitation(effects.clone(), &invitation.invitation_id)
+        .decline_invitation(effects.clone(), &invitation.invitation_id, &tasks)
         .await
         .unwrap();
 
@@ -1121,38 +1251,31 @@ async fn importing_channel_invitation_without_context_rejects_before_persist() {
     assert!(persisted.is_none());
 }
 
-large_stack_async_test!(accepting_guardian_invitation_surfaces_choreography_failure, {
-    let authority_context = create_test_authority(103);
-    let effects = effects_for(&authority_context);
-    let receiver_id = authority_context.authority_id();
-    let handler = InvitationHandler::new(authority_context).unwrap();
-    let sender_id = AuthorityId::new_from_entropy([104u8; 32]);
-    let sender_effects = effects_for(&create_test_authority(104));
-    bootstrap_test_signing_authority(&sender_effects, sender_id).await;
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: InvitationId::new("inv-guardian-missing-ceremony"),
-        sender_id,
-        context_id: None,
-        invitation_type: InvitationType::Guardian {
-            subject_authority: sender_id,
-        },
-        expires_at: None,
-        message: None,
-    };
-    let invitation = Invitation {
-        invitation_id: shareable.invitation_id.clone(),
-        context_id: default_context_id_for_authority(sender_id),
-        sender_id,
-        receiver_id,
-        invitation_type: shareable.invitation_type.clone(),
-        status: InvitationStatus::Pending,
-        created_at: 0,
-        expires_at: None,
-        message: None,
-        receiver_nickname: None,
-    };
-    let code = crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
+large_stack_async_test!(
+    accepting_guardian_invitation_surfaces_choreography_failure,
+    {
+        let authority_context = create_test_authority(103);
+        let effects = effects_for(&authority_context);
+        let receiver_id = authority_context.authority_id();
+        let handler = InvitationHandler::new(authority_context).unwrap();
+        let sender_id = AuthorityId::new_from_entropy([104u8; 32]);
+        let sender_effects = effects_for(&create_test_authority(104));
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
+        let sender_handler = handler_for_id(sender_id);
+        install_full_invitation_biscuit_cache(&sender_effects, sender_id);
+        let invitation = sender_handler
+            .create_invitation(
+                sender_effects.clone(),
+                receiver_id,
+                InvitationType::Guardian {
+                    subject_authority: sender_id,
+                },
+                None,
+                None,
+            )
+            .await
+            .expect("actual original guardian invitation whose principal remains offline");
+        let code = crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
         sender_effects.as_ref(),
         &invitation,
         &ShareableInvitationTransportMetadata {
@@ -1163,22 +1286,66 @@ large_stack_async_test!(accepting_guardian_invitation_surfaces_choreography_fail
     )
     .await
     .expect("guardian invitation code must carry sender proof");
-    let imported = handler
-        .import_invitation_code(effects.as_ref(), &code)
-        .await
-        .expect("guardian invitation should import");
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &code)
+            .await
+            .expect("guardian invitation should import");
 
-    let error = timeout(
-        Duration::from_secs(5),
-        handler.accept_invitation(effects.clone(), &imported.invitation_id),
-    )
-    .await
-    .expect("guardian accept should terminate")
-    .expect_err("guardian choreography failure should surface");
-    // With no principal online the signed acceptance cannot be delivered;
-    // the failure must still surface to the caller.
-    assert!(error.is_timeout(), "unexpected error: {error}");
-});
+        let imported_key =
+            InvitationCacheHandler::imported_invitation_key(receiver_id, &imported.invitation_id);
+        let original_import = effects.retrieve(&imported_key).await.unwrap().unwrap();
+        effects
+            .store(
+                &imported_key,
+                b"{corrupt required Guardian metadata".to_vec(),
+            )
+            .await
+            .unwrap();
+        let failure = InvitationGuardianHandler::new(&handler)
+            .execute_guardian_invitation_guardian(effects.clone(), &imported)
+            .await
+            .expect_err("cached invitation cannot hide backing codec failure");
+        let AgentError::Aura(aura_core::AuraError::Serialization {
+            source: Some(source),
+            ..
+        }) = failure
+        else {
+            panic!("required Guardian import preserves native codec failure");
+        };
+        assert!(source.is::<serde_json::Error>());
+        assert!(
+            effects
+                .retrieve(
+                    &crate::handlers::recovery::recovery_guardian_private_key_storage_key(
+                        receiver_id
+                    )
+                )
+                .await
+                .unwrap()
+                .is_none(),
+            "failed import cannot birth recovery keys"
+        );
+        assert!(effects
+            .retrieve(
+                &crate::handlers::recovery::recovery_guardian_public_key_storage_key(receiver_id)
+            )
+            .await
+            .unwrap()
+            .is_none());
+        effects.store(&imported_key, original_import).await.unwrap();
+
+        let error = timeout(
+            Duration::from_secs(5),
+            handler.accept_invitation(effects.clone(), &imported.invitation_id),
+        )
+        .await
+        .expect("guardian accept should terminate")
+        .expect_err("guardian choreography failure should surface");
+        // With no principal online the signed acceptance cannot be delivered;
+        // the failure must still surface to the caller.
+        assert!(error.is_timeout(), "unexpected error: {error}");
+    }
+);
 
 #[tokio::test]
 async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occurs() {
@@ -1204,9 +1371,11 @@ async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occ
         .await
         .expect("contact invitation should import");
 
+    let task_owner = crate::task_registry::TaskSupervisor::new();
+    let tasks = task_owner.group("decline_exchange_fixture");
     let result = timeout(
         Duration::from_secs(5),
-        handler.decline_invitation(effects.clone(), &imported.invitation_id),
+        handler.decline_invitation(effects.clone(), &imported.invitation_id, &tasks),
     )
     .await
     .expect("decline should terminate")
@@ -1385,119 +1554,124 @@ fn malformed_home_id_rejected_at_string_boundary() {
     assert!(matches!(err, AgentError::Config(_)));
 }
 
-large_stack_async_test!(importing_and_accepting_contact_invitation_commits_contact_fact, {
-    let pair = contact_pair(120).await;
-    let own_authority = pair.receiver_id;
-    let sender_id = pair.sender_id;
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
-    assert_eq!(imported.sender_id, sender_id);
-    assert_eq!(imported.receiver_id, own_authority);
+large_stack_async_test!(
+    importing_and_accepting_contact_invitation_commits_contact_fact,
+    {
+        let pair = contact_pair(120).await;
+        let own_authority = pair.receiver_id;
+        let sender_id = pair.sender_id;
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
+        assert_eq!(imported.sender_id, sender_id);
+        assert_eq!(imported.receiver_id, own_authority);
 
-    pair.accept_with_responding_inviter(&imported.invitation_id)
-        .await
-        .unwrap();
+        pair.accept_with_responding_inviter(&imported.invitation_id)
+            .await
+            .unwrap();
 
-    let committed = pair
-        .receiver_effects
-        .load_committed_facts(own_authority)
-        .await
-        .unwrap();
+        let committed = pair
+            .receiver_effects
+            .load_committed_facts(own_authority)
+            .await
+            .unwrap();
 
-    let mut found = None::<ContactFact>;
-    let mut seen_binding_types: Vec<String> = Vec::new();
-    for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
-            continue;
-        };
+        let mut found = None::<ContactFact>;
+        let mut seen_binding_types: Vec<String> = Vec::new();
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
 
-        seen_binding_types.push(envelope.type_id.as_str().to_string());
-        if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
-            continue;
+            seen_binding_types.push(envelope.type_id.as_str().to_string());
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            found = ContactFact::from_envelope(&envelope);
         }
 
-        found = ContactFact::from_envelope(&envelope);
+        if found.is_none() {
+            panic!(
+                "Expected a committed ContactFact, saw bindings: {:?}",
+                seen_binding_types
+            );
+        }
+        let fact = found.unwrap();
+        match fact {
+            ContactFact::Added {
+                owner_id,
+                contact_id,
+                ..
+            } => {
+                assert_eq!(owner_id, own_authority);
+                assert_eq!(contact_id, sender_id);
+            }
+            other => panic!("Expected ContactFact::Added, got {:?}", other),
+        }
     }
+);
 
-    if found.is_none() {
-        panic!(
-            "Expected a committed ContactFact, saw bindings: {:?}",
-            seen_binding_types
+large_stack_async_test!(
+    accepting_contact_invitation_notifies_sender_and_adds_contact,
+    {
+        let pair = contact_pair(124).await;
+        let (sender_id, receiver_id) = (pair.sender_id, pair.receiver_id);
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+        pair.accept_with_responding_inviter(&imported.invitation_id)
+            .await
+            .unwrap();
+
+        let committed = pair
+            .sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap();
+
+        let mut found = false;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(ContactFact::Added {
+                owner_id,
+                contact_id,
+                nickname,
+                ..
+            }) = ContactFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+            if owner_id == sender_id
+                && contact_id == receiver_id
+                && nickname == receiver_id.to_string()
+            {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "expected sender-side ContactFact::Added for receiver"
         );
     }
-    let fact = found.unwrap();
-    match fact {
-        ContactFact::Added {
-            owner_id,
-            contact_id,
-            ..
-        } => {
-            assert_eq!(owner_id, own_authority);
-            assert_eq!(contact_id, sender_id);
-        }
-        other => panic!("Expected ContactFact::Added, got {:?}", other),
-    }
-});
-
-large_stack_async_test!(accepting_contact_invitation_notifies_sender_and_adds_contact, {
-    let pair = contact_pair(124).await;
-    let (sender_id, receiver_id) = (pair.sender_id, pair.receiver_id);
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
-
-    pair.accept_with_responding_inviter(&imported.invitation_id)
-        .await
-        .unwrap();
-
-    let committed = pair
-        .sender_effects
-        .load_committed_facts(sender_id)
-        .await
-        .unwrap();
-
-    let mut found = false;
-    for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
-            continue;
-        };
-
-        if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
-            continue;
-        }
-
-        let Some(ContactFact::Added {
-            owner_id,
-            contact_id,
-            nickname,
-            ..
-        }) = ContactFact::from_envelope(&envelope)
-        else {
-            continue;
-        };
-        if owner_id == sender_id
-            && contact_id == receiver_id
-            && nickname == receiver_id.to_string()
-        {
-            found = true;
-            break;
-        }
-    }
-    assert!(
-        found,
-        "expected sender-side ContactFact::Added for receiver"
-    );
-});
+);
 
 #[tokio::test]
 async fn creating_contact_invitation_materializes_sender_contact() {
     let sender_id = AuthorityId::new_from_entropy([128u8; 32]);
     let receiver_id = AuthorityId::new_from_entropy([129u8; 32]);
     let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap(),
-    );
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
     let handler = handler_for_id(sender_id);
 
     handler
@@ -1514,8 +1688,7 @@ async fn creating_contact_invitation_materializes_sender_contact() {
     let committed = effects.load_committed_facts(sender_id).await.unwrap();
     let mut found = false;
     for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
             continue;
         };
         if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
@@ -1578,215 +1751,224 @@ large_stack_async_test!(contact_acceptance_processing_skips_unrelated_envelopes,
     assert_eq!(result.new_status, InvitationStatus::Accepted);
 });
 
-large_stack_async_test!(contact_acceptance_processing_seeds_peer_default_descriptor_from_local_context, {
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let config = AgentConfig::default();
+large_stack_async_test!(
+    contact_acceptance_processing_seeds_peer_default_descriptor_from_local_context,
+    {
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
 
-    let sender_id = AuthorityId::new_from_entropy([198u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([199u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([198u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([199u8; 32]);
 
-    let sender_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        );
-    let receiver_effects =
-        crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
-            &config,
-            receiver_id,
-            shared_transport,
-        );
+        let sender_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            );
+        let receiver_effects =
+            crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
+                &config,
+                receiver_id,
+                shared_transport,
+            );
 
-    let sender_handler = handler_for_id(sender_id);
-    let _sender_rendezvous_tasks =
-        attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
-    let sender_manager = sender_effects
-        .rendezvous_manager()
-        .expect("sender rendezvous manager should be attached");
-    let now_ms: u64 = 1_700_000_000_000;
-    let sender_local_context = default_context_id_for_authority(sender_id);
-    let receiver_peer_context = default_context_id_for_authority(receiver_id);
-    sender_manager
-        .cache_descriptor(RendezvousDescriptor {
-            authority_id: receiver_id,
-            device_id: None,
-            context_id: sender_local_context,
-            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:55041").unwrap()],
-            handshake_psk_commitment: [41u8; 32],
-            public_key: [42u8; 32],
-            valid_from: now_ms.saturating_sub(1),
-            valid_until: now_ms.saturating_add(86_400_000),
-            nonce: [43u8; 32],
-            nickname_suggestion: None,
-        })
-        .await
-        .unwrap();
-    assert!(
+        let sender_handler = handler_for_id(sender_id);
+        let _sender_rendezvous_tasks =
+            attach_test_rendezvous_manager(sender_effects.as_ref(), sender_id).await;
+        let sender_manager = sender_effects
+            .rendezvous_manager()
+            .expect("sender rendezvous manager should be attached");
+        let now_ms: u64 = 1_700_000_000_000;
+        let sender_local_context = default_context_id_for_authority(sender_id);
+        let receiver_peer_context = default_context_id_for_authority(receiver_id);
         sender_manager
-            .get_descriptor(receiver_peer_context, receiver_id)
-            .await
-            .is_none(),
-        "peer-default descriptor should start unset"
-    );
-
-    let invitation = sender_handler
-        .create_invitation(
-            sender_effects.clone(),
-            receiver_id,
-            InvitationType::Contact { nickname: None },
-            Some("Contact invitation from sender".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-    let acceptance = ContactInvitationAcceptance {
-        invitation_id: invitation.invitation_id.clone(),
-        acceptor_id: receiver_id,
-        signature: sign_test_contact_acceptance(&receiver_effects, &invitation, receiver_id).await,
-        nickname_suggestion: None,
-    };
-    let payload = serde_json::to_vec(&acceptance).unwrap();
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
-    );
-    metadata.insert(
-        "invitation-id".to_string(),
-        invitation.invitation_id.to_string(),
-    );
-    metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
-
-    send_invitation_test_verified_envelope(
-        &sender_effects,
-        TransportEnvelope {
-            destination: sender_id,
-            source: receiver_id,
-            context: default_context_id_for_authority(sender_id),
-            payload,
-            metadata,
-            receipt: None,
-        },
-    )
-    .await
-    .unwrap();
-
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .unwrap();
-    assert!(processed >= 1);
-
-    let descriptor = sender_manager
-        .get_descriptor(receiver_peer_context, receiver_id)
-        .await
-        .expect("processed contact acceptance should seed peer-default descriptor");
-    assert!(matches!(
-        descriptor.transport_hints.as_slice(),
-        [TransportHint::TcpDirect { addr, .. }] if addr.to_string() == "127.0.0.1:55041"
-    ));
-    assert_eq!(descriptor.handshake_psk_commitment, [41u8; 32]);
-    assert_eq!(descriptor.public_key, [42u8; 32]);
-    assert_eq!(descriptor.nonce, [43u8; 32]);
-});
-
-large_stack_async_test!(invite_to_channel_imports_pending_invitation_in_harness_mode, {
-    let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
-    let _env_restore = EnvRestore::capture(&[harness_mode_env]);
-    std::env::set_var(harness_mode_env, "1");
-
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let config = AgentConfig::default();
-    let sender_id = AuthorityId::new_from_entropy([200u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([201u8; 32]);
-    let sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let receiver_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-
-    let sender_service =
-        invitation_service_for(AuthorityContext::new(sender_id), sender_effects.clone());
-    let receiver_handler = handler_for_id(receiver_id);
-
-    let context_id = ContextId::new_from_entropy([202u8; 32]);
-    let channel_id = ChannelId::from_bytes(hash(b"harness-mode-channel-invite-import"));
-    sender_effects
-        .create_channel(ChannelCreateParams {
-            context: context_id,
-            channel: Some(channel_id),
-            skip_window: None,
-            topic: None,
-        })
-        .await
-        .unwrap();
-    sender_effects
-        .join_channel(ChannelJoinParams {
-            context: context_id,
-            channel: channel_id,
-            participant: sender_id,
-        })
-        .await
-        .unwrap();
-
-    let invitation = sender_service
-        .invite_to_channel(
-            receiver_id,
-            channel_id.to_string(),
-            Some(context_id),
-            Some("shared-parity-lab".to_string()),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-
-    let mut imported = None;
-    for _ in 0..20 {
-        let _ = receiver_handler
-            .process_contact_invitation_acceptances(receiver_effects.clone())
+            .cache_descriptor(RendezvousDescriptor {
+                authority_id: receiver_id,
+                device_id: None,
+                context_id: sender_local_context,
+                transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:55041").unwrap()],
+                handshake_psk_commitment: [41u8; 32],
+                public_key: [42u8; 32],
+                valid_from: now_ms.saturating_sub(1),
+                valid_until: now_ms.saturating_add(86_400_000),
+                nonce: [43u8; 32],
+                nickname_suggestion: None,
+            })
             .await
             .unwrap();
-        let pending = receiver_handler
-            .list_pending_with_storage(receiver_effects.as_ref())
-            .await;
-        if let Some(found) = pending
-            .into_iter()
-            .find(|candidate| candidate.invitation_id == invitation.invitation_id)
-        {
-            imported = Some(found);
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
+        assert!(
+            sender_manager
+                .get_descriptor(receiver_peer_context, receiver_id)
+                .await
+                .is_none(),
+            "peer-default descriptor should start unset"
+        );
 
-    let imported = imported.expect("receiver should import the pending channel invitation");
-    assert!(matches!(imported.invitation_type, InvitationType::Channel { .. }));
-    assert_eq!(imported.status, InvitationStatus::Pending);
-    assert_eq!(imported.sender_id, sender_id);
-    assert_eq!(imported.receiver_id, receiver_id);
-});
+        let invitation = sender_handler
+            .create_invitation(
+                sender_effects.clone(),
+                receiver_id,
+                InvitationType::Contact { nickname: None },
+                Some("Contact invitation from sender".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+        let acceptance = ContactInvitationAcceptance {
+            invitation_id: invitation.invitation_id.clone(),
+            acceptor_id: receiver_id,
+            signature: sign_test_contact_acceptance(&receiver_effects, &invitation, receiver_id)
+                .await,
+            nickname_suggestion: None,
+        };
+        let payload = serde_json::to_vec(&acceptance).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
+        );
+        metadata.insert(
+            "invitation-id".to_string(),
+            invitation.invitation_id.to_string(),
+        );
+        metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
+
+        send_invitation_test_verified_envelope(
+            &sender_effects,
+            TransportEnvelope {
+                destination: sender_id,
+                source: receiver_id,
+                context: default_context_id_for_authority(sender_id),
+                payload,
+                metadata,
+                receipt: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert!(processed >= 1);
+
+        let descriptor = sender_manager
+            .get_descriptor(receiver_peer_context, receiver_id)
+            .await
+            .expect("processed contact acceptance should seed peer-default descriptor");
+        assert!(matches!(
+            descriptor.transport_hints.as_slice(),
+            [TransportHint::TcpDirect { addr, .. }] if addr.to_string() == "127.0.0.1:55041"
+        ));
+        assert_eq!(descriptor.handshake_psk_commitment, [41u8; 32]);
+        assert_eq!(descriptor.public_key, [42u8; 32]);
+        assert_eq!(descriptor.nonce, [43u8; 32]);
+    }
+);
+
+large_stack_async_test!(
+    invite_to_channel_imports_pending_invitation_in_harness_mode,
+    {
+        let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_restore = EnvRestore::capture(&[harness_mode_env]);
+        std::env::set_var(harness_mode_env, "1");
+
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
+        let sender_id = AuthorityId::new_from_entropy([200u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([201u8; 32]);
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+
+        let sender_service =
+            invitation_service_for(AuthorityContext::new(sender_id), sender_effects.clone());
+        let receiver_handler = handler_for_id(receiver_id);
+
+        let context_id = ContextId::new_from_entropy([202u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"harness-mode-channel-invite-import"));
+        sender_effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+        sender_effects
+            .join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: sender_id,
+            })
+            .await
+            .unwrap();
+
+        let invitation = sender_service
+            .invite_to_channel(
+                receiver_id,
+                channel_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let mut imported = None;
+        for _ in 0..20 {
+            let _ = receiver_handler
+                .process_contact_invitation_acceptances(receiver_effects.clone())
+                .await
+                .unwrap();
+            let pending = receiver_handler
+                .list_pending_with_storage(receiver_effects.as_ref())
+                .await;
+            if let Some(found) = pending
+                .into_iter()
+                .find(|candidate| candidate.invitation_id == invitation.invitation_id)
+            {
+                imported = Some(found);
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        let imported = imported.expect("receiver should import the pending channel invitation");
+        assert!(matches!(
+            imported.invitation_type,
+            InvitationType::Channel { .. }
+        ));
+        assert_eq!(imported.status, InvitationStatus::Pending);
+        assert_eq!(imported.sender_id, sender_id);
+        assert_eq!(imported.receiver_id, receiver_id);
+    }
+);
 
 large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelopes, {
     let authority = AuthorityId::new_from_entropy([201u8; 32]);
     let peer = AuthorityId::new_from_entropy([202u8; 32]);
     let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
-    );
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
     let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
     let context_id = ContextId::new_from_entropy([203u8; 32]);
@@ -1832,8 +2014,7 @@ large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelope
     let committed = effects.load_committed_facts(authority).await.unwrap();
     let mut found = false;
     for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
             continue;
         };
         if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
@@ -1854,454 +2035,471 @@ large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelope
     assert!(found, "expected committed chat fact from inbound envelope");
 });
 
-large_stack_async_test!(contact_acceptance_processing_commits_non_chat_relational_fact_envelopes, {
-    let authority = AuthorityId::new_from_entropy([205u8; 32]);
-    let peer = AuthorityId::new_from_entropy([206u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+large_stack_async_test!(
+    contact_acceptance_processing_commits_non_chat_relational_fact_envelopes,
+    {
+        let authority = AuthorityId::new_from_entropy([205u8; 32]);
+        let peer = AuthorityId::new_from_entropy([206u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
-    let context_id = ContextId::new_from_entropy([207u8; 32]);
-    let grant = HomeGrantModeratorFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
-        .to_generic();
+        let context_id = ContextId::new_from_entropy([207u8; 32]);
+        let grant = HomeGrantModeratorFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
+            .to_generic();
 
-    let payload = aura_core::util::serialization::to_vec(&grant).unwrap();
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        CHAT_FACT_CONTENT_TYPE.to_string(),
-    );
+        let payload = aura_core::util::serialization::to_vec(&grant).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
 
-    send_invitation_test_verified_envelope(
-        &effects,
-        TransportEnvelope {
-            destination: authority,
-            source: peer,
-            context: context_id,
-            payload,
-            metadata,
-            receipt: None,
-        },
-    )
-    .await
-    .unwrap();
-
-    let processed = handler
-        .process_contact_invitation_acceptances(effects.clone())
+        send_invitation_test_verified_envelope(
+            &effects,
+            TransportEnvelope {
+                destination: authority,
+                source: peer,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            },
+        )
         .await
         .unwrap();
-    assert_eq!(processed, 1);
 
-    let committed = effects.load_committed_facts(authority).await.unwrap();
-    let mut found = false;
-    for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
-            continue;
-        };
-        let Some(grant_fact) = HomeGrantModeratorFact::from_envelope(&envelope) else {
-            continue;
-        };
-        if grant_fact.target_authority == authority && grant_fact.actor_authority == peer {
-            found = true;
-            break;
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let committed = effects.load_committed_facts(authority).await.unwrap();
+        let mut found = false;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+            let Some(grant_fact) = HomeGrantModeratorFact::from_envelope(&envelope) else {
+                continue;
+            };
+            if grant_fact.target_authority == authority && grant_fact.actor_authority == peer {
+                found = true;
+                break;
+            }
         }
+
+        assert!(
+            found,
+            "expected committed non-chat relational fact from inbound envelope"
+        );
     }
+);
 
-    assert!(
-        found,
-        "expected committed non-chat relational fact from inbound envelope"
-    );
-});
+large_stack_async_test!(
+    channel_acceptance_processing_marks_created_invitation_accepted_for_sender,
+    {
+        let sender_id = AuthorityId::new_from_entropy([207u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([208u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let sender_context = AuthorityContext::new(sender_id);
+        let sender_handler = handler_for(sender_context.clone());
+        let receiver_handler = handler_for_id(receiver_id);
+        let sender_service = invitation_service_for(sender_context, sender_effects.clone());
 
-large_stack_async_test!(channel_acceptance_processing_marks_created_invitation_accepted_for_sender, {
-    let sender_id = AuthorityId::new_from_entropy([207u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([208u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
+        let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
             sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let receiver_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        sender_effects.attach_rendezvous_manager(sender_manager.clone());
+        let sender_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(sender_effects.time_effects().clone()),
+            )
+            .await;
+        crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
+            .await
+            .unwrap();
+
+        let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
             receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-    let sender_context = AuthorityContext::new(sender_id);
-    let sender_handler = handler_for(sender_context.clone());
-    let receiver_handler = handler_for_id(receiver_id);
-    let sender_service = invitation_service_for(sender_context, sender_effects.clone());
-
-    let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
-        sender_id,
-        crate::runtime::services::RendezvousManagerConfig::default(),
-        Arc::new(sender_effects.time_effects().clone()),
-    );
-    sender_effects.attach_rendezvous_manager(sender_manager.clone());
-    let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
-        Arc::new(crate::runtime::TaskSupervisor::new()),
-        Arc::new(sender_effects.time_effects().clone()),
-    );
-    crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
-        .await
-        .unwrap();
-
-    let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
-        receiver_id,
-        crate::runtime::services::RendezvousManagerConfig::default(),
-        Arc::new(receiver_effects.time_effects().clone()),
-    );
-    receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
-    let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
-        Arc::new(crate::runtime::TaskSupervisor::new()),
-        Arc::new(receiver_effects.time_effects().clone()),
-    );
-    crate::runtime::services::RuntimeService::start(
-        &receiver_manager,
-        &receiver_service_context,
-    )
-    .await
-    .unwrap();
-
-    register_test_app_signals(sender_effects.as_ref()).await;
-    register_test_app_signals(receiver_effects.as_ref()).await;
-
-    let now_ms = 1_700_000_000_000;
-    sender_handler
-        .cache_verified_peer_descriptor_for_peer(
-            sender_effects.as_ref(),
-            receiver_id,
-            None,
-            Some("tcp://127.0.0.1:55021"),
-            now_ms,
-        )
-        .await;
-    receiver_handler
-        .cache_verified_peer_descriptor_for_peer(
-            receiver_effects.as_ref(),
-            sender_id,
-            None,
-            Some("tcp://127.0.0.1:55022"),
-            now_ms,
-        )
-        .await;
-
-    let context_id = ContextId::new_from_entropy([209u8; 32]);
-    let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
-    sender_effects
-        .create_channel(ChannelCreateParams {
-            context: context_id,
-            channel: Some(channel_id),
-            skip_window: None,
-            topic: None,
-        })
-        .await
-        .unwrap();
-    sender_effects
-        .join_channel(ChannelJoinParams {
-            context: context_id,
-            channel: channel_id,
-            participant: sender_id,
-        })
-        .await
-        .unwrap();
-
-    let invitation = sender_service
-        .invite_to_channel(
-            receiver_id,
-            channel_id.to_string(),
-            Some(context_id),
-            Some("shared-parity-lab".to_string()),
-            None,
-            None,
-            None,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
+        let receiver_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(receiver_effects.time_effects().clone()),
+            )
+            .await;
+        crate::runtime::services::RuntimeService::start(
+            &receiver_manager,
+            &receiver_service_context,
         )
         .await
         .unwrap();
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
-        .await
-        .unwrap();
 
-    receiver_handler
-        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-    let acceptance = ChannelInvitationAcceptance {
-        invitation_id: imported.invitation_id.clone(),
-        acceptor_id: receiver_id,
-        context_id,
-        channel_id,
-        channel_name: Some("shared-parity-lab".to_string()),
-        signature: sign_test_channel_acceptance(
-            &receiver_effects,
-            &invitation,
-            receiver_id,
+        register_test_app_signals(sender_effects.as_ref()).await;
+        register_test_app_signals(receiver_effects.as_ref()).await;
+
+        let now_ms = 1_700_000_000_000;
+        sender_handler
+            .cache_verified_peer_descriptor_for_peer(
+                sender_effects.as_ref(),
+                receiver_id,
+                None,
+                Some("tcp://127.0.0.1:55021"),
+                now_ms,
+            )
+            .await;
+        receiver_handler
+            .cache_verified_peer_descriptor_for_peer(
+                receiver_effects.as_ref(),
+                sender_id,
+                None,
+                Some("tcp://127.0.0.1:55022"),
+                now_ms,
+            )
+            .await;
+
+        let context_id = ContextId::new_from_entropy([209u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-sender-propagation"));
+        sender_effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+        sender_effects
+            .join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: sender_id,
+            })
+            .await
+            .unwrap();
+
+        let invitation = sender_service
+            .invite_to_channel(
+                receiver_id,
+                channel_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let code = unsigned_test_code_for_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+        let acceptance = ChannelInvitationAcceptance {
+            invitation_id: imported.invitation_id.clone(),
+            acceptor_id: receiver_id,
             context_id,
             channel_id,
-            Some("shared-parity-lab".to_string()),
-        )
-        .await,
-    };
-    let payload = serde_json::to_vec(&acceptance).unwrap();
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
-    );
-    metadata.insert(
-        "invitation-id".to_string(),
-        imported.invitation_id.to_string(),
-    );
-    metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
-    metadata.insert("channel-id".to_string(), channel_id.to_string());
-    send_invitation_test_verified_envelope(
-        &sender_effects,
-        TransportEnvelope {
-            destination: sender_id,
-            source: receiver_id,
-            context: default_context_id_for_authority(sender_id),
-            payload,
-            metadata,
-            receipt: None,
-        },
-    )
-    .await
-    .unwrap();
-
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .unwrap();
-    assert!(processed >= 1);
-
-    let stored = InvitationHandler::load_created_invitation(
-        sender_effects.as_ref(),
-        sender_id,
-        &invitation.invitation_id,
-    )
-    .await
-    .expect("created invitation should remain accessible");
-    assert_eq!(stored.status, InvitationStatus::Accepted);
-});
-
-large_stack_async_test!(channel_acceptance_notification_transports_and_updates_sender_state, {
-    let sender_id = AuthorityId::new_from_entropy([221u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([222u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let receiver_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-    let sender_context = AuthorityContext::new(sender_id);
-    let sender_handler = handler_for(sender_context.clone());
-    let receiver_handler = handler_for_id(receiver_id);
-    let sender_service = invitation_service_for(sender_context, sender_effects.clone());
-
-    let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
-        sender_id,
-        crate::runtime::services::RendezvousManagerConfig::default(),
-        Arc::new(sender_effects.time_effects().clone()),
-    );
-    sender_effects.attach_rendezvous_manager(sender_manager.clone());
-    let sender_service_context = crate::runtime::services::RuntimeServiceContext::new(
-        Arc::new(crate::runtime::TaskSupervisor::new()),
-        Arc::new(sender_effects.time_effects().clone()),
-    );
-    crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
-        .await
-        .unwrap();
-
-    let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
-        receiver_id,
-        crate::runtime::services::RendezvousManagerConfig::default(),
-        Arc::new(receiver_effects.time_effects().clone()),
-    );
-    receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
-    let receiver_service_context = crate::runtime::services::RuntimeServiceContext::new(
-        Arc::new(crate::runtime::TaskSupervisor::new()),
-        Arc::new(receiver_effects.time_effects().clone()),
-    );
-    crate::runtime::services::RuntimeService::start(
-        &receiver_manager,
-        &receiver_service_context,
-    )
-    .await
-    .unwrap();
-
-    register_test_app_signals(sender_effects.as_ref()).await;
-    register_test_app_signals(receiver_effects.as_ref()).await;
-
-    let now_ms = 1_700_000_000_000;
-    sender_handler
-        .cache_verified_peer_descriptor_for_peer(
-            sender_effects.as_ref(),
-            receiver_id,
-            None,
-            Some("tcp://127.0.0.1:55002"),
-            now_ms,
-        )
-        .await;
-    receiver_handler
-        .cache_verified_peer_descriptor_for_peer(
-            receiver_effects.as_ref(),
-            sender_id,
-            None,
-            Some("tcp://127.0.0.1:55001"),
-            now_ms,
-        )
-        .await;
-
-    let context_id = ContextId::new_from_entropy([223u8; 32]);
-    let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-real-transport"));
-    sender_effects
-        .create_channel(ChannelCreateParams {
-            context: context_id,
-            channel: Some(channel_id),
-            skip_window: None,
-            topic: None,
-        })
-        .await
-        .unwrap();
-    sender_effects
-        .join_channel(ChannelJoinParams {
-            context: context_id,
-            channel: channel_id,
-            participant: sender_id,
-        })
-        .await
-        .unwrap();
-
-    // The channel is the sender's own home, so this is a home invitation and
-    // the acceptance materializes home membership.
-    sender_effects
-        .commit_generic_fact_bytes(
-            context_id,
-            aura_social::SOCIAL_FACT_TYPE_ID.into(),
-            aura_social::SocialFact::home_created_ms(
-                aura_social::HomeId::from_bytes(*channel_id.as_bytes()),
+            channel_name: Some("shared-parity-lab".to_string()),
+            signature: sign_test_channel_acceptance(
+                &receiver_effects,
+                &invitation,
+                receiver_id,
                 context_id,
-                1,
-                sender_id,
-                "shared-parity-lab".to_string(),
+                channel_id,
+                Some("shared-parity-lab".to_string()),
             )
-            .to_bytes(),
-        )
-        .await
-        .unwrap();
-    let invitation = sender_service
-        .invite_to_channel(
-            receiver_id,
-            channel_id.to_string(),
-            Some(context_id),
-            Some("shared-parity-lab".to_string()),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-    let code = unsigned_test_code_for_invitation(&invitation);
-    let imported = receiver_handler
-        .import_invitation_code(&receiver_effects, &code)
-        .await
-        .unwrap();
-    receiver_handler
-        .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-    bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
-    receiver_handler
-        .notify_channel_invitation_acceptance(
-            receiver_effects.as_ref(),
-            &imported.invitation_id,
-        )
-        .await
-        .unwrap();
-
-    let processed = sender_handler
-        .process_contact_invitation_acceptances(sender_effects.clone())
-        .await
-        .unwrap();
-    assert!(processed >= 1);
-
-    let stored = InvitationHandler::load_created_invitation(
-        sender_effects.as_ref(),
-        sender_id,
-        &invitation.invitation_id,
-    )
-    .await
-    .expect("created invitation should remain accessible");
-    assert_eq!(stored.status, InvitationStatus::Accepted);
-
-    use aura_effects::ReactiveEffects;
-    let homes: HomesState = sender_effects
-        .reactive_handler()
-        .read(&*HOMES_SIGNAL)
-        .await
-        .unwrap();
-    let home = homes
-        .home_state(&channel_id)
-        .expect("sender should materialize channel acceptance home state");
-    assert_eq!(home.context_id, Some(context_id));
-    assert!(
-        home.member(&receiver_id).is_some(),
-        "sender home state should include receiver after transported acceptance"
-    );
-
-    let committed = sender_effects
-        .load_committed_facts(sender_id)
-        .await
-        .unwrap();
-    let updated_channel_projection = committed.iter().any(|fact| {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-        else {
-            return false;
+            .await,
         };
-        matches!(
-            ChatFact::from_envelope(envelope),
-            Some(ChatFact::ChannelUpdated {
-                context_id: seen_context,
-                channel_id: seen_channel,
-                name: Some(name),
-                member_count: Some(2),
-                member_ids: Some(member_ids),
-                ..
-            }) if seen_context == context_id
-                && seen_channel == channel_id
-                && name == "shared-parity-lab"
-                && member_ids.as_slice() == [receiver_id]
+        let payload = serde_json::to_vec(&acceptance).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
+        );
+        metadata.insert(
+            "invitation-id".to_string(),
+            imported.invitation_id.to_string(),
+        );
+        metadata.insert("acceptor-id".to_string(), receiver_id.to_string());
+        metadata.insert("channel-id".to_string(), channel_id.to_string());
+        send_invitation_test_verified_envelope(
+            &sender_effects,
+            TransportEnvelope {
+                destination: sender_id,
+                source: receiver_id,
+                context: default_context_id_for_authority(sender_id),
+                payload,
+                metadata,
+                receipt: None,
+            },
         )
-    });
-    assert!(
+        .await
+        .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert!(processed >= 1);
+
+        let stored = InvitationHandler::load_created_invitation(
+            sender_effects.as_ref(),
+            sender_id,
+            &invitation.invitation_id,
+        )
+        .await
+        .expect("created invitation should remain accessible");
+        assert_eq!(stored.status, InvitationStatus::Accepted);
+    }
+);
+
+large_stack_async_test!(
+    channel_acceptance_notification_transports_and_updates_sender_state,
+    {
+        let sender_id = AuthorityId::new_from_entropy([221u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([222u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let sender_context = AuthorityContext::new(sender_id);
+        let sender_handler = handler_for(sender_context.clone());
+        let receiver_handler = handler_for_id(receiver_id);
+        let sender_service = invitation_service_for(sender_context, sender_effects.clone());
+
+        let sender_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            sender_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(sender_effects.time_effects().clone()),
+        );
+        sender_effects.attach_rendezvous_manager(sender_manager.clone());
+        let sender_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(sender_effects.time_effects().clone()),
+            )
+            .await;
+        crate::runtime::services::RuntimeService::start(&sender_manager, &sender_service_context)
+            .await
+            .unwrap();
+
+        let receiver_manager = crate::runtime::services::RendezvousManager::new_with_default_udp(
+            receiver_id,
+            crate::runtime::services::RendezvousManagerConfig::default(),
+            Arc::new(receiver_effects.time_effects().clone()),
+        );
+        receiver_effects.attach_rendezvous_manager(receiver_manager.clone());
+        let receiver_service_context =
+            crate::runtime::services::RuntimeServiceContext::test_original(
+                Arc::new(crate::runtime::TaskSupervisor::new()),
+                Arc::new(receiver_effects.time_effects().clone()),
+            )
+            .await;
+        crate::runtime::services::RuntimeService::start(
+            &receiver_manager,
+            &receiver_service_context,
+        )
+        .await
+        .unwrap();
+
+        register_test_app_signals(sender_effects.as_ref()).await;
+        register_test_app_signals(receiver_effects.as_ref()).await;
+
+        let now_ms = 1_700_000_000_000;
+        sender_handler
+            .cache_verified_peer_descriptor_for_peer(
+                sender_effects.as_ref(),
+                receiver_id,
+                None,
+                Some("tcp://127.0.0.1:55002"),
+                now_ms,
+            )
+            .await;
+        receiver_handler
+            .cache_verified_peer_descriptor_for_peer(
+                receiver_effects.as_ref(),
+                sender_id,
+                None,
+                Some("tcp://127.0.0.1:55001"),
+                now_ms,
+            )
+            .await;
+
+        let context_id = ContextId::new_from_entropy([223u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"channel-acceptance-real-transport"));
+        sender_effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+            .unwrap();
+        sender_effects
+            .join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: sender_id,
+            })
+            .await
+            .unwrap();
+
+        // The channel is the sender's own home, so this is a home invitation and
+        // the acceptance materializes home membership.
+        sender_effects
+            .commit_generic_fact_bytes(
+                context_id,
+                aura_social::SOCIAL_FACT_TYPE_ID.into(),
+                aura_social::SocialFact::home_created_ms(
+                    aura_social::HomeId::from_bytes(*channel_id.as_bytes()),
+                    context_id,
+                    1,
+                    sender_id,
+                    "shared-parity-lab".to_string(),
+                )
+                .to_bytes(),
+            )
+            .await
+            .unwrap();
+        let invitation = sender_service
+            .invite_to_channel(
+                receiver_id,
+                channel_id.to_string(),
+                Some(context_id),
+                Some("shared-parity-lab".to_string()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let code = unsigned_test_code_for_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+        bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
+        receiver_handler
+            .notify_channel_invitation_acceptance(
+                receiver_effects.as_ref(),
+                &imported.invitation_id,
+            )
+            .await
+            .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert!(processed >= 1);
+
+        let stored = InvitationHandler::load_created_invitation(
+            sender_effects.as_ref(),
+            sender_id,
+            &invitation.invitation_id,
+        )
+        .await
+        .expect("created invitation should remain accessible");
+        assert_eq!(stored.status, InvitationStatus::Accepted);
+
+        use aura_effects::ReactiveEffects;
+        let homes: HomesState = sender_effects
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap();
+        let home = homes
+            .home_state(&channel_id)
+            .expect("sender should materialize channel acceptance home state");
+        assert_eq!(home.context_id, Some(context_id));
+        assert!(
+            home.member(&receiver_id).is_some(),
+            "sender home state should include receiver after transported acceptance"
+        );
+
+        let committed = sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap();
+        let updated_channel_projection = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelUpdated {
+                    context_id: seen_context,
+                    channel_id: seen_channel,
+                    name: Some(name),
+                    member_count: Some(2),
+                    member_ids: Some(member_ids),
+                    ..
+                }) if seen_context == context_id
+                    && seen_channel == channel_id
+                    && name == "shared-parity-lab"
+                    && member_ids.as_slice() == [receiver_id]
+            )
+        });
+        assert!(
         updated_channel_projection,
         "sender should publish a canonical ChannelUpdated projection after transported acceptance"
     );
-});
+    }
+);
 
 #[tokio::test]
 async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
@@ -2598,10 +2796,7 @@ async fn channel_acceptance_notification_uses_materialized_channel_context() {
     bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
 
     handler
-        .notify_channel_invitation_acceptance(
-            receiver_effects.as_ref(),
-            &imported.invitation_id,
-        )
+        .notify_channel_invitation_acceptance(receiver_effects.as_ref(), &imported.invitation_id)
         .await
         .expect("notification should use the materialized channel context");
 
@@ -2624,69 +2819,72 @@ async fn channel_acceptance_notification_uses_materialized_channel_context() {
     assert_eq!(received.context, materialized_context);
 }
 
-large_stack_async_test!(contact_acceptance_processing_provisions_amp_state_for_channel_created_facts, {
-    let authority = AuthorityId::new_from_entropy([208u8; 32]);
-    let peer = AuthorityId::new_from_entropy([209u8; 32]);
-    let config = AgentConfig::default();
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+large_stack_async_test!(
+    contact_acceptance_processing_provisions_amp_state_for_channel_created_facts,
+    {
+        let authority = AuthorityId::new_from_entropy([208u8; 32]);
+        let peer = AuthorityId::new_from_entropy([209u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
-    let context_id = ContextId::new_from_entropy([210u8; 32]);
-    let channel_id = ChannelId::from_bytes([211u8; 32]);
-    let chat_fact = ChatFact::channel_created_ms(
-        context_id,
-        channel_id,
-        "provisioned".to_string(),
-        Some("Provisioned channel".to_string()),
-        false,
-        1_700_000_000_100,
-        peer,
-    )
-    .to_generic();
+        let context_id = ContextId::new_from_entropy([210u8; 32]);
+        let channel_id = ChannelId::from_bytes([211u8; 32]);
+        let chat_fact = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "provisioned".to_string(),
+            Some("Provisioned channel".to_string()),
+            false,
+            1_700_000_000_100,
+            peer,
+        )
+        .to_generic();
 
-    let payload = aura_core::util::serialization::to_vec(&chat_fact).unwrap();
-    let mut metadata = HashMap::new();
-    metadata.insert(
-        "content-type".to_string(),
-        CHAT_FACT_CONTENT_TYPE.to_string(),
-    );
+        let payload = aura_core::util::serialization::to_vec(&chat_fact).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
 
-    send_invitation_test_verified_envelope(
-        &effects,
-        TransportEnvelope {
-            destination: authority,
-            source: peer,
-            context: context_id,
-            payload,
-            metadata,
-            receipt: None,
-        },
-    )
-    .await
-    .unwrap();
-
-    let processed = handler
-        .process_contact_invitation_acceptances(effects.clone())
+        send_invitation_test_verified_envelope(
+            &effects,
+            TransportEnvelope {
+                destination: authority,
+                source: peer,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            },
+        )
         .await
         .unwrap();
-    assert_eq!(processed, 1);
 
-    timeout(Duration::from_secs(5), async {
-        loop {
-            if aura_protocol::amp::get_channel_state(effects.as_ref(), context_id, channel_id)
-                .await
-                .is_ok()
-            {
-                break;
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if aura_protocol::amp::get_channel_state(effects.as_ref(), context_id, channel_id)
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
             }
-            sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("timed out waiting for provisioned AMP channel state");
-});
+        })
+        .await
+        .expect("timed out waiting for provisioned AMP channel state");
+    }
+);
 
 #[tokio::test]
 async fn invitation_envelope_processing_imports_pending_channel_invites() {
@@ -2781,110 +2979,113 @@ async fn invitation_envelope_processing_imports_pending_channel_invites() {
     }));
 }
 
-large_stack_async_test!(accepting_channel_invitation_materializes_home_and_channel_state, {
-    let sender_id = AuthorityId::new_from_entropy([213u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let _sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-    register_test_app_signals(effects.as_ref()).await;
-    let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55113",
-        1_700_000_000_000,
-    )
-    .await;
-
-    let invitation_id = InvitationId::new("inv-materialize-home-1");
-    let home_id = canonical_home_id(13);
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: invitation_id.clone(),
-        sender_id,
-        context_id: Some(default_context_id_for_authority(sender_id)),
-        invitation_type: InvitationType::Channel {
-            home_id,
-            nickname_suggestion: Some("Oak House".to_string()),
-            bootstrap: None,
-            home: true,
-        },
-        expires_at: None,
-        message: Some("Join Oak House".to_string()),
-    };
-
-    let imported = handler
-        .import_invitation_code(
+large_stack_async_test!(
+    accepting_channel_invitation_materializes_home_and_channel_state,
+    {
+        let sender_id = AuthorityId::new_from_entropy([213u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([214u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
             effects.as_ref(),
-            &shareable
-                .to_code()
-                .expect("shareable invitation should serialize"),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55113",
+            1_700_000_000_000,
         )
-        .await
-        .unwrap();
+        .await;
 
-    handler
-        .accept_invitation(effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-
-    let expected_context = default_context_id_for_authority(sender_id);
-    let expected_channel = home_id;
-
-    let committed = effects.load_committed_facts(receiver_id).await.unwrap();
-    let found_channel_fact = committed.iter().any(|fact| {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-        else {
-            return false;
+        let invitation_id = InvitationId::new("inv-materialize-home-1");
+        let home_id = canonical_home_id(13);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: Some(default_context_id_for_authority(sender_id)),
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Oak House".to_string()),
+                bootstrap: None,
+                home: true,
+            },
+            expires_at: None,
+            message: Some("Join Oak House".to_string()),
         };
-        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-            return false;
-        }
-        matches!(
-            ChatFact::from_envelope(envelope),
-            Some(ChatFact::ChannelCreated {
-                context_id,
-                channel_id,
-                ..
-            }) if context_id == expected_context && channel_id == expected_channel
-        )
-    });
-    assert!(
-        found_channel_fact,
-        "expected ChannelCreated fact for accepted channel invitation"
-    );
 
-    use aura_effects::ReactiveEffects;
-    let homes: HomesState = effects
-        .reactive_handler()
-        .read(&*HOMES_SIGNAL)
-        .await
-        .unwrap();
-    let home = homes
-        .home_state(&expected_channel)
-        .expect("accepted invitation should materialize home state");
-    assert_eq!(home.context_id, Some(expected_context));
-    assert!(home.member(&receiver_id).is_some());
-    assert_eq!(home.my_role, HomeRole::Participant);
-});
+        let imported = handler
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .unwrap();
+
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let expected_context = default_context_id_for_authority(sender_id);
+        let expected_channel = home_id;
+
+        let committed = effects.load_committed_facts(receiver_id).await.unwrap();
+        let found_channel_fact = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                return false;
+            }
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelCreated {
+                    context_id,
+                    channel_id,
+                    ..
+                }) if context_id == expected_context && channel_id == expected_channel
+            )
+        });
+        assert!(
+            found_channel_fact,
+            "expected ChannelCreated fact for accepted channel invitation"
+        );
+
+        use aura_effects::ReactiveEffects;
+        let homes: HomesState = effects
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap();
+        let home = homes
+            .home_state(&expected_channel)
+            .expect("accepted invitation should materialize home state");
+        assert_eq!(home.context_id, Some(expected_context));
+        assert!(home.member(&receiver_id).is_some());
+        assert_eq!(home.my_role, HomeRole::Participant);
+    }
+);
 
 #[test]
 fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
@@ -2911,8 +3112,7 @@ fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
         );
         let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
         register_test_app_signals(effects.as_ref()).await;
-        let _rendezvous_tasks =
-            attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
         cache_test_peer_descriptor(
             effects.as_ref(),
             receiver_id,
@@ -2996,253 +3196,262 @@ fn accepting_channel_invitation_corrects_preexisting_raw_channel_name() {
     });
 }
 
-large_stack_async_test!(accepting_channel_invitation_materializes_amp_bootstrap_state, {
-    let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let _sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            receiver_id,
-            shared_transport,
-        )
-        .unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-    register_test_app_signals(effects.as_ref()).await;
-    let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55114",
-        1_700_000_000_000,
-    )
-    .await;
-
-    let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
-    let home_id = canonical_home_id(14);
-    let bootstrap_key = [7u8; 32];
-    let bootstrap_id = Hash32::from_bytes(&bootstrap_key);
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: invitation_id.clone(),
-        sender_id,
-        context_id: Some(default_context_id_for_authority(sender_id)),
-        invitation_type: InvitationType::Channel {
-            home_id,
-            nickname_suggestion: Some("Elm House".to_string()),
-            bootstrap: Some(ChannelBootstrapPackage {
-                bootstrap_id,
-                key: bootstrap_key.to_vec(),
-            }),
-            home: false,
-        },
-        expires_at: None,
-        message: Some("Join Elm House".to_string()),
-    };
-
-    let imported = handler
-        .import_invitation_code(
+large_stack_async_test!(
+    accepting_channel_invitation_materializes_amp_bootstrap_state,
+    {
+        let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
             effects.as_ref(),
-            &shareable
-                .to_code()
-                .expect("shareable invitation should serialize"),
-        )
-        .await
-        .unwrap();
-
-    handler
-        .accept_invitation(effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-
-    let expected_context = default_context_id_for_authority(sender_id);
-    let expected_channel = home_id;
-
-    let state = aura_protocol::amp::get_channel_state(
-        effects.as_ref(),
-        expected_context,
-        expected_channel,
-    )
-    .await
-    .expect("accepted invitation should materialize AMP channel state");
-    let bootstrap = state
-        .bootstrap
-        .expect("accepted invitation should materialize bootstrap metadata");
-    assert_eq!(bootstrap.bootstrap_id, bootstrap_id);
-    assert_eq!(bootstrap.dealer, sender_id);
-    assert!(bootstrap.recipients.contains(&sender_id));
-    assert!(bootstrap.recipients.contains(&receiver_id));
-
-    let location = SecureStorageLocation::amp_bootstrap_key(
-        &expected_context,
-        &expected_channel,
-        &bootstrap_id,
-    );
-    let stored_key = effects
-        .secure_retrieve(&location, &[SecureStorageCapability::Read])
-        .await
-        .expect("bootstrap key should be persisted");
-    assert_eq!(stored_key, bootstrap_key.to_vec());
-});
-
-large_stack_async_test!(accepting_channel_invitation_uses_shareable_context_when_present, {
-    let sender_id = AuthorityId::new_from_entropy([215u8; 32]);
-    let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
-    let config = AgentConfig::default();
-    let shared_transport = crate::runtime::SharedTransport::new();
-    let _sender_effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
-            sender_id,
-            shared_transport.clone(),
-        )
-        .unwrap(),
-    );
-    let effects = Arc::new(
-        AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
-            &config,
             receiver_id,
-            shared_transport,
+            sender_id,
+            "tcp://127.0.0.1:55114",
+            1_700_000_000_000,
         )
-        .unwrap(),
-    );
-    let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
-    register_test_app_signals(effects.as_ref()).await;
-    let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
-    cache_test_peer_descriptor(
-        effects.as_ref(),
-        receiver_id,
-        sender_id,
-        "tcp://127.0.0.1:55115",
-        1_700_000_000_000,
-    )
-    .await;
+        .await;
 
-    let invitation_id = InvitationId::new("inv-materialize-home-context");
-    let custom_context = ContextId::new_from_entropy([55u8; 32]);
-    let home_id = canonical_home_id(15);
-    let shareable = ShareableInvitation {
-        version: ShareableInvitation::CURRENT_VERSION,
-        invitation_id: invitation_id.clone(),
-        sender_id,
-        context_id: Some(custom_context),
-        invitation_type: InvitationType::Channel {
-            home_id,
-            nickname_suggestion: Some("Birch House".to_string()),
-            bootstrap: None,
-            home: true,
-        },
-        expires_at: None,
-        message: Some("Join Birch House".to_string()),
-    };
-
-    let imported = handler
-        .import_invitation_code(
-            effects.as_ref(),
-            &shareable
-                .to_code()
-                .expect("shareable invitation should serialize"),
-        )
-        .await
-        .unwrap();
-    assert_eq!(imported.context_id, custom_context);
-    assert_ne!(
-        imported.context_id,
-        default_context_id_for_authority(sender_id),
-        "custom context must override sender default context"
-    );
-
-    handler
-        .accept_invitation(effects.clone(), &imported.invitation_id)
-        .await
-        .unwrap();
-
-    let expected_channel = home_id;
-    let committed = effects.load_committed_facts(receiver_id).await.unwrap();
-    let found_channel_fact = committed.iter().any(|fact| {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
-        else {
-            return false;
-        };
-        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
-            return false;
-        }
-        matches!(
-            ChatFact::from_envelope(envelope),
-            Some(ChatFact::ChannelCreated {
-                context_id,
-                channel_id,
-                ..
-            }) if context_id == custom_context && channel_id == expected_channel
-        )
-    });
-    assert!(
-        found_channel_fact,
-        "expected ChannelCreated fact to use shareable context id"
-    );
-
-    use aura_effects::ReactiveEffects;
-    let homes: HomesState = effects
-        .reactive_handler()
-        .read(&*HOMES_SIGNAL)
-        .await
-        .unwrap();
-    let home = homes
-        .home_state(&expected_channel)
-        .expect("accepted invitation should materialize home state");
-    assert_eq!(home.context_id, Some(custom_context));
-});
-
-large_stack_async_test!(imported_invitation_is_resolvable_across_handler_instances, {
-    let pair = contact_pair(122).await;
-    let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
-
-    // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
-    pair.accept_via(&handler_for_id(own_authority), &imported.invitation_id)
-        .await
-        .unwrap();
-
-    let committed = pair
-        .receiver_effects
-        .load_committed_facts(own_authority)
-        .await
-        .unwrap();
-
-    let mut found = None::<ContactFact>;
-    for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
-            continue;
+        let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
+        let home_id = canonical_home_id(14);
+        let bootstrap_key = [7u8; 32];
+        let bootstrap_id = Hash32::from_bytes(&bootstrap_key);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: Some(default_context_id_for_authority(sender_id)),
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Elm House".to_string()),
+                bootstrap: Some(ChannelBootstrapPackage {
+                    bootstrap_id,
+                    key: bootstrap_key.to_vec(),
+                }),
+                home: false,
+            },
+            expires_at: None,
+            message: Some("Join Elm House".to_string()),
         };
 
-        if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
-            continue;
+        let imported = handler
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .unwrap();
+
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let expected_context = default_context_id_for_authority(sender_id);
+        let expected_channel = home_id;
+
+        let state = aura_protocol::amp::get_channel_state(
+            effects.as_ref(),
+            expected_context,
+            expected_channel,
+        )
+        .await
+        .expect("accepted invitation should materialize AMP channel state");
+        let bootstrap = state
+            .bootstrap
+            .expect("accepted invitation should materialize bootstrap metadata");
+        assert_eq!(bootstrap.bootstrap_id, bootstrap_id);
+        assert_eq!(bootstrap.dealer, sender_id);
+        assert!(bootstrap.recipients.contains(&sender_id));
+        assert!(bootstrap.recipients.contains(&receiver_id));
+
+        let location = SecureStorageLocation::amp_bootstrap_key(
+            &expected_context,
+            &expected_channel,
+            &bootstrap_id,
+        );
+        let stored_key = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("bootstrap key should be persisted");
+        assert_eq!(stored_key, bootstrap_key.to_vec());
+    }
+);
+
+large_stack_async_test!(
+    accepting_channel_invitation_uses_shareable_context_when_present,
+    {
+        let sender_id = AuthorityId::new_from_entropy([215u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([216u8; 32]);
+        let config = AgentConfig::default();
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let _sender_effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
+                &config,
+                receiver_id,
+                shared_transport,
+            )
+            .unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+        register_test_app_signals(effects.as_ref()).await;
+        let _rendezvous_tasks = attach_test_rendezvous_manager(effects.as_ref(), receiver_id).await;
+        cache_test_peer_descriptor(
+            effects.as_ref(),
+            receiver_id,
+            sender_id,
+            "tcp://127.0.0.1:55115",
+            1_700_000_000_000,
+        )
+        .await;
+
+        let invitation_id = InvitationId::new("inv-materialize-home-context");
+        let custom_context = ContextId::new_from_entropy([55u8; 32]);
+        let home_id = canonical_home_id(15);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: Some(custom_context),
+            invitation_type: InvitationType::Channel {
+                home_id,
+                nickname_suggestion: Some("Birch House".to_string()),
+                bootstrap: None,
+                home: true,
+            },
+            expires_at: None,
+            message: Some("Join Birch House".to_string()),
+        };
+
+        let imported = handler
+            .import_invitation_code(
+                effects.as_ref(),
+                &shareable
+                    .to_code()
+                    .expect("shareable invitation should serialize"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(imported.context_id, custom_context);
+        assert_ne!(
+            imported.context_id,
+            default_context_id_for_authority(sender_id),
+            "custom context must override sender default context"
+        );
+
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let expected_channel = home_id;
+        let committed = effects.load_committed_facts(receiver_id).await.unwrap();
+        let found_channel_fact = committed.iter().any(|fact| {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                return false;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                return false;
+            }
+            matches!(
+                ChatFact::from_envelope(envelope),
+                Some(ChatFact::ChannelCreated {
+                    context_id,
+                    channel_id,
+                    ..
+                }) if context_id == custom_context && channel_id == expected_channel
+            )
+        });
+        assert!(
+            found_channel_fact,
+            "expected ChannelCreated fact to use shareable context id"
+        );
+
+        use aura_effects::ReactiveEffects;
+        let homes: HomesState = effects
+            .reactive_handler()
+            .read(&*HOMES_SIGNAL)
+            .await
+            .unwrap();
+        let home = homes
+            .home_state(&expected_channel)
+            .expect("accepted invitation should materialize home state");
+        assert_eq!(home.context_id, Some(custom_context));
+    }
+);
+
+large_stack_async_test!(
+    imported_invitation_is_resolvable_across_handler_instances,
+    {
+        let pair = contact_pair(122).await;
+        let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+        // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
+        pair.accept_via(&handler_for_id(own_authority), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let committed = pair
+            .receiver_effects
+            .load_committed_facts(own_authority)
+            .await
+            .unwrap();
+
+        let mut found = None::<ContactFact>;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            found = ContactFact::from_envelope(&envelope);
         }
 
-        found = ContactFact::from_envelope(&envelope);
-    }
-
-    let fact = found.expect("expected a committed ContactFact");
-    match fact {
-        ContactFact::Added { contact_id, .. } => {
-            assert_eq!(contact_id, sender_id);
+        let fact = found.expect("expected a committed ContactFact");
+        match fact {
+            ContactFact::Added { contact_id, .. } => {
+                assert_eq!(contact_id, sender_id);
+            }
+            other => panic!("Expected ContactFact::Added, got {:?}", other),
         }
-        other => panic!("Expected ContactFact::Added, got {:?}", other),
     }
-});
+);
 
 #[tokio::test]
 async fn imported_channel_invitation_preserves_authoritative_context_for_choreography() {
@@ -3338,23 +3547,26 @@ async fn created_invitation_is_retrievable_across_handler_instances() {
     assert_eq!(retrieved.sender_id, own_authority);
 }
 
-large_stack_async_test!(accepted_imported_invitation_persists_status_across_handler_instances, {
-    let pair = contact_pair(252).await;
-    let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
-    pair.accept_with_responding_inviter(&imported.invitation_id)
-        .await
-        .expect("confirmed contact invitation accept should persist imported status");
+large_stack_async_test!(
+    accepted_imported_invitation_persists_status_across_handler_instances,
+    {
+        let pair = contact_pair(252).await;
+        let (own_authority, sender_id) = (pair.receiver_id, pair.sender_id);
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
+        pair.accept_with_responding_inviter(&imported.invitation_id)
+            .await
+            .expect("confirmed contact invitation accept should persist imported status");
 
-    let retrieved = handler_for_id(own_authority)
-        .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
-        .await
-        .expect("accepted imported invitation should remain available");
-    assert_eq!(retrieved.status, InvitationStatus::Accepted);
-    assert_eq!(retrieved.sender_id, sender_id);
-    assert_eq!(retrieved.receiver_id, own_authority);
-});
+        let retrieved = handler_for_id(own_authority)
+            .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
+            .await
+            .expect("accepted imported invitation should remain available");
+        assert_eq!(retrieved.status, InvitationStatus::Accepted);
+        assert_eq!(retrieved.sender_id, sender_id);
+        assert_eq!(retrieved.receiver_id, own_authority);
+    }
+);
 
 large_stack_async_test!(invitation_can_be_cancelled, {
     let authority_context = create_test_authority(98);
@@ -3738,8 +3950,11 @@ async fn device_enrollment_imported_cache_redacts_regular_storage_and_restores_s
         expires_at: invitation.expires_at,
         message: invitation.message.clone(),
     };
-    let imported =
-        StoredImportedInvitation::pending(shareable, invitation.created_at, ImportedSenderTrust::SelfCertified);
+    let imported = StoredImportedInvitation::pending(
+        shareable,
+        invitation.created_at,
+        ImportedSenderTrust::SelfCertified,
+    );
 
     InvitationCacheHandler::persist_imported_invitation(
         effects.as_ref(),
@@ -3810,164 +4025,294 @@ fn device_enrollment_test_invitation(
 }
 
 /// Build real runtimes and retain a setup pin before verifying remote evidence.
-pub(crate) async fn actual_pinned_device_enrollment_fixture(label: &str) -> (
-    Arc<crate::AuraAgent>, Arc<crate::AuraAgent>, Invitation,
-    aura_app::runtime_bridge::DeviceEnrollmentStart, DeviceEnrollmentAccept,
+type ActualDeviceEnrollmentFixture = (
+    Arc<crate::AuraAgent>,
+    Arc<crate::AuraAgent>,
+    Invitation,
+    aura_app::runtime_bridge::DeviceEnrollmentStart,
+    DeviceEnrollmentAccept,
     super::VerifiedEnrollmentResponse,
-) {
-    use aura_app::runtime_bridge::RuntimeBridge;
-    use crate::runtime_bridge::AgentRuntimeBridge;
+);
+
+pub(crate) fn actual_pinned_device_enrollment_fixture(
+    label: &str,
+) -> impl std::future::Future<Output = ActualDeviceEnrollmentFixture> + '_ {
+    Box::pin(actual_pinned_device_enrollment_fixture_owned(
+        label, None, None,
+    ))
+}
+
+pub(crate) fn actual_pinned_device_enrollment_fixture_with_clock(
+    label: &str,
+    clock: Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+) -> impl std::future::Future<Output = ActualDeviceEnrollmentFixture> + '_ {
+    Box::pin(actual_pinned_device_enrollment_fixture_owned(
+        label,
+        Some(clock),
+        None,
+    ))
+}
+
+async fn actual_pinned_device_enrollment_fixture_owned(
+    label: &str,
+    clock: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>>,
+    transport: Option<crate::SharedTransport>,
+) -> ActualDeviceEnrollmentFixture {
     use crate::runtime::EffectSystemBuilder;
-    let transport = crate::SharedTransport::new();
+    use crate::runtime_bridge::AgentRuntimeBridge;
+    use aura_app::runtime_bridge::RuntimeBridge;
+    let transport = transport.unwrap_or_default();
     let mut agents = Vec::new();
     for seed in [151u8, 154u8] {
         let authority = AuthorityId::new_from_entropy([seed; 32]);
         let config = AgentConfig {
             device_id: DeviceId::new_from_entropy([seed + 1; 32]),
             storage: StorageConfig {
-                base_path: tempfile::Builder::new().prefix(&format!("aura-actual-enrollment-{label}-{seed}-")).tempdir().expect("actual enrollment storage root").keep(),
+                base_path: tempfile::Builder::new()
+                    .prefix(&format!("aura-actual-enrollment-{label}-{seed}-"))
+                    .tempdir()
+                    .expect("actual enrollment storage root")
+                    .keep(),
                 ..Default::default()
             },
             ..Default::default()
         };
-        let context = aura_core::context::EffectContext::new(authority,
-            ContextId::new_from_entropy([seed + 2; 32]), aura_core::effects::ExecutionMode::Testing);
-        let runtime = EffectSystemBuilder::testing()
+        let context = aura_core::context::EffectContext::new(
+            authority,
+            ContextId::new_from_entropy([seed + 2; 32]),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        eprintln!("enrollment fixture {label}: build runtime");
+        let builder = EffectSystemBuilder::testing_with_owned_profile(
+            crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+                .expect("actual isolated selected profile custody"),
+        );
+        let builder = builder
             .with_authority(authority)
             .with_config(config)
-            .with_shared_transport(transport.clone())
+            .with_shared_transport(transport.clone());
+        let builder = match &clock {
+            Some(clock) => builder.with_physical_time_provider(clock.clone()),
+            None => builder,
+        };
+        let runtime = builder
             .build(&context)
             .await
             .expect("actual connected runtime");
         let agent = Arc::new(crate::AuraAgent::new(runtime, authority));
-        AgentRuntimeBridge::new(agent.clone()).bootstrap_signing_keys().await.expect("actual signing bootstrap");
+        eprintln!("enrollment fixture {label}: bootstrap signing");
+        AgentRuntimeBridge::new(agent.clone())
+            .bootstrap_signing_keys()
+            .await
+            .expect("actual signing bootstrap");
         agents.push(agent);
     }
     let initiator = agents[0].clone();
     let invitee = agents[1].clone();
-    let code = AgentRuntimeBridge::new(invitee.clone()).export_device_enrollment_setup_request().await.unwrap();
-    let app = Arc::new(async_lock::RwLock::new(aura_app::AppCore::with_runtime(
-        aura_app::AppConfig::default(), Arc::new(AgentRuntimeBridge::new(initiator.clone())),
-    ).unwrap()));
-    let pin = aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(&app, code).await.unwrap();
-    let start = AgentRuntimeBridge::new(initiator.clone()).initiate_device_enrollment_ceremony("Actual device".to_string(), pin).await.unwrap();
+    eprintln!("enrollment fixture {label}: export invitee setup");
+    let code = AgentRuntimeBridge::new(invitee.clone())
+        .export_device_enrollment_setup_request()
+        .await
+        .unwrap();
+    let app = Arc::new(async_lock::RwLock::new(
+        aura_app::AppCore::with_runtime(
+            aura_app::AppConfig::default(),
+            Arc::new(AgentRuntimeBridge::new(initiator.clone())),
+        )
+        .unwrap(),
+    ));
+    eprintln!("enrollment fixture {label}: pin setup");
+    let pin = aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+        &app, code,
+    )
+    .await
+    .unwrap();
+    eprintln!("enrollment fixture {label}: initiate actual enrollment");
+    let start = AgentRuntimeBridge::new(initiator.clone())
+        .initiate_device_enrollment_ceremony("Actual device".to_string(), pin)
+        .await
+        .unwrap();
     let decoded = ShareableInvitation::from_code(&start.enrollment_code).unwrap();
-    let invitation = initiator.invitations().unwrap().get(&decoded.invitation_id).await.unwrap();
-    assert!(!initiator.runtime().effects().export_tree_ops().await.expect("actual committed genesis baseline").is_empty(),
-        "fresh issuer bootstrap must commit baseline before manifest export");
-    let transfer = start.manifest_transfer.as_ref().expect("actual issuer exports manifest transfer");
-    let invitee_app = Arc::new(async_lock::RwLock::new(aura_app::AppCore::with_runtime(
-        aura_app::AppConfig::default(), Arc::new(AgentRuntimeBridge::new(invitee.clone())),
-    ).unwrap()));
-    let selected_manifest = aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
-        &invitee_app, transfer.manifest_code.clone(), transfer.initiator_verifier_code.clone(),
-    ).await.expect("explicit actual initiator transfer verifies");
-    AgentRuntimeBridge::new(invitee.clone()).import_enrollment_invitation(
-        &start.enrollment_code, selected_manifest,
-    ).await.expect("actual transferred manifest admitted before import");
+    let invitation = initiator
+        .invitations()
+        .unwrap()
+        .get(&decoded.invitation_id)
+        .await
+        .unwrap();
+    assert!(
+        !initiator
+            .runtime()
+            .effects()
+            .export_tree_ops()
+            .await
+            .expect("actual committed genesis baseline")
+            .is_empty(),
+        "fresh issuer bootstrap must commit baseline before manifest export"
+    );
+    let transfer = start
+        .manifest_transfer
+        .as_ref()
+        .expect("actual issuer exports manifest transfer");
+    let invitee_app = Arc::new(async_lock::RwLock::new(
+        aura_app::AppCore::with_runtime(
+            aura_app::AppConfig::default(),
+            Arc::new(AgentRuntimeBridge::new(invitee.clone())),
+        )
+        .unwrap(),
+    ));
+    eprintln!("enrollment fixture {label}: pin original manifest");
+    let selected_manifest =
+        aura_app::ui::workflows::ceremonies::pin_user_transferred_enrollment_manifest(
+            &invitee_app,
+            transfer.manifest_code.clone(),
+            transfer.initiator_verifier_code.clone(),
+        )
+        .await
+        .expect("explicit actual initiator transfer verifies");
+    eprintln!("enrollment fixture {label}: import actual enrollment");
+    AgentRuntimeBridge::new(invitee.clone())
+        .import_enrollment_invitation(&start.enrollment_code, selected_manifest)
+        .await
+        .expect("actual transferred manifest admitted before import");
+    eprintln!("enrollment fixture {label}: load admitted original baseline");
     let admitted = super::enrollment_manifest_admission::load_admitted_baseline(
-        invitee.runtime().effects().as_ref(), invitee.authority_id(), &invitation,
-    ).await.expect("actual runtime admission witness");
+        invitee.runtime().effects().as_ref(),
+        invitee.authority_id(),
+        &invitation,
+    )
+    .await
+    .expect("actual runtime admission witness");
     let manifest_digest = admitted.manifest_digest();
     let transcript = DeviceEnrollmentAcceptanceTranscript {
-        invitation: &invitation, acceptor_id: invitee.authority_id(), subject_authority: initiator.authority_id(),
-        ceremony_id: start.ceremony_id.clone(), device_id: start.device_id,
+        invitation: &invitation,
+        acceptor_id: invitee.authority_id(),
+        subject_authority: initiator.authority_id(),
+        ceremony_id: start.ceremony_id.clone(),
+        device_id: start.device_id,
         manifest_digest,
     };
+    eprintln!("enrollment fixture {label}: sign exact acceptance");
     let accept = DeviceEnrollmentAccept {
-        invitation_id: invitation.invitation_id.clone(), ceremony_id: start.ceremony_id.clone(), device_id: start.device_id,
+        invitation_id: invitation.invitation_id.clone(),
+        ceremony_id: start.ceremony_id.clone(),
+        device_id: start.device_id,
         acceptor_id: invitee.authority_id(),
         manifest_digest: Some(manifest_digest),
-        signature: sign_invitation_acceptance_transcript(invitee.runtime().effects().as_ref(), invitee.authority_id(), &transcript).await.unwrap(),
+        signature: sign_invitation_acceptance_transcript(
+            invitee.runtime().effects().as_ref(),
+            invitee.authority_id(),
+            &transcript,
+        )
+        .await
+        .unwrap(),
     };
+    eprintln!("enrollment fixture {label}: verify exact acceptance");
     let verified = super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator.runtime().effects().as_ref(), &invitation, initiator.authority_id(),
-        &start.ceremony_id, start.device_id, &accept,
-    ).await.expect("actual retained setup verifies exact remote proof");
+        initiator.runtime().effects().as_ref(),
+        &invitation,
+        initiator.authority_id(),
+        &start.ceremony_id,
+        start.device_id,
+        &accept,
+    )
+    .await
+    .expect("actual retained setup verifies exact remote proof");
+    eprintln!("enrollment fixture {label}: fixture complete");
     (initiator, invitee, invitation, start, accept, verified)
 }
 
 // Regression: device enrollment is accepted only with a valid signature from
 // the invited authority over this exact enrollment.
-large_stack_async_test!(device_enrollment_acceptance_requires_signed_transcript_from_invitee, {
-    let (initiator, _invitee, invitation, start, accept, _verified) =
-        actual_pinned_device_enrollment_fixture("signature-binding").await;
-    let initiator_effects = initiator.runtime().effects();
-    let device_id = start.device_id;
-    let ceremony_id = start.ceremony_id;
+large_stack_async_test!(
+    device_enrollment_acceptance_requires_signed_transcript_from_invitee,
+    {
+        let (initiator, _invitee, invitation, start, accept, _verified) =
+            actual_pinned_device_enrollment_fixture("signature-binding").await;
+        let initiator_effects = initiator.runtime().effects();
+        let device_id = start.device_id;
+        let ceremony_id = start.ceremony_id;
 
-    // Valid signed acceptance verifies.
-    super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator_effects.as_ref(),
-        &invitation,
-        initiator.authority_id(),
-        &ceremony_id,
-        device_id,
-        &accept,
-    )
-    .await
-    .expect("valid signed acceptance should verify");
+        // Valid signed acceptance verifies.
+        super::device_enrollment::verify_device_enrollment_acceptance(
+            initiator_effects.as_ref(),
+            &invitation,
+            initiator.authority_id(),
+            &ceremony_id,
+            device_id,
+            &accept,
+        )
+        .await
+        .expect("valid signed acceptance should verify");
 
-    // Forged: a different authority claims the acceptance.
-    let mut forged = accept.clone();
-    forged.acceptor_id = AuthorityId::new_from_entropy([200u8; 32]);
-    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator_effects.as_ref(),
-        &invitation,
-        initiator.authority_id(),
-        &ceremony_id,
-        device_id,
-        &forged,
-    )
-    .await
-    .is_err());
+        // Forged: a different authority claims the acceptance.
+        let mut forged = accept.clone();
+        forged.acceptor_id = AuthorityId::new_from_entropy([200u8; 32]);
+        assert!(
+            super::device_enrollment::verify_device_enrollment_acceptance(
+                initiator_effects.as_ref(),
+                &invitation,
+                initiator.authority_id(),
+                &ceremony_id,
+                device_id,
+                &forged,
+            )
+            .await
+            .is_err()
+        );
 
-    // Tampered: acceptance names a different device.
-    let mut tampered = accept.clone();
-    tampered.device_id = DeviceId::new_from_entropy([201u8; 32]);
-    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator_effects.as_ref(),
-        &invitation,
-        initiator.authority_id(),
-        &ceremony_id,
-        device_id,
-        &tampered,
-    )
-    .await
-    .is_err());
+        // Tampered: acceptance names a different device.
+        let mut tampered = accept.clone();
+        tampered.device_id = DeviceId::new_from_entropy([201u8; 32]);
+        assert!(
+            super::device_enrollment::verify_device_enrollment_acceptance(
+                initiator_effects.as_ref(),
+                &invitation,
+                initiator.authority_id(),
+                &ceremony_id,
+                device_id,
+                &tampered,
+            )
+            .await
+            .is_err()
+        );
 
-    // Replay: the same acceptance presented for a different invitation.
-    let mut other_invitation = invitation.clone();
-    other_invitation.invitation_id = InvitationId::new("inv-device-enrollment-other");
-    let mut replayed = accept.clone();
-    replayed.invitation_id = other_invitation.invitation_id.clone();
-    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator_effects.as_ref(),
-        &other_invitation,
-        initiator.authority_id(),
-        &ceremony_id,
-        device_id,
-        &replayed,
-    )
-    .await
-    .is_err());
+        // Replay: the same acceptance presented for a different invitation.
+        let mut other_invitation = invitation.clone();
+        other_invitation.invitation_id = InvitationId::new("inv-device-enrollment-other");
+        let mut replayed = accept.clone();
+        replayed.invitation_id = other_invitation.invitation_id.clone();
+        assert!(
+            super::device_enrollment::verify_device_enrollment_acceptance(
+                initiator_effects.as_ref(),
+                &other_invitation,
+                initiator.authority_id(),
+                &ceremony_id,
+                device_id,
+                &replayed,
+            )
+            .await
+            .is_err()
+        );
 
-    // Tampered signature bytes.
-    let mut bad_sig = accept;
-    if let Some(byte) = bad_sig.signature.signature.first_mut() {
-        *byte ^= 0x01;
+        // Tampered signature bytes.
+        let mut bad_sig = accept;
+        if let Some(byte) = bad_sig.signature.signature.first_mut() {
+            *byte ^= 0x01;
+        }
+        assert!(
+            super::device_enrollment::verify_device_enrollment_acceptance(
+                initiator_effects.as_ref(),
+                &invitation,
+                initiator.authority_id(),
+                &ceremony_id,
+                device_id,
+                &bad_sig,
+            )
+            .await
+            .is_err()
+        );
     }
-    assert!(super::device_enrollment::verify_device_enrollment_acceptance(
-        initiator_effects.as_ref(),
-        &invitation,
-        initiator.authority_id(),
-        &ceremony_id,
-        device_id,
-        &bad_sig,
-    )
-    .await
-    .is_err());
-});
+);
 
 #[test]
 fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
@@ -4249,7 +4594,9 @@ async fn production_sender_proof_validation_is_harness_mode_neutral() {
         key_epoch: Some(1),
     };
 
-    let code = shareable.to_signed_code_with_transport(proof, transport).unwrap();
+    let code = shareable
+        .to_signed_code_with_transport(proof, transport)
+        .unwrap();
     ValidatedImportedInvitation::verify_code(
         baseline_effects.as_ref(),
         &code,
@@ -4614,11 +4961,10 @@ async fn production_import_rejects_tampered_signed_invitation_type() {
     let mut parts: Vec<&str> = code.split(':').collect();
     let mut envelope: serde_json::Value =
         serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[2]).unwrap()).unwrap();
-    envelope["payload"]["invitation_type"] =
-        serde_json::to_value(InvitationType::Guardian {
-            subject_authority: AuthorityId::new_from_entropy([247u8; 32]),
-        })
-        .unwrap();
+    envelope["payload"]["invitation_type"] = serde_json::to_value(InvitationType::Guardian {
+        subject_authority: AuthorityId::new_from_entropy([247u8; 32]),
+    })
+    .unwrap();
     let tampered_json = serde_json::to_vec(&envelope).unwrap();
     let tampered_payload = URL_SAFE_NO_PAD.encode(tampered_json);
     parts[2] = &tampered_payload;
@@ -4698,9 +5044,8 @@ async fn production_import_rejects_signed_channel_replay_against_another_context
 
 #[test]
 fn sender_hint_list_yields_every_transport_type() {
-    let hints = InvitationHandler::transport_hints_from_sender_hint(
-        "tcp://127.0.0.1:1,ws://127.0.0.1:2",
-    );
+    let hints =
+        InvitationHandler::transport_hints_from_sender_hint("tcp://127.0.0.1:1,ws://127.0.0.1:2");
     assert_eq!(hints.len(), 2);
     assert!(matches!(hints[0], TransportHint::TcpDirect { .. }));
     assert!(matches!(hints[1], TransportHint::WebSocketDirect { .. }));
@@ -4848,7 +5193,9 @@ fn shareable_invitation_rejects_many_colon_segments() {
     };
     let code = format!(
         "{}:too:many:segments",
-        shareable.to_code().expect("shareable invitation should serialize")
+        shareable
+            .to_code()
+            .expect("shareable invitation should serialize")
     );
 
     assert_eq!(
@@ -4873,7 +5220,9 @@ fn shareable_invitation_rejects_oversized_sender_hint_segment() {
     };
     let code = format!(
         "{}:{}:{}",
-        shareable.to_code().expect("shareable invitation should serialize"),
+        shareable
+            .to_code()
+            .expect("shareable invitation should serialize"),
         URL_SAFE_NO_PAD.encode("x".repeat(ShareableInvitation::MAX_SENDER_HINT_BYTES + 1)),
         URL_SAFE_NO_PAD.encode(sender_device_id.to_string())
     );
@@ -4900,8 +5249,8 @@ fn shareable_invitation_accepts_max_size_message() {
     let code = shareable
         .to_code()
         .expect("max-size shareable invitation should serialize");
-    let decoded = ShareableInvitation::from_code(&code)
-        .expect("max-size shareable invitation should parse");
+    let decoded =
+        ShareableInvitation::from_code(&code).expect("max-size shareable invitation should parse");
 
     assert_eq!(decoded.message, shareable.message);
     assert_eq!(decoded.invitation_id, shareable.invitation_id);
@@ -4950,7 +5299,9 @@ large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
 
     // Import and accept Alice's invitation
     let alice_invitation = alice.create_contact_invitation().await;
-    let alice_imported = alice.import(&alice.signed_code(&alice_invitation).await).await;
+    let alice_imported = alice
+        .import(&alice.signed_code(&alice_invitation).await)
+        .await;
     assert_eq!(alice_imported.sender_id, alice_sender_id);
     alice
         .accept_with_responding_inviter(&alice_imported.invitation_id)
@@ -4959,7 +5310,9 @@ large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
 
     // Import and accept Carol's invitation (this is the step that was failing in TUI)
     let carol_invitation = carol.create_contact_invitation().await;
-    let carol_imported = carol.import(&carol.signed_code(&carol_invitation).await).await;
+    let carol_imported = carol
+        .import(&carol.signed_code(&carol_invitation).await)
+        .await;
     assert_eq!(carol_imported.sender_id, carol_sender_id);
 
     // This is the critical assertion - Carol's accept should work after Alice's
@@ -4977,8 +5330,7 @@ large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
 
     let mut contact_facts: Vec<ContactFact> = Vec::new();
     for fact in committed {
-        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
-        else {
+        let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content else {
             continue;
         };
 
@@ -5077,33 +5429,74 @@ async fn guardian_acceptance_records_verified_recovery_key() {
     let guardian = create_test_authority(182);
     let principal_effects = effects_for(&principal);
     let guardian_effects = effects_for(&guardian);
-    let mut invitation = device_enrollment_test_invitation(
-        "inv-guardian-signed",
-        principal.authority_id(),
-        guardian.authority_id(),
-        guardian.device_id(),
-    );
-    invitation.invitation_type = InvitationType::Guardian {
-        subject_authority: principal.authority_id(),
-    };
+    let principal_handler = handler_for(principal.clone());
+    install_full_invitation_biscuit_cache(&principal_effects, principal.authority_id());
+    bootstrap_test_signing_authority(&principal_effects, principal.authority_id()).await;
+    let invitation = principal_handler
+        .create_invitation(
+            principal_effects.clone(),
+            guardian.authority_id(),
+            InvitationType::Guardian {
+                subject_authority: principal.authority_id(),
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("actual owned Guardian invitation");
+    let sender = principal_handler
+        .created_invitation_required(principal_effects.clone(), &invitation.invitation_id)
+        .await
+        .expect("actual original sender record");
+    let issued = super::issued_identity::load_original_identity(sender)
+        .await
+        .expect("actual original issuer custody");
+    let invitation = issued.invitation();
+    let original_sender_key = issued.public_key();
 
     let (private_key, public_key) = guardian_effects.ed25519_generate_keypair().await.unwrap();
     let transcript = super::guardian::GuardianInvitationAcceptanceTranscript {
-        invitation: &invitation,
+        invitation,
         guardian: guardian.authority_id(),
         recovery_public_key: &public_key,
-        invitation_sender_proof_key: &[7; 32],
+        invitation_sender_proof_key: &original_sender_key,
     };
-    let signature =
-        aura_signature::sign_ed25519_transcript(guardian_effects.as_ref(), &transcript, &private_key)
-            .await
-            .unwrap();
+    let signature = aura_signature::sign_ed25519_transcript(
+        guardian_effects.as_ref(),
+        &transcript,
+        &private_key,
+    )
+    .await
+    .unwrap();
     let accept = GuardianAccept {
         invitation_id: invitation.invitation_id.clone(),
         signature,
         recovery_public_key: public_key.clone(),
-        invitation_sender_proof_key: vec![7; 32],
+        invitation_sender_proof_key: original_sender_key.to_vec(),
     };
+
+    assert!(
+        super::guardian::verify_and_record_guardian_acceptance(
+            guardian_effects.as_ref(),
+            &issued,
+            &accept,
+        )
+        .await
+        .is_err(),
+        "a genuine owner cannot be used by a foreign runtime"
+    );
+    let mut foreign_issuer_key = accept.clone();
+    foreign_issuer_key.invitation_sender_proof_key = vec![7; 32];
+    assert!(
+        super::guardian::verify_and_record_guardian_acceptance(
+            principal_effects.as_ref(),
+            &issued,
+            &foreign_issuer_key,
+        )
+        .await
+        .is_err(),
+        "a response cannot substitute the original issuer key"
+    );
 
     // A substituted key is rejected and nothing is stored.
     let (_, other_key) = guardian_effects.ed25519_generate_keypair().await.unwrap();
@@ -5111,18 +5504,23 @@ async fn guardian_acceptance_records_verified_recovery_key() {
     swapped.recovery_public_key = other_key;
     assert!(super::guardian::verify_and_record_guardian_acceptance(
         principal_effects.as_ref(),
-        &invitation,
+        &issued,
         &swapped,
     )
     .await
     .is_err());
-    let key_path = crate::handlers::recovery_guardian_public_key_storage_key(guardian.authority_id());
-    assert!(principal_effects.retrieve(&key_path).await.unwrap().is_none());
+    let key_path =
+        crate::handlers::recovery_guardian_public_key_storage_key(guardian.authority_id());
+    assert!(principal_effects
+        .retrieve(&key_path)
+        .await
+        .unwrap()
+        .is_none());
 
     // The genuine acceptance is recorded for guardian setup.
     super::guardian::verify_and_record_guardian_acceptance(
         principal_effects.as_ref(),
-        &invitation,
+        &issued,
         &accept,
     )
     .await
@@ -5164,39 +5562,47 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
         principal_id,
         principal_device,
     ));
-    let guardian_handler =
-        handler_for(AuthorityContext::new_with_device(guardian_id, guardian_device));
-
-    let mut invitation = device_enrollment_test_invitation(
-        "inv-guardian-cross-runtime",
-        principal_id,
+    let guardian_handler = handler_for(AuthorityContext::new_with_device(
         guardian_id,
         guardian_device,
-    );
-    invitation.invitation_type = InvitationType::Guardian {
-        subject_authority: principal_id,
-    };
-    invitation.expires_at = None;
+    ));
 
     bootstrap_test_signing_authority(&principal_effects, principal_id).await;
-    let code = crate::handlers::invitation_service::InvitationServiceApi::export_signed_invitation_with_transport(
-        principal_effects.as_ref(),
-        &invitation,
+    let invitation = principal_handler
+        .create_invitation(
+            principal_effects.clone(),
+            guardian_id,
+            InvitationType::Guardian {
+                subject_authority: principal_id,
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("actual owned guard-created guardian invitation");
+    let sender = principal_handler
+        .created_invitation_required(principal_effects.clone(), &invitation.invitation_id)
+        .await
+        .expect("actual original sender record");
+    let code = super::issued_identity::export_owned_invitation_code(
+        super::issued_identity::load_original_identity(sender)
+            .await
+            .expect("actual original issuer"),
         &ShareableInvitationTransportMetadata {
             sender_device_id: Some(principal_device),
-            ..ShareableInvitationTransportMetadata::default()
+            ..Default::default()
         },
-        false,
     )
     .await
-    .expect("guardian invitation must carry sender proof");
+    .expect("actual original guardian issuer proof");
     guardian_handler
         .import_invitation_code(&guardian_effects, &code)
         .await
         .expect("guardian imports authenticated invitation");
 
     let (principal_result, guardian_result) = tokio::join!(
-        principal_handler.execute_guardian_invitation_principal(principal_effects.clone(), &invitation),
+        principal_handler
+            .execute_guardian_invitation_principal(principal_effects.clone(), &invitation),
         async {
             tokio::time::sleep(guardian_delay).await;
             guardian_handler
@@ -5209,12 +5615,18 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
 
     let key_path = crate::handlers::recovery_guardian_public_key_storage_key(guardian_id);
     assert!(
-        principal_effects.retrieve(&key_path).await.unwrap().is_some(),
+        principal_effects
+            .retrieve(&key_path)
+            .await
+            .unwrap()
+            .is_some(),
         "principal records the guardian recovery key"
     );
     assert!(
         guardian_effects
-            .retrieve(&super::guardian_confirmation_storage_key(&invitation.invitation_id))
+            .retrieve(&super::guardian_confirmation_storage_key(
+                &invitation.invitation_id
+            ))
             .await
             .unwrap()
             .is_some(),
@@ -5222,29 +5634,37 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
     );
 }
 
-large_stack_async_test!(guardian_choreography_completes_when_guardian_accepts_late, {
-    // Longer than one principal receive window, as when a person accepts later.
-    run_guardian_choreography(191, std::time::Duration::from_millis(6_000)).await;
-});
+large_stack_async_test!(
+    guardian_choreography_completes_when_guardian_accepts_late,
+    {
+        // Longer than one principal receive window, as when a person accepts later.
+        run_guardian_choreography(191, std::time::Duration::from_millis(6_000)).await;
+    }
+);
 
 // Regression (work/8.md task 7): the new device re-imports the enrollment code
 // after its runtime switches to the subject authority; the invitation must
 // still name the authority that was invited, or the initiator rejects the
 // signed acceptance.
 large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
-let (_issuer,invitee,invitation,start,_accept,_witness)=Box::pin(
-    actual_pinned_device_enrollment_fixture("reimport-after-switch"),
-).await;
-let invited=invitation.receiver_id;
-// Recreate the importing handler under the subject context on the same
-// actual device/storage. Original admitted provisional identity remains
-// the authoritative receiver; no raw code can supply replacement trust.
-let handler=handler_for(AuthorityContext::new_with_device(invitation.sender_id,invitee.context().device_id()));
-let imported=handler.import_invitation_code(invitee.runtime().effects().as_ref(),&start.enrollment_code)
-    .await.expect("actual independently admitted code reimports under subject handler context");
-assert_eq!(imported.receiver_id,invited);
-assert_eq!(imported.invitation_type,invitation.invitation_type);
-
+    let (_issuer, invitee, invitation, start, _accept, _witness) = Box::pin(
+        actual_pinned_device_enrollment_fixture("reimport-after-switch"),
+    )
+    .await;
+    let invited = invitation.receiver_id;
+    // Recreate the importing handler under the subject context on the same
+    // actual device/storage. Original admitted provisional identity remains
+    // the authoritative receiver; no raw code can supply replacement trust.
+    let handler = handler_for(AuthorityContext::new_with_device(
+        invitation.sender_id,
+        invitee.context().device_id(),
+    ));
+    let imported = handler
+        .import_invitation_code(invitee.runtime().effects().as_ref(), &start.enrollment_code)
+        .await
+        .expect("actual independently admitted code reimports under subject handler context");
+    assert_eq!(imported.receiver_id, invited);
+    assert_eq!(imported.invitation_type, invitation.invitation_type);
 });
 
 // Regression (work/8.md task 32): listing invitations re-caches persisted
@@ -5314,11 +5734,19 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
             .count()
     };
     let sender_before = contacts_added(
-        &pair.sender_effects.load_committed_facts(sender_id).await.unwrap(),
+        &pair
+            .sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap(),
         sender_id,
     );
     let receiver_before = contacts_added(
-        &pair.receiver_effects.load_committed_facts(receiver_id).await.unwrap(),
+        &pair
+            .receiver_effects
+            .load_committed_facts(receiver_id)
+            .await
+            .unwrap(),
         receiver_id,
     );
 
@@ -5332,20 +5760,36 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
         .await
         .expect_err("accepting a revoked invitation must fail");
     assert!(
-        error.to_string().contains("revoked this contact invitation"),
+        error
+            .to_string()
+            .contains("revoked this contact invitation"),
         "expected a typed revocation failure, got: {error}"
     );
 
     let sender_after = contacts_added(
-        &pair.sender_effects.load_committed_facts(sender_id).await.unwrap(),
+        &pair
+            .sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap(),
         sender_id,
     );
     let receiver_after = contacts_added(
-        &pair.receiver_effects.load_committed_facts(receiver_id).await.unwrap(),
+        &pair
+            .receiver_effects
+            .load_committed_facts(receiver_id)
+            .await
+            .unwrap(),
         receiver_id,
     );
-    assert_eq!(sender_after, sender_before, "a revoked invitation must not add a contact for the sender");
-    assert_eq!(receiver_after, receiver_before, "a revoked invitation must not add a contact for the invitee");
+    assert_eq!(
+        sender_after, sender_before,
+        "a revoked invitation must not add a contact for the sender"
+    );
+    assert_eq!(
+        receiver_after, receiver_before,
+        "a revoked invitation must not add a contact for the invitee"
+    );
     let settled = pair
         .receiver_handler
         .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
@@ -5354,166 +5798,222 @@ large_stack_async_test!(revoked_contact_invitation_acceptance_adds_no_contact, {
     assert_eq!(settled.status, InvitationStatus::Cancelled);
 });
 
-large_stack_async_test!(unanswered_contact_acceptance_fails_typed_and_stays_pending, {
-    let pair = contact_pair(54).await;
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+large_stack_async_test!(
+    unanswered_contact_acceptance_fails_typed_and_stays_pending,
+    {
+        let pair = contact_pair(54).await;
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
-    // No inviter processes the acceptance.
-    let error = timeout(
-        Duration::from_secs(90),
-        Box::pin(
-            pair.receiver_handler
-                .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
-        ),
-    )
-    .await
-    .expect("the confirmation wait must be bounded")
-    .expect_err("an unanswered acceptance must not succeed");
-    assert!(
-        error.to_string().contains("did not confirm this contact invitation"),
-        "expected a typed unconfirmed failure, got: {error}"
-    );
-
-    let stored = pair
-        .receiver_handler
-        .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
+        // No inviter processes the acceptance.
+        let error = timeout(
+            Duration::from_secs(90),
+            Box::pin(
+                pair.receiver_handler
+                    .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
+            ),
+        )
         .await
-        .expect("imported invitation should remain readable");
-    assert_eq!(stored.status, InvitationStatus::Pending);
-});
+        .expect("the confirmation wait must be bounded")
+        .expect_err("an unanswered acceptance must not succeed");
+        assert!(
+            error
+                .to_string()
+                .contains("did not confirm this contact invitation"),
+            "expected a typed unconfirmed failure, got: {error}"
+        );
 
-large_stack_async_test!(invitee_applies_only_authentic_responses_to_its_pending_acceptance, {
-    use super::contact_confirmation::{
-        contact_acceptance_digest, ContactInvitationDecision, ContactInvitationResponse,
-        ContactInvitationResponseTranscript, CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
-    };
-
-    let pair = contact_pair(56).await;
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
-
-    // The invitee is awaiting a response to this acceptance.
-    let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
-    let mut stored = InvitationHandler::load_imported_invitation(
-        pair.receiver_effects.as_ref(),
-        pair.receiver_id,
-        &imported.invitation_id,
-        None,
-    )
-    .await
-    .expect("imported invitation should be stored");
-    stored.pending_acceptance_digest = Some(acceptance_digest);
-    InvitationHandler::persist_imported_invitation(
-        pair.receiver_effects.as_ref(),
-        pair.receiver_id,
-        &stored,
-    )
-    .await
-    .unwrap();
-
-    let (inviter_key, _) = crate::handlers::rendezvous_identity::retrieve_identity_keys(
-        pair.sender_effects.as_ref(),
-        &pair.sender_id,
-    )
-    .await
-    .expect("inviter identity keys should exist");
-    let (forger_key, _) = pair.sender_effects.ed25519_generate_keypair().await.unwrap();
-    let respond = |digest: [u8; 32], invitation_id: InvitationId, key: Vec<u8>, source| {
-        let effects = pair.sender_effects.clone();
-        let (inviter_id, acceptor_id) = (pair.sender_id, pair.receiver_id);
-        async move {
-            let mut response = ContactInvitationResponse {
-                invitation_id: invitation_id.clone(),
-                inviter_id,
-                acceptor_id,
-                decision: ContactInvitationDecision::Confirmed,
-                acceptance_digest: digest,
-                signature: Vec::new(),
-            };
-            response.signature = aura_signature::sign_ed25519_transcript(
-                effects.as_ref(),
-                &ContactInvitationResponseTranscript(&response),
-                &key,
-            )
-            .await
-            .unwrap();
-            let mut metadata = HashMap::new();
-            metadata.insert(
-                "content-type".to_string(),
-                CONTACT_INVITATION_RESPONSE_CONTENT_TYPE.to_string(),
-            );
-            metadata.insert("invitation-id".to_string(), invitation_id.to_string());
-            TransportEnvelope {
-                destination: acceptor_id,
-                source,
-                context: default_context_id_for_authority(acceptor_id),
-                payload: serde_json::to_vec(&response).unwrap(),
-                metadata,
-                receipt: None,
-            }
-        }
-    };
-    let apply = |envelope: TransportEnvelope| {
-        let handler = &pair.receiver_handler;
-        let effects = pair.receiver_effects.clone();
-        async move {
-            handler
-                .apply_contact_invitation_response(effects.as_ref(), &envelope)
-                .await
-                .unwrap()
-        }
-    };
-    let status = || async {
-        pair.receiver_handler
+        let stored = pair
+            .receiver_handler
             .get_invitation_with_storage(pair.receiver_effects.as_ref(), &imported.invitation_id)
             .await
-            .unwrap()
-            .status
-    };
-    let id = imported.invitation_id.clone();
+            .expect("imported invitation should remain readable");
+        assert_eq!(stored.status, InvitationStatus::Pending);
+    }
+);
 
-    // Forged: signed by a key other than the code's sender proof key.
-    let forged = respond(acceptance_digest, id.clone(), forger_key.clone(), pair.sender_id).await;
-    assert_eq!(apply(forged).await, None);
-    // Replayed: authentic, but answering a different acceptance.
-    let replayed = respond([9; 32], id.clone(), inviter_key.to_vec(), pair.sender_id).await;
-    assert_eq!(apply(replayed).await, None);
-    // Wrong source: an authentic response relayed by another authority.
-    let relayed = respond(acceptance_digest, id.clone(), inviter_key.to_vec(), pair.receiver_id).await;
-    assert_eq!(apply(relayed).await, None);
-    // Unrelated invitation id.
-    let unrelated = respond(
-        acceptance_digest,
-        InvitationId::new("not-our-invitation"),
-        inviter_key.to_vec(),
-        pair.sender_id,
-    )
-    .await;
-    assert_eq!(apply(unrelated).await, None);
-    assert_eq!(status().await, InvitationStatus::Pending);
+large_stack_async_test!(
+    invitee_applies_only_authentic_responses_to_its_pending_acceptance,
+    {
+        use super::contact_confirmation::{
+            contact_acceptance_digest, ContactInvitationDecision, ContactInvitationResponse,
+            ContactInvitationResponseTranscript, CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
+        };
 
-    // Authentic and answering our acceptance: applied once.
-    let authentic = respond(acceptance_digest, id.clone(), inviter_key.to_vec(), pair.sender_id).await;
-    assert_eq!(apply(authentic.clone()).await, Some(ContactInvitationDecision::Confirmed));
-    assert_eq!(status().await, InvitationStatus::Accepted);
-    // A duplicate of it is ignored (idempotent).
-    assert_eq!(apply(authentic).await, None);
-});
+        let pair = contact_pair(56).await;
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+        // The invitee is awaiting a response to this acceptance.
+        let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
+        let mut stored = InvitationHandler::load_imported_invitation(
+            pair.receiver_effects.as_ref(),
+            pair.receiver_id,
+            &imported.invitation_id,
+            None,
+        )
+        .await
+        .expect("imported invitation should be stored");
+        stored.pending_acceptance_digest = Some(acceptance_digest);
+        InvitationHandler::persist_imported_invitation(
+            pair.receiver_effects.as_ref(),
+            pair.receiver_id,
+            &stored,
+        )
+        .await
+        .unwrap();
+
+        let (inviter_key, _) = crate::handlers::rendezvous_identity::retrieve_identity_keys(
+            pair.sender_effects.as_ref(),
+            &pair.sender_id,
+        )
+        .await
+        .expect("inviter identity keys should exist");
+        let (forger_key, _) = pair
+            .sender_effects
+            .ed25519_generate_keypair()
+            .await
+            .unwrap();
+        let respond = |digest: [u8; 32], invitation_id: InvitationId, key: Vec<u8>, source| {
+            let effects = pair.sender_effects.clone();
+            let (inviter_id, acceptor_id) = (pair.sender_id, pair.receiver_id);
+            async move {
+                let mut response = ContactInvitationResponse {
+                    invitation_id: invitation_id.clone(),
+                    inviter_id,
+                    acceptor_id,
+                    decision: ContactInvitationDecision::Confirmed,
+                    acceptance_digest: digest,
+                    signature: Vec::new(),
+                };
+                response.signature = aura_signature::sign_ed25519_transcript(
+                    effects.as_ref(),
+                    &ContactInvitationResponseTranscript(&response),
+                    &key,
+                )
+                .await
+                .unwrap();
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "content-type".to_string(),
+                    CONTACT_INVITATION_RESPONSE_CONTENT_TYPE.to_string(),
+                );
+                metadata.insert("invitation-id".to_string(), invitation_id.to_string());
+                TransportEnvelope {
+                    destination: acceptor_id,
+                    source,
+                    context: default_context_id_for_authority(acceptor_id),
+                    payload: serde_json::to_vec(&response).unwrap(),
+                    metadata,
+                    receipt: None,
+                }
+            }
+        };
+        let apply = |envelope: TransportEnvelope| {
+            let handler = &pair.receiver_handler;
+            let effects = pair.receiver_effects.clone();
+            async move {
+                handler
+                    .apply_contact_invitation_response(effects.as_ref(), &envelope)
+                    .await
+                    .unwrap()
+            }
+        };
+        let status = || async {
+            pair.receiver_handler
+                .get_invitation_with_storage(
+                    pair.receiver_effects.as_ref(),
+                    &imported.invitation_id,
+                )
+                .await
+                .unwrap()
+                .status
+        };
+        let id = imported.invitation_id.clone();
+
+        // Forged: signed by a key other than the code's sender proof key.
+        let forged = respond(
+            acceptance_digest,
+            id.clone(),
+            forger_key.clone(),
+            pair.sender_id,
+        )
+        .await;
+        assert_eq!(apply(forged).await, None);
+        // Replayed: authentic, but answering a different acceptance.
+        let replayed = respond([9; 32], id.clone(), inviter_key.to_vec(), pair.sender_id).await;
+        assert_eq!(apply(replayed).await, None);
+        // Wrong source: an authentic response relayed by another authority.
+        let relayed = respond(
+            acceptance_digest,
+            id.clone(),
+            inviter_key.to_vec(),
+            pair.receiver_id,
+        )
+        .await;
+        assert_eq!(apply(relayed).await, None);
+        // Unrelated invitation id.
+        let unrelated = respond(
+            acceptance_digest,
+            InvitationId::new("not-our-invitation"),
+            inviter_key.to_vec(),
+            pair.sender_id,
+        )
+        .await;
+        assert_eq!(apply(unrelated).await, None);
+        assert_eq!(status().await, InvitationStatus::Pending);
+
+        // Authentic and answering our acceptance: applied once.
+        let authentic = respond(
+            acceptance_digest,
+            id.clone(),
+            inviter_key.to_vec(),
+            pair.sender_id,
+        )
+        .await;
+        assert_eq!(
+            apply(authentic.clone()).await,
+            Some(ContactInvitationDecision::Confirmed)
+        );
+        assert_eq!(status().await, InvitationStatus::Accepted);
+        // A duplicate of it is ignored (idempotent).
+        assert_eq!(apply(authentic).await, None);
+    }
+);
 
 #[test]
 fn inviter_answers_each_settled_status_with_a_typed_decision() {
-    use super::contact_confirmation::{settled_contact_invitation_decision, ContactInvitationDecision};
+    use super::contact_confirmation::{
+        settled_contact_invitation_decision, ContactInvitationDecision,
+    };
     use ContactInvitationDecision::*;
     let decide = settled_contact_invitation_decision;
     assert_eq!(decide(&InvitationStatus::Pending, false, false), None);
-    assert_eq!(decide(&InvitationStatus::Pending, true, false), Some(Expired));
-    assert_eq!(decide(&InvitationStatus::Expired, false, false), Some(Expired));
-    assert_eq!(decide(&InvitationStatus::Cancelled, false, false), Some(Revoked));
-    assert_eq!(decide(&InvitationStatus::Declined, false, false), Some(AlreadySettled));
-    assert_eq!(decide(&InvitationStatus::Accepted, false, false), Some(AlreadySettled));
+    assert_eq!(
+        decide(&InvitationStatus::Pending, true, false),
+        Some(Expired)
+    );
+    assert_eq!(
+        decide(&InvitationStatus::Expired, false, false),
+        Some(Expired)
+    );
+    assert_eq!(
+        decide(&InvitationStatus::Cancelled, false, false),
+        Some(Revoked)
+    );
+    assert_eq!(
+        decide(&InvitationStatus::Declined, false, false),
+        Some(AlreadySettled)
+    );
+    assert_eq!(
+        decide(&InvitationStatus::Accepted, false, false),
+        Some(AlreadySettled)
+    );
     // A duplicate from the acceptor who already accepted is re-confirmed.
-    assert_eq!(decide(&InvitationStatus::Accepted, false, true), Some(Confirmed));
+    assert_eq!(
+        decide(&InvitationStatus::Accepted, false, true),
+        Some(Confirmed)
+    );
 }
 
 #[tokio::test]
@@ -5563,23 +6063,26 @@ async fn home_invitation_acceptance_commits_durable_home_membership() {
     )));
 }
 
-large_stack_async_test!(existing_contact_can_import_a_new_code_signed_by_its_confirmed_key, {
-    let pair = contact_pair(66).await;
-    let first = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&first).await).await;
-    pair.accept_with_responding_inviter(&imported.invitation_id)
-        .await
-        .expect("first contact invitation should be confirmed");
+large_stack_async_test!(
+    existing_contact_can_import_a_new_code_signed_by_its_confirmed_key,
+    {
+        let pair = contact_pair(66).await;
+        let first = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&first).await).await;
+        pair.accept_with_responding_inviter(&imported.invitation_id)
+            .await
+            .expect("first contact invitation should be confirmed");
 
-    // The sender is now a contact; a second code signed by the same key imports.
-    let second = pair.create_contact_invitation().await;
-    let reimported = pair
-        .receiver_handler
-        .import_invitation_code(&pair.receiver_effects, &pair.signed_code(&second).await)
-        .await
-        .expect("a confirmed contact's new code should import");
-    assert_eq!(reimported.sender_id, pair.sender_id);
-});
+        // The sender is now a contact; a second code signed by the same key imports.
+        let second = pair.create_contact_invitation().await;
+        let reimported = pair
+            .receiver_handler
+            .import_invitation_code(&pair.receiver_effects, &pair.signed_code(&second).await)
+            .await
+            .expect("a confirmed contact's new code should import");
+        assert_eq!(reimported.sender_id, pair.sender_id);
+    }
+);
 large_stack_async_test!(
     enrollment_refusal_is_a_distinct_pinned_signature_not_acceptance,
     {
@@ -5699,15 +6202,35 @@ large_stack_async_test!(
                 .is_err(),
             "rejection must never authorize activation or overwrite the first terminal decision"
         );
-        let cancel = issuer.invitations().expect("issuer invitation service")
-            .cancel(&invitation.invitation_id).await;
-        assert!(cancel.is_err(), "public cancellation cannot replace actual signed rejection");
-        let stored = issuer.invitations().expect("issuer invitation service")
-            .get(&invitation.invitation_id).await.expect("created invitation remains present");
-        assert_eq!(stored.status, InvitationStatus::Pending,
-            "losing terminal CAS cannot publish InvitationCancelled");
-        assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id)
-            .await.expect("required terminal read"), Some(outcome));
+        let cancel = issuer
+            .invitations()
+            .expect("issuer invitation service")
+            .cancel(&invitation.invitation_id)
+            .await;
+        assert!(
+            cancel.is_err(),
+            "public cancellation cannot replace actual signed rejection"
+        );
+        let stored = issuer
+            .invitations()
+            .expect("issuer invitation service")
+            .get(&invitation.invitation_id)
+            .await
+            .expect("created invitation remains present");
+        assert_eq!(
+            stored.status,
+            InvitationStatus::Pending,
+            "losing terminal CAS cannot publish InvitationCancelled"
+        );
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("required terminal read"),
+            Some(outcome)
+        );
     }
 );
 
@@ -5872,142 +6395,1059 @@ large_stack_async_test!(
     }
 );
 
-large_stack_async_test!(actual_issuer_cancellation_wins_before_local_status_and_is_idempotent, {
-    use super::enrollment_trust::RetainedEnrollmentVmControl;
-    use aura_app::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
-    let (issuer, _invitee, invitation, start, _, _) =
-        actual_pinned_device_enrollment_fixture("issuer-cancel-first-decision").await;
-    let effects = issuer.runtime().effects();
-    let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
-        .await.expect("genuine retained signed issuance");
-    let cancellation = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
-        .await.expect("actual original-window terminal CAS");
-    assert_eq!(cancellation.invitation(), &invitation.invitation_id);
-    assert_eq!(cancellation.ceremony(), &start.ceremony_id);
-    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id)
-        .await.expect("required terminal read"),
-        Some(CeremonyTerminalOutcome::Failed(CeremonyFailureReason::Cancelled)));
-    assert_eq!(issuer.invitations().expect("issuer service").get(&invitation.invitation_id)
-        .await.expect("created sender invitation").status, InvitationStatus::Pending,
-        "terminal CAS alone cannot fabricate local publication");
-    let again = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
-        .await.expect("same durable negative decision is idempotent");
-    assert_eq!(again.ceremony(), &start.ceremony_id);
-    assert!(issuer.ceremony_tracker().await.complete(&start.ceremony_id,
-        CeremonyTerminalOutcome::Committed).await.is_err(),
-        "negative terminal capability never authorizes adoption");
-});
+large_stack_async_test!(
+    actual_issuer_cancellation_wins_before_local_status_and_is_idempotent,
+    {
+        use super::enrollment_trust::RetainedEnrollmentVmControl;
+        use aura_app::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
+        let (issuer, _invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("issuer-cancel-first-decision").await;
+        let effects = issuer.runtime().effects();
+        let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
+            .await
+            .expect("genuine retained signed issuance");
+        let cancellation = issuer
+            .ceremony_runner()
+            .await
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("actual original-window terminal CAS");
+        assert_eq!(cancellation.invitation(), &invitation.invitation_id);
+        assert_eq!(cancellation.ceremony(), &start.ceremony_id);
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("required terminal read"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+        assert_eq!(
+            issuer
+                .invitations()
+                .expect("issuer service")
+                .get(&invitation.invitation_id)
+                .await
+                .expect("created sender invitation")
+                .status,
+            InvitationStatus::Pending,
+            "terminal CAS alone cannot fabricate local publication"
+        );
+        let again = issuer
+            .ceremony_runner()
+            .await
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("same durable negative decision is idempotent");
+        assert_eq!(again.ceremony(), &start.ceremony_id);
+        assert!(
+            issuer
+                .ceremony_tracker()
+                .await
+                .complete(&start.ceremony_id, CeremonyTerminalOutcome::Committed)
+                .await
+                .is_err(),
+            "negative terminal capability never authorizes adoption"
+        );
+    }
+);
 
-large_stack_async_test!(cancellation_tokens_reject_another_runtime_with_identical_ids, {
-    use super::enrollment_trust::{EnrollmentVerifierError, RetainedEnrollmentVmControl};
-    use std::error::Error as _;
-    let (issuer, _invitee, invitation, start, _, _) =
-        actual_pinned_device_enrollment_fixture("cancel-runtime-owner").await;
-    let effects = issuer.runtime().effects();
-    let mut config = effects.config().clone();
-    config.storage.base_path = tempfile::Builder::new().prefix("aura-cancel-other-runtime-")
-        .tempdir().expect("distinct actual runtime storage root").keep();
-    let context = aura_core::context::EffectContext::new(issuer.authority_id(), invitation.context_id,
-        aura_core::effects::ExecutionMode::Testing);
-    let foreign = crate::runtime::EffectSystemBuilder::testing()
-        .with_authority(issuer.authority_id()).with_config(config).build(&context)
-        .await.expect("distinct real runtime with equal authority and device identifiers");
-    let foreign = foreign.effects();
-    assert_eq!(foreign.device_id(), effects.device_id());
-    let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
-        .await.expect("genuine signed control belongs to original runtime");
-    let mismatch = issued.require_runtime_owner(foreign.as_ref())
-        .expect_err("equal identifiers cannot replace exact runtime ownership");
-    assert!(matches!(mismatch.source().and_then(|source| source.downcast_ref::<EnrollmentVerifierError>()),
-        Some(EnrollmentVerifierError::RuntimeOwner)));
-    assert!(super::enrollment_vm_admission::sign_request(foreign.as_ref(), &issued).await.is_err(),
-        "borrowed control cannot authorize another runtime's signer");
-    let handler = handler_for_id(issuer.authority_id());
-    let record = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
-        .await.expect("required original sender record capability");
-    let prepared = handler.prepare_enrollment_cancellation(&issued, record)
-        .await.expect("actual original guard preparation");
-    let cancelled = issuer.ceremony_runner().await.cancel_verified_enrollment(&issued)
-        .await.expect("actual first negative decision");
-    assert!(handler.publish_verified_enrollment_cancellation(foreign.clone(), prepared, cancelled)
-        .await.is_err(), "wrong runtime cannot publish the matching negative decision");
-    let original = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
-        .await.expect("original sender record still required");
-    assert_eq!(original.invitation().status, InvitationStatus::Pending,
-        "wrong-runtime publication cannot mutate original sender record");
-    assert!(foreign.retrieve(&InvitationCacheHandler::created_invitation_key(
-        issuer.authority_id(), &invitation.invitation_id)).await.expect("foreign required storage read").is_none());
-    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await
-        .expect("original durable terminal owner read"), Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
-            aura_app::runtime_bridge::CeremonyFailureReason::Cancelled)));
-});
+large_stack_async_test!(
+    cancellation_tokens_reject_another_runtime_with_identical_ids,
+    {
+        use super::enrollment_trust::{EnrollmentVerifierError, RetainedEnrollmentVmControl};
+        use std::error::Error as _;
+        let (issuer, _invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("cancel-runtime-owner").await;
+        let effects = issuer.runtime().effects();
+        let mut config = effects.config().clone();
+        config.storage.base_path = tempfile::Builder::new()
+            .prefix("aura-cancel-other-runtime-")
+            .tempdir()
+            .expect("distinct actual runtime storage root")
+            .keep();
+        let context = aura_core::context::EffectContext::new(
+            issuer.authority_id(),
+            invitation.context_id,
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let foreign = crate::runtime::EffectSystemBuilder::testing()
+            .with_authority(issuer.authority_id())
+            .with_config(config)
+            .build(&context)
+            .await
+            .expect("distinct real runtime with equal authority and device identifiers");
+        let foreign = foreign.effects();
+        assert_eq!(foreign.device_id(), effects.device_id());
+        let issued = RetainedEnrollmentVmControl::load(effects.clone(), &invitation)
+            .await
+            .expect("genuine signed control belongs to original runtime");
+        let mismatch = issued
+            .require_runtime_owner(foreign.as_ref())
+            .expect_err("equal identifiers cannot replace exact runtime ownership");
+        assert!(matches!(
+            mismatch
+                .source()
+                .and_then(|source| source.downcast_ref::<EnrollmentVerifierError>()),
+            Some(EnrollmentVerifierError::RuntimeOwner)
+        ));
+        assert!(
+            super::enrollment_vm_admission::sign_request(foreign.as_ref(), &issued)
+                .await
+                .is_err(),
+            "borrowed control cannot authorize another runtime's signer"
+        );
+        let handler = handler_for_id(issuer.authority_id());
+        let record = handler
+            .created_invitation_required(effects.clone(), &invitation.invitation_id)
+            .await
+            .expect("required original sender record capability");
+        let prepared = handler
+            .prepare_enrollment_cancellation(&issued, record)
+            .await
+            .expect("actual original guard preparation");
+        let cancelled = issuer
+            .ceremony_runner()
+            .await
+            .cancel_verified_enrollment(&issued)
+            .await
+            .expect("actual first negative decision");
+        assert!(
+            handler
+                .publish_verified_enrollment_cancellation(foreign.clone(), prepared, cancelled)
+                .await
+                .is_err(),
+            "wrong runtime cannot publish the matching negative decision"
+        );
+        let original = handler
+            .created_invitation_required(effects.clone(), &invitation.invitation_id)
+            .await
+            .expect("original sender record still required");
+        assert_eq!(
+            original.invitation().status,
+            InvitationStatus::Pending,
+            "wrong-runtime publication cannot mutate original sender record"
+        );
+        assert!(foreign
+            .retrieve(&InvitationCacheHandler::created_invitation_key(
+                issuer.authority_id(),
+                &invitation.invitation_id
+            ))
+            .await
+            .expect("foreign required storage read")
+            .is_none());
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("original durable terminal owner read"),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+            ))
+        );
+    }
+);
 
-large_stack_async_test!(required_sender_enrollment_hydration_rejects_missing_corrupt_and_mismatched_secret, {
-    let (issuer, _invitee, invitation, start, _, _) =
-        actual_pinned_device_enrollment_fixture("required-created-secret").await;
-    let effects = issuer.runtime().effects();
-    let handler = handler_for_id(issuer.authority_id());
-    let key = InvitationCacheHandler::created_invitation_key(issuer.authority_id(), &invitation.invitation_id);
-    let location = InvitationCacheHandler::secret_payload_location(issuer.authority_id(), &invitation.invitation_id, "created");
-    let original = effects.secure_retrieve(&location, &[SecureStorageCapability::Read])
-        .await.expect("actual separately retained signed enrollment payload");
-    let regular = effects.retrieve(&key).await.expect("required regular storage read")
-        .expect("actual regular sender record");
-    let decoded_regular: Invitation = serde_json::from_slice(&regular).expect("actual regular record decodes");
-    let hydrated = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
-        .await.expect("required secret hydration succeeds");
-    assert!(matches!(&decoded_regular.invitation_type,
+large_stack_async_test!(
+    required_sender_enrollment_hydration_rejects_missing_corrupt_and_mismatched_secret,
+    {
+        let (issuer, _invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("required-created-secret").await;
+        let effects = issuer.runtime().effects();
+        let handler = handler_for_id(issuer.authority_id());
+        let key = InvitationCacheHandler::created_invitation_key(
+            issuer.authority_id(),
+            &invitation.invitation_id,
+        );
+        let location = InvitationCacheHandler::secret_payload_location(
+            issuer.authority_id(),
+            &invitation.invitation_id,
+            "created",
+        );
+        let original = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("actual separately retained signed enrollment payload");
+        let regular = effects
+            .retrieve(&key)
+            .await
+            .expect("required regular storage read")
+            .expect("actual regular sender record");
+        let decoded_regular: Invitation =
+            serde_json::from_slice(&regular).expect("actual regular record decodes");
+        let hydrated = handler
+            .created_invitation_required(effects.clone(), &invitation.invitation_id)
+            .await
+            .expect("required secret hydration succeeds");
+        assert!(matches!(&decoded_regular.invitation_type,
         InvitationType::DeviceEnrollment { key_package, threshold_config, public_key_package, baseline_tree_ops, .. }
         if key_package.is_empty() && threshold_config.is_empty() && public_key_package.is_empty() && baseline_tree_ops.is_empty()));
-    assert!(matches!(&hydrated.invitation().invitation_type,
+        assert!(matches!(&hydrated.invitation().invitation_type,
         InvitationType::DeviceEnrollment { key_package, public_key_package, baseline_tree_ops, .. }
         if !key_package.is_empty() && !public_key_package.is_empty() && !baseline_tree_ops.is_empty()));
-    effects.secure_store(&location, b"{malformed actual retained record", &[SecureStorageCapability::Read, SecureStorageCapability::Write])
-        .await.expect("inject actual secure-record codec fault");
-    let codec = handler.created_invitation_required(effects.clone(), &invitation.invitation_id)
-        .await.err().expect("required codec failure cannot become redacted fallback");
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&codec);
-    let mut found = false;
-    while let Some(error) = cause { found |= error.is::<serde_json::Error>(); cause = error.source(); }
-    assert!(found, "actual secure record codec source is preserved");
-    let mut wrong: Invitation = serde_json::from_slice(&original).expect("actual original retained payload");
-    wrong.receiver_id = AuthorityId::new_from_entropy([0x37; 32]);
-    effects.secure_store(&location, &serde_json::to_vec(&wrong).expect("mismatched test record encoding"),
-        &[SecureStorageCapability::Read, SecureStorageCapability::Write]).await.expect("inject actual retained identity fault");
-    assert!(handler.created_invitation_required(effects.clone(), &invitation.invitation_id).await.is_err(),
-        "secure custody alone cannot authorize mismatched invitation metadata");
-    effects.secure_delete(&location, &[SecureStorageCapability::Delete]).await.expect("remove actual required retained payload");
-    assert!(issuer.invitations().expect("actual public service").cancel(&invitation.invitation_id).await.is_err(),
-        "public cancellation cannot fall back when retained payload is absent");
-    assert_eq!(effects.retrieve(&key).await.expect("required regular reread").expect("original record remains"), regular,
-        "failed required hydration cannot publish local cancellation");
-    assert!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await.expect("required terminal read").is_none(),
-        "failed required hydration cannot authorize terminal CAS");
-    effects.secure_store(&location, &original, &[SecureStorageCapability::Read, SecureStorageCapability::Write])
-        .await.expect("restore original real evidence for owned task cleanup");
-});
+        effects
+            .secure_store(
+                &location,
+                b"{malformed actual retained record",
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .expect("inject actual secure-record codec fault");
+        let codec = handler
+            .created_invitation_required(effects.clone(), &invitation.invitation_id)
+            .await
+            .err()
+            .expect("required codec failure cannot become redacted fallback");
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&codec);
+        let mut found = false;
+        while let Some(error) = cause {
+            found |= error.is::<serde_json::Error>();
+            cause = error.source();
+        }
+        assert!(found, "actual secure record codec source is preserved");
+        let mut wrong: Invitation =
+            serde_json::from_slice(&original).expect("actual original retained payload");
+        wrong.receiver_id = AuthorityId::new_from_entropy([0x37; 32]);
+        effects
+            .secure_store(
+                &location,
+                &serde_json::to_vec(&wrong).expect("mismatched test record encoding"),
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .expect("inject actual retained identity fault");
+        assert!(
+            handler
+                .created_invitation_required(effects.clone(), &invitation.invitation_id)
+                .await
+                .is_err(),
+            "secure custody alone cannot authorize mismatched invitation metadata"
+        );
+        effects
+            .secure_delete(&location, &[SecureStorageCapability::Delete])
+            .await
+            .expect("remove actual required retained payload");
+        assert!(
+            issuer
+                .invitations()
+                .expect("actual public service")
+                .cancel(&invitation.invitation_id)
+                .await
+                .is_err(),
+            "public cancellation cannot fall back when retained payload is absent"
+        );
+        assert_eq!(
+            effects
+                .retrieve(&key)
+                .await
+                .expect("required regular reread")
+                .expect("original record remains"),
+            regular,
+            "failed required hydration cannot publish local cancellation"
+        );
+        assert!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("required terminal read")
+                .is_none(),
+            "failed required hydration cannot authorize terminal CAS"
+        );
+        effects
+            .secure_store(
+                &location,
+                &original,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .expect("restore original real evidence for owned task cleanup");
+    }
+);
 
-large_stack_async_test!(public_enrollment_cancel_hydrates_original_then_retains_redaction_and_idempotence, {
-    let (issuer, _invitee, invitation, start, _, _) =
-        actual_pinned_device_enrollment_fixture("public-cancel-required-hydration").await;
-    let effects = issuer.runtime().effects();
-    let location = InvitationCacheHandler::secret_payload_location(issuer.authority_id(), &invitation.invitation_id, "created");
-    let original = effects.secure_retrieve(&location, &[SecureStorageCapability::Read]).await.expect("original secure payload");
-    let service = issuer.invitations().expect("actual public service");
-    assert_eq!(service.cancel(&invitation.invitation_id).await.expect("genuine public owner cancellation").new_status,
-        InvitationStatus::Cancelled);
-    assert_eq!(effects.secure_retrieve(&location, &[SecureStorageCapability::Read]).await.expect("retained secure reread"), original,
-        "status publication must not rewrite original secure cryptographic evidence");
-    let regular = effects.retrieve(&InvitationCacheHandler::created_invitation_key(issuer.authority_id(), &invitation.invitation_id))
-        .await.expect("required regular reread").expect("regular record exists");
-    let decoded: Invitation = serde_json::from_slice(&regular).expect("regular cancellation record");
-    assert_eq!(decoded.status, InvitationStatus::Cancelled);
-    assert!(matches!(decoded.invitation_type,
+large_stack_async_test!(
+    public_enrollment_cancel_hydrates_original_then_retains_redaction_and_idempotence,
+    {
+        let (issuer, _invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("public-cancel-required-hydration").await;
+        let effects = issuer.runtime().effects();
+        let location = InvitationCacheHandler::secret_payload_location(
+            issuer.authority_id(),
+            &invitation.invitation_id,
+            "created",
+        );
+        let original = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("original secure payload");
+        let service = issuer.invitations().expect("actual public service");
+        assert_eq!(
+            service
+                .cancel(&invitation.invitation_id)
+                .await
+                .expect("genuine public owner cancellation")
+                .new_status,
+            InvitationStatus::Cancelled
+        );
+        assert_eq!(
+            effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await
+                .expect("retained secure reread"),
+            original,
+            "status publication must not rewrite original secure cryptographic evidence"
+        );
+        let regular = effects
+            .retrieve(&InvitationCacheHandler::created_invitation_key(
+                issuer.authority_id(),
+                &invitation.invitation_id,
+            ))
+            .await
+            .expect("required regular reread")
+            .expect("regular record exists");
+        let decoded: Invitation =
+            serde_json::from_slice(&regular).expect("regular cancellation record");
+        assert_eq!(decoded.status, InvitationStatus::Cancelled);
+        assert!(
+            matches!(decoded.invitation_type,
         InvitationType::DeviceEnrollment { key_package, threshold_config, public_key_package, baseline_tree_ops, .. }
         if key_package.is_empty() && threshold_config.is_empty() && public_key_package.is_empty() && baseline_tree_ops.is_empty()),
-        "hydration must never leak secure payload into regular status storage");
-    assert_eq!(service.cancel(&invitation.invitation_id).await.expect("same public terminal owner is idempotent").new_status,
-        InvitationStatus::Cancelled);
-    assert_eq!(issuer.ceremony_runner().await.terminal_outcome(&start.ceremony_id).await.expect("required terminal read"),
-        Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(aura_app::runtime_bridge::CeremonyFailureReason::Cancelled)));
-});
+            "hydration must never leak secure payload into regular status storage"
+        );
+        assert_eq!(
+            service
+                .cancel(&invitation.invitation_id)
+                .await
+                .expect("same public terminal owner is idempotent")
+                .new_status,
+            InvitationStatus::Cancelled
+        );
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("required terminal read"),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+            ))
+        );
+    }
+);
+
+large_stack_async_test!(
+    public_cancellation_delivers_signed_negative_notice_without_request_acceptance,
+    {
+        use aura_app::runtime_bridge::{
+            CeremonyFailureReason, CeremonyTerminalOutcome, RuntimeBridge,
+        };
+        let (issuer, invitee, invitation, start, _, _) =
+            actual_pinned_device_enrollment_fixture("public-cancel-terminal-notice").await;
+        let before = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("actual original registration");
+        issuer
+            .invitations()
+            .expect("actual issuer service")
+            .cancel(&invitation.invitation_id)
+            .await
+            .expect("actual protected cancellation owner");
+        let failed_accept = timeout(
+            std::time::Duration::from_secs(20),
+            invitee
+                .invitations()
+                .expect("actual invitee service")
+                .accept(&invitation.invitation_id),
+        )
+        .await
+        .expect("cancel notice terminates actual accept owner")
+        .expect_err("cancelled enrollment cannot report acceptance success");
+        let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&failed_accept);
+        let mut cancelled = false;
+        while let Some(current) = cause {
+            if matches!(
+                current
+                    .downcast_ref::<super::enrollment_vm_admission::EnrollmentVmAdmissionError>(),
+                Some(
+                    super::enrollment_vm_admission::EnrollmentVmAdmissionError::TerminalFailed(
+                        CeremonyFailureReason::Cancelled
+                    )
+                )
+            ) {
+                cancelled = true;
+            }
+            cause = current.source();
+        }
+        assert!(
+            cancelled,
+            "original signed terminal cancellation remains a concrete source"
+        );
+        let effects = invitee.runtime().effects();
+        let retained = super::enrollment_manifest_admission::load_failed_enrollment_for_ceremony(
+            effects.as_ref(),
+            invitee.authority_id(),
+            &start.ceremony_id,
+        )
+        .await
+        .expect("required signed negative receipt read")
+        .expect("public cancellation retained authenticated negative evidence");
+        assert_eq!(
+            retained.evidence().reason(),
+            CeremonyFailureReason::Cancelled
+        );
+        assert_eq!(
+            crate::runtime_bridge::AgentRuntimeBridge::new(invitee.clone())
+                .get_ceremony_terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("native actual receipt readout"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+        let after = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("same actual registration remains inspectable");
+        assert_eq!(
+            before.timeout_budget.started_at_ms(),
+            after.timeout_budget.started_at_ms()
+        );
+        assert_eq!(
+            before.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms(),
+            "notification cannot renew the original enrollment window"
+        );
+        assert!(
+            super::enrollment_manifest_admission::load_confirmed_enrollment(
+                effects.as_ref(),
+                invitee.authority_id(),
+                &invitation.invitation_id,
+            )
+            .await
+            .is_err(),
+            "failed notice cannot mint activation or committed receipt"
+        );
+    }
+);
+
+#[tokio::test]
+async fn actual_enrollment_notice_callers_fit_default_stack_budget() {
+    // This test deliberately uses the normal runtime stack and actual setup,
+    // issuer registration and immutable admission. The futures inspected below
+    // are not polled, so sizing cannot become a second execution owner.
+    let (issuer, invitee, invitation, _, _, _) = Box::pin(actual_pinned_device_enrollment_fixture(
+        "default-stack-notice-future-size",
+    ))
+    .await;
+    let effects = issuer.runtime().effects();
+    let tracker = issuer.runtime().ceremony_tracker();
+    let InvitationType::DeviceEnrollment { ceremony_id, .. } = &invitation.invitation_type else {
+        panic!("actual enrollment fixture")
+    };
+    let state = tracker
+        .get(ceremony_id)
+        .await
+        .expect("actual registered state");
+    let registered = effects
+        .resume_owned_enrollment_registration(
+            tracker,
+            state.initiator_id,
+            state.new_epoch,
+            &state.ceremony_id,
+            state.prestate_hash,
+        )
+        .await
+        .expect("actual original registration");
+    let service = issuer
+        .invitations()
+        .expect("actual runtime invitation owner");
+    let issuer_future = service.start_registered_device_enrollment(&registered);
+    let issuer_bytes = std::mem::size_of_val(&issuer_future);
+    assert!(
+        issuer_bytes <= 16 * 1024,
+        "issuer lexical caller exceeds 16 KiB budget: {issuer_bytes}"
+    );
+    drop(issuer_future);
+    let invitee_handler = handler_for(AuthorityContext::new(invitee.authority_id()));
+    let tasks = invitee
+        .runtime()
+        .tasks()
+        .group("notice-future-size-observer");
+    let invitee_future = invitee_handler.execute_device_enrollment_invitee(
+        invitee.runtime().effects(),
+        &invitation,
+        &tasks,
+    );
+    let invitee_bytes = std::mem::size_of_val(&invitee_future);
+    assert!(
+        invitee_bytes <= 16 * 1024,
+        "invitee lexical caller exceeds 16 KiB budget: {invitee_bytes}"
+    );
+    drop(invitee_future);
+    issuer
+        .invitations()
+        .expect("actual service cleanup owner")
+        .cancel(&invitation.invitation_id)
+        .await
+        .expect("actual protected fixture cancellation");
+}
+
+#[test]
+fn enrollment_production_builder_and_fixture_frames_are_bounded_before_first_poll() {
+    fn frame_bytes<F: std::future::Future>(_: impl FnOnce() -> F) -> usize {
+        std::mem::size_of::<F>()
+    }
+    let fixture = frame_bytes(|| actual_pinned_device_enrollment_fixture("frame-size-only"));
+    let authority = AuthorityId::new_from_entropy([181; 32]);
+    let context = aura_core::context::EffectContext::new(
+        authority,
+        ContextId::new_from_entropy([182; 32]),
+        aura_core::effects::ExecutionMode::Testing,
+    );
+    let builder = crate::runtime::EffectSystemBuilder::testing().with_authority(authority);
+    let production_builder = frame_bytes(|| builder.build(&context));
+    assert!(fixture <= 16 * 1024 && production_builder <= 16 * 1024,
+        "unpolled frames: actual enrollment fixture={fixture} bytes, production EffectSystemBuilder::build={production_builder} bytes (16 KiB caller budget); no future was constructed or polled");
+}
+
+#[tokio::test]
+async fn two_runtime_cancelled_notice_recovers_original_window_after_restart() {
+    let case = cancelled_notice_restart_case();
+    assert!(
+        std::mem::size_of_val(&case) <= 16 * 1024,
+        "restart caller future must remain bounded"
+    );
+    case.await;
+}
+
+fn cancelled_notice_restart_case() -> impl Future<Output = ()> {
+    Box::pin(async move {
+        use crate::runtime::{EffectContext, EffectSystemBuilder};
+        use aura_app::runtime_bridge::{
+            CeremonyFailureReason, CeremonyTerminalOutcome, RuntimeBridge,
+        };
+        use std::error::Error;
+        let network = crate::SharedTransport::new();
+        let (issuer, invitee, invitation, start, _accept, _witness) =
+            Box::pin(actual_pinned_device_enrollment_fixture_owned(
+                "cancelled-notice-durable-restart",
+                None,
+                Some(network.clone()),
+            ))
+            .await;
+        let authority = issuer.authority_id();
+        let config = issuer.runtime().effects().config().clone();
+        let context = EffectContext::new(
+            authority,
+            issuer.context().default_context_id(),
+            aura_core::effects::ExecutionMode::Testing,
+        );
+        let before = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("actual original registered interval");
+        // Drain the old sender before the negative decision. Thus no old task
+        // can send the frame later attributed to the restarted notice owner.
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("old runtime sender actually drained");
+        let publication = issuer
+            .invitations()
+            .expect("actual issuer service")
+            .cancel(&invitation.invitation_id)
+            .await
+            .expect_err("closed publisher retains partial Cancelled decision");
+        let mut cause: Option<&(dyn Error + 'static)> = Some(&publication);
+        let mut closed_sink = false;
+        while let Some(source) = cause {
+            closed_sink |= matches!(
+                source.downcast_ref::<crate::runtime::subsystems::journal::JournalSubsystemError>(),
+                Some(crate::runtime::subsystems::journal::JournalSubsystemError::SinkClosed { .. })
+            );
+            cause = source.source();
+        }
+        assert!(
+            closed_sink,
+            "genuine local publication fault retains native source"
+        );
+        assert_eq!(
+            issuer
+                .ceremony_runner()
+                .await
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("actual durable negative first decision"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+        drop(issuer);
+        let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+            .expect("original profile lease after acknowledged teardown");
+        let runtime = EffectSystemBuilder::testing_with_owned_profile(profile)
+            .with_authority(authority)
+            .with_config(config)
+            .with_shared_transport(network)
+            .build(&context)
+            .await
+            .expect("reopen actual protected original runtime");
+        let restarted = Arc::new(crate::AuraAgent::new(runtime, authority));
+        let service = restarted
+            .invitations()
+            .expect("actual restored service ownership");
+        let preparation = service.prepare_cancelled_enrollment_notice_recovery(&start.ceremony_id);
+        assert!(
+            std::mem::size_of_val(&preparation) <= 16 * 1024,
+            "production required notice preparation caller future must remain bounded"
+        );
+        drop(preparation); // Unpolled observation neither admits nor signs.
+        crate::runtime_bridge::AgentRuntimeBridge::new(restarted.clone())
+            .bootstrap_signing_keys()
+            .await
+            .expect("recover actual failed generation and negative notice owner");
+        let after = restarted
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("restored exact original interval");
+        assert_eq!(
+            before.timeout_budget.started_at_ms(),
+            after.timeout_budget.started_at_ms()
+        );
+        assert_eq!(
+            before.timeout_budget.deadline_at_ms(),
+            after.timeout_budget.deadline_at_ms()
+        );
+        assert_eq!(
+            after.terminal_outcome,
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+        let receiver = timeout(
+            std::time::Duration::from_secs(20),
+            invitee
+                .invitations()
+                .expect("actual independently pinned receiver")
+                .accept(&invitation.invitation_id),
+        )
+        .await;
+        // Ordinary outer test timeout still drains both real runtime owners.
+        let sender_cleanup = restarted
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        let receiver_cleanup = invitee
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        receiver
+            .expect("bounded real restarted notice must reach receiver")
+            .expect_err("actual Cancelled notice cannot report enrollment acceptance");
+        sender_cleanup.expect("finite recovered sender drains acknowledged teardown");
+        receiver_cleanup.expect("actual receiver sibling tasks drain acknowledged teardown");
+        let effects = invitee.runtime().effects();
+        let failed = super::enrollment_manifest_admission::load_failed_enrollment_for_ceremony(
+            effects.as_ref(),
+            invitee.authority_id(),
+            &start.ceremony_id,
+        )
+        .await
+        .expect("required receiver failure readout")
+        .expect("actual pinned signed Cancelled frame retained before failure publication");
+        assert_eq!(failed.evidence().reason(), CeremonyFailureReason::Cancelled);
+        assert!(
+            super::enrollment_manifest_admission::load_confirmed_enrollment(
+                effects.as_ref(),
+                invitee.authority_id(),
+                &invitation.invitation_id,
+            )
+            .await
+            .is_err(),
+            "negative restart receipt never becomes activation authority"
+        );
+        assert_eq!(
+            crate::runtime_bridge::AgentRuntimeBridge::new(invitee.clone())
+                .get_ceremony_terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("native receiver readout"),
+            Some(CeremonyTerminalOutcome::Failed(
+                CeremonyFailureReason::Cancelled
+            ))
+        );
+    })
+}
+
+// Append in handlers/invitation/tests.rs. Actual runtime producer/consumer path;
+// observations below never mint allocation or terminal authority.
+#[tokio::test]
+async fn owned_enrollment_secret_retirement_restarts_and_preserves_reissued_generation() {
+    use crate::runtime::EffectContext;
+    use crate::runtime_bridge::AgentRuntimeBridge;
+    use aura_app::runtime_bridge::RuntimeBridge;
+    use aura_core::effects::{ExecutionMode, SecureStorageEffects};
+    let case = Box::pin(async move {
+        #[derive(serde::Deserialize)]
+        struct EnvelopeObservation {
+            version: u8,
+            allocation: aura_core::effects::secret_lifetime::SecretAllocationReference,
+        }
+        let network = crate::SharedTransport::new();
+        let (issuer, invitee, _invitation, start, _accept, _witness) = Box::pin(
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_owned(
+                "owned-secret-retirement-original-reissue",
+                None,
+                Some(network.clone()),
+            ),
+        )
+        .await;
+        let authority = issuer.authority_id();
+        let participant =
+            aura_core::threshold::ParticipantIdentity::device(invitee.context().device_id());
+        let share = aura_core::effects::SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}:{}", authority, start.pending_epoch.value()),
+            participant.storage_key(),
+        );
+        let original_bytes = issuer
+            .runtime()
+            .effects()
+            .secure_retrieve(&share, &[aura_core::effects::SecureStorageCapability::Read])
+            .await
+            .expect("actual original owned pending envelope");
+        let original: EnvelopeObservation =
+            serde_json::from_slice(&original_bytes).expect("observe actual v2 envelope");
+        assert_eq!(
+            original.version, 2,
+            "actual enrollment branch must use allocation lifetime birth"
+        );
+        let before_state = issuer
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration");
+        let before = (
+            before_state.timeout_budget.started_at_ms(),
+            before_state.timeout_budget.deadline_at_ms(),
+        );
+        drop(before_state);
+        let config = issuer.runtime().effects().config().clone();
+        let context = EffectContext::new(
+            authority,
+            issuer.context().default_context_id(),
+            ExecutionMode::Testing,
+        );
+        issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+            .expect("original task owners drain");
+        let publication = AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect_err("closed publisher retains genuine partial Cancelled decision");
+        assert!(
+            std::error::Error::source(&publication).is_some(),
+            "original publication failure retained"
+        );
+        issuer
+            .runtime()
+            .effects()
+            .fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
+        let interrupted = issuer
+            .runtime()
+            .ceremony_tracker()
+            .retire_failed_enrollment_generation(&start.ceremony_id)
+            .await
+            .expect_err("real generation cleanup must retain injected final storage failure");
+        assert!(std::error::Error::source(&interrupted).is_some());
+        let terminal = issuer
+            .runtime()
+            .ceremony_runner()
+            .terminal_outcome(&start.ceremony_id)
+            .await
+            .expect("original durable negative decision");
+        assert!(matches!(
+            terminal,
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+            ))
+        ));
+        drop(issuer);
+        let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+            .expect("original profile lease after acknowledged teardown");
+        let runtime = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+            .with_authority(authority)
+            .with_config(config)
+            .with_shared_transport(network)
+            .build(&context)
+            .await
+            .expect("actual exclusive selected-profile reopen");
+        let reopened = Arc::new(crate::AuraAgent::new(runtime, authority));
+        let bridge = AgentRuntimeBridge::new(reopened.clone());
+        bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("required original root inventory and Failed cleanup recovery");
+        let after = reopened
+            .runtime()
+            .ceremony_tracker()
+            .get(&start.ceremony_id)
+            .await
+            .expect("original terminal readout remains");
+        assert_eq!(before.0, after.timeout_budget.started_at_ms());
+        assert_eq!(before.1, after.timeout_budget.deadline_at_ms());
+        assert_eq!(after.terminal_outcome, terminal);
+        let setup_code = AgentRuntimeBridge::new(invitee.clone())
+            .export_device_enrollment_setup_request()
+            .await
+            .expect("actual independently owned setup export");
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(reopened.clone())),
+            )
+            .expect("actual issuer app owner"),
+        ));
+        let setup =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                &app, setup_code,
+            )
+            .await
+            .expect("independent user-transferred pin");
+        let replacement = bridge
+            .initiate_device_enrollment_ceremony("actual reissued generation".into(), setup)
+            .await
+            .expect("fresh issuance after acknowledged original cleanup");
+        assert_ne!(replacement.ceremony_id, start.ceremony_id);
+        assert_eq!(replacement.pending_epoch, start.pending_epoch);
+        let replacement_bytes = reopened
+            .runtime()
+            .effects()
+            .secure_retrieve(&share, &[aura_core::effects::SecureStorageCapability::Read])
+            .await
+            .expect("actual replacement envelope");
+        let replacement_observed: EnvelopeObservation =
+            serde_json::from_slice(&replacement_bytes).expect("observe replacement original birth");
+        assert_eq!(replacement_observed.version, 2);
+        assert_ne!(
+            original.allocation.allocation,
+            replacement_observed.allocation.allocation
+        );
+        assert_ne!(
+            original.allocation.scope,
+            replacement_observed.allocation.scope
+        );
+        reopened
+            .runtime()
+            .ceremony_tracker()
+            .retire_failed_enrollment_generation(&start.ceremony_id)
+            .await
+            .expect("old negative replay is observation only for reissued epoch");
+        assert_eq!(
+            reopened
+                .runtime()
+                .effects()
+                .secure_retrieve(&share, &[aura_core::effects::SecureStorageCapability::Read])
+                .await
+                .expect("replacement custody survives old retirement"),
+            replacement_bytes
+        );
+        assert_eq!(
+            reopened
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .expect("original outcome after replay"),
+            terminal
+        );
+        // Capture both cleanup results before asserting either, so a failed
+        // sender cleanup cannot leave the independent receiver alive.
+        let sender = reopened
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        let receiver = invitee
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        sender.expect("new sender owns acknowledged teardown");
+        receiver.expect("independent receiver owns acknowledged teardown");
+    });
+    assert!(
+        std::mem::size_of_val(&case) <= 16 * 1024,
+        "ordinary-stack integration caller future stays bounded"
+    );
+    case.await;
+}
+
+#[tokio::test]
+async fn interrupted_signed_issuance_resumes_actual_original_registration_owner() {
+    let case = Box::pin(async {
+        let label = "interrupted-signed-registration-owner";
+        use crate::runtime::EffectSystemBuilder;
+        use crate::runtime_bridge::AgentRuntimeBridge;
+        use aura_app::runtime_bridge::RuntimeBridge;
+        let transport = crate::SharedTransport::new();
+        let mut agents = Vec::new();
+        for seed in [151u8, 154u8] {
+            let authority = AuthorityId::new_from_entropy([seed; 32]);
+            let config = AgentConfig {
+                device_id: DeviceId::new_from_entropy([seed + 1; 32]),
+                storage: StorageConfig {
+                    base_path: tempfile::Builder::new()
+                        .prefix(&format!("aura-actual-enrollment-{label}-{seed}-"))
+                        .tempdir()
+                        .expect("actual enrollment storage root")
+                        .keep(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let context = aura_core::context::EffectContext::new(
+                authority,
+                ContextId::new_from_entropy([seed + 2; 32]),
+                aura_core::effects::ExecutionMode::Testing,
+            );
+            eprintln!("enrollment fixture {label}: build runtime");
+            let builder = EffectSystemBuilder::testing()
+                .with_authority(authority)
+                .with_config(config)
+                .with_shared_transport(transport.clone());
+            let clock: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>> = None;
+            let builder = match &clock {
+                Some(clock) => builder.with_physical_time_provider(clock.clone()),
+                None => builder,
+            };
+            let runtime = builder
+                .build(&context)
+                .await
+                .expect("actual connected runtime");
+            let agent = Arc::new(crate::AuraAgent::new(runtime, authority));
+            eprintln!("enrollment fixture {label}: bootstrap signing");
+            AgentRuntimeBridge::new(agent.clone())
+                .bootstrap_signing_keys()
+                .await
+                .expect("actual signing bootstrap");
+            agents.push(agent);
+        }
+        let initiator = agents[0].clone();
+        let invitee = agents[1].clone();
+        eprintln!("enrollment fixture {label}: export invitee setup");
+        let code = AgentRuntimeBridge::new(invitee.clone())
+            .export_device_enrollment_setup_request()
+            .await
+            .unwrap();
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(initiator.clone())),
+            )
+            .unwrap(),
+        ));
+        eprintln!("enrollment fixture {label}: pin setup");
+        let pin =
+            aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                &app, code,
+            )
+            .await
+            .unwrap();
+        let effects = initiator.runtime().effects();
+        effects.fail_next_registration_seal_for_test().await;
+        let failure = AgentRuntimeBridge::new(initiator.clone())
+            .initiate_device_enrollment_ceremony("Actual interrupted device".to_string(), pin)
+            .await
+            .expect_err("actual signed issuance interrupted before original registration seal");
+        assert!(std::error::Error::source(&failure).is_some());
+        let tracker = initiator.ceremony_tracker().await;
+        let active = tracker.list_active().await;
+        assert_eq!(active.len(), 1, "only actual original allocation exists");
+        let (ceremony, original) = &active[0];
+        let before = (
+            original.timeout_budget.started_at_ms(),
+            original.timeout_budget.deadline_at_ms(),
+        );
+        let resumed = effects
+            .resume_owned_enrollment_registration(
+                &tracker,
+                original.initiator_id,
+                original.new_epoch,
+                ceremony,
+                original.prestate_hash,
+            )
+            .await
+            .expect("actual unregistered production continuation retains original reservation");
+        assert_eq!(
+            resumed.canonical_invitation().sender_id,
+            original.initiator_id
+        );
+        // Tracker's actual admission is private to services. The public runner uses
+        // the same strongest registered owner and retains the original interval.
+        let window = initiator
+            .ceremony_runner()
+            .await
+            .registered_enrollment_generation_window(&resumed)
+            .await
+            .expect("original signed generation admits actual execution window");
+        let after = tracker
+            .get(ceremony)
+            .await
+            .expect("original recovered registration");
+        assert_eq!(after.timeout_budget.started_at_ms(), before.0);
+        assert_eq!(after.timeout_budget.deadline_at_ms(), before.1);
+        let remaining = window
+            .remaining_ms(effects.as_ref())
+            .await
+            .expect("required original owner clock");
+        assert!(remaining > 0 && remaining <= before.1 - before.0);
+        drop(window);
+        drop(resumed);
+        let sender = initiator
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        let receiver = invitee
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await;
+        sender.expect("issuer owned cleanup");
+        receiver.expect("invitee owned cleanup");
+    });
+    case.await;
+}

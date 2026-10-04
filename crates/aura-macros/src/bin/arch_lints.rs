@@ -116,11 +116,17 @@ fn run() -> Result<(), String> {
         return Err("expected at least one path to scan".to_string());
     }
 
-    let mut rust_files = collect_tracked_rust_files(&paths)?;
-    if rust_files.is_empty() {
+    let mut rust_files = if let Some(files) = collect_tracked_rust_files(&paths)? {
+        files
+    } else {
+        let mut files = Vec::new();
         for path in &paths {
-            collect_rust_files(path, &mut rust_files)?;
+            collect_rust_files(path, &mut files)?;
         }
+        files
+    };
+    if rust_files.is_empty() {
+        return Err("no Rust source files found in requested inputs".to_string());
     }
     rust_files.sort();
     rust_files.dedup();

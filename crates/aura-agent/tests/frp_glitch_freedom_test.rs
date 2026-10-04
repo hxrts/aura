@@ -31,13 +31,13 @@ fn scheduler_with_registry(
     config: SchedulerConfig,
 ) -> (
     ReactiveScheduler,
-    mpsc::Sender<aura_agent::reactive::FactSource>,
+    aura_agent::reactive::FactIngress,
     mpsc::Sender<()>,
 ) {
     use aura_effects::time::PhysicalTimeHandler;
     use std::sync::Arc;
     let time_effects = Arc::new(PhysicalTimeHandler);
-    let (scheduler, fact_tx, shutdown_tx, _update_tx) =
+    let (scheduler, fact_tx, shutdown_tx) =
         ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects);
     (scheduler, fact_tx, shutdown_tx)
 }
@@ -261,9 +261,13 @@ impl OrderTrackingView {
 }
 
 impl ReactiveView for OrderTrackingView {
-    fn update<'a>(&'a self, _facts: &'a [Fact]) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    fn update<'a>(
+        &'a self,
+        _facts: &'a [Fact],
+    ) -> Pin<Box<dyn Future<Output = Result<(), aura_core::AuraError>> + Send + 'a>> {
         Box::pin(async move {
             self.update_order.write().await.push(self.id.clone());
+            Ok(())
         })
     }
 
@@ -300,7 +304,9 @@ async fn test_scheduler_topological_update_order() {
     scheduler.register_view(view_b);
 
     // Spawn scheduler
-    tokio::spawn(scheduler.run());
+    let scheduler_owner = aura_agent::TaskSupervisor::new();
+    let _scheduler_task =
+        scheduler_owner.spawn_try_named("actual_integration_scheduler", scheduler.run());
 
     // Create a test fact
     let fact = Fact::new(
@@ -327,7 +333,14 @@ async fn test_scheduler_topological_update_order() {
     tokio::time::sleep(Duration::from_millis(20)).await;
 
     // Shutdown
-    shutdown_tx.send(()).await.unwrap();
+    shutdown_tx
+        .send(())
+        .await
+        .expect("actual graceful stop signal");
+    scheduler_owner
+        .wait_for_idle(Duration::from_secs(1))
+        .await
+        .expect("actual owned scheduler completion and native health");
 
     // Verify update order
     let order = update_order.read().await;

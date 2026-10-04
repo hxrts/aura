@@ -182,11 +182,6 @@ pub enum EffectCommand {
 /// Outcome type shared across Layer 5 feature crates.
 pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 
-const INVITATION_GUARD_ACCEPT_EXECUTION_PLAN_CAPABILITY: &str =
-    "invitation_guard_accept_execution_plan";
-const INVITATION_GUARD_SEND_EXECUTION_PLAN_CAPABILITY: &str =
-    "invitation_guard_send_execution_plan";
-
 /// Pure execution plan derived from an invitation guard outcome.
 ///
 /// Layer 6 runtimes interpret this plan, but the partitioning itself is
@@ -279,15 +274,9 @@ pub fn check_flow_budget(
 /// Accept keeps flow-budget charging and receipt recording local so the
 /// authoritative accept settlement stays atomic even if the peer notification is
 /// deferred or fails later.
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "invitation_guard_accept_execution_plan",
-    family = "runtime_helper"
-)]
 pub fn plan_accept_execution(
     outcome: GuardOutcome,
 ) -> Result<InvitationEffectExecutionPlan, String> {
-    let _ = INVITATION_GUARD_ACCEPT_EXECUTION_PLAN_CAPABILITY;
     if outcome.is_denied() {
         return Err(denial_reason(&outcome));
     }
@@ -312,15 +301,53 @@ pub fn plan_accept_execution(
 /// Send defers every outwardly visible side effect except the journal append so
 /// invitation creation can publish the authoritative pending fact before budget,
 /// receipt, and network effects run on their own timeout policy.
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "invitation_guard_send_execution_plan",
-    family = "runtime_helper"
-)]
 pub fn plan_send_execution(outcome: GuardOutcome) -> Result<InvitationEffectExecutionPlan, String> {
-    let _ = INVITATION_GUARD_SEND_EXECUTION_PLAN_CAPABILITY;
-    if outcome.is_denied() {
-        return Err(denial_reason(&outcome));
+    plan_required_send_execution(outcome).map_err(|error| error.to_string())
+}
+
+/// Concrete guard denial retained by required reservation execution.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invitation guard denied: {reason}")]
+pub struct InvitationGuardDenial {
+    reason: types::GuardViolation,
+}
+
+impl InvitationGuardDenial {
+    /// Retain the actual reason without misclassifying accounting denial as authorization.
+    pub fn into_native_error(self) -> aura_core::AuraError {
+        let budget = matches!(
+            self.reason,
+            types::GuardViolation::InsufficientFlowBudget { .. }
+        );
+        let source =
+            Some(std::sync::Arc::new(self) as std::sync::Arc<dyn std::error::Error + Send + Sync>);
+        if budget {
+            aura_core::AuraError::Internal {
+                message: "reserved invitation flow budget denied".into(),
+                source,
+            }
+        } else {
+            aura_core::AuraError::PermissionDenied {
+                message: "reserved invitation guard denied".into(),
+                source,
+            }
+        }
+    }
+
+    /// Structural guard policy reason; display text never authorizes a retry or mutation.
+    pub fn reason(&self) -> &types::GuardViolation {
+        &self.reason
+    }
+}
+
+/// Partition authorized commands while retaining a structural denial source.
+pub fn plan_required_send_execution(
+    outcome: GuardOutcome,
+) -> Result<InvitationEffectExecutionPlan, InvitationGuardDenial> {
+    if let Some(reason) = outcome.decision.denial_reason() {
+        return Err(InvitationGuardDenial {
+            reason: reason.clone(),
+        });
     }
 
     let mut local_effects = Vec::new();
@@ -448,6 +475,29 @@ mod tests {
         let result = check_capability(&snapshot, &InvitationCapability::Guardian.as_name());
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
+    }
+
+    #[test]
+    fn required_send_retains_structural_denial() {
+        let reason = types::GuardViolation::InsufficientFlowBudget {
+            required: FlowCost::new(7),
+            remaining: FlowCost::new(2),
+        };
+        let error = plan_required_send_execution(GuardOutcome::denied(reason.clone()))
+            .expect_err("required budget denial");
+        assert_eq!(error.reason(), &reason);
+        let wrapped = aura_core::AuraError::PermissionDenied {
+            message: "reservation denied".into(),
+            source: Some(std::sync::Arc::new(error)),
+        };
+        let source = std::error::Error::source(&wrapped).expect("typed denial source");
+        assert_eq!(
+            source
+                .downcast_ref::<InvitationGuardDenial>()
+                .expect("original denial")
+                .reason(),
+            &reason
+        );
     }
 
     #[test]

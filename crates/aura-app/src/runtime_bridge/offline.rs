@@ -188,7 +188,6 @@ impl OfflineRuntimeBridge {
     }
 
     /// Create a new offline runtime bridge
-
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {
             #[cfg(test)]

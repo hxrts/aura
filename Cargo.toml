@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 
+# Host build support is outside Aura runtime layers.
+exclude = ["toolkit/test-support"]
+
 members = [
     # L1 Foundation
     "crates/aura-core",
@@ -108,14 +111,14 @@ socket2 = { version = "0.5", features = ["all"] }
 
 # Session types
 # Current upstream Telltale package layout.
-telltale = "15.0.0"
-telltale-types = "15.0.0"
-telltale-theory = "15.0.0"
-telltale-language = "15.0.0"
-telltale-runtime = "15.0.0"
-telltale-machine = "15.0.0"
-telltale-bridge = "15.0.0"
-telltale-simulator = "15.0.0"
+telltale = "=17.0.1"
+telltale-types = "=17.0.1"
+telltale-theory = "=17.0.1"
+telltale-language = "=17.0.1"
+telltale-runtime = "=17.0.1"
+telltale-machine = "=17.0.1"
+telltale-bridge = "=17.0.1"
+telltale-simulator = "=17.0.1"
 
 # Authorization
 biscuit-auth = { version = "5.0", features = ["wasm"] }

@@ -25,6 +25,7 @@ test-support = []
 
 [dependencies]
 aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }
+aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -50,7 +51,7 @@ rand_chacha = { workspace = true }
 zeroize = { workspace = true }
 aes-gcm = { workspace = true }
 chacha20 = { workspace = true }
-chacha20poly1305 = { workspace = true }
+chacha20poly1305 = { workspace = true, features = ["std"] }
 getrandom = { workspace = true }
 
 biscuit-auth = { workspace = true }

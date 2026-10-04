@@ -32,6 +32,8 @@ pub fn validate_actor_transition(
             | (ActorLifecyclePhase::Stopping, ActorLifecyclePhase::Failed)
             | (ActorLifecyclePhase::Stopped, ActorLifecyclePhase::Starting)
             | (ActorLifecyclePhase::Failed, ActorLifecyclePhase::Starting)
+            // Failed startup may retain resources that still need owned disposal.
+            | (ActorLifecyclePhase::Failed, ActorLifecyclePhase::Stopping)
             | (ActorLifecyclePhase::Failed, ActorLifecyclePhase::Stopped)
     );
 
@@ -110,9 +112,16 @@ impl<Domain, C, State> ActorOwnedServiceRoot<Domain, C, State> {
         *self.tasks.lock().await = Some(tasks);
     }
 
+    /// Retain the actual issued worker group while required completion is pending.
+    /// Failed cleanup cannot detach the group from its original actor root.
+    #[aura_macros::capability_boundary(category = "capability_gated", capability = "ActorOwnedServiceRoot", receiver_type = ActorOwnedServiceRoot<Domain, C, State>, family = "runtime_helper")]
+    pub(crate) async fn retained_tasks(&self) -> Option<TaskGroup> {
+        self.tasks.lock().await.clone()
+    }
+
     #[cfg(test)]
     pub(crate) async fn task_group(&self) -> Option<TaskGroup> {
-        self.tasks.lock().await.clone()
+        self.retained_tasks().await
     }
 
     pub(crate) async fn take_tasks(&self) -> Option<TaskGroup> {

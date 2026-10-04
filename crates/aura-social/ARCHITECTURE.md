@@ -119,3 +119,14 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 ### Required moderation evidence
 
 Required ban/mute decisions use bounded fallible decoding of ban, unban, mute, and unmute facts before reduction. Schema 1 and declared DAG-CBOR/JSON are checked without codec fallback; payload and committed wrapper contexts must agree. Observational compatibility reducers remain available and must not serve the required runtime decision boundary. This decoder does not mint journal authentication or authorization evidence.
+
+Required Social envelope decoding preserves native JSON/DAG-CBOR causes and
+validates schema-1 policy before observed Home projection applies creation or
+membership. Creation-first replay ordering consumes the validated batch; a
+malformed matching record cannot be skipped to publish a successful revision.
+
+Each of the nine moderation fact types exposes an exact-domain required decoder
+bound to its committed wrapper context. Home projection decodes once into a
+private typed moderation value before canonical Home lookup. Missing Home
+materialization cannot exempt malformed matching evidence from required failure.
+These decoders establish shape and scoping only, not moderation authorization.

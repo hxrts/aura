@@ -1,5 +1,21 @@
 use super::*;
 
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RequiredImportedInvitationRecordError {
+    #[error("required imported invitation exceeds its 1 MiB record bound")]
+    Oversized,
+    #[error("required imported invitation key differs from its retained identifier")]
+    Identity,
+    #[error("required imported invitation belongs to another runtime authority")]
+    RuntimeOwner,
+}
+fn imported_record_error(cause: RequiredImportedInvitationRecordError) -> AgentError {
+    AgentError::Aura(aura_core::AuraError::Invalid {
+        message: cause.to_string(),
+        source: Some(Arc::new(cause)),
+    })
+}
+
 pub(super) struct InvitationCacheHandler<'a> {
     handler: &'a InvitationHandler,
 }
@@ -156,7 +172,7 @@ impl<'a> InvitationCacheHandler<'a> {
                 ],
             )
             .await
-            .map_err(|e| crate::core::AgentError::effects(e.to_string()))
+            .map_err(AgentError::from)
     }
 
     async fn secure_retrieve_secret_payload(
@@ -233,11 +249,39 @@ impl<'a> InvitationCacheHandler<'a> {
         authority_id: AuthorityId,
         invitation: &StoredImportedInvitation,
     ) -> AgentResult<()> {
+        let lease = effects.acquire_imported_invitation_decision().await;
+        Self::persist_imported_invitation_with_decision_lease(
+            effects,
+            authority_id,
+            invitation,
+            &lease,
+        )
+        .await
+    }
+
+    pub(super) async fn persist_imported_invitation_with_decision_lease(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation: &StoredImportedInvitation,
+        lease: &crate::runtime::effects::ImportedInvitationDecisionLeaseCapability<'_>,
+    ) -> AgentResult<()> {
+        lease
+            .require_runtime_owner(effects)
+            .map_err(AgentError::from)?;
+        if authority_id != effects.runtime_authority_id() {
+            return Err(imported_record_error(
+                RequiredImportedInvitationRecordError::RuntimeOwner,
+            ));
+        }
         let key = Self::imported_invitation_key(authority_id, &invitation.invitation_id);
         let regular_invitation =
             if Self::has_device_enrollment_payload(&invitation.shareable.invitation_type) {
-                let secure_bytes = serde_json::to_vec(invitation)
-                    .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
+                let secure_bytes = serde_json::to_vec(invitation).map_err(|source| {
+                    AgentError::Aura(aura_core::AuraError::Serialization {
+                        message: "encode retained imported invitation".into(),
+                        source: Some(Arc::new(source)),
+                    })
+                })?;
                 Self::secure_store_secret_payload(
                     effects,
                     authority_id,
@@ -250,13 +294,73 @@ impl<'a> InvitationCacheHandler<'a> {
             } else {
                 invitation.clone()
             };
-        let bytes = serde_json::to_vec(&regular_invitation)
-            .map_err(|e| crate::core::AgentError::internal(e.to_string()))?;
-        effects
-            .store(&key, bytes)
-            .await
-            .map_err(|e| crate::core::AgentError::effects(e.to_string()))?;
+        let bytes = serde_json::to_vec(&regular_invitation).map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "encode retained imported invitation".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
+        effects.store(&key, bytes).await.map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Storage {
+                message: "persist retained imported invitation".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?;
         Ok(())
+    }
+
+    /// Required regular imported metadata. This never reconstructs or hydrates
+    /// enrollment secret authority; callers keep domain admission separate.
+    pub(super) async fn load_imported_regular_required(
+        effects: &AuraEffectSystem,
+        authority_id: AuthorityId,
+        invitation_id: &InvitationId,
+        lease: &crate::runtime::effects::ImportedInvitationDecisionLeaseCapability<'_>,
+    ) -> AgentResult<Option<StoredImportedInvitation>> {
+        lease
+            .require_runtime_owner(effects)
+            .map_err(AgentError::from)?;
+        if effects.runtime_authority_id() != authority_id {
+            return Err(imported_record_error(
+                RequiredImportedInvitationRecordError::RuntimeOwner,
+            ));
+        }
+        let key = Self::imported_invitation_key(authority_id, invitation_id);
+        let Some(bytes) = effects.retrieve(&key).await.map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Storage {
+                message: "read required imported invitation metadata".into(),
+                source: Some(Arc::new(source)),
+            })
+        })?
+        else {
+            return Ok(None);
+        };
+        if bytes.len() > 1024 * 1024 {
+            return Err(imported_record_error(
+                RequiredImportedInvitationRecordError::Oversized,
+            ));
+        }
+        let stored = Self::decode_imported_invitation(&bytes)?;
+        if stored.shareable.invitation_id != *invitation_id
+            || !matches!(
+                stored.shareable.version,
+                1 | ShareableInvitation::CURRENT_VERSION
+            )
+        {
+            return Err(imported_record_error(
+                RequiredImportedInvitationRecordError::Identity,
+            ));
+        }
+        Ok(Some(stored))
+    }
+
+    fn decode_imported_invitation(bytes: &[u8]) -> AgentResult<StoredImportedInvitation> {
+        serde_json::from_slice(bytes).map_err(|source| {
+            AgentError::Aura(aura_core::AuraError::Serialization {
+                message: "decode retained imported invitation".into(),
+                source: Some(Arc::new(source)),
+            })
+        })
     }
 
     pub(super) async fn load_imported_invitation(
@@ -289,7 +393,7 @@ impl<'a> InvitationCacheHandler<'a> {
         bytes: &[u8],
         _preserved: Option<&Invitation>,
     ) -> Option<StoredImportedInvitation> {
-        serde_json::from_slice::<StoredImportedInvitation>(bytes).ok()
+        Self::decode_imported_invitation(bytes).ok()
     }
 
     pub(super) async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
