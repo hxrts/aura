@@ -10,10 +10,13 @@ export AURA_E2E_ROOT="$test_root"
 export AURA_E2E_RUN_DIR="$test_root/.tmp/e2e/run"
 export AURA_E2E_TOOL_REPL="$test_root/fake-tool-repl.sh"
 export AURA_E2E_RUN_TOKEN=lan-retention-test-1
+export AURA_LAN_FIXTURE_PROVIDER_REPORT="$test_root/provider-selection"
 mkdir -p "$test_root/scripts/dev" "$test_root/configs"
 cp "$repo_root/scripts/dev/retain-e2e-runs.sh" "$test_root/scripts/dev/retain-e2e-runs.sh"
 cat > "$AURA_E2E_TOOL_REPL" <<'EOF'
 #!/usr/bin/env bash
+[[ "${AURA_SECURE_STORAGE_BACKEND:-}" == filesystem-fallback ]] || exit 91
+printf '%s\n' "$AURA_SECURE_STORAGE_BACKEND" > "$AURA_LAN_FIXTURE_PROVIDER_REPORT"
 exec sleep 30
 EOF
 chmod +x "$AURA_E2E_TOOL_REPL"
@@ -29,6 +32,12 @@ cleanup() {
 trap cleanup EXIT
 
 bash "$driver" start "$test_root/configs/lan.toml" >/dev/null
+for _ in {1..100}; do
+  [[ ! -f "$AURA_LAN_FIXTURE_PROVIDER_REPORT" ]] || break
+  sleep 0.01
+done
+[[ "$(cat "$AURA_LAN_FIXTURE_PROVIDER_REPORT")" == filesystem-fallback ]]
+kill -0 "$(cat "$AURA_E2E_RUN_DIR/repl.pid")"
 runs="$test_root/.tmp/e2e/run/host-a/artifacts/runs"
 manifest="$runs/$AURA_E2E_RUN_TOKEN/.aura-retention.json"
 [[ "$(jq -r .state "$manifest")" == active ]]
@@ -36,6 +45,9 @@ if bash "$driver" finish success >/dev/null 2>&1; then
   echo 'LAN run finished while tool_repl was active' >&2; exit 1
 fi
 bash "$driver" stop >/dev/null
+if bash "$driver" req '{"method":"ui_state","params":{"instance_id":"absent"}}' 1 >/dev/null 2>&1; then
+  echo 'LAN driver accepted a request after shutdown' >&2; exit 1
+fi
 bash "$driver" finish success >/dev/null
 [[ "$(jq -r .outcome "$manifest")" == success ]]
 if bash "$driver" start "$test_root/configs/lan.toml" >/dev/null 2>&1; then

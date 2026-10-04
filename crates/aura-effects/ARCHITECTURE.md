@@ -29,6 +29,11 @@ record inventory and secure retrieval failures preserve their native causes.
 
 ## Invariants
 
+- Platform secure retrieval reports exact-location `SecureStorageRecordMissing`
+  only for keyring `NoEntry`; denied access and provider outages retain their
+  native keyring causes. Noninteractive unit coverage enforces this distinction
+  in the required workspace test lane.
+
 - Public FROST package construction accepts typed public commitments only.
   Bound-message signing checks both native and DTO transcripts against the
   independently admitted message, public package, threshold and participant

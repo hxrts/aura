@@ -59,6 +59,9 @@ start)
   export AURA_HARNESS_AURA_BIN="${AURA_HARNESS_AURA_BIN:-$here/aura-wrap.sh}"
   export AURA_HARNESS_RUN_TOKEN="$AURA_E2E_RUN_TOKEN"
   export AURA_HARNESS_WEB_PREBUILT_ONLY=1
+  # Explicit provider configuration avoids OS credential prompts. The runtime
+  # still requires its existing harness admission for filesystem fallback.
+  export AURA_SECURE_STORAGE_BACKEND=filesystem-fallback
   # Expose the browser transport relay on this host's LAN address (taken from the config's
   # non-loopback bind_address) so peers on the other host reach its browsers.
   lan_host=$(grep -o 'bind_address = "[^"]*"' "$2" | cut -d'"' -f2 | cut -d: -f1 | grep -v "^127\." | head -1 || true)
@@ -69,13 +72,31 @@ start)
   echo $! > "$PIDF"; echo "started pid $(cat "$PIDF")"
   ;;
 req)
+  [[ -f "$PIDF" ]] && kill -0 "$(cat "$PIDF")" 2>/dev/null || {
+    echo 'LAN REPL is not running; request rejected' >&2; exit 1;
+  }
   n=$(( $(cat "$SEQ") + 1 )); echo $n > "$SEQ"
   body="${2#\{}"
-  printf '{"id":%s,%s\n' "$n" "$body" > "$FIFO"
+  printf '{"id":%s,%s\n' "$n" "$body" > "$FIFO" &
+  request_writer=$!
+  ingress_deadline=$((SECONDS + 5))
+  while kill -0 "$request_writer" 2>/dev/null; do
+    if ! kill -0 "$(cat "$PIDF")" 2>/dev/null || (( SECONDS >= ingress_deadline )); then
+      kill "$request_writer" 2>/dev/null || true
+      wait "$request_writer" 2>/dev/null || true
+      echo 'LAN request ingress failed: REPL exited or FIFO admission timed out' >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  wait "$request_writer"
   to=${3:-120}
   for _ in $(seq 1 $((to*5))); do
     line=$(grep -m1 "^{\"id\":$n[,}]" "$OUT" 2>/dev/null || true)
     [ -n "$line" ] && { echo "$line"; exit 0; }
+    kill -0 "$(cat "$PIDF")" 2>/dev/null || {
+      echo "LAN REPL exited before response id=$n" >&2; exit 1;
+    }
     sleep 0.2
   done
   echo "TIMEOUT id=$n" >&2; exit 1

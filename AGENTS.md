@@ -117,6 +117,9 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   tests, and Rust-native lints for syntactic or boundary-shape rules;
   `just check-arch` should stay focused on workspace topology, governance, and
   integration checks that are not realistically provable at compile time
+- **Test-scope enforcement**: classify Rust test exclusions by parsed lexical
+  scope and positive cfg predicates. Mixed test/production predicates and
+  production declarations following test items retain production enforcement.
 - **Architecture syntax lint gate**: run `just lint-arch-syntax` when changing
   effect placement, runtime-coupling, raw impure/time/random usage,
   concurrency escape hatches, crypto-boundary syntax, or syntax-owned
@@ -647,3 +650,11 @@ Production runtime assembly must reject deterministic seeds before profile acqui
   Run `just _policy-check check absolute-time-observation` for this boundary.
   The same exact nonignored source/discovery/execution inventory runs in
   `just ci-vm-session-lifecycle`; a focused pass is not whole-runtime proof.
+
+Architecture reactive checks inspect direct generic fact commits inside actual
+`#[semantic_owner]` declarations. Use the required commit and processing
+capabilities when terminal success requires projection acknowledgment. Durable
+actor publication alone does not promise UI readiness: preserve the distinct
+`InvitationAccepted` and `ContactLinkReady` contracts. Comments, marker words,
+and unrelated await helpers cannot establish owner completion. Required
+`just ci-policy-toolkit-clippy` executes the AST regressions before strict lint.

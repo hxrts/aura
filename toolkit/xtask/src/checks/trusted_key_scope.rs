@@ -127,9 +127,7 @@ fn imported_key_accessor_origin(file: &syn::File, capability: &str) -> bool {
         let syn::Item::Impl(item) = item else {
             return false;
         };
-        if path_name(&item.self_ty).as_deref()
-            != Some(capability)
-        {
+        if path_name(&item.self_ty).as_deref() != Some(capability) {
             return false;
         }
         item.items.iter().any(|item| {
@@ -253,12 +251,17 @@ fn guardian_possession_accessor_origin(file: &syn::File) -> bool {
                 && named_field(&call.receiver, "issued").and_then(identifier).as_deref() == Some("self"))
     }
     fn accept_field(expr: &syn::Expr, field: &str) -> bool {
-        named_field(expr, field).and_then(|base| named_field(base, "accept"))
-            .and_then(identifier).as_deref() == Some("self")
+        named_field(expr, field)
+            .and_then(|base| named_field(base, "accept"))
+            .and_then(identifier)
+            .as_deref()
+            == Some("self")
     }
     fn slice(expr: &syn::Expr) -> Option<&syn::Expr> {
         match naked(expr) {
-            syn::Expr::MethodCall(call) if call.method == "as_slice" && call.args.is_empty() => Some(&call.receiver),
+            syn::Expr::MethodCall(call) if call.method == "as_slice" && call.args.is_empty() => {
+                Some(&call.receiver)
+            }
             _ => None,
         }
     }
@@ -423,21 +426,32 @@ fn transferred_record_origin(file: &syn::File) -> bool {
 impl Scope<'_> {
     fn contract(&self) -> Contract {
         if self.path == "crates/aura-agent/src/handlers/invitation/guardian.rs"
-            && self.sealed_guardian_possession && self.implementation.is_none()
-            && self.function.as_ref().is_some_and(|signature| signature.ident == "verify_guardian_possession_required")
-        { return Contract::GuardianPossession; }
+            && self.sealed_guardian_possession
+            && self.implementation.is_none()
+            && self
+                .function
+                .as_ref()
+                .is_some_and(|signature| signature.ident == "verify_guardian_possession_required")
+        {
+            return Contract::GuardianPossession;
+        }
         if self.path == "crates/aura-agent/src/handlers/invitation/guardian.rs"
-            && self.sealed_guardian_pair && self.implementation.is_none()
-            && self.function.as_ref().is_some_and(|signature| signature.ident == "verify_guardian_pair_required")
+            && self.sealed_guardian_pair
+            && self.implementation.is_none()
+            && self
+                .function
+                .as_ref()
+                .is_some_and(|signature| signature.ident == "verify_guardian_pair_required")
         {
             return Contract::GuardianPair;
         }
         if self.path == "crates/aura-agent/src/handlers/invitation/guardian.rs"
             && self.sealed_guardian_confirmation
             && self.implementation.is_none()
-            && self.function.as_ref().is_some_and(|signature| {
-                signature.ident == "verify_guardian_confirmation_required"
-            })
+            && self
+                .function
+                .as_ref()
+                .is_some_and(|signature| signature.ident == "verify_guardian_confirmation_required")
         {
             return Contract::ContactResponse;
         }
@@ -742,20 +756,39 @@ mod tests {
     #[test]
     fn actual_guardian_roles_reject_unbound_possession_sources() {
         let path = "crates/aura-agent/src/handlers/invitation/guardian.rs";
-        let source = include_str!("../../../../crates/aura-agent/src/handlers/invitation/guardian.rs");
+        let source =
+            include_str!("../../../../crates/aura-agent/src/handlers/invitation/guardian.rs");
         let actual = analyze(path, source).unwrap();
         assert!(actual.typed_contract);
         assert!(actual.violations.is_empty(), "{:?}", actual.violations);
         for invalid in [
             source.replace("self.issued.require_runtime_owner(effects)?;", ""),
             source.replace("self.accept.invitation_id !=", "peer.invitation_id !="),
-            source.replace("self.issued.public_key().as_slice()", "peer.public_key().as_slice()"),
-            source.replace("Ok(self.accept.recovery_public_key.as_slice())", "Ok(peer.recovery_public_key.as_slice())"),
-            source.replace("original.original_possession_key(effects)?", "original.accept.recovery_public_key.as_slice()"),
-            source.replace("original: &RequiredGuardianPossessionVerificationCapability", "original: &peer::RequiredGuardianPossessionVerificationCapability"),
-            source.replace("issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability", "pub issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability"),
+            source.replace(
+                "self.issued.public_key().as_slice()",
+                "peer.public_key().as_slice()",
+            ),
+            source.replace(
+                "Ok(self.accept.recovery_public_key.as_slice())",
+                "Ok(peer.recovery_public_key.as_slice())",
+            ),
+            source.replace(
+                "original.original_possession_key(effects)?",
+                "original.accept.recovery_public_key.as_slice()",
+            ),
+            source.replace(
+                "original: &RequiredGuardianPossessionVerificationCapability",
+                "original: &peer::RequiredGuardianPossessionVerificationCapability",
+            ),
+            source.replace(
+                "issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability",
+                "pub issued: &'owner super::issued_identity::IssuedInvitationIdentityCapability",
+            ),
         ] {
-            assert!(!analyze(path, &invalid).unwrap().violations.is_empty(), "unbound possession source accepted");
+            assert!(
+                !analyze(path, &invalid).unwrap().violations.is_empty(),
+                "unbound possession source accepted"
+            );
         }
     }
     #[test]
@@ -769,18 +802,40 @@ mod tests {
         assert!(analyze(path, source).unwrap().violations.is_empty());
         for invalid in [
             source.replace("original.original_pair_key(effects)?", "peer.public_key"),
-            source.replace("original.original_pair_key(effects)?", "original.public.as_slice()"),
+            source.replace(
+                "original.original_pair_key(effects)?",
+                "original.public.as_slice()",
+            ),
             source.replace("self.public.as_slice()", "peer.public.as_slice()"),
             source.replace("self.lease.effects()", "peer.effects()"),
             source.replace("std::ptr::eq(self.lease.effects(), effects)", "true"),
-            source.replace("original: &RequiredGuardianPairVerificationCapability", "original: &[u8]"),
-            source.replace("original: &RequiredGuardianPairVerificationCapability", "original: &peer::RequiredGuardianPairVerificationCapability"),
-            source.replace("original: &RequiredGuardianPairVerificationCapability", "original: &RequiredGuardianConfirmationVerificationCapability"),
+            source.replace(
+                "original: &RequiredGuardianPairVerificationCapability",
+                "original: &[u8]",
+            ),
+            source.replace(
+                "original: &RequiredGuardianPairVerificationCapability",
+                "original: &peer::RequiredGuardianPairVerificationCapability",
+            ),
+            source.replace(
+                "original: &RequiredGuardianPairVerificationCapability",
+                "original: &RequiredGuardianConfirmationVerificationCapability",
+            ),
             source.replace("lease: Lease", "pub lease: Lease"),
-            source.replace("struct RequiredGuardianPairVerificationCapability", "#[derive(Deserialize)] struct RequiredGuardianPairVerificationCapability"),
-            source.replace("{ effects.ed25519_verify", "{ let original = peer; effects.ed25519_verify"),
+            source.replace(
+                "struct RequiredGuardianPairVerificationCapability",
+                "#[derive(Deserialize)] struct RequiredGuardianPairVerificationCapability",
+            ),
+            source.replace(
+                "{ effects.ed25519_verify",
+                "{ let original = peer; effects.ed25519_verify",
+            ),
         ] {
-            assert_eq!(analyze(path, &invalid).unwrap().violations.len(), 1, "{invalid}");
+            assert_eq!(
+                analyze(path, &invalid).unwrap().violations.len(),
+                1,
+                "{invalid}"
+            );
         }
     }
     #[test]
@@ -794,16 +849,38 @@ mod tests {
         assert!(analyze(path, source).unwrap().violations.is_empty());
         for invalid in [
             source.replace("original.original_sender_key(effects)?", "peer.public_key"),
-            source.replace("original.original_sender_key(effects)?", "original.stored.sender_proof_key"),
-            source.replace("original: &RequiredGuardianConfirmationVerificationCapability", "original: &RequiredContactResponseVerificationCapability"),
-            source.replace("original: &RequiredGuardianConfirmationVerificationCapability", "original: &peer::RequiredGuardianConfirmationVerificationCapability"),
-            source.replace("original: &RequiredGuardianConfirmationVerificationCapability", "original: &mut RequiredGuardianConfirmationVerificationCapability"),
+            source.replace(
+                "original.original_sender_key(effects)?",
+                "original.stored.sender_proof_key",
+            ),
+            source.replace(
+                "original: &RequiredGuardianConfirmationVerificationCapability",
+                "original: &RequiredContactResponseVerificationCapability",
+            ),
+            source.replace(
+                "original: &RequiredGuardianConfirmationVerificationCapability",
+                "original: &peer::RequiredGuardianConfirmationVerificationCapability",
+            ),
+            source.replace(
+                "original: &RequiredGuardianConfirmationVerificationCapability",
+                "original: &mut RequiredGuardianConfirmationVerificationCapability",
+            ),
             source.replace("lease: Lease", "pub lease: Lease"),
-            source.replace("self.lease.require_runtime_owner(effects).map_err(Error::from)?;", ""),
+            source.replace(
+                "self.lease.require_runtime_owner(effects).map_err(Error::from)?;",
+                "",
+            ),
             source.replace("std::ptr::eq(self.effects, effects)", "true"),
-            source.replace("{ effects.ed25519_verify", "{ let original = peer; effects.ed25519_verify"),
+            source.replace(
+                "{ effects.ed25519_verify",
+                "{ let original = peer; effects.ed25519_verify",
+            ),
         ] {
-            assert_eq!(analyze(path, &invalid).unwrap().violations.len(), 1, "{invalid}");
+            assert_eq!(
+                analyze(path, &invalid).unwrap().violations.len(),
+                1,
+                "{invalid}"
+            );
         }
     }
     #[test]

@@ -487,6 +487,7 @@ ci-clippy:
 
 # The repo-local policy toolkit is excluded from the Aura Cargo workspace.
 ci-policy-toolkit-clippy:
+    cargo test --manifest-path toolkit/xtask/Cargo.toml --all-targets
     cargo clippy --manifest-path toolkit/xtask/Cargo.toml --all-targets -- -D warnings
 
 # Verify cache guards and evidence retention without a real Cargo build.
@@ -1221,13 +1222,13 @@ ci-dry-run profile="push":
     add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
 
     # CI / Deep Conformance (push + pull_request)
-    add_step "Conformance Suite"          "nix develop --command bash -lc 'just ci-conformance-policy && CARGO_BUILD_JOBS=4 AURA_CONFORMANCE_WRITE_ARTIFACTS=1 AURA_CONFORMANCE_ARTIFACT_DIR=artifacts/conformance AURA_CONFORMANCE_ROTATING_WINDOW=8 AURA_CONFORMANCE_ITF_SEED_WINDOW=8 just ci-conformance'"
+    add_step "Conformance Suite"          "nix develop --command bash -lc 'just ci-conformance-policy && AURA_CONFORMANCE_WRITE_ARTIFACTS=1 AURA_CONFORMANCE_ARTIFACT_DIR=artifacts/conformance AURA_CONFORMANCE_ROTATING_WINDOW=8 AURA_CONFORMANCE_ITF_SEED_WINDOW=8 just ci-conformance'"
     add_step "Conformance ITF"            "nix develop --command just ci-conformance-itf"
     add_step "Conformance Differential"   "nix develop --command bash -lc 'just lean-oracle-build && just ci-conformance-diff'"
-    add_step "Choreography Parity"        "nix develop .#ci --command bash -lc 'CARGO_BUILD_JOBS=4 just ci-choreo-parity'"
+    add_step "Choreography Parity"        "nix develop .#ci --command just ci-choreo-parity"
     add_step "Property Monitor Suite"     "nix develop .#ci --command just ci-property-monitor"
     add_step "Effects Gate"               "nix develop .#ci --command just ci-effects"
-    add_step "Agent WASM Gate"            "nix develop .#ci --command bash -lc 'CARGO_BUILD_JOBS=4 just ci-agent-wasm'"
+    add_step "Agent WASM Gate"            "nix develop .#ci --command just ci-agent-wasm"
 
     if [[ "$profile" != "pr" ]]; then
         # CI / Deep Harness (push)

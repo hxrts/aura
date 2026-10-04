@@ -1452,6 +1452,19 @@ impl PlatformSecureStorageHandler {
             source: Some(Arc::new(error)),
         }
     }
+
+    fn map_retrieval_error(
+        location: &SecureStorageLocation,
+        error: keyring::Error,
+    ) -> SecureStorageError {
+        match error {
+            keyring::Error::NoEntry => {
+                aura_core::effects::secure::SecureStorageRecordMissing::new(location.clone())
+                    .into_storage_error()
+            }
+            other => Self::map_keyring_error(other),
+        }
+    }
 }
 
 #[cfg(any(
@@ -1572,7 +1585,7 @@ impl SecureStorageEffects for PlatformSecureStorageHandler {
         let original = self
             .entry_for_location(location)?
             .get_secret()
-            .map_err(Self::map_keyring_error)?;
+            .map_err(|error| Self::map_retrieval_error(location, error))?;
         self.decode_record(location, &original)
             .map(|(plaintext, _)| plaintext)
     }
@@ -3427,6 +3440,50 @@ impl SecureStorageEffects for FilesystemFallbackSecureStorageHandler {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "openbsd"
+    ))]
+    fn platform_retrieval_distinguishes_exact_absence_from_provider_failure() {
+        use aura_core::effects::secure::SecureStorageRecordMissing;
+        use std::error::Error;
+
+        let location = SecureStorageLocation::new("startup", "biscuit");
+        let absent =
+            PlatformSecureStorageHandler::map_retrieval_error(&location, keyring::Error::NoEntry);
+        let missing = absent
+            .source()
+            .unwrap()
+            .downcast_ref::<SecureStorageRecordMissing>()
+            .unwrap();
+        assert_eq!(missing.location(), &location);
+        assert_ne!(
+            missing.location(),
+            &SecureStorageLocation::new("startup", "other")
+        );
+
+        let failed = PlatformSecureStorageHandler::map_retrieval_error(
+            &location,
+            keyring::Error::PlatformFailure(Box::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "credential provider refused access",
+            ))),
+        );
+        let native = failed.source().unwrap();
+        assert!(native
+            .downcast_ref::<SecureStorageRecordMissing>()
+            .is_none());
+        assert!(matches!(
+            native.downcast_ref::<keyring::Error>(),
+            Some(keyring::Error::PlatformFailure(_))
+        ));
+    }
 
     #[tokio::test]
     #[cfg(all(unix, not(target_arch = "wasm32")))]

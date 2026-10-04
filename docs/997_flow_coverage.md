@@ -333,3 +333,15 @@ Current limitation:
 - [Simulation Guide](805_simulation_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Project Structure](999_project_structure.md)
+
+### Noninteractive native startup provider coverage
+
+LAN tooling explicitly configures filesystem secure storage for isolated
+production harness profiles; runtime admission retains the harness requirement.
+Required driver fixtures verify that configuration reaches the child process
+and reject requests after shutdown. Platform retrieval unit coverage verifies
+exact-location missing-record classification and retained native provider
+failures without touching OS credentials. TUI account reload must retain native
+agent causes and reach authoritative ready/settled state after account creation;
+compile success and the pre-reload success operation alone are insufficient.
+See `docs/804_testing_guide.md` for the provider and live-run procedure.

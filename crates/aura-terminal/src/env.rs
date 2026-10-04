@@ -31,6 +31,20 @@ fn non_empty_env(key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Explicit provider selection; runtime admission still enforces its policy.
+pub fn secure_storage_backend_override(
+) -> Result<Option<aura_agent::core::config::SecureStorageBackend>, aura_core::AuraError> {
+    use aura_agent::core::config::SecureStorageBackend;
+    match non_empty_env("AURA_SECURE_STORAGE_BACKEND").as_deref() {
+        None => Ok(None),
+        Some("platform") => Ok(Some(SecureStorageBackend::PlatformCredentialStore)),
+        Some("filesystem-fallback") => Ok(Some(SecureStorageBackend::FilesystemFallback)),
+        Some(_) => Err(aura_core::AuraError::invalid(
+            "invalid AURA_SECURE_STORAGE_BACKEND",
+        )),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessLanDiscoveryEnv {
     pub enabled: bool,

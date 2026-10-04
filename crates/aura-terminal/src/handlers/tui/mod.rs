@@ -230,7 +230,7 @@ struct RuntimeLaunchSpec<'a> {
 }
 
 impl RuntimeLaunchSpec<'_> {
-    fn agent_config(&self) -> AgentConfig {
+    fn agent_config(&self) -> Result<AgentConfig, AuraError> {
         let mut config = AgentConfig {
             device_id: self.device_id,
             storage: StorageConfig {
@@ -248,9 +248,12 @@ impl RuntimeLaunchSpec<'_> {
             },
             ..AgentConfig::default()
         };
+        if let Some(backend) = crate::env::secure_storage_backend_override()? {
+            config.storage.secure_storage_backend = backend;
+        }
         harness_lan_discovery_override(&mut config);
         bootstrap_broker_override(&mut config);
-        config
+        Ok(config)
     }
 
     fn effect_context(&self) -> EffectContext {
@@ -507,14 +510,15 @@ async fn handle_tui_launch(
 
             let agent = match launch.mode {
                 TuiMode::Production => AgentBuilder::new()
-                    .with_config(runtime_spec.agent_config())
+                    .with_config(runtime_spec.agent_config()?)
                     .with_authority(authority)
                     .with_sync_config(runtime_spec.sync_config())
-                    .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
+                    .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())
                     .build_production(&runtime_spec.effect_context())
                     .await
-                    .map_err(|error| {
-                        AuraError::internal(format!("Failed to create agent: {error}"))
+                    .map_err(|error| AuraError::Internal {
+                        message: "Failed to create agent".into(),
+                        source: Some(std::sync::Arc::new(error)),
                     })?,
                 TuiMode::Demo { seed } => {
                     stdio.println(format_args!("Using simulation agent with seed: {seed}"));
@@ -532,11 +536,11 @@ async fn handle_tui_launch(
                             "Creating Bob's agent with shared transport..."
                         ));
                         AgentBuilder::new()
-                                .with_config(runtime_spec.agent_config())
+                                .with_config(runtime_spec.agent_config()?)
                                 .with_authority(authority)
                                 .with_sync_config(runtime_spec.sync_config())
                                 .with_rendezvous_config(
-                                    runtime_spec.agent_config().rendezvous_config(),
+                                    runtime_spec.agent_config()?.rendezvous_config(),
                                 )
                                 .build_simulation_async_with_shared_transport(
                                     seed,
@@ -554,7 +558,7 @@ async fn handle_tui_launch(
                     #[cfg(not(feature = "development"))]
                     {
                         AgentBuilder::new()
-                            .with_config(runtime_spec.agent_config())
+                            .with_config(runtime_spec.agent_config()?)
                             .with_authority(authority)
                             .with_sync_config(runtime_spec.sync_config())
                             .build_simulation_async(seed, &runtime_spec.effect_context())
@@ -795,22 +799,21 @@ async fn handle_tui_launch(
 
                 let agent = match launch.mode {
                     TuiMode::Production => AgentBuilder::new()
-                        .with_config(runtime_spec.agent_config())
+                        .with_config(runtime_spec.agent_config()?)
                         .with_authority(runtime_authority)
                         .with_sync_config(runtime_spec.sync_config())
-                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
+                        .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())
                         .build_production(&runtime_spec.effect_context())
                         .await
-                        .map_err(|error| {
-                            AuraError::internal(format!(
-                                "Failed to create provisional runtime agent: {error}"
-                            ))
+                        .map_err(|error| AuraError::Internal {
+                            message: "Failed to create provisional runtime agent".into(),
+                            source: Some(std::sync::Arc::new(error)),
                         })?,
                     TuiMode::Demo { seed } => AgentBuilder::new()
-                        .with_config(runtime_spec.agent_config())
+                        .with_config(runtime_spec.agent_config()?)
                         .with_authority(runtime_authority)
                         .with_sync_config(runtime_spec.sync_config())
-                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())
+                        .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())
                         .build_simulation_async(seed, &runtime_spec.effect_context())
                         .await
                         .map_err(|error| {
@@ -991,13 +994,13 @@ mod tests {
 
         assert!(
             source.contains(
-                ".with_sync_config(runtime_spec.sync_config())\n                                .with_rendezvous_config(\n                                    runtime_spec.agent_config().rendezvous_config(),\n                                )\n                                .build_simulation_async_with_shared_transport("
+                ".with_sync_config(runtime_spec.sync_config())\n                                .with_rendezvous_config(\n                                    runtime_spec.agent_config()?.rendezvous_config(),\n                                )\n                                .build_simulation_async_with_shared_transport("
             ),
             "demo shared-transport runtime must enable rendezvous so bootstrap discovery stays live"
         );
         assert!(
             source.contains(
-                ".with_sync_config(runtime_spec.sync_config())\n                        .with_rendezvous_config(runtime_spec.agent_config().rendezvous_config())\n                        .build_simulation_async(seed, &runtime_spec.effect_context())"
+                ".with_sync_config(runtime_spec.sync_config())\n                        .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())\n                        .build_simulation_async(seed, &runtime_spec.effect_context())"
             ),
             "demo provisional runtime must enable rendezvous so bootstrap discovery starts before enrollment"
         );

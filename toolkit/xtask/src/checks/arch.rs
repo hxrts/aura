@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, path::Path};
 use anyhow::{bail, Context, Result};
 use regex::Regex;
 use serde_json::Value;
+use syn::{spanned::Spanned, visit::Visit};
 
 use super::support::{
     command_stdout, dirs_under, read, read_lines, repo_relative, repo_root, rg_exists, rg_lines,
@@ -182,7 +183,7 @@ fn check_layers(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         "-g".into(),
         "*.rs".into(),
     ])?;
-    for hit in aura_core_impls {
+    for hit in filtered_test_module_hits(repo_root, aura_core_impls)? {
         if hit.contains("trait") || hit.contains("impl<") || hit.contains("ScriptedTimeEffects") {
             continue;
         }
@@ -409,13 +410,16 @@ fn check_effects(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(effects): synchronous guard/effect bridge remains",
-        rg_non_comment_lines(&[
-            "-n".into(),
-            "GuardEffectSystem|futures::executor::block_on".into(),
-            repo_relative(repo_root.join("crates")),
-            "-g".into(),
-            "*.rs".into(),
-        ])?
+        filtered_test_module_hits(
+            repo_root,
+            rg_non_comment_lines(&[
+                "-n".into(),
+                "GuardEffectSystem|futures::executor::block_on".into(),
+                repo_relative(repo_root.join("crates")),
+                "-g".into(),
+                "*.rs".into(),
+            ])?,
+        )?
         .into_iter()
         .filter(|hit| {
             !hit.contains("crates/aura-app/src/frontend_primitives/submitted_operation.rs")
@@ -498,29 +502,122 @@ fn check_reactive(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
         "-g".into(),
         "*.rs".into(),
     ])?;
-    let sync_re = Regex::new(r"impl.*Handler|impl.*Service|async fn (accept|create|import|send)")?;
     for file in commit_files {
-        if file.contains("/tests/")
-            || file.contains("_test.rs")
-            || file.ends_with("/tests.rs")
-            || file.contains("crates/aura-simulator/")
-            || file.contains("crates/aura-sync/")
-            || file.contains("handlers/shared.rs")
+        let path = repo_root.join(&file);
+        if path
+            .components()
+            .any(|component| component.as_os_str() == "tests")
         {
             continue;
         }
-        let contents = read(repo_root.join(&file))?;
-        if !contents.contains("await_next_view_update")
-            && !contents.contains("fire_and_forget")
-            && !contents.contains("FactCommitResult")
-            && sync_re.is_match(&contents)
-        {
+        for line in unacknowledged_semantic_commits(&read(&path)?)? {
             audit.push(format!(
-                "arch(reactive): fact commit without view sync in {file}"
+                "arch(reactive): direct generic fact commit in semantic owner at {file}:{line}; use required commit and processing capability"
             ));
         }
     }
     Ok(())
+}
+
+/// Local declaration boundary fence. Durable actor publication is not terminal
+/// view evidence. Interprocedural ownership and capability consumption remain
+/// governed by the declaration ratchet and typed ownership API gates.
+fn unacknowledged_semantic_commits(source: &str) -> Result<Vec<usize>> {
+    struct Commits<'source> {
+        source: &'source str,
+        owner: bool,
+        lines: Vec<usize>,
+        failure: Option<anyhow::Error>,
+    }
+    fn declares_owner(attributes: &[syn::Attribute]) -> bool {
+        attributes.iter().any(|attribute| {
+            attribute
+                .path()
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "semantic_owner")
+        })
+    }
+    impl Commits<'_> {
+        fn record(&mut self, identifier: &syn::Ident) {
+            if !self.owner || identifier != "commit_generic_fact_bytes" {
+                return;
+            }
+            let line = identifier.span().start().line;
+            match test_scope_contains(self.source, line) {
+                Ok(false) => self.lines.push(line),
+                Ok(true) => {}
+                Err(error) => self.failure = Some(error),
+            }
+        }
+    }
+    impl<'ast> Visit<'ast> for Commits<'_> {
+        fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+            let original = self.owner;
+            self.owner = declares_owner(&item.attrs);
+            syn::visit::visit_item_fn(self, item);
+            self.owner = original;
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            let original = self.owner;
+            self.owner = declares_owner(&item.attrs);
+            syn::visit::visit_impl_item_fn(self, item);
+            self.owner = original;
+        }
+        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            self.record(&call.method);
+            syn::visit::visit_expr_method_call(self, call);
+        }
+        fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(path) = call.func.as_ref() {
+                if let Some(segment) = path.path.segments.last() {
+                    self.record(&segment.ident);
+                }
+            }
+            syn::visit::visit_expr_call(self, call);
+        }
+    }
+    let syntax = syn::parse_file(source).context("parse reactive semantic owner boundary")?;
+    let mut commits = Commits {
+        source,
+        owner: false,
+        lines: Vec::new(),
+        failure: None,
+    };
+    commits.visit_file(&syntax);
+    if let Some(error) = commits.failure {
+        return Err(error);
+    }
+    Ok(commits.lines)
+}
+
+#[cfg(test)]
+mod reactive_commit_tests {
+    use super::unacknowledged_semantic_commits;
+
+    #[test]
+    fn actor_publication_comments_and_issuer_are_not_terminal_proofs() {
+        let source = "// commit_generic_fact_bytes is our durable issuer\nimpl Effects { async fn commit_generic_fact_bytes(&self) {} }\nasync fn actor(effects: Effects) { effects.commit_generic_fact_bytes().await; }\n";
+        assert!(unacknowledged_semantic_commits(source).unwrap().is_empty());
+    }
+
+    #[test]
+    fn declared_owner_cannot_substitute_marker_comments_for_processing() {
+        let source = "#[aura_macros::semantic_owner(owner = \"test\")]\nasync fn terminal(effects: Effects) {\n // FactCommitResult await_next_view_update fire_and_forget\n effects.commit_generic_fact_bytes().await;\n}\n";
+        assert_eq!(unacknowledged_semantic_commits(source).unwrap(), vec![4]);
+    }
+
+    #[test]
+    fn mixed_test_configuration_preserves_terminal_fence() {
+        let source = "#[cfg(all(test, unix))]\n#[semantic_owner]\nasync fn fixture(effects: Effects) { effects.commit_generic_fact_bytes().await; }\n#[cfg(any(test, feature = \"production\"))]\n#[semantic_owner]\nasync fn terminal(effects: Effects) { effects.commit_generic_fact_bytes().await; }\n";
+        assert_eq!(unacknowledged_semantic_commits(source).unwrap(), vec![6]);
+    }
+
+    #[test]
+    fn owner_methods_and_associated_calls_are_checked() {
+        let source = "impl Owner {\n #[semantic_owner]\n async fn terminal(effects: Effects) {\n  Effects::commit_generic_fact_bytes(&effects).await;\n }\n}\n";
+        assert_eq!(unacknowledged_semantic_commits(source).unwrap(), vec![4]);
+    }
 }
 
 fn check_ceremonies(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
@@ -793,13 +890,16 @@ fn check_workflows(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(workflows): serde_json::Value in workflow surface",
-        rg_non_comment_lines(&[
-            "-n".into(),
-            "serde_json::Value".into(),
-            repo_relative(repo_root.join("crates/aura-app/src/workflows")),
-            "-g".into(),
-            "*.rs".into(),
-        ])?
+        filtered_test_module_hits(
+            repo_root,
+            rg_non_comment_lines(&[
+                "-n".into(),
+                "serde_json::Value".into(),
+                repo_relative(repo_root.join("crates/aura-app/src/workflows")),
+                "-g".into(),
+                "*.rs".into(),
+            ])?,
+        )?
         .into_iter()
         .filter(|hit| !hit.contains("crates/aura-app/src/workflows/recovery_cli.rs")),
     );
@@ -878,13 +978,16 @@ fn check_serialization(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
 
     audit.push_matches(
         "arch(serialization): stateful handler under aura-agent/src/handlers",
-        rg_non_comment_lines(&[
-            "-n".into(),
-            "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<".into(),
-            repo_relative(repo_root.join("crates/aura-agent/src/handlers")),
-            "-g".into(),
-            "*.rs".into(),
-        ])?
+        filtered_test_module_hits(
+            repo_root,
+            rg_non_comment_lines(&[
+                "-n".into(),
+                "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<".into(),
+                repo_relative(repo_root.join("crates/aura-agent/src/handlers")),
+                "-g".into(),
+                "*.rs".into(),
+            ])?,
+        )?
         .into_iter()
         .filter(|hit| !hit.contains("ota_activation_service") && !hit.contains("recovery_service")),
     );
@@ -985,8 +1088,7 @@ fn check_test_seeds(repo_root: &Path, audit: &mut ArchAudit) -> Result<()> {
                     idx + 1,
                     line.trim()
                 ));
-            } else if !has_allow_annotation(&lines, idx + 1, "#[allow(clippy::disallowed_methods)]")
-            {
+            } else if !has_allow_annotation(&lines, idx + 1)? {
                 audit.push(format!(
                     "arch(test-seeds): banned AuraEffectSystem constructor outside test context without allow annotation: {}:{}:{}",
                     repo_relative(&file),
@@ -1081,27 +1183,150 @@ fn filtered_test_module_hits(repo_root: &Path, hits: Vec<String>) -> Result<Vec<
 }
 
 fn is_test_context(path: &Path, line_number: usize) -> Result<bool> {
-    let display = repo_relative(path);
-    if display.contains("/tests/") || display.ends_with("_test.rs") || display.ends_with("test.rs")
+    // Cargo integration-test targets are test-only. A source filename such as
+    // latest.rs or *_test.rs does not by itself establish a test configuration.
+    if path
+        .components()
+        .any(|component| component.as_os_str() == "tests")
     {
         return Ok(true);
     }
-    let lines = read_lines(path)?;
-    let cfg_test_line = lines
-        .iter()
-        .enumerate()
-        .find_map(|(idx, line)| line.contains("#[cfg(test)]").then_some(idx + 1));
-    Ok(cfg_test_line.is_some_and(|cfg_line| line_number > cfg_line))
+    test_scope_contains(&read(path)?, line_number)
+        .with_context(|| format!("classifying Rust test scope in {}", path.display()))
 }
 
-fn has_allow_annotation(lines: &[String], line_number: usize, needle: &str) -> bool {
-    let start = line_number.saturating_sub(15).max(1);
-    lines
+fn test_scope_contains(source: &str, line: usize) -> Result<bool> {
+    attribute_scope_contains(source, line, super::policy::is_rust_test_only)
+}
+
+fn attribute_scope_contains(
+    source: &str,
+    line: usize,
+    predicate: fn(&[syn::Attribute]) -> bool,
+) -> Result<bool> {
+    struct TestScopes {
+        ranges: Vec<(usize, usize)>,
+        predicate: fn(&[syn::Attribute]) -> bool,
+    }
+    impl TestScopes {
+        fn record(&mut self, attributes: &[syn::Attribute], span: proc_macro2::Span) {
+            if (self.predicate)(attributes) {
+                self.ranges.push((span.start().line, span.end().line));
+            }
+        }
+    }
+    impl<'ast> Visit<'ast> for TestScopes {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let attributes = match item {
+                syn::Item::Const(item) => &item.attrs,
+                syn::Item::Enum(item) => &item.attrs,
+                syn::Item::ExternCrate(item) => &item.attrs,
+                syn::Item::Fn(item) => &item.attrs,
+                syn::Item::ForeignMod(item) => &item.attrs,
+                syn::Item::Impl(item) => &item.attrs,
+                syn::Item::Macro(item) => &item.attrs,
+                syn::Item::Mod(item) => &item.attrs,
+                syn::Item::Static(item) => &item.attrs,
+                syn::Item::Struct(item) => &item.attrs,
+                syn::Item::Trait(item) => &item.attrs,
+                syn::Item::TraitAlias(item) => &item.attrs,
+                syn::Item::Type(item) => &item.attrs,
+                syn::Item::Union(item) => &item.attrs,
+                syn::Item::Use(item) => &item.attrs,
+                _ => return,
+            };
+            self.record(attributes, item.span());
+            syn::visit::visit_item(self, item);
+        }
+        fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+            self.record(&item.attrs, item.span());
+            syn::visit::visit_impl_item_fn(self, item);
+        }
+        fn visit_impl_item_const(&mut self, item: &'ast syn::ImplItemConst) {
+            self.record(&item.attrs, item.span());
+            syn::visit::visit_impl_item_const(self, item);
+        }
+        fn visit_local(&mut self, item: &'ast syn::Local) {
+            self.record(&item.attrs, item.span());
+            syn::visit::visit_local(self, item);
+        }
+    }
+    let syntax = syn::parse_file(source).context("parse architecture test scope")?;
+    let mut scopes = TestScopes {
+        ranges: Vec::new(),
+        predicate,
+    };
+    scopes.record(&syntax.attrs, syntax.span());
+    scopes.visit_file(&syntax);
+    Ok(scopes
+        .ranges
         .iter()
-        .enumerate()
-        .skip(start - 1)
-        .take(line_number.saturating_sub(start) + 1)
-        .any(|(_, line)| line.contains(needle))
+        .any(|(start, end)| *start <= line && line <= *end))
+}
+
+#[cfg(test)]
+mod test_scope_tests {
+    use super::test_scope_contains;
+
+    #[test]
+    fn lexical_test_scopes_do_not_hide_following_production() {
+        let source = "// #[cfg(test)] is only a comment\n#[cfg(test)]\nmod fixtures {\n impl Effects for Fixture {}\n}\nimpl Effects for Production {}\n";
+        assert!(test_scope_contains(source, 4).unwrap());
+        assert!(!test_scope_contains(source, 1).unwrap());
+        assert!(!test_scope_contains(source, 6).unwrap());
+    }
+
+    #[test]
+    fn positive_test_predicates_preserve_mixed_production_branches() {
+        let source = "#[cfg(all(test, not(target_arch = \"wasm32\")))]\nfn fixture() {}\n#[cfg(any(test, feature = \"production\"))]\nfn production() {}\n#[cfg(any(all(test, unix), all(test, windows)))]\nfn alternate_fixture() {}\n#[cfg(not(test))]\nfn native() {}\n";
+        assert!(test_scope_contains(source, 2).unwrap());
+        assert!(!test_scope_contains(source, 4).unwrap());
+        assert!(test_scope_contains(source, 6).unwrap());
+        assert!(!test_scope_contains(source, 8).unwrap());
+    }
+
+    #[test]
+    fn test_method_and_nested_module_have_only_their_own_custody() {
+        let source = "impl Owner {\n #[cfg(test)]\n fn fixture() { forbidden(); }\n fn production() { forbidden(); }\n}\nmod outer {\n #[cfg(test)]\n mod fixtures { fn fixture() {} }\n fn production() {}\n}\n";
+        assert!(test_scope_contains(source, 3).unwrap());
+        assert!(!test_scope_contains(source, 4).unwrap());
+        assert!(test_scope_contains(source, 8).unwrap());
+        assert!(!test_scope_contains(source, 9).unwrap());
+    }
+
+    #[test]
+    fn malformed_rust_fails_closed() {
+        assert!(test_scope_contains("#[cfg(test)] fn broken( {", 1).is_err());
+    }
+
+    #[test]
+    fn constructor_allowance_is_lexical_not_nearby_text() {
+        let source = "// #[allow(clippy::disallowed_methods)]\nfn outside() { forbidden(); }\nfn owner() {\n #[allow(clippy::disallowed_methods)]\n let system = {\n  forbidden();\n };\n forbidden();\n}\n";
+        let lines = source.lines().map(str::to_owned).collect::<Vec<_>>();
+        assert!(!super::has_allow_annotation(&lines, 2).unwrap());
+        assert!(super::has_allow_annotation(&lines, 6).unwrap());
+        assert!(!super::has_allow_annotation(&lines, 8).unwrap());
+    }
+}
+
+fn has_allow_annotation(lines: &[String], line_number: usize) -> Result<bool> {
+    fn allows_disallowed_methods(attributes: &[syn::Attribute]) -> bool {
+        attributes.iter().any(|attribute| {
+            attribute.path().is_ident("allow")
+                && attribute
+                    .parse_args_with(
+                        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+                    )
+                    .is_ok_and(|paths| {
+                        paths.iter().any(|path| {
+                            path.segments.len() == 2
+                                && path.segments[0].ident == "clippy"
+                                && path.segments[1].ident == "disallowed_methods"
+                        })
+                    })
+        })
+    }
+    attribute_scope_contains(&lines.join("\n"), line_number, allows_disallowed_methods)
 }
 
 fn layer_of(name: &str) -> usize {

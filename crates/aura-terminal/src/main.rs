@@ -56,7 +56,10 @@ fn main() -> Result<(), AuraError> {
         .enable_all()
         .thread_stack_size(TOKIO_WORKER_STACK_SIZE_BYTES)
         .build()
-        .map_err(|error| AuraError::internal(format!("build terminal runtime: {error}")))?
+        .map_err(|source| AuraError::Internal {
+            message: "build terminal runtime".into(),
+            source: Some(std::sync::Arc::new(source)),
+        })?
         .block_on(async_main())
 }
 
@@ -115,7 +118,10 @@ async fn async_main() -> Result<(), AuraError> {
         }
         aura_terminal::handlers::tui::handle_tui(&tui_args)
             .await
-            .map_err(|e| AuraError::agent(format!("{e}")))?;
+            .map_err(|source| AuraError::Internal {
+                message: "run terminal UI".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })?;
         return Ok(());
     }
 

@@ -63,9 +63,15 @@ mod tests {
             + 1;
         assert!(lines.contains(&fixture));
         let production = source.replace("#[cfg(test)]", "");
-        let fixture = production.lines().position(|line| line.contains("signature: Vec::new()")).unwrap() + 1;
-        assert!(!test_lines(&production).unwrap().contains(&fixture),
-            "a test-like module name cannot exempt production signatures");
+        let fixture = production
+            .lines()
+            .position(|line| line.contains("signature: Vec::new()"))
+            .unwrap()
+            + 1;
+        assert!(
+            !test_lines(&production).unwrap().contains(&fixture),
+            "a test-like module name cannot exempt production signatures"
+        );
     }
     #[test]
     fn mixed_cfg_and_later_production_are_not_exempted() {

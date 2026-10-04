@@ -27,6 +27,12 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 ## Invariants
 
+- Runtime bring-up retains the original agent error as its native source.
+  `AURA_SECURE_STORAGE_BACKEND` explicitly selects `platform` or
+  `filesystem-fallback`; invalid values fail construction. The runtime owns
+  admission of filesystem fallback. LAN tooling requests that provider to
+  avoid credential prompts while retaining production runtime semantics.
+
 - Device enrollment issuance accepts an explicit user-transferred setup code.
   Frontends forward it to the app-owned verification and issuance workflow;
   raw authority IDs, demo autofill and discovery metadata cannot replace the

@@ -937,6 +937,13 @@ The tracked LAN driver sets `AURA_HARNESS_WEB_PREBUILT_ONLY=1`. Its static
 server requires a current `web,harness` bundle; missing, stale or non-harness
 assets fail startup without an implicit Dioxus build or release-cache deletion.
 Stop the run and use `scripts/harness/lan/build.sh web` before retrying.
+The LAN driver explicitly selects `AURA_SECURE_STORAGE_BACKEND=filesystem-fallback`
+for its isolated native profiles. Runtime admission still checks harness
+authorization for that provider; ordinary production defaults to platform
+credentials. This avoids OS credential prompts without bypassing crypto,
+authorization or lifecycle behavior. Required LAN safety fixtures enforce the
+provider handoff. Secure retrieval distinguishes exact missing records from
+native provider failures; workspace unit coverage enforces that distinction.
 `just ci-build-cache-policy` verifies this boundary with isolated positive and
 negative fixtures. Successful asset admission is build evidence only; observe
 the authoritative frontend readiness and semantic operation contracts normally.
@@ -1637,7 +1644,9 @@ changing these ownership boundaries.
 Repo-local policy validators have a separate strict lint lane:
 `just ci-policy-toolkit-clippy`. The crate is excluded from the Aura Cargo
 workspace, so workspace Clippy does not validate it. `just ci-clippy` includes
-both lanes. Pair validator changes with the relevant toolkit tests; warnings
+both lanes. The repo-local lane also executes all policy-toolkit unit tests,
+including lexical test-scope and semantic-owner raw-commit regressions.
+Pair validator changes with the relevant toolkit tests; warnings
 must be repaired without weakening validation predicates or adding suppressions.
 
 The mandatory Guardian lifecycle inventory also verifies exact recovery-key
@@ -1813,3 +1822,13 @@ deadline trait compile-fail doctest. It rejects receipt-generation coordinates;
 positive provider tests simultaneously require the physical coordinate API.
 The manual `TimeError` display and source matches are exhaustive, so new variants
 require an explicit native-source decision at compile time.
+
+Architecture reactive enforcement inspects actual direct generic fact commits
+inside declared semantic owners. Those owners use required commit and
+processing capabilities when their terminal contract requires projection
+acknowledgment. Durable actor publication is a separate contract; invitation
+acceptance need not wait for contact-link convergence. AST regressions reject
+marker-word and unrelated-helper substitutes for completion while preserving
+ordinary actor publication. Interprocedural ownership remains enforced by the
+annotation ratchet and typed capability gates. The required policy-toolkit lane
+executes these regressions before strict Clippy.
