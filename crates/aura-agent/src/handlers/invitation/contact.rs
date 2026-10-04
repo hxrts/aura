@@ -991,6 +991,26 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                     };
                     let fact = fact.payload();
+                    // The receipt binds the envelope source to the sender, so a
+                    // moderation fact must name that sender as its actor.
+                    if let RelationalFact::Generic { envelope: inner, .. } = fact {
+                        let source = in_flight_envelope
+                            .as_ref()
+                            .map(|envelope| envelope.source);
+                        if let Some(actor) =
+                            aura_social::moderation::facts::claimed_moderation_actor(inner)
+                        {
+                            if Some(actor) != source {
+                                tracing::warn!(
+                                    claimed_actor = %actor,
+                                    source = ?source,
+                                    "Rejected inbound moderation fact whose actor is not its sender"
+                                );
+                                in_flight_envelope = None;
+                                continue;
+                            }
+                        }
+                    }
 
                     super::channel::InvitationChannelHandler::new(self.handler)
                         .provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), fact)
