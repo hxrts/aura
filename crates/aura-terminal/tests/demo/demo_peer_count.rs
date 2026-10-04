@@ -91,8 +91,12 @@ async fn connection_status(env: &FullTestEnv) -> ConnectionStatus {
         .expect("read CONNECTION_STATUS_SIGNAL")
 }
 
-#[tokio::test]
-async fn demo_refresh_account_reports_two_online_contacts() {
+#[test]
+fn demo_refresh_account_reports_two_online_contacts() {
+    support::run_with_terminal_stack(demo_refresh_account_reports_two_online_contacts_body);
+}
+
+async fn demo_refresh_account_reports_two_online_contacts_body() {
     let env = demo_env("peer-count-refresh").await;
     add_demo_peers_as_contacts(&env).await;
     assert_eq!(
@@ -101,8 +105,12 @@ async fn demo_refresh_account_reports_two_online_contacts() {
     );
 }
 
-#[tokio::test]
-async fn demo_accepting_contact_invites_updates_peer_count() {
+#[test]
+fn demo_accepting_contact_invites_updates_peer_count() {
+    support::run_with_terminal_stack(demo_accepting_contact_invites_updates_peer_count_body);
+}
+
+async fn demo_accepting_contact_invites_updates_peer_count_body() {
     let env = demo_env("peer-count-invites").await;
     let before = connection_status(&env).await;
     assert!(

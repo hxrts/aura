@@ -688,53 +688,10 @@ async fn process_peer_transport_messages(
                         }
                     }
                 }
-                "application/aura-invitation" => {
-                    let code = match String::from_utf8(envelope.payload) {
-                        Ok(code) => code,
-                        Err(err) => {
-                            tracing::warn!("{name} received invalid invitation payload: {err}");
-                            continue;
-                        }
-                    };
-
-                    let invitation_service = match agent.invitations() {
-                        Ok(service) => service,
-                        Err(err) => {
-                            tracing::warn!("{name} failed to load invitation service: {err}");
-                            continue;
-                        }
-                    };
-
-                    let invitation = match invitation_service.import_and_cache(&code).await {
-                        Ok(invitation) => invitation,
-                        Err(err) => {
-                            tracing::warn!("{name} failed to import invitation: {err}");
-                            continue;
-                        }
-                    };
-
-                    if matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
-                        // Demo peers accept guardian bindings through the same
-                        // invitation service a person uses from Notifications.
-                        if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
-                        {
-                            tracing::warn!(
-                                "{name} failed to accept guardian invitation {}: {err}",
-                                invitation.invitation_id
-                            );
-                        }
-                    } else if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                        accept_channel_invitation(
-                            name,
-                            agent,
-                            &effects,
-                            &invitation_service,
-                            &invitation,
-                            envelope.context,
-                        )
-                        .await;
-                    }
-                }
+                // Inbound invitations go through the runtime's own import path
+                // (sender authenticated by the transport receipt); the demo then
+                // accepts them from the pending list below, as a person would.
+                "application/aura-invitation" => deferred.push(envelope),
                 "application/aura-chat-fact" => {
                     let relational_fact = match from_slice::<RelationalFact>(&envelope.payload) {
                         Ok(fact) => fact,
@@ -1018,11 +975,18 @@ async fn process_peer_transport_messages(
         tracing::debug!("{name} inbox processing failed: {err}");
     }
 
-    // Auto-accept pending channel invitations for demo peers.
+    // Auto-accept pending guardian and channel invitations for demo peers.
     if let Ok(invitation_service) = agent.invitations() {
         let pending = invitation_service.list_pending().await;
         for invitation in pending {
-            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+            if matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+                if let Err(err) = invitation_service.accept(&invitation.invitation_id).await {
+                    tracing::warn!(
+                        "{name} failed to accept guardian invitation {}: {err}",
+                        invitation.invitation_id
+                    );
+                }
+            } else if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                 let context = invitation.context_id;
                 accept_channel_invitation(
                     name,

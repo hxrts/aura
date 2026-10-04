@@ -495,6 +495,82 @@ impl FullTestEnv {
         }
     }
 
+    /// Bob's account with demo peers (Alice, Carol) on a shared transport.
+    #[cfg(feature = "development")]
+    pub async fn demo_bob(name: &str) -> Self {
+        Self::with_config(FullTestEnvConfig {
+            name: name.to_string(),
+            nickname_suggestion: Some("Bob".to_string()),
+            with_demo_peers: true,
+            ..Default::default()
+        })
+        .await
+    }
+
+    /// Send once the demo peers have joined the channel: retries only while
+    /// the send reports channel establishment still in progress (bounded).
+    #[cfg(feature = "development")]
+    pub async fn send_when_channel_ready(
+        &self,
+        channel_id: aura_core::types::identifiers::ChannelId,
+        content: &str,
+    ) {
+        let start = tokio::time::Instant::now();
+        loop {
+            match aura_app::ui::workflows::messaging::send_message(
+                &self.app_core,
+                channel_id,
+                content,
+                2,
+            )
+            .await
+            {
+                Ok(_) => return,
+                Err(error)
+                    if (error.to_string().contains("establishment is not complete")
+                        || error.to_string().contains("not resolved"))
+                        && start.elapsed() < std::time::Duration::from_secs(15) =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Err(error) => panic!("send message: {error}"),
+            }
+        }
+    }
+
+    /// Import and accept Alice's and Carol's signed contact codes through
+    /// the TUI's path and wait until both are contacts.
+    #[cfg(feature = "development")]
+    pub async fn add_demo_peers_as_contacts(&self) -> [AuthorityId; 2] {
+        use aura_app::ui::workflows::invitation;
+        let peers = self.demo_peers.as_ref().expect("demo peers started");
+        let (alice_code, carol_code) = peers
+            .signed_contact_invite_codes()
+            .await
+            .expect("demo peers create signed contact codes");
+        for code in [&alice_code, &carol_code] {
+            let imported = invitation::import_invitation_details(&self.app_core, code)
+                .await
+                .expect("import demo contact code");
+            invitation::accept_invitation(&self.app_core, imported)
+                .await
+                .expect("accept demo contact code");
+        }
+        let ids = [peers.alice_authority(), peers.carol_authority()];
+        let start = tokio::time::Instant::now();
+        loop {
+            let contacts = aura_app::ui::workflows::query::list_contacts(&self.app_core).await;
+            if ids.iter().all(|id| contacts.iter().any(|c| c.id == *id)) {
+                return ids;
+            }
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "demo peers did not become contacts"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+
     /// Clean up the test directory.
     pub fn cleanup(&self) {
         let _ = std::fs::remove_dir_all(&self.test_dir);
