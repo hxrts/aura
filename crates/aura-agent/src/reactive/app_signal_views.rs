@@ -29,10 +29,8 @@ use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinPara
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
-use aura_protocol::amp::{
-    amp_open_committed, get_channel_state, ChannelMembershipFact, ChannelParticipantEvent,
-};
-use std::collections::{BTreeSet, HashMap};
+use aura_protocol::amp::{amp_open_committed, get_channel_state, ChannelMembershipFact};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -1473,6 +1471,7 @@ pub struct ChatSignalView {
     update_gate: Mutex<()>,
     state: Mutex<ChatState>,
     hidden_channels_after_leave: Mutex<BTreeSet<ChannelId>>,
+    membership: Mutex<BTreeMap<(ContextId, ChannelId), aura_amp::SchemaOneChannelMembership>>,
     effects: Arc<AuraEffectSystem>,
 }
 
@@ -1488,8 +1487,47 @@ impl ChatSignalView {
             update_gate: Mutex::new(()),
             state: Mutex::new(ChatState::default()),
             hidden_channels_after_leave: Mutex::new(BTreeSet::new()),
+            membership: Mutex::new(BTreeMap::new()),
             effects,
         }
+    }
+
+    async fn apply_observed_membership(&self, state: &mut ChatState) -> bool {
+        let observations = self.membership.lock().await;
+        let mut removed = Vec::new();
+        let mut changed = false;
+        for channel in state.all_channels_mut() {
+            let Some(context) = channel.context_id else {
+                continue;
+            };
+            let Some(membership) = observations.get(&(context, channel.id)) else {
+                continue;
+            };
+            if membership.departed(self.own_authority) {
+                removed.push(channel.id);
+                continue;
+            }
+            let before = channel.member_ids.clone();
+            let old_count = channel.member_count;
+            channel
+                .member_ids
+                .retain(|member| *member != self.own_authority && !membership.departed(*member));
+            channel.member_ids.extend(
+                membership
+                    .participants()
+                    .filter(|member| *member != self.own_authority),
+            );
+            channel.member_ids.sort();
+            channel.member_ids.dedup();
+            channel.member_count = (channel.member_ids.len() as u32).saturating_add(1);
+            changed |= channel.member_ids != before || channel.member_count != old_count;
+        }
+        let mut hidden = self.hidden_channels_after_leave.lock().await;
+        for channel in removed {
+            hidden.insert(channel);
+            changed |= state.remove_channel(&channel).is_some();
+        }
+        changed
     }
 
     async fn ensure_amp_channel_state(
@@ -1602,6 +1640,15 @@ impl ChatSignalView {
         // Sender is a recorded member of the channel (e.g. its creator).
         known_channel_member: bool,
     ) -> bool {
+        if self
+            .membership
+            .lock()
+            .await
+            .get(&(context_id, channel_id))
+            .is_some_and(|membership| membership.departed(sender_id))
+        {
+            return false;
+        }
         if sender_id == self.own_authority {
             return true;
         }
@@ -1662,6 +1709,28 @@ impl ReactiveView for ChatSignalView {
     fn update<'a>(&'a self, facts: &'a [Fact]) -> ReactiveUpdateFuture<'a> {
         Box::pin(async move {
             let _update_gate = self.update_gate.lock().await;
+            {
+                let mut observations = self.membership.lock().await;
+                for fact in facts {
+                    let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
+                        &fact.content
+                    else {
+                        continue;
+                    };
+                    if let Some(membership) = ChannelMembershipFact::from_envelope(envelope) {
+                        observations
+                            .entry((membership.context(), membership.channel()))
+                            .or_insert_with(|| {
+                                aura_amp::SchemaOneChannelMembership::new(
+                                    membership.context(),
+                                    membership.channel(),
+                                )
+                            })
+                            .observe(&membership);
+                    }
+                }
+            }
+
             let owner = ProjectionOwner::new(self.reactive.clone());
             loop {
                 let source = match owner.snapshot(ProjectionSlot::chat()).await {
@@ -2016,64 +2085,18 @@ impl ReactiveView for ChatSignalView {
                                 continue;
                             };
 
-                            let channel_id = membership.channel();
-                            let participant = membership.participant();
-                            match membership.event() {
-                                ChannelParticipantEvent::Joined => {
-                                    if participant == self.own_authority {
-                                        self.hidden_channels_after_leave
-                                            .lock()
-                                            .await
-                                            .remove(&channel_id);
-                                    }
-                                    if state.channel(&channel_id).is_none() {
-                                        tracing::debug!(
-                                            channel_id = %channel_id,
-                                            participant = %participant,
-                                            "ignoring ChannelParticipantEvent::Joined without canonical channel metadata"
-                                        );
-                                        continue;
-                                    }
-                                    if let Some(channel) = state.channel_mut(&channel_id) {
-                                        if participant != self.own_authority
-                                            && !channel.member_ids.contains(&participant)
-                                        {
-                                            channel.member_ids.push(participant);
-                                        }
-                                        let known_members =
-                                            channel.member_ids.len().saturating_add(1) as u32;
-                                        if known_members > channel.member_count {
-                                            channel.member_count = known_members;
-                                        }
-                                        changed = true;
-                                    }
-                                }
-                                ChannelParticipantEvent::Left => {
-                                    if participant == self.own_authority {
-                                        self.hidden_channels_after_leave
-                                            .lock()
-                                            .await
-                                            .insert(channel_id);
-                                        if state.remove_channel(&channel_id).is_some() {
-                                            changed = true;
-                                        }
-                                    } else if let Some(channel) = state.channel_mut(&channel_id) {
-                                        let before = channel.member_ids.len();
-                                        channel.member_ids.retain(|member| *member != participant);
-                                        if channel.member_ids.len() != before {
-                                            channel.member_count =
-                                                channel.member_count.saturating_sub(1);
-                                            changed = true;
-                                        }
-                                    }
-                                }
-                            }
+                            // The whole batch was observed before projection. Publication
+                            // below applies shared remove-wins semantics after metadata.
+                            let _ = membership;
+                            changed = true;
                         }
 
                         // Ignore other fact types in ChatSignalView
                         _ => {}
                     }
                 }
+
+                changed |= self.apply_observed_membership(&mut state).await;
 
                 if !changed {
                     return Ok(());
@@ -2122,6 +2145,7 @@ mod tests {
     };
     use aura_app::views::chat::ChatState;
     use aura_core::effects::reactive::ReactiveEffects;
+    use aura_protocol::amp::ChannelParticipantEvent;
 
     #[tokio::test]
     async fn required_signal_views_retain_actual_unregistered_snapshot_failure() {
@@ -3402,6 +3426,209 @@ mod tests {
             .clone();
         assert_eq!(home.member_count, 2);
         assert_eq!(home.members.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn chat_membership_departures_survive_order_batches_hints_and_replay() {
+        let own = AuthorityId::new_from_entropy([151u8; 32]);
+        let peer = AuthorityId::new_from_entropy([152u8; 32]);
+        let context = ContextId::new_from_entropy([153u8; 32]);
+        let channel = ChannelId::from_bytes([154u8; 32]);
+        let creation = fact_from_relational(
+            ChatFact::channel_created_ms(context, channel, "members".into(), None, false, 10, own)
+                .to_generic(),
+        );
+        let join = fact_from_relational(
+            ChannelMembershipFact::new(
+                context,
+                channel,
+                peer,
+                ChannelParticipantEvent::Joined,
+                TimeStamp::OrderClock(OrderTime([255u8; 32])),
+            )
+            .to_generic(),
+        );
+        let left = fact_from_relational(
+            ChannelMembershipFact::new(
+                context,
+                channel,
+                peer,
+                ChannelParticipantEvent::Left,
+                TimeStamp::OrderClock(OrderTime([0u8; 32])),
+            )
+            .to_generic(),
+        );
+        let hint = fact_from_relational(
+            ChatFact::channel_updated_ms(
+                context,
+                channel,
+                None,
+                None,
+                Some(99),
+                Some(vec![peer]),
+                100,
+                own,
+            )
+            .to_generic(),
+        );
+        for (case, batches) in [
+            vec![vec![
+                creation.clone(),
+                join.clone(),
+                left.clone(),
+                hint.clone(),
+            ]],
+            vec![vec![
+                creation.clone(),
+                left.clone(),
+                join.clone(),
+                hint.clone(),
+            ]],
+            vec![
+                vec![creation.clone(), join.clone()],
+                vec![left.clone()],
+                vec![hint.clone(), join.clone()],
+            ],
+            // Restart replay deliberately includes later metadata before original creation.
+            vec![vec![
+                hint.clone(),
+                left.clone(),
+                join.clone(),
+                creation.clone(),
+            ]],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let effects = Arc::new(
+                AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+                    &AgentConfig::default(),
+                    own,
+                    case as u64,
+                )
+                .unwrap(),
+            );
+            let view = ChatSignalView::new(own, reactive.clone(), effects);
+            for batch in batches {
+                view.update(&batch).await.unwrap();
+            }
+            let snapshot = reactive.read(&*CHAT_SIGNAL).await.unwrap();
+            let projected = snapshot.channel(&channel).unwrap();
+            assert!(
+                projected.member_ids.is_empty(),
+                "schema-one departure defeats joins and metadata hints"
+            );
+            assert_eq!(
+                projected.member_count, 1,
+                "removed peers cannot leave stale counts"
+            );
+            assert!(
+                !view
+                    .sender_allowed_for_context(context, channel, peer, 100, true)
+                    .await,
+                "known-membership and invitation fallback cannot override observed departure"
+            );
+            view.update(&[left.clone(), join.clone(), hint.clone()])
+                .await
+                .unwrap();
+            let snapshot = reactive.read(&*CHAT_SIGNAL).await.unwrap();
+            assert_eq!(
+                snapshot.channel(&channel).unwrap().member_count,
+                1,
+                "duplicate replay is idempotent"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_own_departure_cannot_be_unhidden_by_schema_one_join_or_metadata() {
+        let own = AuthorityId::new_from_entropy([161u8; 32]);
+        let context = ContextId::new_from_entropy([162u8; 32]);
+        let foreign = ContextId::new_from_entropy([163u8; 32]);
+        let channel = ChannelId::from_bytes([164u8; 32]);
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own)
+                .unwrap(),
+        );
+        let view = ChatSignalView::new(own, reactive.clone(), effects);
+        let creation = fact_from_relational(
+            ChatFact::channel_created_ms(context, channel, "own".into(), None, false, 10, own)
+                .to_generic(),
+        );
+        let membership = |scope, event| {
+            fact_from_relational(
+                ChannelMembershipFact::new(
+                    scope,
+                    channel,
+                    own,
+                    event,
+                    TimeStamp::OrderClock(OrderTime([1u8; 32])),
+                )
+                .to_generic(),
+            )
+        };
+        view.update(&[
+            creation.clone(),
+            membership(foreign, ChannelParticipantEvent::Left),
+        ])
+        .await
+        .unwrap();
+        assert!(
+            reactive
+                .read(&*CHAT_SIGNAL)
+                .await
+                .unwrap()
+                .channel(&channel)
+                .is_some(),
+            "foreign context cannot hide canonical channel"
+        );
+        view.update(&[membership(context, ChannelParticipantEvent::Left)])
+            .await
+            .unwrap();
+        assert!(reactive
+            .read(&*CHAT_SIGNAL)
+            .await
+            .unwrap()
+            .channel(&channel)
+            .is_none());
+        let hint = fact_from_relational(
+            ChatFact::channel_updated_ms(
+                context,
+                channel,
+                None,
+                None,
+                Some(3),
+                Some(vec![own]),
+                50,
+                own,
+            )
+            .to_generic(),
+        );
+        view.update(&[
+            membership(context, ChannelParticipantEvent::Joined),
+            hint,
+            creation,
+        ])
+        .await
+        .unwrap();
+        assert!(
+            reactive
+                .read(&*CHAT_SIGNAL)
+                .await
+                .unwrap()
+                .channel(&channel)
+                .is_none(),
+            "unversioned join is not a certified successor"
+        );
+        assert!(
+            !view
+                .sender_allowed_for_context(context, channel, own, 100, true)
+                .await
+        );
     }
 
     #[tokio::test]

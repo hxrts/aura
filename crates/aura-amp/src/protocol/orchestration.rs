@@ -456,6 +456,14 @@ where
     let (state, _) = prepare_send(effects, context, channel)
         .await
         .map_err(|e| return_send_failure(context, channel, e))?;
+    if !crate::core::sender_allowed_by_epoch_state(&state, sender)
+        || !crate::journal::sender_allowed_by_channel_membership(effects, context, channel, sender)
+            .await?
+    {
+        return Err(AuraError::permission_denied(
+            "sender is excluded by canonical AMP membership",
+        ));
+    }
     let ratchet_state = send_ratchet_from_epoch_state(&state);
     let ratchet_gen =
         next_send_generation(effects, &state, &ratchet_state, context, channel, sender)

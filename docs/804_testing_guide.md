@@ -14,8 +14,29 @@ for persistent enrollment fixtures rather than constructing raw registration sta
 seed-424242, 24-step AMP harness trace and compares it with
 `verification/quint/traces/amp_channel.itf.json`. The workspace test lane runs
 `amp_channel_itf::replay_amp_channel_lifecycle_trace` against real simulation
-agents. Missing artifacts and replay failures fail the test; they cannot skip
-execution. To regenerate the fixture, run:
+agents for steps 1–14. Steps 15–24 use a private simulator-only observational
+transition-policy adapter: original scope binding, model phase sequencing,
+single-live-successor, conflict suppression and emergency policy invariants.
+These steps publish no native certificate/finalization facts, mint no signatures
+or consensus IDs, and prove neither cryptographic admission nor physical
+cryptoshred. Actual A2 witness issuance and owned A3 committee coverage remain
+unfinished in `work/10.md`. Missing artifacts and replay failures fail the test; they cannot skip
+execution. Each fixture agent must complete native threshold-service authority
+bootstrap before replay, retaining its protected genesis, active epoch and
+physical signing allocation. Do not replace that setup with channel bootstrap
+metadata or raw seeded epoch/key records. The full replay then checks actual
+invitation issuance and acceptance. Join delivery must retain the actual source
+producer's membership entries and the original channel checkpoint required by
+canonical reduction, with exact context/channel selection and original entry
+keys, order and payload. The source actor alone produces a departure; peers
+replicate that original Left event and acknowledge absence. Missing evidence or
+failed canonical acknowledgment must fail the replay; final membership assertions
+must not repair state. Schema-one reduction tests must invert opaque tokens,
+insertion and journal merge order, reject unversioned rejoin and all-departed
+sender bypass, and preserve original clock failure with no append. Selected
+transition commitments are not successor roster/inclusion evidence; that owned
+witness remains an explicit unfinished task in `work/10.md`. To regenerate
+the fixture, run:
 
 ```sh
 QUINT_TRACE_MAIN=harness_amp_channel QUINT_TRACE_MAX_STEPS=24 scripts/verify/quint-trace.sh generate verification/quint/harness/amp_channel.qnt verification/quint/traces/amp_channel.itf.json
@@ -877,6 +898,17 @@ cargo run -p aura-harness --bin aura-harness -- \
 
 Patchbay is the authoritative NAT-realism backend for holepunch validation. Use native `patchbay` on Linux CI and Linux developers when capabilities are available. Use `patchbay-vm` on macOS and as Linux fallback to run the same scenarios in a Linux VM. Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
 
+The Linux harness pins Patchbay to upstream revision
+`cecd3b22e23396874169fa12d4441a6bdcaa1de9`, which migrates its DNS implementation
+to Hickory 0.26. Its two lab construction paths use the upstream builder API.
+The Linux dependency manifest additionally requires Hickory Proto `=0.26.1`:
+0.26.0 is affected by RUSTSEC-2026-0119, while 0.25 is also affected by
+RUSTSEC-2026-0118. Keep the backend enabled and validate the Linux harness,
+including its integration-test targets; a macOS build cannot establish this
+target-specific compatibility. Regenerate the tracked `Cargo.nix` after changing
+these dependencies and run `just ci-security-audit`. The ignored `Cargo.lock`
+does not enforce the fixed dependency versions on a fresh checkout.
+
 `patchbay-vm` relies on the explicit harness work and artifact directories and `QEMU_VM_WORK_DIR`. The removed `.qemu-vm` redirect path is no longer part of the supported workflow.
 
 ### Backend Resolution
@@ -1530,6 +1562,12 @@ two to one, root identity and immutable ciphertext remain unchanged, and an
 unrelated identical ciphertext alias is rejected with retained native evidence.
 Mutable successor publication remains a separately verified transition scope.
 
+Process-death checkpoint waits use `PhysicalTimeEffects` and one original
+`TimeoutBudget`; each diagnostic pause is bounded by the remaining budget.
+Test-only fault registries use `tokio::sync::Mutex::try_lock` with explicit
+busy failures and never hold locks across awaits. Strict effects test Clippy
+enforces these boundaries.
+
 ### Contact continuation ownership regression inventory
 
 The VM lifecycle lane requires the actual signed-import corruption, decision lease, original-parent deadline/shared rollback and native clock failure tests in `owned_contact_continuation_tests`. Run the existing Contact confirmed and revoked integration cases in the same serialized lane. `ManualPhysicalClock::provider_faults_are_one_shot_and_wake_original_waiting_sleep` verifies provider fault injection without physical progress. Automatic recovery of an interrupted Contact wait requires retained original-window and payload evidence; these in-process tests do not establish that recovery contract.
@@ -1946,3 +1984,22 @@ exact scope/reference substitution refusal, and interrupted publication refusing
 a second allocation for an already born scope. An unchanged envelope alone does
 not establish managed secret lifetime custody. Preserve native provider sources
 and distinguish these assertions from legacy envelope encryption coverage.
+
+### Authoritative fact policy test scopes
+
+Frontend authoritative-fact restrictions inspect Rust paths and macro tokens.
+Genuine lexical test scopes may observe the original published facts in native
+producer regressions. Comments, string diagnostics, and preceding test modules
+cannot exempt adjacent production. Mixed `cfg(any(test, feature = ...))` remains
+production-capable and checked; the toolkit regression suite enforces this split.
+
+Schema-one AMP membership projection regressions must cover both opaque fact
+orders, split updates, duplicate replay, restart replay and metadata after leave.
+The shared compact remove-wins reducer supplies both native and reactive views.
+A foreign context must not hide a channel, and local departure cannot be undone
+by an unversioned join or channel hint. Departed senders must fail projection
+admission even with known-member or invitation enrichment. App readiness tests
+must prove native participant counts defeat stale row/published count hints and
+removed peers do not enable recipient or delivery readiness. Certified successor
+membership requires actual verified inclusion evidence; transition ids and hashes
+are insufficient.

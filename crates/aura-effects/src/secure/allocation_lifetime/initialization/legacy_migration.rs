@@ -802,6 +802,51 @@ pub(super) fn require_original_anchors(root: &FilesystemLifetimeRoot) -> Result<
         .acknowledge_entries()
         .map_err(|source| source_error("acknowledge original migration anchor continuity", source))
 }
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "ProfileOwnedSecureStorage",
+    family = "runtime_helper"
+)]
+pub(super) fn require_historical_cutover_origin(
+    owner: &ProfileOwnedSecureStorage,
+    root: [u8; 32],
+) -> Result<(), AuraError> {
+    let backend = selected_initial_provider(owner)?;
+    let birth = canonical_original_anchor(backend, BIRTH)?
+        .ok_or_else(|| recovery_error(AllocationLifetimeRecoveryError::OriginalBirth))?;
+    let state = canonical_original_state(backend)?;
+    if birth.root != root || state.original != birth {
+        return Err(transition_error(
+            OriginalInitializationTransitionError::Seal,
+        ));
+    }
+    Ok(())
+}
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "ProfileOwnedSecureStorage",
+    family = "runtime_helper"
+)]
+pub(super) fn verify_historical_lifecycle_cutover(
+    owner: &ProfileOwnedSecureStorage,
+    old: &[u8],
+    next: &[u8],
+) -> Result<[u8; 32], AuraError> {
+    let backend = selected_initial_provider(owner)?;
+    let old = decode_original_state(backend, old)?;
+    let next = decode_original_state(backend, next)?;
+    if old.phase != OwnerPhase::Preparing
+        || next.phase != OwnerPhase::Handed
+        || old.original != next.original
+    {
+        return Err(transition_error(
+            OriginalInitializationTransitionError::Phase,
+        ));
+    }
+    require_historical_cutover_origin(owner, old.original.root)?;
+    Ok(old.original.root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -880,48 +925,4 @@ mod tests {
         }
         Ok(())
     }
-}
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "ProfileOwnedSecureStorage",
-    family = "runtime_helper"
-)]
-pub(super) fn require_historical_cutover_origin(
-    owner: &ProfileOwnedSecureStorage,
-    root: [u8; 32],
-) -> Result<(), AuraError> {
-    let backend = selected_initial_provider(owner)?;
-    let birth = canonical_original_anchor(backend, BIRTH)?
-        .ok_or_else(|| recovery_error(AllocationLifetimeRecoveryError::OriginalBirth))?;
-    let state = canonical_original_state(backend)?;
-    if birth.root != root || state.original != birth {
-        return Err(transition_error(
-            OriginalInitializationTransitionError::Seal,
-        ));
-    }
-    Ok(())
-}
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
-    capability = "ProfileOwnedSecureStorage",
-    family = "runtime_helper"
-)]
-pub(super) fn verify_historical_lifecycle_cutover(
-    owner: &ProfileOwnedSecureStorage,
-    old: &[u8],
-    next: &[u8],
-) -> Result<[u8; 32], AuraError> {
-    let backend = selected_initial_provider(owner)?;
-    let old = decode_original_state(backend, old)?;
-    let next = decode_original_state(backend, next)?;
-    if old.phase != OwnerPhase::Preparing
-        || next.phase != OwnerPhase::Handed
-        || old.original != next.original
-    {
-        return Err(transition_error(
-            OriginalInitializationTransitionError::Phase,
-        ));
-    }
-    require_historical_cutover_origin(owner, old.original.root)?;
-    Ok(old.original.root)
 }

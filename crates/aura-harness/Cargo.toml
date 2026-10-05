@@ -51,11 +51,15 @@ nix = "0.26"
 which = "6"
 ctrlc = "3.4"
 tempfile = { workspace = true }
-patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "f1ef699f1c0c43063382af41de0509c18dea6d0c", optional = true }
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["net"] }
 serial_test = "3.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "f1ef699f1c0c43063382af41de0509c18dea6d0c" }
+patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Keep the ignored Cargo.lock from retaining the vulnerable 0.26.0 release.
+hickory-proto = { version = "=0.26.1", default-features = false }

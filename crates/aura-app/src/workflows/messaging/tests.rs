@@ -3116,3 +3116,58 @@ async fn duplicate_diagnostic_requires_exact_scope_and_independent_canonical_rea
         "required canonical reconciliation cause must remain original"
     );
 }
+
+#[tokio::test]
+async fn readiness_native_participants_override_stale_projection_and_published_counts() {
+    let own = AuthorityId::new_from_entropy([175u8; 32]);
+    let departed = AuthorityId::new_from_entropy([176u8; 32]);
+    let context = ContextId::new_from_entropy([177u8; 32]);
+    let channel = ChannelId::from_bytes([178u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(own));
+    runtime.set_amp_channel_participants(context, channel, vec![own]);
+    runtime.set_amp_channel_state_exists(context, channel, true);
+    let bridge: Arc<dyn RuntimeBridge> = runtime;
+    let app = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), bridge).unwrap(),
+    ));
+    register_signals_only(&app).await;
+    update_chat_projection_observed(&app, |chat| {
+        chat.upsert_channel(Channel {
+            id: channel,
+            context_id: Some(context),
+            name: "removed-peer".into(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: vec![departed],
+            member_count: 99,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await
+    .unwrap();
+    refresh_authoritative_channel_membership_readiness(&app)
+        .await
+        .unwrap();
+    let facts = read_signal_or_default(&app, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
+    assert!(
+        facts.iter().any(
+            |fact| matches!(fact, AuthoritativeSemanticFact::ChannelMembershipReady {
+        channel: key, member_count: 1,
+    } if key.id.as_deref() == Some(channel.to_string().as_str()))
+        ),
+        "native full membership count must defeat stale hints"
+    );
+    let coordinator = ChannelReadinessCoordinator::load(&app, true).await.unwrap();
+    let state = coordinator.state_for_channel(channel).unwrap();
+    assert_eq!(state.member_count, 1);
+    assert!(state.recipients.is_empty());
+    assert!(
+        !state.delivery_supported,
+        "removed recipient cannot enable delivery readiness"
+    );
+}

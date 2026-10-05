@@ -337,7 +337,7 @@ Use the existing timeout budget or its child budget for subsequent stages. Clone
 
 ### Persist enrollment windows through their sealed owner
 
-Use `registered_enrollment_window` for an issued generation and the admitted-window constructor for a verified invitee manifest. Pass the resulting `EnrollmentWindow` through nested attempts. Its child, retry, and executor methods checkpoint the original parent observation before continuation. Do not reconstruct a duration or call a raw/no-op executor on that path. A new immutable user-transfer admission allocates its original window; existing admissions require the retained record. Missing legacy state requires fresh setup transfer rather than repair from raw identifiers.
+Use `registered_enrollment_window` for an issued generation and the admitted-window constructor for a verified invitee manifest. Pass the resulting `EnrollmentWindowCapability` through nested attempts. Its child, retry, and executor methods checkpoint the original parent observation before continuation. Do not reconstruct a duration or call a raw/no-op executor on that path. A new immutable user-transfer admission allocates its original window; existing admissions require the retained record. Missing legacy state requires fresh setup transfer rather than repair from raw identifiers.
 
 Use fallible owned interval callbacks for required maintenance. Preserve the original error through task supervision, service health consumption, and shutdown. Run `just ci-ownership-policy`, `just ci-annotation-ratchet`, and the checkpoint/rollback source regressions after changing these boundaries.
 

@@ -25,7 +25,9 @@ pub(super) fn map_amp_error(error: AmpChannelError) -> RuntimeBridgeError {
             IntentError::validation_failed(detail),
             RuntimeBridgeErrorKind::NotFound,
         ),
-        AmpChannelError::AlreadyExists { .. } | AmpChannelError::InvalidState(_) => (
+        AmpChannelError::AlreadyExists { .. }
+        | AmpChannelError::InvalidState(_)
+        | AmpChannelError::RejoinRequiresMembershipEvidence { .. } => (
             IntentError::validation_failed(detail),
             RuntimeBridgeErrorKind::Validation,
         ),

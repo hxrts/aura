@@ -122,7 +122,7 @@ impl WebSocketTransportHandler {
         )
         .await
         .map_err(|_| WebSocketConnectError::HandshakeTimeout)?
-        .map_err(WebSocketConnectError::Handshake)
+        .map_err(|source| WebSocketConnectError::Handshake(Box::new(source)))
     }
 
     async fn connect_with_retry(
@@ -456,7 +456,7 @@ enum WebSocketConnectError {
     ConnectTimeout { addr: SocketAddr },
     ConnectIo(io::Error),
     HandshakeTimeout,
-    Handshake(tungstenite::Error),
+    Handshake(Box<tungstenite::Error>),
 }
 
 impl WebSocketConnectError {
@@ -466,10 +466,13 @@ impl WebSocketConnectError {
             Self::Dns(error) | Self::ConnectIo(error) => {
                 WebSocketTransportHandler::is_retryable_connect_error(error)
             }
-            Self::Handshake(tungstenite::Error::Io(error)) => {
-                WebSocketTransportHandler::is_retryable_connect_error(error)
-            }
-            Self::Protocol(_) | Self::NoAddresses { .. } | Self::Handshake(_) => false,
+            Self::Handshake(source) => match source.as_ref() {
+                tungstenite::Error::Io(error) => {
+                    WebSocketTransportHandler::is_retryable_connect_error(error)
+                }
+                _ => false,
+            },
+            Self::Protocol(_) | Self::NoAddresses { .. } => false,
         }
     }
 
@@ -507,6 +510,21 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
     use tokio::time::Duration;
+
+    #[test]
+    fn handshake_error_preserves_retry_classification() {
+        let transient = WebSocketConnectError::Handshake(Box::new(tungstenite::Error::Io(
+            io::Error::from(io::ErrorKind::ConnectionReset),
+        )));
+        assert!(transient.is_retryable());
+        let terminal = WebSocketConnectError::Handshake(Box::new(tungstenite::Error::Io(
+            io::Error::from(io::ErrorKind::PermissionDenied),
+        )));
+        assert!(!terminal.is_retryable());
+        let protocol =
+            WebSocketConnectError::Handshake(Box::new(tungstenite::Error::ConnectionClosed));
+        assert!(!protocol.is_retryable());
+    }
 
     fn test_config() -> TransportConfig {
         TransportConfig {

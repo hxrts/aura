@@ -13,7 +13,7 @@ use aura_harness::network_lab::{
     TopologySpec,
 };
 use patchbay::config::LabConfig;
-use patchbay::{check_caps, Lab, LabOpts, OutDir};
+use patchbay::{check_caps, Lab, OutDir};
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
 
@@ -323,14 +323,13 @@ async fn runtime_harness_patchbay_holepunch_works_e2e() -> Result<()> {
     let lab_config = to_patchbay_lab_config(&topology)?;
     let out = tempfile::tempdir().context("create holepunch artifact tempdir")?;
 
-    let lab = Lab::from_config_with_opts(
-        lab_config,
-        LabOpts::default()
-            .outdir(OutDir::Nested(out.path().to_path_buf()))
-            .label("aura-harness-holepunch-e2e"),
-    )
-    .await
-    .context("provision patchbay lab for holepunch e2e")?;
+    let lab = Lab::builder()
+        .config(lab_config)
+        .outdir(OutDir::Nested(out.path().to_path_buf()))
+        .label("aura-harness-holepunch-e2e")
+        .build()
+        .await
+        .context("provision patchbay lab for holepunch e2e")?;
 
     let relay = lab
         .device_by_name("relay-dev")

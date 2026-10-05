@@ -1,4 +1,6 @@
-//! Replay AMP channel lifecycle traces against real simulation agents.
+//! Replay AMP lifecycle steps 1–14 against real simulation agents, followed by
+//! simulator-only observational transition-policy steps 15–24. The latter
+//! issue no native certificates, consensus identities or destruction receipts.
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use std::path::Path;

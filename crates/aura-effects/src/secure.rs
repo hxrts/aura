@@ -3562,10 +3562,7 @@ mod tests {
                     (false, ImmutablePublicationCheckpoint::Staged)
                         | (true, ImmutablePublicationCheckpoint::Published)
                 ) {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "injected publication crash boundary",
-                    ))
+                    Err(std::io::Error::other("injected publication crash boundary"))
                 } else {
                     Ok(())
                 }

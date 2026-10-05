@@ -4,6 +4,10 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
+The AMP error interface includes `RejoinRequiresMembershipEvidence` with exact context,
+channel and participant diagnostics. This typed refusal identifies an
+unversioned membership mutation failure; it supplies no successor capability.
+
 Single source of truth for domain types and effect trait definitions. Provides foundational algebraic types with zero dependencies on other Aura crates.
 
 ## Scope

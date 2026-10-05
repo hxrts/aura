@@ -444,8 +444,8 @@ impl FilesystemLifetimeRoot {
         // record and requires exact authenticated recovery, never a new birth.
         #[cfg(test)]
         if ACK_FAULTS
-            .lock()
-            .expect("owned ACK fault registry")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .remove(&record.reference.allocation)
         {
             return Err(source_error(
@@ -677,8 +677,8 @@ pub(crate) fn initialization_cutover_checkpoint(stage: &str) -> std::io::Result<
 }
 
 #[cfg(test)]
-static ACK_FAULTS: std::sync::LazyLock<std::sync::Mutex<std::collections::BTreeSet<[u8; 32]>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeSet::new()));
+static ACK_FAULTS: std::sync::LazyLock<tokio::sync::Mutex<std::collections::BTreeSet<[u8; 32]>>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::BTreeSet::new()));
 
 #[cfg(test)]
 mod tests {
@@ -814,8 +814,8 @@ mod ack_tests {
             .allocate(b"original-ACK-generation", b"real-secret")
             .await?;
         ACK_FAULTS
-            .lock()
-            .expect("fault registry")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .insert(original.reference().allocation);
         let error = match original.decide_negative(b"original-negative").await {
             Err(error) => error,
@@ -830,8 +830,8 @@ mod ack_tests {
         );
         // A second ACK fault must fail even for exact already-published state.
         ACK_FAULTS
-            .lock()
-            .expect("fault registry")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .insert(original.reference().allocation);
         assert!(original
             .decide_negative(b"original-negative")
@@ -839,14 +839,14 @@ mod ack_tests {
             .is_err());
         let negative = original.decide_negative(b"original-negative").await?;
         ACK_FAULTS
-            .lock()
-            .expect("fault registry")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .insert(original.reference().allocation);
         assert!(negative.retire().await.is_err());
         // Tombstone existence does not substitute for required ACK on replay.
         ACK_FAULTS
-            .lock()
-            .expect("fault registry")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .insert(original.reference().allocation);
         assert!(negative.retire().await.is_err());
         negative.retire().await?;

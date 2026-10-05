@@ -132,6 +132,37 @@ verifies deterministic regeneration before the workspace test lane. Replay
 uses owned temporary storage and the default test stack; stack inflation is
 not a substitute for bounded delegated futures.
 
+Each AMP replay agent completes native threshold-service authority bootstrap
+before action admission. This establishes its original physical signer,
+protected genesis, active epoch and public policy. Channel bootstrap packages
+cannot substitute for authority identity custody. The required full lifecycle
+replay exercises genuine invitation issuance and acceptance; bootstrap and
+invitation errors retain their concrete sources.
+
+After each native join or leave, the closed fixture replicates only matching original
+membership entries through journal merge/persist, retaining their exact source
+keys, order and payload, together with the original producer's channel checkpoint
+required for canonical AMP reduction. Missing source evidence fails replay. The post-leave
+invariant checks both remaining actors' canonical membership; it cannot repair
+membership from the expected set. This direct fixture delivery does not prove
+production transport authorization or reactive projection synchronization.
+Peers acknowledge expected participant presence or absence through canonical
+reduction. The source actor alone produces the departure; peers do not create
+independent replacement leave events.
+
+The unchanged 24-step trace has two evidence scopes. Steps 1–14 exercise actual
+runtime creation, invitations, original membership, delivery and departure.
+Steps 15–24 use the private observational `amp_transition_model` adapter to check
+phase sequencing, exact parent/context/channel binding, competing successors,
+conflict suppression and emergency policy invariants. Typed transition identities
+derive from the actual native base scope and observed members, but model A2/A3
+statuses grant no production authority. The adapter publishes no certificate or
+finalization facts, invents no signature/consensus ID, and asserts native epochs
+remain unchanged. Cryptoshred policy observation proves no physical destruction.
+Real verified A2 issuance and owned A3 committee integration remain outstanding.
+Negative phase, foreign parent, conflict resurrection and suspect/destruction
+regressions enforce this observational adapter's scope.
+
 Channel creation commits the complete chat creation fact through the runtime
 journal after AMP creation and creator join. The closed three-actor fixture
 owns its immutable bootstrap roster at creation. Required checkpoint reads

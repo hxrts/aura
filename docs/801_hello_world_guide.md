@@ -14,6 +14,12 @@ nix develop
 
 This command activates all required tools and dependencies. The environment includes Rust, development tools, and build scripts.
 
+Cargo and `cargo clippy` both use the shell's pinned Rust toolchain. The shell
+dispatches Clippy explicitly because Cargo can otherwise select an older
+plugin installed in Cargo home before searching PATH. This requires no global
+toolchain changes. `just ci-build-cache-policy` tests the dispatch, argument
+boundaries, and forwarded exit status.
+
 Build the project:
 
 ```bash

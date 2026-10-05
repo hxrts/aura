@@ -1839,3 +1839,11 @@ capability. Consumers retain the original field order, serde defaults, and
 optional migration-field omission, preserving immutable protected-record
 digests. Confirmed agreement is derived from the original verified receipt and
 activation owner; the signed original configuration is never rewritten.
+
+ChatSignalView retains the shared compact SchemaOneChannelMembership observations
+per exact context/channel. Whole incoming batches are observed before metadata or
+message admission. Departures persist across batches and replay, and canonical
+channel metadata cannot reintroduce members or unhide local departure. Historical
+invitation visibility cannot admit an observed departed sender. No membership
+observation materializes canonical entities; certified transition identifiers or
+commitment hashes alone do not establish successor inclusion.

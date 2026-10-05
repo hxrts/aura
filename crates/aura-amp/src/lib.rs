@@ -68,7 +68,10 @@ pub use evidence::{
 // Re-exports: Channel
 // ============================================================================
 
-pub use channel::{AmpChannelCoordinator, ChannelMembershipFact, ChannelParticipantEvent};
+pub use channel::{
+    AmpChannelCoordinator, ChannelMembershipFact, ChannelParticipantEvent,
+    SchemaOneChannelMembership,
+};
 
 // ============================================================================
 // Re-exports: Protocol Orchestration

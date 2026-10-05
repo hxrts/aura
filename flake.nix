@@ -72,6 +72,12 @@
           targets = [ "wasm32-unknown-unknown" ];
         };
 
+        auraCargo = pkgs.writeShellScriptBin "cargo" ''
+          export AURA_NIX_CARGO_BIN="${rustToolchain}/bin/cargo"
+          export AURA_NIX_CLIPPY_BIN="${rustToolchain}/bin/cargo-clippy"
+          exec ${pkgs.bash}/bin/bash ${./scripts/dev/cargo-in-nix.sh} "$@"
+        '';
+
         rustToolchainNightly = pkgs.rust-bin.nightly.latest.default.override {
           extensions = [
             "rust-src"
@@ -221,6 +227,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Rust toolchain
+            auraCargo
             rustToolchain
             cargo-watch
             cargo-edit
@@ -356,6 +363,7 @@
         devShells.ci = pkgs.mkShell {
           buildInputs = with pkgs; [
             # Rust toolchain
+            auraCargo
             rustToolchain
             rustToolchainNightly
 

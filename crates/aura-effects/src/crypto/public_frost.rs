@@ -529,7 +529,13 @@ mod tests {
         .unwrap();
         assert!(matches!(
             cause(
-                &create_package(message, &[c1.clone()], &keys.public_key_package, 2).unwrap_err()
+                &create_package(
+                    message,
+                    std::slice::from_ref(&c1),
+                    &keys.public_key_package,
+                    2
+                )
+                .unwrap_err()
             ),
             PublicFrostSigningError::Quorum { .. }
         ));

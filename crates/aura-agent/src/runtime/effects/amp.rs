@@ -172,7 +172,24 @@ impl AmpChannelEffects for AuraEffectSystem {
         aura_protocol::amp::get_channel_state(self, params.context, params.channel)
             .await
             .map_err(map_amp_err)?;
-        let timestamp = ChannelMembershipFact::random_timestamp(self).await;
+        if aura_protocol::amp::journal::channel_participant_departed(
+            self,
+            params.context,
+            params.channel,
+            params.participant,
+        )
+        .await
+        .map_err(map_amp_err)?
+        {
+            return Err(AmpChannelError::RejoinRequiresMembershipEvidence {
+                context: params.context,
+                channel: params.channel,
+                participant: params.participant,
+            });
+        }
+        let timestamp = ChannelMembershipFact::random_timestamp(self)
+            .await
+            .map_err(map_amp_err)?;
         let membership = ChannelMembershipFact::new(
             params.context,
             params.channel,
@@ -203,7 +220,9 @@ impl AmpChannelEffects for AuraEffectSystem {
         aura_protocol::amp::get_channel_state(self, params.context, params.channel)
             .await
             .map_err(map_amp_err)?;
-        let timestamp = ChannelMembershipFact::random_timestamp(self).await;
+        let timestamp = ChannelMembershipFact::random_timestamp(self)
+            .await
+            .map_err(map_amp_err)?;
         let membership = ChannelMembershipFact::new(
             params.context,
             params.channel,

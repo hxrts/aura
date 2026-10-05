@@ -4,6 +4,8 @@
 //! maps Quint actions to AMP channel operations (create/invite/accept/join/send/recv/leave).
 
 use super::action_registry::{ActionBuilder, ActionRegistry};
+#[path = "amp_transition_model.rs"]
+mod transition_model;
 use aura_agent::core::{default_context_id_for_authority, AgentBuilder, AgentConfig};
 use aura_agent::handlers::{InvitationStatus, InvitationType};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
@@ -13,7 +15,8 @@ use aura_core::effects::random::RandomCoreEffects;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::transport::TransportError;
 use aura_core::effects::{
-    time::PhysicalTimeEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    time::PhysicalTimeEffects, JournalEffects, SecureStorageCapability, SecureStorageEffects,
+    SecureStorageLocation, ThresholdSigningEffects,
 };
 use aura_core::effects::{
     ActionEffect, ActionResult, AmpChannelEffects, ChannelCreateParams, ChannelJoinParams,
@@ -62,6 +65,106 @@ pub struct AmpChannelHarness {
 }
 
 impl AmpChannelHarness {
+    // Replicate actual committed membership entries in this closed actor fixture.
+    // Keep their original keys/order/payload; never construct memberships from
+    // trace actor labels or the invariant's expected participant set. Include
+    // the original producer checkpoint required by canonical AMP reduction.
+    async fn synchronize_committed_membership(
+        &self,
+        source: &aura_agent::AuraEffectSystem,
+        channel: ChannelId,
+        participant: AuthorityId,
+        transition: aura_amp::ChannelParticipantEvent,
+    ) -> Result<()> {
+        let journal = source.get_journal().await?;
+        let mut delta = aura_core::Journal::new();
+        let prefix = format!("relational:{}:", self.context_id);
+        let mut selected = 0usize;
+        let mut checkpoint_selected = false;
+        for (key, value) in journal.read_facts().iter() {
+            if !key.as_str().starts_with(&prefix) {
+                continue;
+            }
+            let aura_core::FactValue::Bytes(bytes) = value else {
+                return Err(AuraError::invalid(
+                    "AMP source relational entry is not canonical bytes",
+                ));
+            };
+            let content: aura_journal::fact::FactContent =
+                serde_json::from_slice(bytes).map_err(|source| AuraError::Serialization {
+                    message: "decode actual AMP source membership entry".into(),
+                    source: Some(Arc::new(source)),
+                })?;
+            if let aura_journal::fact::FactContent::Relational(RelationalFact::Protocol(
+                ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+            )) = &content
+            {
+                if checkpoint.context == self.context_id && checkpoint.channel == channel {
+                    delta.facts.insert(key.clone(), value.clone())?;
+                    checkpoint_selected = true;
+                }
+                continue;
+            }
+            let aura_journal::fact::FactContent::Relational(RelationalFact::Generic {
+                envelope,
+                ..
+            }) = content
+            else {
+                continue;
+            };
+            let Some(membership) = aura_amp::ChannelMembershipFact::from_envelope(&envelope) else {
+                continue;
+            };
+            if membership.context() != self.context_id
+                || membership.channel() != channel
+                || membership.participant() != participant
+                || !matches!(
+                    (membership.event(), transition),
+                    (
+                        aura_amp::ChannelParticipantEvent::Joined,
+                        aura_amp::ChannelParticipantEvent::Joined
+                    ) | (
+                        aura_amp::ChannelParticipantEvent::Left,
+                        aura_amp::ChannelParticipantEvent::Left
+                    )
+                )
+            {
+                continue;
+            }
+            delta.facts.insert(key.clone(), value.clone())?;
+            selected += 1;
+        }
+        if selected == 0 {
+            return Err(AuraError::invalid(
+                "actual AMP membership transition has no committed source entry",
+            ));
+        }
+        if !checkpoint_selected {
+            return Err(AuraError::invalid(
+                "actual AMP membership transition has no original channel checkpoint",
+            ));
+        }
+        for name in ["bob", "alice", "carol"] {
+            let agent = self.agent_for(name)?;
+            let target = agent.runtime().effects();
+            if std::ptr::eq(source, target.as_ref()) {
+                continue;
+            }
+            let current = target.get_journal().await?;
+            let merged = target.merge_facts(current, delta.clone()).await?;
+            target.persist_journal(&merged).await?;
+            let acknowledged =
+                aura_amp::list_channel_participants(target.as_ref(), self.context_id, channel)
+                    .await?;
+            let expected_presence = matches!(transition, aura_amp::ChannelParticipantEvent::Joined);
+            if acknowledged.contains(&participant) != expected_presence {
+                return Err(AuraError::invalid(format!(
+                    "{name} did not acknowledge original committed AMP {transition:?} for {participant}",
+                )));
+            }
+        }
+        Ok(())
+    }
     /// Build a new harness with three agents (bob/alice/carol).
     pub async fn new(seed: u64, base_path: PathBuf) -> Result<Arc<Self>> {
         let shared_transport = SharedTransport::new();
@@ -391,6 +494,7 @@ impl AmpChannelHarness {
 /// Build an action registry with AMP channel handlers.
 pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
     let mut registry = ActionRegistry::new();
+    let transition_harness = harness.clone();
 
     registry.register(
         ActionBuilder::new("createChannel")
@@ -441,7 +545,19 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 participant: authority,
                             })
                             .await
-                            .map_err(|e| AuraError::invalid(format!("join channel failed: {e}")))?;
+                            .map_err(|source| AuraError::Internal {
+                                message: "commit actual AMP channel join".into(),
+                                source: Some(Arc::new(source)),
+                            })?;
+
+                        harness
+                            .synchronize_committed_membership(
+                                effects.as_ref(),
+                                channel,
+                                authority,
+                                aura_amp::ChannelParticipantEvent::Joined,
+                            )
+                            .await?;
 
                         // The creation action owns both protocol checkpoint and
                         // canonical chat identity. Invitations consume that
@@ -543,7 +659,10 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 None,
                             )
                             .await
-                            .map_err(|e| AuraError::internal(format!("invite failed: {e}")))?;
+                            .map_err(|source| AuraError::Internal {
+                                message: "create actual AMP channel invitation".into(),
+                                source: Some(Arc::new(source)),
+                            })?;
 
                         let code = invitation_service
                             .export_invitation_with_sender_hint(&invitation)
@@ -644,7 +763,19 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 participant: authority,
                             })
                             .await
-                            .map_err(|e| AuraError::invalid(format!("join channel failed: {e}")))?;
+                            .map_err(|source| AuraError::Internal {
+                                message: "commit joining actor's actual AMP membership".into(),
+                                source: Some(Arc::new(source)),
+                            })?;
+
+                        harness
+                            .synchronize_committed_membership(
+                                effects.as_ref(),
+                                channel,
+                                authority,
+                                aura_amp::ChannelParticipantEvent::Joined,
+                            )
+                            .await?;
 
                         Ok(success_result(result_state, vec![]))
                     })
@@ -786,27 +917,22 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 participant: leaver_id,
                             })
                             .await
-                            .map_err(|e| {
-                                AuraError::invalid(format!("leave channel failed: {e}"))
+                            .map_err(|source| AuraError::Internal {
+                                message: "commit actual AMP channel leave".into(),
+                                source: Some(Arc::new(source)),
                             })?;
+
+                        harness
+                            .synchronize_committed_membership(
+                                effects.as_ref(),
+                                channel,
+                                leaver_id,
+                                aura_amp::ChannelParticipantEvent::Left,
+                            )
+                            .await?;
 
                         let bob = harness.agent_for("bob")?;
                         let alice = harness.agent_for("alice")?;
-
-                        for agent in [bob.clone(), alice.clone()] {
-                            let effects = agent.runtime().effects();
-                            effects
-                                .leave_channel(ChannelLeaveParams {
-                                    context: harness.context_id(),
-                                    channel,
-                                    participant: leaver_id,
-                                })
-                                .await
-                                .map_err(|error| AuraError::Internal {
-                                    message: "replicate channel leave".into(),
-                                    source: Some(Arc::new(error)),
-                                })?;
-                        }
 
                         let channel_state = get_channel_state(
                             bob.runtime().effects().as_ref(),
@@ -869,6 +995,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
             .build(),
     );
 
+    transition_model::register(&mut registry, transition_harness);
     registry
 }
 
@@ -933,7 +1060,22 @@ async fn build_agent(
         .with_authority(authority)
         .build_simulation_async_with_shared_transport(seed, &ctx, shared_transport)
         .await
-        .map_err(|e| AuraError::internal(format!("build agent failed: {e}")))?;
+        .map_err(|source| AuraError::Internal {
+            message: "build actual AMP simulation agent".into(),
+            source: Some(Arc::new(source)),
+        })?;
+
+    // Invitation sender custody requires the original protected active epoch
+    // and physical signer. The service publishes genuine genesis and key
+    // records; channel bootstrap data does not establish an authority identity.
+    agent
+        .threshold_signing()
+        .bootstrap_authority(&authority)
+        .await
+        .map_err(|source| AuraError::Internal {
+            message: "bootstrap actual AMP simulation authority".into(),
+            source: Some(Arc::new(source)),
+        })?;
 
     Ok(Arc::new(agent))
 }

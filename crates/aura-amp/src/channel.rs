@@ -13,7 +13,7 @@ use aura_core::effects::amp::{
 use aura_core::effects::random::RandomExtendedEffects;
 use aura_core::hash::hash;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
-use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::time::TimeStamp;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::fact::{
@@ -23,9 +23,7 @@ use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    config::AmpRuntimeConfig, get_channel_state, list_channel_participants, AmpJournalEffects,
-};
+use crate::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
 
 /// Simple coordinator that writes AMP channel facts into the context journal.
 pub struct AmpChannelCoordinator<E> {
@@ -226,10 +224,15 @@ where
         if !crate::core::sender_allowed_by_epoch_state(&state, params.sender) {
             return Err(AmpChannelError::Unauthorized);
         }
-        let participants = list_channel_participants(&self.effects, params.context, params.channel)
-            .await
-            .map_err(map_err)?;
-        if !participants.is_empty() && !participants.contains(&params.sender) {
+        if !crate::journal::sender_allowed_by_channel_membership(
+            &self.effects,
+            params.context,
+            params.channel,
+            params.sender,
+        )
+        .await
+        .map_err(map_err)?
+        {
             return Err(AmpChannelError::Unauthorized);
         }
         let send_epoch = state
@@ -303,14 +306,17 @@ impl ChannelMembershipFact {
         }
     }
 
-    pub async fn random_timestamp<A: AmpJournalEffects>(effects: &A) -> TimeStamp {
-        match effects.order_time().await {
-            Ok(order) => TimeStamp::OrderClock(order),
-            Err(err) => {
-                tracing::warn!("order_time unavailable: {err}; falling back to zero order");
-                TimeStamp::OrderClock(OrderTime([0u8; 32]))
-            }
-        }
+    pub async fn random_timestamp<A: AmpJournalEffects>(
+        effects: &A,
+    ) -> aura_core::Result<TimeStamp> {
+        effects
+            .order_time()
+            .await
+            .map(TimeStamp::OrderClock)
+            .map_err(|source| aura_core::AuraError::Internal {
+                message: "read original AMP membership order token".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
     }
 
     /// Context that scopes this membership event.
@@ -348,6 +354,61 @@ fn channel_membership_schema_version() -> u16 {
     1
 }
 
+/// Pure schema-one membership observations scoped to one context and channel.
+/// This is neither authorization nor canonical channel creation evidence.
+/// Departures are permanent within this unversioned observation set; opaque
+/// order tokens never establish successor membership or causal rejoin.
+#[derive(Debug, Clone)]
+pub struct SchemaOneChannelMembership {
+    context: ContextId,
+    channel: ChannelId,
+    joined: std::collections::BTreeSet<AuthorityId>,
+    departed: std::collections::BTreeSet<AuthorityId>,
+}
+impl SchemaOneChannelMembership {
+    /// Begin empty observations for an exact context and channel.
+    pub fn new(context: ContextId, channel: ChannelId) -> Self {
+        Self {
+            context,
+            channel,
+            joined: std::collections::BTreeSet::default(),
+            departed: std::collections::BTreeSet::default(),
+        }
+    }
+    /// Observe an exact-scope fact; foreign context/channel facts are rejected.
+    /// Returns whether the fact belongs to this observation scope.
+    pub fn observe(&mut self, fact: &ChannelMembershipFact) -> bool {
+        if fact.context() != self.context || fact.channel() != self.channel {
+            return false;
+        }
+        match fact.event() {
+            ChannelParticipantEvent::Joined => {
+                self.joined.insert(fact.participant());
+            }
+            ChannelParticipantEvent::Left => {
+                self.departed.insert(fact.participant());
+            }
+        }
+        true
+    }
+    /// Sorted observed joins with all observed departures removed.
+    pub fn participants(&self) -> impl Iterator<Item = AuthorityId> + '_ {
+        self.joined.difference(&self.departed).copied()
+    }
+    /// Whether this scope retains a departure for the exact participant.
+    pub fn departed(&self, participant: AuthorityId) -> bool {
+        self.departed.contains(&participant)
+    }
+    /// Whether any join or departure evidence has been observed.
+    pub fn has_observations(&self) -> bool {
+        !self.joined.is_empty() || !self.departed.is_empty()
+    }
+    /// Whether the participant belongs to observed schema-one membership.
+    pub fn contains(&self, participant: AuthorityId) -> bool {
+        self.joined.contains(&participant) && !self.departed.contains(&participant)
+    }
+}
+
 fn map_err(error: aura_core::AuraError) -> AmpChannelError {
     AmpChannelError::Effect(error)
 }
@@ -360,9 +421,206 @@ async fn persist_channel_membership_event<E: AmpJournalEffects>(
     event: ChannelParticipantEvent,
 ) -> aura_core::Result<()> {
     let _state = get_channel_state(effects, context, channel).await?;
-    let timestamp = ChannelMembershipFact::random_timestamp(effects).await;
+    if matches!(event, ChannelParticipantEvent::Joined)
+        && crate::journal::channel_participant_departed(effects, context, channel, participant)
+            .await?
+    {
+        return Err(aura_core::AuraError::Invalid {
+            message: "schema-one membership cannot authorize rejoin".into(),
+            source: Some(std::sync::Arc::new(
+                AmpChannelError::RejoinRequiresMembershipEvidence {
+                    context,
+                    channel,
+                    participant,
+                },
+            )),
+        });
+    }
+    let timestamp = ChannelMembershipFact::random_timestamp(effects).await?;
     let membership = ChannelMembershipFact::new(context, channel, participant, event, timestamp);
     effects
         .insert_relational_fact(membership.to_generic())
         .await
+}
+
+#[cfg(test)]
+mod membership_tests {
+    use super::*;
+    use aura_core::effects::TimeError;
+    use aura_core::effects::{JournalEffects, OrderClockEffects};
+    use aura_core::time::OrderTime;
+    use aura_core::{FlowBudget, FlowCost, Journal};
+    use aura_journal::fact::FactContent;
+
+    struct FaultClockJournal {
+        journal: tokio::sync::Mutex<Journal>,
+    }
+    #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+    #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+    impl JournalEffects for FaultClockJournal {
+        async fn get_journal(&self) -> aura_core::Result<Journal> {
+            Ok(self.journal.lock().await.clone())
+        }
+        async fn persist_journal(&self, journal: &Journal) -> aura_core::Result<()> {
+            *self.journal.lock().await = journal.clone();
+            Ok(())
+        }
+        async fn merge_facts(
+            &self,
+            mut target: Journal,
+            delta: Journal,
+        ) -> aura_core::Result<Journal> {
+            target.merge_facts(delta.facts);
+            Ok(target)
+        }
+        async fn refine_caps(&self, _: Journal, _: Journal) -> aura_core::Result<Journal> {
+            panic!("membership does not refine capabilities")
+        }
+        async fn get_flow_budget(
+            &self,
+            _: &ContextId,
+            _: &AuthorityId,
+        ) -> aura_core::Result<FlowBudget> {
+            panic!("membership does not read flow budgets")
+        }
+        async fn update_flow_budget(
+            &self,
+            _: &ContextId,
+            _: &AuthorityId,
+            _: &FlowBudget,
+        ) -> aura_core::Result<FlowBudget> {
+            panic!("membership does not update flow budgets")
+        }
+        async fn charge_flow_budget(
+            &self,
+            _: &ContextId,
+            _: &AuthorityId,
+            _: FlowCost,
+        ) -> aura_core::Result<FlowBudget> {
+            panic!("membership does not charge flow budgets")
+        }
+    }
+    #[async_trait::async_trait]
+    impl OrderClockEffects for FaultClockJournal {
+        async fn order_time(&self) -> Result<OrderTime, TimeError> {
+            Err(TimeError::ServiceUnavailable)
+        }
+    }
+    fn scope() -> (ContextId, ChannelId, AuthorityId) {
+        (
+            ContextId::new_from_entropy(hash(
+                b"aura-amp.membership-original-source-regression.context",
+            )),
+            ChannelId::from_bytes(hash(
+                b"aura-amp.membership-original-source-regression.channel",
+            )),
+            AuthorityId::new_from_entropy(hash(
+                b"aura-amp.membership-original-source-regression.participant",
+            )),
+        )
+    }
+    fn original_journal(
+        context: ContextId,
+        channel: ChannelId,
+        participant: AuthorityId,
+        departed: bool,
+    ) -> Journal {
+        let mut journal = Journal::new();
+        let checkpoint = RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(ChannelCheckpoint {
+                context,
+                channel,
+                chan_epoch: 0,
+                base_gen: 0,
+                window: 1024,
+                ck_commitment: Hash32::default(),
+                skip_window_override: None,
+            }),
+        );
+        let entries = if departed {
+            vec![
+                checkpoint,
+                ChannelMembershipFact::new(
+                    context,
+                    channel,
+                    participant,
+                    ChannelParticipantEvent::Left,
+                    TimeStamp::OrderClock(OrderTime([0; 32])),
+                )
+                .to_generic(),
+            ]
+        } else {
+            vec![checkpoint]
+        };
+        for (index, content) in (0u8..).zip(entries) {
+            let encoded = match serde_json::to_vec(&FactContent::Relational(content)) {
+                Ok(bytes) => bytes,
+                Err(source) => panic!("encode actual original fixture: {source}"),
+            };
+            if let Err(source) = journal.facts.insert(
+                format!("relational:{context}:{}", hex::encode([index; 32])),
+                aura_core::FactValue::Bytes(encoded),
+            ) {
+                panic!("retain original fixture: {source}");
+            }
+        }
+        journal
+    }
+    #[tokio::test]
+    async fn original_membership_clock_failure_retains_source_and_appends_nothing() {
+        let (context, channel, participant) = scope();
+        let initial = original_journal(context, channel, participant, false);
+        let effects = FaultClockJournal {
+            journal: tokio::sync::Mutex::new(initial.clone()),
+        };
+        let Err(error) = persist_channel_membership_event(
+            &effects,
+            context,
+            channel,
+            participant,
+            ChannelParticipantEvent::Joined,
+        )
+        .await
+        else {
+            panic!("clock outage cannot publish membership success");
+        };
+        assert!(std::error::Error::source(&error).is_some_and(|source| source.is::<TimeError>()));
+        assert_eq!(*effects.journal.lock().await, initial);
+    }
+    #[tokio::test]
+    async fn original_departure_rejects_unversioned_rejoin_and_empty_sender_bypass() {
+        let (context, channel, participant) = scope();
+        let initial = original_journal(context, channel, participant, true);
+        let effects = FaultClockJournal {
+            journal: tokio::sync::Mutex::new(initial.clone()),
+        };
+        let Err(error) = persist_channel_membership_event(
+            &effects,
+            context,
+            channel,
+            participant,
+            ChannelParticipantEvent::Joined,
+        )
+        .await
+        else {
+            panic!("opaque token cannot authorize rejoin");
+        };
+        assert!(matches!(
+            std::error::Error::source(&error)
+                .and_then(|source| source.downcast_ref::<AmpChannelError>()),
+            Some(AmpChannelError::RejoinRequiresMembershipEvidence { .. })
+        ));
+        let allowed = crate::journal::sender_allowed_by_channel_membership(
+            &effects,
+            context,
+            channel,
+            participant,
+        )
+        .await;
+        assert!(
+            matches!(allowed, Ok(false)),
+            "all departed membership must not grant send authority"
+        );
+        assert_eq!(*effects.journal.lock().await, initial);
+    }
 }

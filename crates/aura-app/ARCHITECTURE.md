@@ -482,3 +482,8 @@ allocated bridge over the same native agent remains foreign. Authority IDs,
 effect equivalence, and public metadata cannot replace this owner identity. The
 actual native quorum fixture verifies both original-reference admission and
 foreign-facade rejection before consuming explicit participant approval.
+
+Channel readiness uses the exact full participant count from a successful strong
+native channel read. Observed row counts and prior readiness facts cannot widen
+that count; recipient resolution derives from the same participant read. Required
+participant lookup errors retain their native cause through the workflow boundary.

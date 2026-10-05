@@ -487,7 +487,7 @@ pub(in crate::workflows) async fn authoritative_recipient_peers_for_channel(
     Ok(participants)
 }
 
-async fn authoritative_channel_participants(
+pub(super) async fn authoritative_channel_participants(
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
 ) -> Result<Vec<AuthorityId>, AuraError> {
@@ -505,14 +505,20 @@ async fn authoritative_channel_participants(
         |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
-            source: AuraError::agent(error.to_string()),
+            source: AuraError::Internal {
+                message: "required authoritative AMP membership read".into(),
+                source: Some(Arc::new(error)),
+            },
         },
     )?
     .map_err(
         |error| super::super::error::WorkflowError::AuthoritativeParticipantsLookup {
             channel: channel_id.to_string(),
             context: context_id.to_string(),
-            source: AuraError::agent(error.to_string()),
+            source: AuraError::Internal {
+                message: "required authoritative AMP membership read".into(),
+                source: Some(Arc::new(error)),
+            },
         },
     )?;
 
@@ -545,14 +551,20 @@ async fn authoritative_channel_participants(
             super::super::error::WorkflowError::AuthoritativeParticipantsLookupAfterConvergence {
                 channel: channel_id.to_string(),
                 context: context_id.to_string(),
-                source: AuraError::agent(error.to_string()),
+                source: AuraError::Internal {
+                    message: "required authoritative AMP membership read".into(),
+                    source: Some(Arc::new(error)),
+                },
             }
         })?
         .map_err(|error| {
             super::super::error::WorkflowError::AuthoritativeParticipantsLookupAfterConvergence {
                 channel: channel_id.to_string(),
                 context: context_id.to_string(),
-                source: AuraError::agent(error.to_string()),
+                source: AuraError::Internal {
+                    message: "required authoritative AMP membership read".into(),
+                    source: Some(Arc::new(error)),
+                },
             }
         })?;
     }

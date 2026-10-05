@@ -5,6 +5,8 @@ use std::{
     process::Command,
 };
 
+#[path = "authoritative_fact_scope.rs"]
+mod authoritative_fact_scope;
 #[path = "runtime_entropy_scope.rs"]
 mod runtime_entropy_scope;
 #[path = "security_test_scope.rs"]
@@ -1088,13 +1090,20 @@ pub fn run_harness_typed_json_boundary() -> Result<()> {
 
 pub fn run_harness_authoritative_fact_boundary() -> Result<()> {
     let repo_root = repo_root()?;
-    let violations = rg_non_comment_lines(&["-n".into(),
-        "AuthoritativeSemanticFact::(OperationStatus|PendingHomeInvitationReady|ContactLinkReady|ChannelMembershipReady|RecipientPeersResolved|PeerChannelReady|MessageDeliveryReady)".into(),
-        repo_relative(repo_root.join("crates/aura-terminal/src")),
-        repo_relative(repo_root.join("crates/aura-web/src")),
-        repo_relative(repo_root.join("crates/aura-harness/src")),
-        "-g".into(),
-        "*.rs".into()])?;
+    let mut violations = Vec::new();
+    for frontend in ["aura-terminal", "aura-web", "aura-harness"] {
+        for path in rust_files_under(repo_root.join("crates").join(frontend).join("src")) {
+            let source = read(&path)?;
+            for line in authoritative_fact_scope::production_fact_lines(&source)
+                .with_context(|| format!("parse authoritative fact boundary {}", path.display()))?
+            {
+                violations.push(format!(
+                    "{}:{line}: authoritative semantic fact outside approved boundary",
+                    repo_relative(&path)
+                ));
+            }
+        }
+    }
     if !violations.is_empty() {
         for hit in violations {
             eprintln!("{hit}");

@@ -4,6 +4,19 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
+Schema-one channel membership uses the shared pure `SchemaOneChannelMembership`
+observation reducer: joins minus retained departures, scoped to exact context and
+channel. Opaque order tokens are noncausal and cannot authorize rejoin. Native
+joins retain a typed `RejoinRequiresMembershipEvidence` refusal; certified transition
+membership remains the sole successor contract. Observed all-departed membership
+fails sender checks before ratchet advancement. Required order-token errors keep
+native sources and cannot append a zero-token membership event.
+
+Regression hooks include reversed opaque tokens, insertion and original journal
+merge permutations, unversioned rejoin refusal, all-departed sender rejection,
+and an original clock outage with no append. These observations grant neither
+canonical channel creation evidence nor authorization capabilities.
+
 Orchestrate AMP channel lifecycle and message transport coordination on top of relational journal facts.
 
 ## Scope

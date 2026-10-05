@@ -1257,6 +1257,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
         params: ChannelJoinParams,
     ) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
+        if aura_protocol::amp::journal::channel_participant_departed(
+            &effects,
+            params.context,
+            params.channel,
+            params.participant,
+        )
+        .await
+        .map_err(|source| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(source)))?
+        {
+            return Err(map_amp_error(
+                aura_core::effects::amp::AmpChannelError::RejoinRequiresMembershipEvidence {
+                    context: params.context,
+                    channel: params.channel,
+                    participant: params.participant,
+                },
+            ));
+        }
         let _canonical =
             aura_protocol::amp::get_channel_state(&effects, params.context, params.channel)
                 .await
@@ -1266,11 +1283,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let timestamp = execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            || async {
-                Ok::<_, aura_core::AuraError>(
-                    ChannelMembershipFact::random_timestamp(&effects).await,
-                )
-            },
+            || async { ChannelMembershipFact::random_timestamp(&effects).await },
         )
         .await
         .map_err(|error| match error {
@@ -1335,7 +1348,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             channel,
             participant,
             ChannelParticipantEvent::Left,
-            ChannelMembershipFact::random_timestamp(&effects).await,
+            ChannelMembershipFact::random_timestamp(&effects)
+                .await
+                .map_err(|source| {
+                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(source))
+                })?,
         )
         .to_generic();
         for member in members.into_iter().filter(|member| *member != participant) {

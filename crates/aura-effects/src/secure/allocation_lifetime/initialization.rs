@@ -23,18 +23,18 @@ fn recovery_error(reason: AllocationLifetimeRecoveryError) -> AuraError {
 }
 #[cfg(test)]
 static INIT_FAULTS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::BTreeSet<(String, &'static str)>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeSet::new()));
+    tokio::sync::Mutex<std::collections::BTreeSet<(String, &'static str)>>,
+> = std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::BTreeSet::new()));
 #[cfg(test)]
 fn init_fault(owned: &ProfileOwnedSecureStorage, stage: &'static str) -> Result<(), AuraError> {
     use aura_core::effects::profile_storage::ProfileStorageLease;
-    init_fault_profile(&owned._owner.profile_identity().to_string(), stage)
+    init_fault_profile(owned._owner.profile_identity(), stage)
 }
 #[cfg(test)]
 fn init_fault_profile(profile: &str, stage: &'static str) -> Result<(), AuraError> {
     if INIT_FAULTS
-        .lock()
-        .expect("initialization fault registry")
+        .try_lock()
+        .expect("test-only fault registry busy; owner-key access must stay synchronous")
         .remove(&(profile.to_string(), stage))
     {
         return Err(source_error(
@@ -826,10 +826,7 @@ pub(super) fn prepare_birth(
     #[cfg(test)]
     {
         use aura_core::effects::profile_storage::ProfileStorageLease;
-        init_fault_profile(
-            &root._profile.profile_identity().to_string(),
-            "birth-prepared",
-        )?;
+        init_fault_profile(root._profile.profile_identity(), "birth-prepared")?;
     }
     complete_pending_birth(root)
 }
@@ -883,6 +880,10 @@ pub(super) fn require_reference(
         ));
     }
     Ok(())
+}
+
+pub(super) fn missing_live_allocation() -> AuraError {
+    recovery_error(AllocationLifetimeRecoveryError::LiveAllocation)
 }
 
 #[cfg(test)]
@@ -1274,8 +1275,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initialization_recovers_linked_stage_after_actual_process_death(
+    #[tokio::test]
+    async fn original_initialization_recovers_linked_stage_after_actual_process_death(
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::MetadataExt;
         for target in ["birth", "handed", BORN, INDEX, READY, HANDED, MARKER] {
@@ -1285,7 +1286,8 @@ mod tests {
                 &profile,
                 &temporary.path().join("checkpoint"),
                 &format!("after-link:{target}"),
-            )?;
+            )
+            .await?;
             let storage = selected(&profile)?;
             let provider = backend(&storage).owned_directory()?;
             let parent = match target {
@@ -1366,8 +1368,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_mutable_initialization_successors_recover_after_process_death(
+    #[tokio::test]
+    async fn original_mutable_initialization_successors_recover_after_process_death(
     ) -> Result<(), Box<dyn std::error::Error>> {
         for target in [
             "mutable-index-ready",
@@ -1376,7 +1378,7 @@ mod tests {
         ] {
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target)?;
+            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target).await?;
             let storage = selected(&profile)?;
             let provider = backend(&storage);
             let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
@@ -1398,7 +1400,7 @@ mod tests {
             validate(&index, initialized.root_identity)?;
             assert!(index.phase == Phase::Handed);
             assert!(index.births.is_empty() && index.pending.is_none());
-            require_initial_stage_inventory(&directory)?;
+            require_initial_stage_inventory(directory)?;
             directory.require_stage_inventory(&[])?;
             drop(initialized);
             drop(storage);
@@ -1408,8 +1410,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_mutable_successor_requires_independent_seal_and_retains_evidence(
+    #[tokio::test]
+    async fn original_mutable_successor_requires_independent_seal_and_retains_evidence(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
@@ -1417,7 +1419,8 @@ mod tests {
             &profile,
             &temporary.path().join("checkpoint"),
             "mutable-index-ready",
-        )?;
+        )
+        .await?;
         let storage = selected(&profile)?;
         let directory = backend(&storage).owned_directory()?;
         let before = directory.read_bounded(std::path::Path::new(INDEX), false, MAX_INDEX_BYTES)?;
@@ -1433,8 +1436,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_mutable_successor_rejects_foreign_physical_profile(
+    #[tokio::test]
+    async fn original_mutable_successor_rejects_foreign_physical_profile(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("original");
@@ -1442,7 +1445,8 @@ mod tests {
             &profile,
             &temporary.path().join("checkpoint"),
             "mutable-index-ready",
-        )?;
+        )
+        .await?;
         let storage = selected(&profile)?;
         let directory = backend(&storage).owned_directory()?;
         let observation = directory
@@ -1468,7 +1472,8 @@ mod tests {
             &profile,
             &temporary.path().join("checkpoint"),
             "mutable-index-ready",
-        )?;
+        )
+        .await?;
         let selected_storage = selected(&profile)?;
         let staged_ciphertext = backend(&selected_storage)
             .owned_directory()?
@@ -1493,7 +1498,7 @@ mod tests {
         );
         match secret.state().await? {
             aura_core::effects::secret_lifetime::SecretLifetimeState::Positive { decision } => {
-                assert_eq!(decision, b"original-positive")
+                assert_eq!(decision, b"original-positive");
             }
             _ => panic!("original decision must survive stale initial successor"),
         }
@@ -1504,8 +1509,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initial_cutover_preserves_substituted_source_and_target_evidence(
+    #[tokio::test]
+    async fn original_initial_cutover_preserves_substituted_source_and_target_evidence(
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
@@ -1516,7 +1521,8 @@ mod tests {
                 &profile,
                 &temporary.path().join("checkpoint"),
                 "mutable-index-ready",
-            )?;
+            )
+            .await?;
             let storage = selected(&profile)?;
             let directory = backend(&storage).owned_directory()?;
             let observation = directory
@@ -1574,8 +1580,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initial_cutover_recovers_acknowledged_custody_and_exchange_after_process_death(
+    #[tokio::test]
+    async fn original_initial_cutover_recovers_acknowledged_custody_and_exchange_after_process_death(
     ) -> Result<(), Box<dyn std::error::Error>> {
         for point in [
             "journal-stage",
@@ -1592,14 +1598,16 @@ mod tests {
                 &profile,
                 &temporary.path().join("initial"),
                 "mutable-index-ready",
-            )?;
+            )
+            .await?;
             // A separate actual creator reopens original evidence and is killed
             // inside the owned cutover, never a fabricated journal fixture.
             killed_original_stage(
                 &profile,
                 &temporary.path().join("cutover"),
                 &format!("cutover:{point}"),
-            )?;
+            )
+            .await?;
             let storage = selected(&profile)?;
             let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
             let initialized = initialize(owned(&storage))?;
@@ -1624,8 +1632,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initial_cutover_requires_exact_archived_custody_on_reopen(
+    #[tokio::test]
+    async fn original_initial_cutover_requires_exact_archived_custody_on_reopen(
     ) -> Result<(), Box<dyn std::error::Error>> {
         #[derive(Clone, Copy)]
         enum Fault {
@@ -1641,7 +1649,8 @@ mod tests {
                     &profile,
                     &temporary.path().join("checkpoint"),
                     "mutable-index-ready",
-                )?;
+                )
+                .await?;
                 let storage = selected(&profile)?;
                 initialize(owned(&storage))?;
                 let physical = profile.join("secure_store");
@@ -1712,8 +1721,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initial_cutover_authenticates_history_and_rejects_unknown_transaction_inventory(
+    #[tokio::test]
+    async fn original_initial_cutover_authenticates_history_and_rejects_unknown_transaction_inventory(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
@@ -1721,7 +1730,8 @@ mod tests {
             &profile,
             &temporary.path().join("checkpoint"),
             "mutable-index-ready",
-        )?;
+        )
+        .await?;
         let storage = selected(&profile)?;
         initialize(owned(&storage))?;
         let directory = backend(&storage).owned_directory()?;
@@ -1771,8 +1781,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn original_initial_cutover_recovers_two_successive_original_index_transitions(
+    #[tokio::test]
+    async fn original_initial_cutover_recovers_two_successive_original_index_transitions(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let temporary = tempfile::tempdir()?;
         let profile = temporary.path().join("profile");
@@ -1780,17 +1790,20 @@ mod tests {
             &profile,
             &temporary.path().join("ready"),
             "mutable-index-ready",
-        )?;
+        )
+        .await?;
         killed_original_stage(
             &profile,
             &temporary.path().join("handed"),
             "mutable-index-handed",
-        )?;
+        )
+        .await?;
         killed_original_stage(
             &profile,
             &temporary.path().join("exchange"),
             "cutover:exchange",
-        )?;
+        )
+        .await?;
         let storage = selected(&profile)?;
         let original = legacy_migration::require_preparing_original_anchor(owned(&storage))?;
         let initialized = initialize(owned(&storage))?;
@@ -1816,7 +1829,7 @@ mod tests {
             let _ = self.0.wait();
         }
     }
-    fn killed_original_stage(
+    async fn killed_original_stage(
         profile: &std::path::Path,
         marker: &std::path::Path,
         target: &str,
@@ -1834,15 +1847,19 @@ mod tests {
                 .stdout(std::process::Stdio::null())
                 .spawn()?,
         );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        use aura_core::effects::time::PhysicalTimeEffects;
+        let time = crate::time::PhysicalTimeHandler::new();
+        let started = time.physical_time().await?;
+        let budget = aura_core::TimeoutBudget::from_start_and_timeout(
+            &started,
+            std::time::Duration::from_secs(10),
+        )?;
         while !marker.exists() {
             if let Some(status) = child.0.try_wait()? {
                 return Err(format!("prelink child exited: {status}").into());
             }
-            if std::time::Instant::now() >= deadline {
-                return Err("prelink child checkpoint deadline".into());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            let remaining = budget.remaining_at(&time.physical_time().await?)?;
+            time.sleep_ms(remaining.as_millis().min(10) as u64).await?;
         }
         child.0.kill()?;
         assert!(
@@ -1851,8 +1868,8 @@ mod tests {
         );
         Ok(())
     }
-    #[test]
-    fn original_initialization_recovers_exact_prelink_ciphertext_after_process_death(
+    #[tokio::test]
+    async fn original_initialization_recovers_exact_prelink_ciphertext_after_process_death(
     ) -> Result<(), Box<dyn std::error::Error>> {
         for target in [
             "lifecycle",
@@ -1867,7 +1884,7 @@ mod tests {
             eprintln!("checking original pre-link target: {target}");
             let temporary = tempfile::tempdir()?;
             let profile = temporary.path().join("profile");
-            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target)?;
+            killed_original_stage(&profile, &temporary.path().join("checkpoint"), target).await?;
             let storage = selected(&profile)?;
             let selected = backend(&storage).owned_directory()?;
             let directory = if ["lifecycle", "birth", "handed"].contains(&target) {
@@ -2092,8 +2109,8 @@ mod tests {
     }
     fn arm(storage: &ProductionSecureStorageHandler, stage: &'static str) {
         INIT_FAULTS
-            .lock()
-            .expect("initialization faults")
+            .try_lock()
+            .expect("test-only fault registry busy; owner-key access must stay synchronous")
             .insert((owned(storage)._owner.profile_identity().to_string(), stage));
     }
     fn root_id(storage: &ProductionSecureStorageHandler) -> Result<[u8; 32], AuraError> {
@@ -2637,8 +2654,4 @@ mod tests {
         }
         Ok(())
     }
-}
-
-pub(super) fn missing_live_allocation() -> AuraError {
-    recovery_error(AllocationLifetimeRecoveryError::LiveAllocation)
 }

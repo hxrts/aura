@@ -132,10 +132,11 @@ impl NetworkLabBackend for PatchbayBackend {
         cfg_if! {
             if #[cfg(all(target_os = "linux", feature = "patchbay-backend"))] {
                 let config = topology_adapter::to_patchbay_lab_config(&topology)?;
-                let opts = patchbay::LabOpts::default()
+                let lab = patchbay::Lab::builder()
+                    .config(config)
                     .outdir(patchbay::OutDir::Nested(self.artifact_root.clone()))
-                    .label(format!("aura-{}", topology.name));
-                let lab = patchbay::Lab::from_config_with_opts(config, opts)
+                    .label(format!("aura-{}", topology.name))
+                    .build()
                     .await
                     .context("provision patchbay lab")?;
 

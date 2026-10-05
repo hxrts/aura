@@ -6,7 +6,7 @@
 //! - Inserting relational facts (checkpoints, bumps, policies)
 //! - Channel state reduction via journal queries
 
-use crate::{ChannelMembershipFact, ChannelParticipantEvent};
+use crate::ChannelMembershipFact;
 use aura_core::effects::{JournalEffects, OrderClockEffects};
 use aura_core::hash::hash;
 use aura_core::time::{OrderTime, TimeStamp};
@@ -225,7 +225,44 @@ pub async fn list_channel_participants<A: AmpJournalEffects>(
 ) -> Result<Vec<AuthorityId>> {
     let _canonical = get_channel_state(effects, context, channel).await?;
     let journal = effects.fetch_context_journal(context).await?;
-    let mut participants = std::collections::BTreeSet::new();
+    Ok(reduce_membership(&journal, context, channel)
+        .participants()
+        .collect())
+}
+
+/// Whether original schema-one departure evidence prevents an unversioned rejoin.
+/// Opaque order tokens cannot prove that a join supersedes a departure.
+pub async fn channel_participant_departed<A: AmpJournalEffects>(
+    effects: &A,
+    context: ContextId,
+    channel: ChannelId,
+    participant: AuthorityId,
+) -> Result<bool> {
+    let _canonical = get_channel_state(effects, context, channel).await?;
+    let journal = effects.fetch_context_journal(context).await?;
+    Ok(reduce_membership(&journal, context, channel).departed(participant))
+}
+
+/// Reject an observed departed or foreign sender without treating an empty
+/// post-departure set as permission. Absence of membership observations retains
+/// the separate bootstrap/epoch authorization contract, and grants no identity.
+pub async fn sender_allowed_by_channel_membership<A: AmpJournalEffects>(
+    effects: &A,
+    context: ContextId,
+    channel: ChannelId,
+    sender: AuthorityId,
+) -> Result<bool> {
+    let journal = effects.fetch_context_journal(context).await?;
+    let observations = reduce_membership(&journal, context, channel);
+    Ok(!observations.has_observations() || observations.contains(sender))
+}
+
+fn reduce_membership(
+    journal: &FactJournal,
+    context: ContextId,
+    channel: ChannelId,
+) -> crate::channel::SchemaOneChannelMembership {
+    let mut observations = crate::channel::SchemaOneChannelMembership::new(context, channel);
 
     for fact in journal.iter_facts() {
         let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
@@ -235,20 +272,10 @@ pub async fn list_channel_participants<A: AmpJournalEffects>(
         let Some(membership) = ChannelMembershipFact::from_envelope(envelope) else {
             continue;
         };
-        if membership.context() != context || membership.channel() != channel {
-            continue;
-        }
-        match membership.event() {
-            ChannelParticipantEvent::Joined => {
-                participants.insert(membership.participant());
-            }
-            ChannelParticipantEvent::Left => {
-                participants.remove(&membership.participant());
-            }
-        }
+        observations.observe(&membership);
     }
 
-    Ok(participants.into_iter().collect())
+    observations
 }
 
 // ============================================================================
@@ -354,5 +381,112 @@ fn build_context_journal(
     FactJournal {
         namespace: JournalNamespace::Context(context),
         facts,
+    }
+}
+
+#[cfg(test)]
+mod schema_one_membership_tests {
+    use super::*;
+    use crate::ChannelParticipantEvent;
+
+    #[test]
+    fn departure_wins_reversed_tokens_insertion_and_original_journal_merges() {
+        let context =
+            ContextId::new_from_entropy(hash(b"aura-amp.schema-one-order-inversion.context"));
+        let channel = ChannelId::from_bytes(hash(b"aura-amp.schema-one-order-inversion.channel"));
+        let participant =
+            AuthorityId::new_from_entropy(hash(b"aura-amp.schema-one-order-inversion.participant"));
+        let retained = AuthorityId::new_from_entropy(hash(
+            b"aura-amp.schema-one-order-inversion.retained-participant",
+        ));
+        for (join_token, leave_token) in [([255; 32], [0; 32]), ([0; 32], [255; 32])] {
+            let join = ChannelMembershipFact::new(
+                context,
+                channel,
+                participant,
+                ChannelParticipantEvent::Joined,
+                TimeStamp::OrderClock(OrderTime(join_token)),
+            );
+            let leave = ChannelMembershipFact::new(
+                context,
+                channel,
+                participant,
+                ChannelParticipantEvent::Left,
+                TimeStamp::OrderClock(OrderTime(leave_token)),
+            );
+            let stay = ChannelMembershipFact::new(
+                context,
+                channel,
+                retained,
+                ChannelParticipantEvent::Joined,
+                TimeStamp::OrderClock(OrderTime([127; 32])),
+            );
+            let make = |items: &[(&ChannelMembershipFact, [u8; 32])]| {
+                let mut journal = Journal::new();
+                for (membership, token) in items {
+                    let content = FactContent::Relational(membership.to_generic());
+                    let bytes = match serde_json::to_vec(&content) {
+                        Ok(bytes) => bytes,
+                        Err(source) => panic!("encode actual original membership: {source}"),
+                    };
+                    if let Err(source) = journal.facts.insert(
+                        format!("relational:{context}:{}", hex::encode(token)),
+                        FactValue::Bytes(bytes),
+                    ) {
+                        panic!("retain original membership: {source}");
+                    }
+                }
+                journal
+            };
+            let forward = make(&[
+                (&join, join_token),
+                (&leave, leave_token),
+                (&stay, [127; 32]),
+            ]);
+            let reverse = make(&[
+                (&stay, [127; 32]),
+                (&leave, leave_token),
+                (&join, join_token),
+            ]);
+            let joined = make(&[(&join, join_token), (&stay, [127; 32])]);
+            let departed = make(&[(&leave, leave_token)]);
+            let mut join_merge_leave = joined.clone();
+            join_merge_leave.merge(&departed);
+            let mut leave_merge_join = departed;
+            leave_merge_join.merge(&joined);
+            for original in [forward, reverse, join_merge_leave, leave_merge_join] {
+                let facts = build_context_journal(context, extract_fact_contents(&original));
+                let observed = reduce_membership(&facts, context, channel);
+                assert_eq!(observed.participants().collect::<Vec<_>>(), vec![retained]);
+                assert!(observed.departed(participant));
+                let mut attempted_rejoin = observed;
+                assert!(attempted_rejoin.observe(&join));
+                assert!(
+                    !attempted_rejoin.contains(participant),
+                    "schema one has no successor generation witness"
+                );
+                let foreign = ChannelMembershipFact::new(
+                    context,
+                    ChannelId::from_bytes(hash(
+                        b"aura-amp.schema-one-order-inversion.foreign-channel",
+                    )),
+                    participant,
+                    ChannelParticipantEvent::Joined,
+                    TimeStamp::OrderClock(OrderTime([19; 32])),
+                );
+                assert!(!attempted_rejoin.observe(&foreign));
+                let foreign_context = ChannelMembershipFact::new(
+                    ContextId::new_from_entropy(hash(
+                        b"aura-amp.schema-one-order-inversion.foreign-context",
+                    )),
+                    channel,
+                    participant,
+                    ChannelParticipantEvent::Joined,
+                    TimeStamp::OrderClock(OrderTime([20; 32])),
+                );
+                assert!(!attempted_rejoin.observe(&foreign_context));
+                assert!(!attempted_rejoin.contains(participant));
+            }
+        }
     }
 }

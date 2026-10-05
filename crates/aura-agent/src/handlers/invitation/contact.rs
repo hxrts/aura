@@ -857,7 +857,15 @@ impl<'a> InvitationContactHandler<'a> {
                     .await?;
                     effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
 
-                    let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await;
+                    if aura_protocol::amp::journal::channel_participant_departed(effects.as_ref(), acceptance.context_id, acceptance.channel_id, acceptance.acceptor_id).await.map_err(AgentError::from)? {
+                        return Err(AgentError::from(aura_core::AuraError::Invalid {
+                            message: "contact acceptance cannot supersede original channel departure".into(),
+                            source: Some(Arc::new(aura_core::effects::amp::AmpChannelError::RejoinRequiresMembershipEvidence {
+                                context: acceptance.context_id, channel: acceptance.channel_id, participant: acceptance.acceptor_id,
+                            })),
+                        }));
+                    }
+                    let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await.map_err(AgentError::from)?;
                     let membership = ChannelMembershipFact::new(
                         acceptance.context_id,
                         acceptance.channel_id,

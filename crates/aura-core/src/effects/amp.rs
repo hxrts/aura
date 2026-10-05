@@ -30,6 +30,16 @@ pub enum AmpChannelError {
     InvalidState(String),
     #[error("authorization failed")]
     Unauthorized,
+    /// Schema-one departure cannot be superseded by another unversioned join.
+    #[error("channel rejoin requires independently verified membership evidence")]
+    RejoinRequiresMembershipEvidence {
+        /// Original relational context.
+        context: ContextId,
+        /// Original channel.
+        channel: ChannelId,
+        /// Participant with retained departure evidence.
+        participant: AuthorityId,
+    },
     #[error("storage error: {0}")]
     Storage(String),
     #[error("crypto error: {0}")]
@@ -47,6 +57,7 @@ impl crate::ProtocolErrorCode for AmpChannelError {
             AmpChannelError::Effect(error) => crate::ProtocolErrorCode::code(error),
             AmpChannelError::InvalidState(_) => "invalid_state",
             AmpChannelError::Unauthorized => "unauthorized",
+            AmpChannelError::RejoinRequiresMembershipEvidence { .. } => "invalid_state",
             AmpChannelError::Storage(_) => "storage",
             AmpChannelError::Crypto(_) => "crypto",
             AmpChannelError::Internal(_) => "internal",

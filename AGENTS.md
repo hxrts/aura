@@ -29,6 +29,11 @@ Per-crate `ARCHITECTURE.md` files describe a single crate's purpose, scope, depe
 
 **Required**: Nix with flakes enabled. Run `nix develop` first.
 
+The Nix shell dispatches Cargo and Clippy from its pinned Rust toolchain. Keep
+this scoped dispatch: Cargo otherwise prefers installed Cargo-home plugins,
+which can select an older Clippy even when the Nix toolchain leads PATH.
+`just ci-build-cache-policy` verifies argument and exit-status forwarding.
+
 | Category | Command | Purpose |
 |----------|---------|---------|
 | Build | `just build` | Build all crates |
@@ -96,6 +101,10 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Browser bridge compatibility**: changes to browser harness bridge, bounded browser task ownership, or observation surfaces must update `crates/aura-web/ARCHITECTURE.md` and `docs/804_testing_guide.md`; this includes the explicit `stage_runtime_identity` bootstrap handoff and the page-owned semantic queue (`window.__AURA_DRIVER_SEMANTIC_ENQUEUE__`)
 - **Parity exception metadata**: every `ParityException` must have structured metadata in `aura-app::ui_contract` including reason code, scope, affected surface, and doc reference
 - **Parity-critical waits**: use authoritative readiness, event, or quiescence contracts; raw sleeps, raw polling, and fallback text/DOM checks are diagnostics only
+- **Authoritative fact syntax scope**: frontend authoritative-fact restrictions
+  inspect real Rust paths, including macro tokens, with lexical `cfg(test)`
+  classification. Comments, strings, or an earlier test module cannot exempt
+  later production code; mixed `cfg(any(test, feature = ...))` stays checked.
 - **Canonical entity materialization only**: reactive/view/harness-facing code may enrich already-materialized channel or invitation state, but it may not fabricate canonical metadata from partial facts such as membership events or raw ids; one explicit owned path must materialize the canonical entity shape end to end
 - **Channel creation witness**: `aura-chat::CanonicalChannelCreation` comes only from `ChannelCreated`; `ChannelUpdated`, messages, name hints, and prior UI snapshots may stage or enrich but cannot insert a visible channel. Its constructor stays private to `aura-chat`, and `ChatViewReducer` use outside the sanctioned owner modules fails the ownership policy gate. Keep pure creation evidence out of capability-boundary helper inventories. A plain fact shape does not prove journal commit provenance; that requires a journal-issued token.
 - **Reactive subscriptions**: subscribing before registration must fail fast; lagging subscribers may miss intermediate updates and resume from a newer snapshot

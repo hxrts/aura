@@ -30,7 +30,7 @@ impl ChannelReadinessState {
             fact_key.name.as_deref(),
             Some(name) if name.eq_ignore_ascii_case("note to self")
         );
-        let member_count = member_count.max((recipients.len() as u32).saturating_add(1));
+        // Native participant reads supply an exact count; hints cannot widen it.
         let delivery_supported = !is_note_to_self && !recipients.is_empty();
         Self {
             channel_id,
@@ -213,26 +213,31 @@ impl ChannelReadinessCoordinator {
                 seed.authoritative_context
                     .map(|context_id| AuthoritativeChannelRef::new(channel_id, context_id))
             };
-            let recipients = match (
-                resolve_recipients,
-                &runtime,
-                self_authority,
-                authoritative_channel,
-            ) {
-                (true, Some(runtime), Some(authority_id), Some(authoritative_channel)) => {
-                    authoritative_recipient_peers_for_channel(
-                        runtime,
-                        authoritative_channel,
-                        authority_id,
-                    )
-                    .await?
+            let authoritative_participants = match (&runtime, authoritative_channel) {
+                (Some(runtime), Some(channel)) if resolve_recipients => Some(
+                    super::channel_refs::authoritative_channel_participants(runtime, channel)
+                        .await?,
+                ),
+                _ => None,
+            };
+            let member_count = authoritative_participants
+                .as_ref()
+                .map_or(seed.member_count, |participants| participants.len() as u32);
+            let recipients = if resolve_recipients {
+                match (authoritative_participants, self_authority) {
+                    (Some(mut participants), Some(authority)) => {
+                        participants.retain(|participant| *participant != authority);
+                        participants
+                    }
+                    _ => Vec::new(),
                 }
-                _ => Vec::new(),
+            } else {
+                Vec::new()
             };
             states.push(ChannelReadinessState::new(
                 channel_id,
                 seed.fact_key,
-                seed.member_count,
+                member_count,
                 authoritative_channel,
                 recipients,
                 seed.had_membership_fact,
@@ -492,10 +497,20 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
     };
     let mut replacements = Vec::new();
     for state in coordinator.states() {
+        let mut actual_member_count = None;
         let membership_ready = if let Some(runtime) = runtime.as_ref() {
             if let Some(channel) = state.authoritative_channel {
                 match runtime_channel_state_exists(runtime, channel).await {
-                    Ok(true) => true,
+                    Ok(true) => {
+                        actual_member_count = Some(
+                            super::channel_refs::authoritative_channel_participants(
+                                runtime, channel,
+                            )
+                            .await?
+                            .len() as u32,
+                        );
+                        true
+                    }
                     Ok(false) if state.had_membership_fact => {
                         messaging_warn!(
                             "Retaining ChannelMembershipReady for {} after transient runtime-state miss; authoritative leave/close owns revocation",
@@ -524,7 +539,15 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
             true
         };
         if membership_ready {
-            replacements.push(state.membership_fact());
+            let mut fact = state.membership_fact();
+            if let (
+                Some(count),
+                AuthoritativeSemanticFact::ChannelMembershipReady { member_count, .. },
+            ) = (actual_member_count, &mut fact)
+            {
+                *member_count = count;
+            }
+            replacements.push(fact);
         }
     }
     let kind = AuthoritativeSemanticFactKind::ChannelMembershipReady;
