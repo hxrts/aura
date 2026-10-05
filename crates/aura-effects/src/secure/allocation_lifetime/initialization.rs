@@ -32,11 +32,9 @@ fn init_fault(owned: &ProfileOwnedSecureStorage, stage: &'static str) -> Result<
 }
 #[cfg(test)]
 fn init_fault_profile(profile: &str, stage: &'static str) -> Result<(), AuraError> {
-    if INIT_FAULTS
-        .try_lock()
-        .expect("test-only fault registry busy; owner-key access must stay synchronous")
-        .remove(&(profile.to_string(), stage))
-    {
+    if super::with_test_faults(&INIT_FAULTS, |faults| {
+        faults.remove(&(profile.to_string(), stage))
+    }) {
         return Err(source_error(
             "original initialization ACK",
             std::io::Error::other("injected interrupted provider initialization"),
@@ -1866,6 +1864,26 @@ mod tests {
             !child.0.wait()?.success(),
             "actual creator must die before target link"
         );
+        // A killed process's advisory lock can be released slightly after
+        // `wait` returns (macOS exit ordering). Wait, within the same budget,
+        // until the profile is actually free before the caller reopens it.
+        loop {
+            match crate::profile_storage::FilesystemProfileStorageHandler::new(
+                profile.to_path_buf(),
+            )
+            .acquire_owned_native()
+            {
+                Ok(probe) => {
+                    drop(probe);
+                    break;
+                }
+                Err(aura_core::effects::profile_storage::ProfileStorageError::Busy) => {
+                    let remaining = budget.remaining_at(&time.physical_time().await?)?;
+                    time.sleep_ms(remaining.as_millis().min(10) as u64).await?;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
         Ok(())
     }
     #[tokio::test]
@@ -2108,10 +2126,9 @@ mod tests {
         backend
     }
     fn arm(storage: &ProductionSecureStorageHandler, stage: &'static str) {
-        INIT_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .insert((owned(storage)._owner.profile_identity().to_string(), stage));
+        super::with_test_faults(&INIT_FAULTS, |faults| {
+            faults.insert((owned(storage)._owner.profile_identity().to_string(), stage))
+        });
     }
     fn root_id(storage: &ProductionSecureStorageHandler) -> Result<[u8; 32], AuraError> {
         let backend = backend(storage);

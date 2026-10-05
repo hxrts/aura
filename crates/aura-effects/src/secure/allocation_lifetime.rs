@@ -443,11 +443,9 @@ impl FilesystemLifetimeRoot {
         // Publication alone is not an ACK. A fault here leaves the complete
         // record and requires exact authenticated recovery, never a new birth.
         #[cfg(test)]
-        if ACK_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .remove(&record.reference.allocation)
-        {
+        if with_test_faults(&ACK_FAULTS, |faults| {
+            faults.remove(&record.reference.allocation)
+        }) {
             return Err(source_error(
                 "acknowledge durable transition",
                 std::io::Error::other("injected directory fsync unavailable"),
@@ -680,6 +678,22 @@ pub(crate) fn initialization_cutover_checkpoint(stage: &str) -> std::io::Result<
 static ACK_FAULTS: std::sync::LazyLock<tokio::sync::Mutex<std::collections::BTreeSet<[u8; 32]>>> =
     std::sync::LazyLock::new(|| tokio::sync::Mutex::new(std::collections::BTreeSet::new()));
 
+/// Run `access` on a test-only fault registry. Holders only insert or remove
+/// one entry and never await, so a parallel test briefly contending for the
+/// lock is retried synchronously instead of failing the test.
+#[cfg(test)]
+pub(super) fn with_test_faults<T: Ord, R>(
+    registry: &tokio::sync::Mutex<std::collections::BTreeSet<T>>,
+    access: impl FnOnce(&mut std::collections::BTreeSet<T>) -> R,
+) -> R {
+    loop {
+        if let Ok(mut faults) = registry.try_lock() {
+            return access(&mut faults);
+        }
+        std::thread::yield_now();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,10 +827,9 @@ mod ack_tests {
         let original = root
             .allocate(b"original-ACK-generation", b"real-secret")
             .await?;
-        ACK_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .insert(original.reference().allocation);
+        with_test_faults(&ACK_FAULTS, |faults| {
+            faults.insert(original.reference().allocation)
+        });
         let error = match original.decide_negative(b"original-negative").await {
             Err(error) => error,
             Ok(_) => panic!("unacknowledged publication must not mint proof"),
@@ -829,25 +842,22 @@ mod ack_tests {
             matches!(original.state().await?,SecretLifetimeState::Negative {decision} if decision==b"original-negative")
         );
         // A second ACK fault must fail even for exact already-published state.
-        ACK_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .insert(original.reference().allocation);
+        with_test_faults(&ACK_FAULTS, |faults| {
+            faults.insert(original.reference().allocation)
+        });
         assert!(original
             .decide_negative(b"original-negative")
             .await
             .is_err());
         let negative = original.decide_negative(b"original-negative").await?;
-        ACK_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .insert(original.reference().allocation);
+        with_test_faults(&ACK_FAULTS, |faults| {
+            faults.insert(original.reference().allocation)
+        });
         assert!(negative.retire().await.is_err());
         // Tombstone existence does not substitute for required ACK on replay.
-        ACK_FAULTS
-            .try_lock()
-            .expect("test-only fault registry busy; owner-key access must stay synchronous")
-            .insert(original.reference().allocation);
+        with_test_faults(&ACK_FAULTS, |faults| {
+            faults.insert(original.reference().allocation)
+        });
         assert!(negative.retire().await.is_err());
         negative.retire().await?;
         Ok(())
