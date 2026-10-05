@@ -46,7 +46,7 @@ pub(crate) struct ContextDkgPeer {
 /// This device's key material for opening round-two packages.
 pub(crate) struct LocalDeviceKeys {
     pub public_key: Vec<u8>,
-    pub key_agreement_secret: [u8; 32],
+    pub key_agreement_secret: aura_core::secrets::PrivateKeyBytes,
 }
 
 struct DeviceSealer<'a> {
@@ -86,7 +86,8 @@ impl DkgSealer for DeviceSealer<'_> {
             self.me,
             self.my_device,
             &self.local.public_key,
-            &self.local.key_agreement_secret,
+            <&[u8; 32]>::try_from(self.local.key_agreement_secret.expose_private_key())
+                .map_err(|_| AuraError::crypto("device key-agreement secret must be 32 bytes"))?,
             &sealed,
         )
         .await
@@ -298,7 +299,9 @@ mod tests {
             peer,
             LocalDeviceKeys {
                 public_key,
-                key_agreement_secret: secret,
+                key_agreement_secret: aura_core::secrets::PrivateKeyBytes::import_from_slice(
+                    &secret,
+                ),
             },
         )
     }

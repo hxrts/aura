@@ -1,4 +1,5 @@
 //! Exercise the real linter CLI against tracked, new and ignored inputs.
+#![allow(clippy::expect_used)] // test fixtures fail loudly on setup errors
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
