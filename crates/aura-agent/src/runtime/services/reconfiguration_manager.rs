@@ -18,7 +18,6 @@ use aura_journal::fact::{ProtocolRelationalFact, RelationalFact, SessionDelegati
 use aura_mpst::CompositionManifest;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::sync::RwLock;
 
 #[cfg(feature = "choreo-backend-telltale-machine")]
@@ -77,92 +76,220 @@ pub struct SessionDelegationOutcome {
 }
 
 /// Typed runtime errors for one live session ownership handoff.
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum ActiveSessionDelegationError {
-    #[error(
-        "active session handoff target {active_session_id} does not match delegation session {transfer_session_id}"
-    )]
     SessionMismatch {
         active_session_id: SessionId,
         transfer_session_id: SessionId,
     },
-    #[error("failed to transfer live session owner for session {session_id}: {source}")]
     OwnerTransfer {
         session_id: SessionId,
-        #[source]
-        source: SessionIngressError,
+        source: Box<SessionIngressError>,
     },
-    #[error("live delegation failed for session {session_id}: {source}")]
     Reconfiguration {
         session_id: SessionId,
-        #[source]
-        source: ReconfigurationManagerError,
+        source: Box<ReconfigurationManagerError>,
     },
-    #[error(
-        "live delegation rollback failed for session {session_id} after reconfiguration error: {source}; rollback: {rollback}"
-    )]
     RollbackFailed {
         session_id: SessionId,
-        #[source]
-        source: ReconfigurationManagerError,
-        rollback: SessionIngressError,
+        source: Box<ReconfigurationManagerError>,
+        rollback: Box<SessionIngressError>,
     },
 }
 
+impl std::fmt::Display for ActiveSessionDelegationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SessionMismatch {
+                active_session_id,
+                transfer_session_id,
+            } => {
+                write!(
+                    f,
+                    "active session handoff target {active_session_id} does not match delegation session {transfer_session_id}"
+                )
+            }
+            Self::OwnerTransfer { session_id, source } => {
+                write!(
+                    f,
+                    "failed to transfer live session owner for session {session_id}: {source}"
+                )
+            }
+            Self::Reconfiguration { session_id, source } => {
+                write!(
+                    f,
+                    "live delegation failed for session {session_id}: {source}"
+                )
+            }
+            Self::RollbackFailed {
+                session_id,
+                source,
+                rollback,
+            } => {
+                write!(
+                    f,
+                    "live delegation rollback failed for session {session_id} after reconfiguration error: {source}; rollback: {rollback}"
+                )
+            }
+        }
+    }
+}
+
 /// Typed runtime errors for reconfiguration and delegation.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconfigurationManagerError {
-    #[error("{operation} requires protocol-critical runtime surfaces {surfaces:?}: {message}")]
     MissingCapability {
         operation: &'static str,
         surfaces: &'static [&'static str],
         message: String,
     },
-    #[error("register bundle `{bundle_id}` failed: {message}")]
-    RegisterBundle { bundle_id: String, message: String },
-    #[error("link bundles `{left}` + `{right}` into `{linked}` failed: {message}")]
+    RegisterBundle {
+        bundle_id: String,
+        message: String,
+    },
     LinkBundles {
         left: String,
         right: String,
         linked: String,
         message: String,
     },
-    #[error("delegation timestamp unavailable for session {session_id}: {message}")]
     DelegationTimestamp {
         session_id: SessionId,
         message: String,
     },
-    #[error("delegation requires pre-registered bundle `{bundle_id}`")]
-    BundleNotRegistered { bundle_id: String },
-    #[error(
-        "delegation for session {session_id} rejected link boundary for bundle `{bundle_id}`: {source}"
-    )]
+    BundleNotRegistered {
+        bundle_id: String,
+    },
     InvalidLinkBoundary {
         session_id: SessionId,
         bundle_id: String,
-        #[source]
-        source: RuntimeBoundaryError,
+        source: Box<RuntimeBoundaryError>,
     },
-    #[error("session delegation failed for session {session_id}: {message}")]
     DelegateSession {
         session_id: SessionId,
         message: String,
     },
     #[cfg(feature = "choreo-backend-telltale-machine")]
-    #[error("runtime upgrade for bundle `{bundle_id}` failed: {message}")]
-    RuntimeUpgrade { bundle_id: String, message: String },
-    #[error("failed to persist delegation fact for session {session_id}: {message}")]
+    RuntimeUpgrade {
+        bundle_id: String,
+        message: String,
+    },
     PersistDelegationFact {
         session_id: SessionId,
         message: String,
     },
-    #[error(
-        "reconfiguration coherence violation after delegation for session {session_id}: {details}"
-    )]
     CoherenceViolation {
         session_id: SessionId,
         details: String,
     },
+}
+
+impl std::fmt::Display for ReconfigurationManagerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingCapability {
+                operation,
+                surfaces,
+                message,
+            } => {
+                write!(
+                    f,
+                    "{operation} requires protocol-critical runtime surfaces {surfaces:?}: {message}"
+                )
+            }
+            Self::RegisterBundle { bundle_id, message } => {
+                write!(f, "register bundle `{bundle_id}` failed: {message}")
+            }
+            Self::LinkBundles {
+                left,
+                right,
+                linked,
+                message,
+            } => {
+                write!(
+                    f,
+                    "link bundles `{left}` + `{right}` into `{linked}` failed: {message}"
+                )
+            }
+            Self::DelegationTimestamp {
+                session_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "delegation timestamp unavailable for session {session_id}: {message}"
+                )
+            }
+            Self::BundleNotRegistered { bundle_id } => {
+                write!(f, "delegation requires pre-registered bundle `{bundle_id}`")
+            }
+            Self::InvalidLinkBoundary {
+                session_id,
+                bundle_id,
+                source,
+            } => {
+                write!(
+                    f,
+                    "delegation for session {session_id} rejected link boundary for bundle `{bundle_id}`: {source}"
+                )
+            }
+            Self::DelegateSession {
+                session_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "session delegation failed for session {session_id}: {message}"
+                )
+            }
+            #[cfg(feature = "choreo-backend-telltale-machine")]
+            Self::RuntimeUpgrade { bundle_id, message } => {
+                write!(
+                    f,
+                    "runtime upgrade for bundle `{bundle_id}` failed: {message}"
+                )
+            }
+            Self::PersistDelegationFact {
+                session_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to persist delegation fact for session {session_id}: {message}"
+                )
+            }
+            Self::CoherenceViolation {
+                session_id,
+                details,
+            } => {
+                write!(
+                    f,
+                    "reconfiguration coherence violation after delegation for session {session_id}: {details}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ActiveSessionDelegationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::OwnerTransfer { source, .. } => Some(source.as_ref()),
+            Self::Reconfiguration { source, .. } | Self::RollbackFailed { source, .. } => {
+                Some(source.as_ref())
+            }
+            Self::SessionMismatch { .. } => None,
+        }
+    }
+}
+
+impl std::error::Error for ReconfigurationManagerError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidLinkBoundary { source, .. } => Some(source.as_ref()),
+            _ => None,
+        }
+    }
 }
 
 impl SessionDelegationTransfer {
@@ -368,7 +495,7 @@ impl ReconfigurationManager {
             .await
             .map_err(|source| ActiveSessionDelegationError::Reconfiguration {
                 session_id: transfer.session_id,
-                source,
+                source: Box::new(source),
             })?;
 
         let previous_owner_label = session.owner().owner_label.clone();
@@ -379,7 +506,7 @@ impl ReconfigurationManager {
             .transfer_owner_in_place(next_owner_label, next_boundary.clone())
             .map_err(|source| ActiveSessionDelegationError::OwnerTransfer {
                 session_id: transfer.session_id,
-                source,
+                source: Box::new(source),
             })?;
         #[cfg(feature = "choreo-backend-telltale-machine")]
         let ownership_receipt = build_active_session_ownership_receipt(
@@ -405,12 +532,12 @@ impl ReconfigurationManager {
                 match rollback {
                     Ok(()) => Err(ActiveSessionDelegationError::Reconfiguration {
                         session_id: active_session_id,
-                        source,
+                        source: Box::new(source),
                     }),
                     Err(rollback) => Err(ActiveSessionDelegationError::RollbackFailed {
                         session_id: active_session_id,
-                        source,
-                        rollback,
+                        source: Box::new(source),
+                        rollback: Box::new(rollback),
                     }),
                 }
             }
@@ -650,11 +777,11 @@ fn validate_link_boundary(
         return Err(ReconfigurationManagerError::InvalidLinkBoundary {
             session_id,
             bundle_id: bundle_id.to_string(),
-            source: RuntimeBoundaryError::LinkBoundaryBundleMismatch {
+            source: Box::new(RuntimeBoundaryError::LinkBoundaryBundleMismatch {
                 session_id,
                 bundle_id: bundle_id.to_string(),
                 boundary_bundle_id: boundary.bundle_id.clone(),
-            },
+            }),
         });
     }
 
@@ -662,12 +789,12 @@ fn validate_link_boundary(
         return Err(ReconfigurationManagerError::InvalidLinkBoundary {
             session_id,
             bundle_id: bundle_id.to_string(),
-            source: RuntimeBoundaryError::LinkBoundaryScopeMismatch {
+            source: Box::new(RuntimeBoundaryError::LinkBoundaryScopeMismatch {
                 session_id,
                 bundle_id: bundle_id.to_string(),
                 boundary_scope: boundary.capability_scope.clone(),
                 capability_scope: capability_scope.clone(),
-            },
+            }),
         });
     }
 
@@ -790,6 +917,40 @@ fn telltale_scope_for_capability_scope(scope: &SessionOwnerCapabilityScope) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn delegation_diagnostics_keep_native_sources_with_bounded_error_layout() {
+        use std::error::Error;
+        assert!(std::mem::size_of::<ReconfigurationManagerError>() < 128);
+        assert!(std::mem::size_of::<ActiveSessionDelegationError>() < 128);
+        assert!(
+            std::mem::size_of::<crate::runtime::services::sync_manager::SyncManagerError>() < 128
+        );
+        let session_id = SessionId::from_uuid(uuid::Uuid::nil());
+        let native = RuntimeBoundaryError::LinkBoundaryBundleMismatch {
+            session_id,
+            bundle_id: "original bundle".into(),
+            boundary_bundle_id: Some("foreign bundle".into()),
+        };
+        let error = ActiveSessionDelegationError::Reconfiguration {
+            session_id,
+            source: Box::new(ReconfigurationManagerError::InvalidLinkBoundary {
+                session_id,
+                bundle_id: "original bundle".into(),
+                source: Box::new(native),
+            }),
+        };
+        let Some(manager) = error
+            .source()
+            .and_then(|source| source.downcast_ref::<ReconfigurationManagerError>())
+        else {
+            panic!("delegation must retain the native manager cause");
+        };
+        assert!(
+            matches!(manager.source().and_then(|source| source.downcast_ref::<RuntimeBoundaryError>()),
+            Some(RuntimeBoundaryError::LinkBoundaryBundleMismatch { session_id: actual, bundle_id, boundary_bundle_id })
+            if *actual == session_id && bundle_id == "original bundle" && boundary_bundle_id.as_deref() == Some("foreign bundle"))
+        );
+    }
     use crate::core::AgentConfig;
     use crate::runtime::{
         open_owned_manifest_vm_session_admitted, AuraEffectSystem, AuraLinkBoundary,

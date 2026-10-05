@@ -63,52 +63,122 @@ impl AuraVmConcurrencyEnvelopeError {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum AuraVmSessionOpenError {
-    #[error("failed to build role-scoped VM image for protocol {protocol_id}: {message}")]
     RoleScopedImage {
         protocol_id: String,
         message: String,
     },
-    #[error("failed to resolve VM protocol policy for protocol {protocol_id}: {source}")]
     PolicyResolution {
         protocol_id: String,
-        #[source]
         source: crate::runtime::AuraVmDeterminismProfileError,
     },
-    #[error("failed to claim protocol fragments for protocol {protocol_id}: {message}")]
     FragmentClaim {
         protocol_id: String,
         message: String,
     },
-    #[error("failed to admit declared guard capabilities for protocol {protocol_id}: {message}")]
     ManifestGuardCapability {
         protocol_id: String,
         message: String,
     },
-    #[error("failed to admit declared theorem packs for protocol {protocol_id}: {message}")]
     ManifestTheoremPack {
         protocol_id: String,
         message: String,
     },
-    #[error(
-        "failed to create VM engine for protocol {protocol_id} under policy {policy_ref}: {source}"
-    )]
     EngineCreation {
         protocol_id: String,
         policy_ref: String,
-        #[source]
-        source: crate::runtime::AuraChoreoEngineError,
+        source: Box<crate::runtime::AuraChoreoEngineError>,
     },
-    #[error(
-        "failed to open VM session for protocol {protocol_id} under policy {policy_ref}: {source}"
-    )]
     SessionOpen {
         protocol_id: String,
         policy_ref: String,
-        #[source]
-        source: crate::runtime::AuraChoreoEngineError,
+        source: Box<crate::runtime::AuraChoreoEngineError>,
     },
+}
+
+impl std::fmt::Display for AuraVmSessionOpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RoleScopedImage {
+                protocol_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to build role-scoped VM image for protocol {protocol_id}: {message}"
+                )
+            }
+            Self::PolicyResolution {
+                protocol_id,
+                source,
+            } => {
+                write!(
+                    f,
+                    "failed to resolve VM protocol policy for protocol {protocol_id}: {source}"
+                )
+            }
+            Self::FragmentClaim {
+                protocol_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to claim protocol fragments for protocol {protocol_id}: {message}"
+                )
+            }
+            Self::ManifestGuardCapability {
+                protocol_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to admit declared guard capabilities for protocol {protocol_id}: {message}"
+                )
+            }
+            Self::ManifestTheoremPack {
+                protocol_id,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to admit declared theorem packs for protocol {protocol_id}: {message}"
+                )
+            }
+            Self::EngineCreation {
+                protocol_id,
+                policy_ref,
+                source,
+            } => {
+                write!(
+                    f,
+                    "failed to create VM engine for protocol {protocol_id} under policy {policy_ref}: {source}"
+                )
+            }
+            Self::SessionOpen {
+                protocol_id,
+                policy_ref,
+                source,
+            } => {
+                write!(
+                    f,
+                    "failed to open VM session for protocol {protocol_id} under policy {policy_ref}: {source}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for AuraVmSessionOpenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PolicyResolution { source, .. } => Some(source),
+            Self::EngineCreation { source, .. } | Self::SessionOpen { source, .. } => {
+                Some(source.as_ref())
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -547,7 +617,7 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     .map_err(|source| AuraVmSessionOpenError::EngineCreation {
         protocol_id: protocol_id.to_string(),
         policy_ref: effective_policy.policy_ref.to_string(),
-        source,
+        source: Box::new(source),
     })?;
     let sid = if let Some(manifest) = manifest {
         engine
@@ -569,7 +639,7 @@ pub(in crate::runtime) async fn open_role_scoped_vm_session_admitted(
     .map_err(|source| AuraVmSessionOpenError::SessionOpen {
         protocol_id: protocol_id.to_string(),
         policy_ref: admission.effective_policy_ref().to_string(),
-        source,
+        source: Box::new(source),
     })?;
     Ok((engine, handler, sid))
 }
@@ -638,35 +708,72 @@ pub(in crate::runtime) async fn open_manifest_vm_session_admitted(
 }
 
 /// Native VM bridge failures retain their cause for owner retry decisions.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum AuraVmBridgeRoundError {
-    #[error("missing peer mapping for VM send target role {role}")]
-    MissingPeer { role: String },
-    #[error("VM send custody failed: {source}")]
+    MissingPeer {
+        role: String,
+    },
     SendCustody {
-        #[source]
         source: aura_core::effects::VmBridgeSendError,
     },
-    #[error("{active_role} VM step failed: {source}")]
     Step {
         active_role: String,
-        #[source]
-        source: crate::runtime::AuraChoreoEngineError,
+        source: Box<crate::runtime::AuraChoreoEngineError>,
     },
-    #[error("failed to bridge VM send {from_role}->{to_role}:{label}: {source}")]
     Send {
         from_role: String,
         to_role: String,
         label: String,
-        #[source]
-        source: ChoreographyError,
+        source: Box<ChoreographyError>,
     },
-    #[error("{active_role} VM receive failed: {source}")]
     Receive {
         active_role: String,
-        #[source]
         source: ChoreographyError,
     },
+}
+
+impl std::fmt::Display for AuraVmBridgeRoundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingPeer { role } => {
+                write!(f, "missing peer mapping for VM send target role {role}")
+            }
+
+            Self::SendCustody { source } => write!(f, "VM send custody failed: {source}"),
+
+            Self::Step {
+                active_role,
+                source,
+            } => write!(f, "{active_role} VM step failed: {source}"),
+
+            Self::Send {
+                from_role,
+                to_role,
+                label,
+                source,
+            } => write!(
+                f,
+                "failed to bridge VM send {from_role}->{to_role}:{label}: {source}"
+            ),
+
+            Self::Receive {
+                active_role,
+                source,
+            } => write!(f, "{active_role} VM receive failed: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for AuraVmBridgeRoundError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingPeer { .. } => None,
+            Self::SendCustody { source } => Some(source),
+            Self::Step { source, .. } => Some(source.as_ref()),
+            Self::Send { source, .. } => Some(source.as_ref()),
+            Self::Receive { source, .. } => Some(source),
+        }
+    }
 }
 
 pub async fn flush_pending_vm_sends(
@@ -706,7 +813,7 @@ pub async fn flush_pending_vm_sends(
                     from_role: pending.from_role,
                     to_role: pending.to_role,
                     label: pending.label,
-                    source,
+                    source: Box::new(source),
                 });
             }
         }
@@ -726,7 +833,7 @@ pub async fn advance_host_bridged_vm_round(
         .step()
         .map_err(|source| AuraVmBridgeRoundError::Step {
             active_role: active_role.to_owned(),
-            source,
+            source: Box::new(source),
         })?;
     flush_pending_vm_sends(effects, handler, peer_roles).await?;
     let (blocked_receive, host_wait_status) =
@@ -759,7 +866,7 @@ where
         .step()
         .map_err(|source| AuraVmBridgeRoundError::Step {
             active_role: active_role.to_owned(),
-            source,
+            source: Box::new(source),
         })?;
     flush_pending_vm_sends(effects, handler, peer_roles).await?;
     let (blocked_receive, host_wait_status) = match receive_blocked_vm_message(
@@ -1000,6 +1107,46 @@ pub fn collect_vm_session_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vm_diagnostics_keep_native_sources_with_bounded_error_layout() {
+        use std::error::Error;
+        assert!(std::mem::size_of::<AuraVmSessionOpenError>() < 128);
+        assert!(std::mem::size_of::<AuraVmBridgeRoundError>() < 128);
+        let error = AuraVmSessionOpenError::EngineCreation {
+            protocol_id: "original protocol".into(),
+            policy_ref: "original policy".into(),
+            source: Box::new(crate::runtime::AuraChoreoEngineError::MissingRuntimeContracts),
+        };
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<crate::runtime::AuraChoreoEngineError>()),
+            Some(crate::runtime::AuraChoreoEngineError::MissingRuntimeContracts)
+        ));
+        let destination = AuthorityId::new_from_entropy(aura_core::hash::hash(
+            b"aura-agent.vm-diagnostics.native-transport-source",
+        ));
+        let send = AuraVmBridgeRoundError::Send {
+            from_role: "Initiator".into(),
+            to_role: "Invitee".into(),
+            label: "original request".into(),
+            source: Box::new(ChoreographyError::Transport {
+                source: Box::new(aura_core::effects::TransportError::DestinationUnreachable {
+                    destination,
+                }),
+            }),
+        };
+        let Some(choreography) = send
+            .source()
+            .and_then(|source| source.downcast_ref::<ChoreographyError>())
+        else {
+            panic!("VM send must retain the native choreography cause");
+        };
+        assert!(
+            matches!(choreography.source().and_then(|source| source.downcast_ref::<aura_core::effects::TransportError>()),
+            Some(aura_core::effects::TransportError::DestinationUnreachable { destination: actual }) if *actual == destination)
+        );
+    }
     use crate::core::AgentConfig;
     use aura_core::AuthorityId;
     use aura_mpst::upstream::types::Label;
@@ -1274,9 +1421,9 @@ mod tests {
         assert!(matches!(
             err,
             AuraVmBridgeRoundError::Send {
-                source: ChoreographyError::SessionNotStarted,
+                source,
                 ..
-            }
+            } if matches!(source.as_ref(), ChoreographyError::SessionNotStarted)
         ));
     }
 

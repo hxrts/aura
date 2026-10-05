@@ -7,5 +7,5 @@ error[E0603]: function `wait_for_runtime_channel_state` is private
 note: the function `wait_for_runtime_channel_state` is defined here
  --> src/workflows/messaging.rs
   |
-  |     runtime_channel_state_exists, wait_for_runtime_channel_state,
-  |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |     wait_for_runtime_channel_state,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

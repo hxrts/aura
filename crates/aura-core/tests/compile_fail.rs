@@ -7,6 +7,8 @@ fn ownership_compile_fail_guards() {
     assert!(
         std::process::Command::new(cargo)
             .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
             .expect("required Cargo must be invocable")
             .success(),

@@ -33,6 +33,12 @@ Native Rust interface to the Quint formal verification language using the Quint 
 - Used for protocol specification verification, not runtime.
 - Re-exports `quint_evaluator` types for interop.
 
+The upstream evaluator is pinned to Quint v0.33.0. Its known
+RUSTSEC-2026-0292 dependency vulnerability is explicitly accepted through a
+reason-bearing `deny.toml` exception, not repaired by this upgrade. The
+[verification guide](../../docs/806_verification_guide.md#quint-evaluator-advisory-exception)
+defines the exception scope, removal criterion and required upgrade checks.
+
 ### InvariantQuintIrDeterminism
 
 Quint bridge import and export must produce stable intermediate representation for identical inputs.

@@ -5,6 +5,8 @@ pub(crate) fn acquire_trybuild_lock(
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let status = std::process::Command::new(cargo)
         .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()?;
     if !status.success() {
         return Err(std::io::Error::other(format!("required Cargo failed: {status}")).into());

@@ -181,6 +181,7 @@ opt-level = "s"
 [profile.dev]
 opt-level = 0
 debug = true
+incremental = false
 
 [profile.wasm]
 inherits = "release"

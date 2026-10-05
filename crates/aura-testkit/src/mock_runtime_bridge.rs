@@ -95,10 +95,23 @@ impl CancellationToken for MockRuntimeCancellationToken {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("required mock task {0} cancelled by its original owner")]
+struct MockRequiredTaskCancelled(&'static str);
+fn mock_required_cancelled(name: &'static str) -> aura_core::AuraError {
+    aura_core::AuraError::Internal {
+        message: "required mock task cancelled".into(),
+        source: Some(Arc::new(MockRequiredTaskCancelled(name))),
+    }
+}
+
+type MockRequiredTask = (&'static str, JoinHandle<Result<(), aura_core::AuraError>>);
+
 #[derive(Debug)]
 struct MockRuntimeTaskSpawnerImpl {
     shutdown_tx: watch::Sender<bool>,
     handles: Mutex<Vec<JoinHandle<()>>>,
+    required: Mutex<Vec<MockRequiredTask>>,
 }
 
 impl MockRuntimeTaskSpawnerImpl {
@@ -106,6 +119,7 @@ impl MockRuntimeTaskSpawnerImpl {
         Self {
             shutdown_tx,
             handles: Mutex::new(Vec::new()),
+            required: Mutex::new(Vec::new()),
         }
     }
 
@@ -117,7 +131,15 @@ impl MockRuntimeTaskSpawnerImpl {
     }
 
     fn abort_all(&self) {
-        let _ = self.shutdown_tx.send(true);
+        self.shutdown_tx.send_replace(true);
+        for (_, handle) in self
+            .required
+            .lock()
+            .expect("mock required task registry poisoned")
+            .drain(..)
+        {
+            handle.abort();
+        }
         let mut handles = self.handles.lock().expect("mock runtime handles poisoned");
         for handle in handles.drain(..) {
             handle.abort();
@@ -154,6 +176,57 @@ impl TaskSpawner for MockRuntimeTaskSpawnerImpl {
                 _ = fut => {}
             }
         }));
+    }
+
+    fn spawn_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        let mut required = self
+            .required
+            .lock()
+            .expect("mock required task registry poisoned");
+        if *self.shutdown_tx.borrow() {
+            return Err(mock_required_cancelled(name));
+        }
+        let mut owned_shutdown = self.shutdown_tx.subscribe();
+        let handle = tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => Err(mock_required_cancelled(name)),
+                _ = owned_shutdown.changed() => Err(mock_required_cancelled(name)),
+                outcome = fut => outcome,
+            }
+        });
+        required.push((name, handle));
+        Ok(())
+    }
+    fn spawn_local_fallible_cancellable(
+        &self,
+        name: &'static str,
+        fut: LocalBoxFuture<'static, Result<(), aura_core::AuraError>>,
+        token: Arc<dyn CancellationToken>,
+    ) -> Result<(), aura_core::AuraError> {
+        let mut required = self
+            .required
+            .lock()
+            .expect("mock required task registry poisoned");
+        if *self.shutdown_tx.borrow() {
+            return Err(mock_required_cancelled(name));
+        }
+        let mut owned_shutdown = self.shutdown_tx.subscribe();
+        let handle = tokio::task::spawn_local(async move {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => Err(mock_required_cancelled(name)),
+                _ = owned_shutdown.changed() => Err(mock_required_cancelled(name)),
+                outcome = fut => outcome,
+            }
+        });
+        required.push((name, handle));
+        Ok(())
     }
 
     fn cancellation_token(&self) -> Arc<dyn CancellationToken> {
@@ -216,6 +289,7 @@ pub struct MockRuntimeBridge {
     id_counter: AtomicU64,
     /// Simulated current time (ms since epoch)
     current_time_ms: AtomicU64,
+    physical_time_changed: tokio::sync::Notify,
     /// Devices registered with this authority
     devices: Arc<RwLock<Vec<BridgeDeviceInfo>>>,
     /// Whether canonical AMP channel state should be reported as available.
@@ -243,6 +317,58 @@ impl std::fmt::Debug for MockRuntimeBridge {
 }
 
 impl MockRuntimeBridge {
+    /// Stop the original task owner and await actual destruction, retaining every
+    /// required outcome and concrete task/native failure for test observation.
+    pub async fn shutdown_owned_tasks(
+        &self,
+    ) -> Vec<(&'static str, Result<(), aura_core::AuraError>)> {
+        self.task_owner.inner.shutdown_tx.send_replace(true);
+        let required = std::mem::take(
+            &mut *self
+                .task_owner
+                .inner
+                .required
+                .lock()
+                .expect("mock required task registry poisoned"),
+        );
+        let units = std::mem::take(
+            &mut *self
+                .task_owner
+                .inner
+                .handles
+                .lock()
+                .expect("mock runtime handles poisoned"),
+        );
+        let mut outcomes = Vec::new();
+        for handle in &units {
+            handle.abort();
+        }
+        for handle in units {
+            if let Err(source) = handle.await {
+                if !source.is_cancelled() {
+                    outcomes.push((
+                        "mock_unit_task",
+                        Err(aura_core::AuraError::Internal {
+                            message: "owned mock task join failed".into(),
+                            source: Some(Arc::new(source)),
+                        }),
+                    ));
+                }
+            }
+        }
+        for (name, handle) in required {
+            let outcome = match handle.await {
+                Ok(outcome) => outcome,
+                Err(source) => Err(aura_core::AuraError::Internal {
+                    message: "required mock task join failed".into(),
+                    source: Some(Arc::new(source)),
+                }),
+            };
+            outcomes.push((name, outcome));
+        }
+        outcomes
+    }
+
     /// Create a new mock runtime bridge with a random authority
     pub fn new() -> Self {
         Self::with_authority(AuthorityId::new_from_entropy([1u8; 32]))
@@ -261,7 +387,8 @@ impl MockRuntimeBridge {
             nickname_suggestion: Arc::new(RwLock::new("MockUser".to_string())),
             mfa_policy: Arc::new(RwLock::new("Disabled".to_string())),
             id_counter: AtomicU64::new(1),
-            current_time_ms: AtomicU64::new(1700000000000), // Fixed starting time
+            current_time_ms: AtomicU64::new(1700000000000), // Fixed original physical observation
+            physical_time_changed: tokio::sync::Notify::new(),
             devices: Arc::new(RwLock::new(vec![BridgeDeviceInfo {
                 id: device_id,
                 name: "MockDevice".to_string(),
@@ -396,12 +523,18 @@ impl MockRuntimeBridge {
 
     /// Advance the mock time by the given milliseconds
     pub fn advance_time_ms(&self, ms: u64) {
-        self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
+        self.current_time_ms
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |now| {
+                now.checked_add(ms)
+            })
+            .expect("explicit mock physical advance overflow");
+        self.physical_time_changed.notify_waiters();
     }
 
     /// Set the mock time to a specific value
     pub fn set_time_ms(&self, ms: u64) {
         self.current_time_ms.store(ms, Ordering::SeqCst);
+        self.physical_time_changed.notify_waiters();
     }
 
     /// Control whether canonical AMP channel state exists for readiness tests.
@@ -1566,24 +1699,208 @@ impl RuntimeBridge for MockRuntimeBridge {
     }
 
     async fn current_time_ms(&self) -> Result<u64, aura_app::runtime_bridge::RuntimeBridgeError> {
-        // Auto-advance time by 1ms on each call to ensure unique timestamps
-        // This is important for message deduplication (message IDs include timestamp)
-        let time = self.current_time_ms.fetch_add(1, Ordering::SeqCst);
-        Ok(time)
+        // Observing physical time never advances it. Mock IDs have their own
+        // sequence owner; message IDs also use the app's separate sequence.
+        Ok(self.now_ms())
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
-        // Mock bridge advances virtual time instead of sleeping
-        self.current_time_ms.fetch_add(ms, Ordering::SeqCst);
-        // Yield to allow other tasks to run
-        tokio::task::yield_now().await;
-        Ok(())
+        let mut previous = self.now_ms();
+        let target = previous.checked_add(ms).ok_or_else(|| {
+            aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                IntentError::internal_error("mock physical sleep target overflow"),
+                aura_core::effects::TimeError::OperationFailed {
+                    reason: "mock physical sleep target overflow".into(),
+                },
+            )
+        })?;
+        loop {
+            let changed = self.physical_time_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let now = self.now_ms();
+            if now < previous {
+                return Err(aura_app::runtime_bridge::RuntimeBridgeError::with_source(
+                    IntentError::internal_error(
+                        "mock physical clock rolled back during original sleep",
+                    ),
+                    aura_core::effects::TimeError::PhysicalClockRollback {
+                        previous_ms: previous,
+                        observed_ms: now,
+                    },
+                ));
+            }
+            if now >= target {
+                return Ok(());
+            }
+            previous = now;
+            changed.await;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn required_mock_tasks_retain_native_failure_and_acknowledge_cancelled_destruction() {
+        let runtime = MockRuntimeBridge::new();
+        let spawner = runtime.task_owner.inner.clone();
+        let (failed_tx, failed_rx) = tokio::sync::oneshot::channel();
+        TaskSpawner::spawn_fallible_cancellable(
+            spawner.as_ref(),
+            "native_failure",
+            Box::pin(async move {
+                failed_tx.send(()).unwrap();
+                Err(aura_core::AuraError::Storage {
+                    message: "actual injected required IO failure".into(),
+                    source: Some(Arc::new(std::io::Error::from(
+                        std::io::ErrorKind::PermissionDenied,
+                    ))),
+                })
+            }),
+            spawner.cancellation_token(),
+        )
+        .unwrap();
+        failed_rx.await.unwrap();
+        let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
+        struct RequiredDrop(Option<tokio::sync::oneshot::Sender<()>>);
+        impl Drop for RequiredDrop {
+            fn drop(&mut self) {
+                if let Some(tx) = self.0.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+        let retained = RequiredDrop(Some(dropped_tx));
+        TaskSpawner::spawn_fallible_cancellable(
+            spawner.as_ref(),
+            "pending_required",
+            Box::pin(async move {
+                let _retained = retained;
+                futures::future::pending::<Result<(), aura_core::AuraError>>().await
+            }),
+            spawner.cancellation_token(),
+        )
+        .unwrap();
+        let outcomes = runtime.shutdown_owned_tasks().await;
+        assert_eq!(outcomes.len(), 2);
+        let native = outcomes
+            .iter()
+            .find(|(name, _)| *name == "native_failure")
+            .unwrap()
+            .1
+            .as_ref()
+            .unwrap_err();
+        let source = std::error::Error::source(native)
+            .unwrap()
+            .downcast_ref::<std::io::Error>()
+            .unwrap();
+        assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+        let cancelled = outcomes
+            .iter()
+            .find(|(name, _)| *name == "pending_required")
+            .unwrap()
+            .1
+            .as_ref()
+            .unwrap_err();
+        assert!(std::error::Error::source(cancelled)
+            .unwrap()
+            .downcast_ref::<MockRequiredTaskCancelled>()
+            .is_some());
+        dropped_rx
+            .await
+            .expect("real task future destroyed before drain acknowledgment");
+        assert!(TaskSpawner::spawn_fallible_cancellable(
+            spawner.as_ref(),
+            "after_stop",
+            Box::pin(async { Ok(()) }),
+            spawner.cancellation_token()
+        )
+        .is_err());
+        assert!(
+            runtime.shutdown_owned_tasks().await.is_empty(),
+            "drain consumes each owned handle exactly once"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_physical_sleep_requires_explicit_progress_and_retains_rollback() {
+        let runtime = MockRuntimeBridge::new();
+        let original = runtime.current_time_ms().await.unwrap();
+        assert_eq!(runtime.current_time_ms().await.unwrap(), original);
+        assert_ne!(
+            runtime.next_string_id(),
+            runtime.next_string_id(),
+            "identity uniqueness has a separate sequence owner"
+        );
+        let sleep = runtime.sleep_ms(10);
+        tokio::pin!(sleep);
+        assert!(futures::poll!(sleep.as_mut()).is_pending());
+        assert_eq!(
+            runtime.current_time_ms().await.unwrap(),
+            original,
+            "timer polling cannot spend another owner's budget"
+        );
+        runtime.advance_time_ms(9);
+        assert!(futures::poll!(sleep.as_mut()).is_pending());
+        runtime.advance_time_ms(1);
+        assert!(matches!(
+            futures::poll!(sleep.as_mut()),
+            std::task::Poll::Ready(Ok(()))
+        ));
+        let rollback = runtime.sleep_ms(5);
+        tokio::pin!(rollback);
+        assert!(futures::poll!(rollback.as_mut()).is_pending());
+        runtime.set_time_ms(original);
+        let error = match futures::poll!(rollback.as_mut()) {
+            std::task::Poll::Ready(Err(error)) => error,
+            other => panic!("explicit rollback must remain an actual clock fault: {other:?}"),
+        };
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .downcast_ref::<aura_core::effects::TimeError>()
+            .is_some_and(|source| matches!(
+                source,
+                aura_core::effects::TimeError::PhysicalClockRollback { .. }
+            )));
+    }
+
+    #[tokio::test]
+    async fn required_mock_refresh_hook_startup_does_not_advance_its_timeout_clock() {
+        let runtime = Arc::new(MockRuntimeBridge::new());
+        let original = runtime.current_time_ms().await.unwrap();
+        let timer = runtime.sleep_ms(5000);
+        tokio::pin!(timer);
+        assert!(futures::poll!(timer.as_mut()).is_pending());
+        let bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(aura_app::AppConfig::default(), bridge).unwrap(),
+        ));
+        aura_app::AppCore::init_signals_with_hooks(&app)
+            .await
+            .expect(
+            "actual required listener task acknowledges startup under its original frozen budget",
+        );
+        assert_eq!(runtime.current_time_ms().await.unwrap(), original);
+        assert!(
+            futures::poll!(timer.as_mut()).is_pending(),
+            "listener success cannot fabricate deadline expiry"
+        );
+        let outcomes = runtime.shutdown_owned_tasks().await;
+        assert!(
+            !outcomes.is_empty(),
+            "fixture must have admitted actual required listeners"
+        );
+        for (_, outcome) in outcomes {
+            if let Err(source) = outcome {
+                assert!(
+                    std::error::Error::source(&source).is_some(),
+                    "required cancellation/failure retains its concrete source"
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_mock_runtime_bridge_basic() {
@@ -1653,7 +1970,7 @@ mod tests {
         bridge.advance_time_ms(1000);
         let t2 = bridge.current_time_ms().await.unwrap();
 
-        assert_eq!(t2 - t1, 1001);
+        assert_eq!(t2 - t1, 1000);
 
         bridge.set_time_ms(2000000000000);
         let t3 = bridge.current_time_ms().await.unwrap();

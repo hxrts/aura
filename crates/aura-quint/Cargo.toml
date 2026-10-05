@@ -25,7 +25,7 @@ async-trait = { workspace = true }
 async-process = "1"
 tempfile = "3.0"
 telltale-bridge = { workspace = true }
-quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.29.0" }
+quint_evaluator = { git = "https://github.com/quint-co/quint", tag = "v0.33.0" }
 
 [dev-dependencies]
 tokio = { workspace = true }

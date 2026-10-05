@@ -194,8 +194,9 @@ where
                     message: format!("read required invitation record {key}"),
                     source: Some(Arc::new(error)),
                 })?
-                .ok_or_else(|| {
-                    AuraError::not_found(format!("listed invitation record disappeared: {key}"))
+                .ok_or_else(|| AuraError::NotFound {
+                    message: format!("listed invitation record disappeared: {key}"),
+                    source: None,
                 })?;
             // Decode before filtering: corrupt records have unknown type and
             // cannot silently become an absent channel invitation.

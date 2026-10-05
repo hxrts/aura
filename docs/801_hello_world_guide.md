@@ -74,14 +74,18 @@ Replace the Cargo command after `--` for `cargo check`, `cargo clippy`, or
 another package test. Omit `--allow-live-harness` outside a live run. The
 guard refuses admission when another builder is active or free space is below
 the configured floor; wait for the current owner to finish and release an
-idle cache window before retrying. Guarded builds default to
-`CARGO_INCREMENTAL=0`; opt in with `CARGO_INCREMENTAL=1` when the saved rebuild
+idle cache window before retrying. The Cargo development profile disables
+incremental compilation by default for ordinary Cargo and editor checks;
+guarded builds also default to `CARGO_INCREMENTAL=0`. Opt in with
+`CARGO_INCREMENTAL=1` when the saved rebuild
 time justifies its retained cache. The fixed-source foundation measurement
 retained 289,240 KiB without incremental compilation versus 552,508 KiB after
 an incremental source rebuild (47.6% less). The wrapper's measured rebuild
 times were 16s versus 12s; this is a foundation check, not a whole-workspace
 performance guarantee. The wrapper and saved disk report log the effective
-setting, and the safety fixture verifies both the default and override.
+setting. Required cache-policy fixtures verify the wrapper behavior and compile
+a tiny isolated package using the actual development profile to verify the
+compiler default and explicit override.
 
 Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
 have stopped. Its startup and per-step preflight refuses active consumers,

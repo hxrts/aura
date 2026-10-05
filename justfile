@@ -490,10 +490,11 @@ ci-policy-toolkit-clippy:
     cargo test --manifest-path toolkit/xtask/Cargo.toml --all-targets
     cargo clippy --manifest-path toolkit/xtask/Cargo.toml --all-targets -- -D warnings
 
-# Verify cache guards and evidence retention without a real Cargo build.
+# Verify cache guards, evidence retention, and a tiny isolated compiler probe.
 ci-build-cache-policy:
     bash -n scripts/dev/*.sh scripts/harness/lan/build.sh scripts/harness/lan/drv.sh scripts/web/serve-static.sh
     bash scripts/dev/test-cargo-in-nix.sh
+    bash scripts/dev/test-cargo-incremental-default.sh
     bash scripts/dev/test-build-budget.sh
     bash scripts/dev/test-prune-ci-cache.sh
     bash scripts/dev/test-prune-inactive-lane.sh

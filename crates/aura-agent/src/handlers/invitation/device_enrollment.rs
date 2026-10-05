@@ -129,11 +129,14 @@ fn enrollment_send_peer_unreachable(
                     from_role,
                     to_role,
                     label,
-                    source: ChoreographyError::Transport { source },
+                    source,
                 },
             ..
         }) = cause.downcast_ref::<SessionIngressError>()
         {
+            let ChoreographyError::Transport { source } = source.as_ref() else {
+                return false;
+            };
             return from_role == "Initiator"
                 && to_role == "Invitee"
                 && label == expected_label
@@ -1083,11 +1086,11 @@ mod budget_tests {
                 from_role: "Initiator".into(),
                 to_role: "Invitee".into(),
                 label: label.into(),
-                source: aura_protocol::effects::ChoreographyError::Transport {
+                source: Box::new(aura_protocol::effects::ChoreographyError::Transport {
                     source: Box::new(aura_core::effects::TransportError::DestinationUnreachable {
                         destination,
                     }),
-                },
+                }),
             },
         };
         enrollment_stage_error("required initial request send", cause)

@@ -755,13 +755,13 @@ pub fn run_runtime_shutdown_order() -> Result<()> {
             target.display()
         );
     }
-    let reactive = first_match_line(&target, "self.reactive_pipeline_service.stop().await")?
+    let reactive = first_match_line(&target, ".stop_with_original_budget(original.budget())")?
         .context("runtime-shutdown-order: missing reactive pipeline shutdown step")?;
-    let task_tree = first_match_line(&target, "shutdown_with_timeout(Duration::from_secs(5))")?
+    let task_tree = first_match_line(&target, ".shutdown_with_original_budget(self.effect_system.as_ref(), original.budget())")?
         .context("runtime-shutdown-order: missing runtime task tree shutdown step")?;
-    let stop_services = first_match_line(&target, "self.stop_services().await")?
+    let stop_services = first_match_line(&target, "self.stop_services(&original)")?
         .context("runtime-shutdown-order: missing stop_services step")?;
-    let lifecycle = first_match_line(&target, "lifecycle_manager.shutdown(ctx).await")?
+    let lifecycle = first_match_line(&target, "lifecycle_manager.shutdown(ctx)")?
         .context("runtime-shutdown-order: missing lifecycle shutdown step")?;
     if reactive >= task_tree {
         bail!(
@@ -1330,6 +1330,10 @@ pub fn run_browser_restart_boundary() -> Result<()> {
 
 pub fn run_service_surface_declarations() -> Result<()> {
     let repo_root = repo_root()?;
+    run_service_surface_declarations_at(&repo_root)
+}
+
+fn run_service_surface_declarations_at(repo_root: &Path) -> Result<()> {
     for file in [
         repo_root.join("crates/aura-rendezvous/src/service.rs"),
         repo_root.join("crates/aura-agent/src/runtime/services/move_manager.rs"),
@@ -1365,14 +1369,19 @@ pub fn run_service_surface_declarations() -> Result<()> {
             );
         }
     }
-    let exceptions = rg_lines(&[
+    let mut scan_arguments = vec![
         "-n".into(),
         "service_surface_(exception|allowlist|compat_alias)".into(),
         repo_relative(repo_root.join("crates")),
         repo_relative(repo_root.join("scripts")),
-        repo_relative(repo_root.join("work")),
         repo_relative(repo_root.join("docs")),
-    ])?;
+    ];
+    // Ignored local plans are optional in clean checkouts; production roots
+    // remain mandatory and rg errors there must still fail the gate.
+    if repo_root.join("work").is_dir() {
+        scan_arguments.push(repo_relative(repo_root.join("work")));
+    }
+    let exceptions = rg_lines(&scan_arguments)?;
     for hit in exceptions {
         let (file, line_number) = parse_hit_path_line(&hit)?;
         let lines = read_lines(repo_root.join(file))?;
@@ -8923,5 +8932,93 @@ mod ownership_ratchet_tests {
             wrapper
         )
         .unwrap());
+    }
+}
+
+#[cfg(test)]
+mod service_surface_scan_tests {
+    use super::run_service_surface_declarations_at;
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    struct Fixture {
+        root: PathBuf,
+    }
+    impl Fixture {
+        fn new() -> anyhow::Result<Self> {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = loop {
+                let candidate = std::env::temp_dir().join(format!(
+                    "aura-service-surface-{}",
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&candidate) {
+                    Ok(()) => break candidate,
+                    Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(source) => return Err(source.into()),
+                }
+            };
+            let fixture = Self { root };
+            for file in [
+                "crates/aura-rendezvous/src/service.rs",
+                "crates/aura-rendezvous/src/descriptor.rs",
+                "crates/aura-agent/src/runtime/services/move_manager.rs",
+            ] {
+                let path = fixture.root.join(file);
+                let parent = path
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("fixture has no parent"))?;
+                fs::create_dir_all(parent)?;
+                fs::write(
+                    path,
+                    "#[aura_macros::service_surface(name = \"fixture\")]\npub struct Surface;\n",
+                )?;
+            }
+            fs::create_dir(fixture.root.join("scripts"))?;
+            fs::create_dir(fixture.root.join("docs"))?;
+            Ok(fixture)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            if let Err(source) = fs::remove_dir_all(&self.root) {
+                eprintln!(
+                    "service-surface fixture cleanup {}: {source}",
+                    self.root.display()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clean_checkout_without_scratch_retains_production_exception_enforcement(
+    ) -> anyhow::Result<()> {
+        let fixture = Fixture::new()?;
+        assert!(!fixture.root.join("work").exists());
+        run_service_surface_declarations_at(&fixture.root)?;
+        fs::write(
+            fixture.root.join("scripts/escape.sh"),
+            "# service_surface_exception\n",
+        )?;
+        let error = run_service_surface_declarations_at(&fixture.root)
+            .expect_err("missing scratch cannot exempt production exceptions");
+        assert!(error.to_string().contains("must declare owner"));
+        fs::write(
+            fixture.root.join("scripts/escape.sh"),
+            "# service_surface_exception\n# owner = fixture\n# remove_by = fixture-validation\n",
+        )?;
+        run_service_surface_declarations_at(&fixture.root)?;
+        fs::create_dir(fixture.root.join("work"))?;
+        fs::write(
+            fixture.root.join("work/scratch.md"),
+            "service_surface_exception\n",
+        )?;
+        let error = run_service_surface_declarations_at(&fixture.root)
+            .expect_err("existing scratch retains metadata enforcement");
+        assert!(error.to_string().contains("work/scratch.md"));
+        Ok(())
     }
 }

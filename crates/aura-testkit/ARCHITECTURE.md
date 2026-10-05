@@ -181,3 +181,19 @@ without awaiting its injectable clock-read path or advancing time. Actual clock
 notifications drive wakeups; rollback and selected timer failures remain typed.
 Required delayed-registration and native-fault tests run in both the focused
 absolute-time-observation and full VM lifecycle inventories.
+
+MockRuntimeBridge's native owner supports required fallible send/local tasks.
+It retains actual Result-bearing join handles; shutdown closes admission under the
+same registry lock, cancels the original owner and awaits each real handle.
+shutdown_owned_tasks exposes concrete named outcomes, including native failures,
+cancellation and join faults. The real supervision regression verifies native IO
+source retention, future destruction before drain acknowledgment and post-stop
+refusal. Unit-only spawning does not substitute for required task supervision.
+
+MockRuntimeBridge physical observations do not advance the clock, and relative
+sleeps wait for explicit clock control with race-safe notification registration.
+Advancing time is checked and monotone; deliberate set-time rollback remains a
+source-bearing clock fault to a waiting original timer. Mock entity IDs and app
+message IDs use separate sequence owners. Required listener startup uses actual
+supervised acknowledgment under the frozen original window; polling its timeout
+cannot advance shared time or consume another task's startup budget.

@@ -4,6 +4,8 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
+Native delegation and VM diagnostics box bulky concrete causes while retaining their original error-source chain and structured metadata. Their explicit `Error::source` implementations expose the concrete cause through `Box::as_ref`, preserving direct native downcasts rather than exposing the allocation wrapper. Rejected prepared enrollment entries retain move-owned task/window custody in a box until explicit cancellation and drain; representation changes do not acknowledge teardown. Native regressions enforce bounded error layouts and concrete source downcasts across these boundaries.
+
 Production runtime composition and effect system assembly for authority-based identity management. Owns structured concurrency, service lifecycle, session ownership, effect registry, builder infrastructure, and choreography adapters.
 
 ## Scope

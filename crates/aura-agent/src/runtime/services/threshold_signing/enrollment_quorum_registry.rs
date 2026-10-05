@@ -232,16 +232,16 @@ impl EnrollmentQuorumRegistry {
     pub(super) async fn insert_prepared(
         &self,
         entry: PreparedIssuerEntry,
-    ) -> Result<(), (AuraError, PreparedIssuerEntry)> {
+    ) -> Result<(), (AuraError, Box<PreparedIssuerEntry>)> {
         if !Arc::ptr_eq(entry._capacity._permit.semaphore(), &self.capacity) {
-            return Err((rejected(RegistryFailure::Binding), entry));
+            return Err((rejected(RegistryFailure::Binding), Box::new(entry)));
         }
         let mut entries = self.prepared.lock().await;
         if self.capacity.is_closed() {
-            return Err((rejected(RegistryFailure::Missing), entry));
+            return Err((rejected(RegistryFailure::Missing), Box::new(entry)));
         }
         if entries.contains_key(&entry.ceremony) {
-            return Err((rejected(RegistryFailure::Collision), entry));
+            return Err((rejected(RegistryFailure::Collision), Box::new(entry)));
         }
         entries.insert(entry.ceremony.clone(), entry);
         Ok(())

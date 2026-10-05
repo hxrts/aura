@@ -4769,7 +4769,7 @@ impl ThresholdSigningService {
             task,
         );
         if let Err((primary, entry)) = self.shared.quorum.insert_prepared(entry).await {
-            if let Err(cleanup) = entry.cancel_and_drain().await {
+            if let Err(cleanup) = (*entry).cancel_and_drain().await {
                 return Err(enrollment_quorum_registry::joined(primary, cleanup));
             }
             return Err(primary);

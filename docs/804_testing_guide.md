@@ -2003,3 +2003,27 @@ must prove native participant counts defeat stale row/published count hints and
 removed peers do not enable recipient or delivery readiness. Certified successor
 membership requires actual verified inclusion evidence; transition ids and hashes
 are insufficient.
+
+### Ownership checks in clean checkouts
+
+Service-surface governance scans required production roots even when ignored
+local `work/` notes are absent. Existing scratch remains subject to exception
+metadata checks. The toolkit regression exercises a clean fixture without
+scratch, rejects an unowned production exception, and checks existing scratch
+metadata. Do not create or publish work plans merely to satisfy a CI validator.
+
+### Mock runtime physical time and required tasks
+
+`MockRuntimeBridge` observes one manually controlled physical clock. Reads and
+polling `sleep_ms` do not advance it. Drive timer expiration explicitly with
+`advance_time_ms`; use `set_time_ms` to inject rollback and retain the resulting
+native `TimeError`. Register notifications before rechecking the clock so a
+concurrent advance cannot be lost. Entity and message uniqueness use their
+separate sequence owners rather than changing physical time on observation.
+
+Required refresh hooks must run through the mock's fallible task owner. Observe
+named native failures and cancellation with `shutdown_owned_tasks`, which awaits
+actual future destruction. Keep the native error/destruction, explicit timer
+progress/rollback, and genuine listener-startup regressions in ordinary test
+coverage. A timeout poll must not spend a listener's entire startup window before
+that listener can acknowledge readiness.

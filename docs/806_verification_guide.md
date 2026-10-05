@@ -14,6 +14,22 @@ Unit tests suffice for simple, well-understood behavior. Do not over-invest in v
 
 See [Formal Verification Reference](120_verification.md) for the complete architecture documentation.
 
+### Quint evaluator advisory exception
+
+Aura uses the upstream Quint v0.33.0 Rust evaluator. Its `imbl 5` dependency
+resolves to `imbl-sized-chunks 0.1.3`, affected by
+[RUSTSEC-2026-0292](https://rustsec.org/advisories/RUSTSEC-2026-0292.html).
+The user-approved, reason-bearing exception in `deny.toml` accepts this known
+panic-safety double-free/use-after-free vulnerability; upgrading Quint does not
+fix it. The exception suppresses only this advisory in the required
+`just ci-security-audit` gate; other advisories retain their existing policy.
+
+Remove the exception when upstream uses `imbl-sized-chunks >=0.2.0`, regenerate
+`Cargo.nix`, and require the advisory gate to pass without this exception.
+Validate evaluator upgrades with `cargo check -p aura-quint --all-targets` and
+`cargo test -p aura-quint`. Retain an immutable resolved git revision; no local
+path override or fork is required for this accepted upstream dependency.
+
 ## Writing Quint Specifications
 
 ### Getting Started

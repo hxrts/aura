@@ -34,6 +34,11 @@ this scoped dispatch: Cargo otherwise prefers installed Cargo-home plugins,
 which can select an older Clippy even when the Nix toolchain leads PATH.
 `just ci-build-cache-policy` verifies argument and exit-status forwarding.
 
+The Cargo development profile disables incremental compilation by default,
+including ordinary Cargo and editor checks. `CARGO_INCREMENTAL=1` remains an
+explicit override. The cache-policy gate compiles a tiny isolated probe to
+verify both effective compiler settings without building the workspace.
+
 | Category | Command | Purpose |
 |----------|---------|---------|
 | Build | `just build` | Build all crates |
@@ -118,6 +123,9 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
 - **Security boundary policy sync**: when adding or changing security-sensitive toolkit checks in `toolkit/xtask/src/checks/policy.rs`, keep this guidance aligned and run `just _policy-check check security-boundary-policy` before broader CI
 - **Shared scenario boundary**: shared scenarios stay actor-based and semantic-only; the legacy compatibility-step scenario language is quarantined to explicit non-shared fixtures
 - **Typed governance first**: extend typed validator domains before adding new shell policy logic; `scripts/check/` wrappers should stay thin and workflow-oriented
+- **Optional scratch governance**: ownership checks must work in clean
+  checkouts without ignored `work/` notes; absent scratch cannot exempt
+  required production roots or exception metadata.
 - **Authoritative-ref discipline**: once parity-critical code has
   authoritative context, later APIs must require the strongest typed reference;
   raw-id re-resolution, `resolve_*` downgrade, and `*_or_fallback` repair are

@@ -17886,6 +17886,28 @@ Node.js and browsers, built on `#[wasm_bindgen]` using the `wasm-bindgen` crate.
         };
         resolvedDefaultFeatures = [ "arch" "default" ];
       };
+      "libmimalloc-sys" = rec {
+        crateName = "libmimalloc-sys";
+        version = "0.1.49";
+        edition = "2018";
+        description = "Sys crate wrapping the mimalloc allocator";
+        links = "mimalloc";
+        sha256 = "1sdqq31sbf8dbdng8fsyzl2c5xxphn6dvr6ggik6zhg18cpsaiba";
+        libName = "libmimalloc_sys";
+        authors = [
+          "Octavian Oncescu <octavonce@gmail.com>"
+        ];
+        buildDependencies = [
+          {
+            name = "cc";
+            packageId = "cc";
+          }
+        ];
+        features = {
+          "cty" = [ "dep:cty" ];
+          "extended" = [ "cty" ];
+        };
+      };
       "libredox" = rec {
         crateName = "libredox";
         version = "0.1.25";
@@ -18774,6 +18796,37 @@ be used outside of a proc-macro context.
           }
         ];
         features = {
+        };
+        resolvedDefaultFeatures = [ "default" ];
+      };
+      "mimalloc" = rec {
+        crateName = "mimalloc";
+        version = "0.1.52";
+        edition = "2018";
+        description = "Performance and security oriented drop-in allocator";
+        sha256 = "0qkqr4yga7fkyqwnn89d2xp346q54n4fpm91rzxd2jni52xkjh9d";
+        authors = [
+          "Octavian Oncescu <octavonce@gmail.com>"
+          "Vincent Rouillé <vincent@speedy37.fr>"
+          "Thom Chiovoloni <chiovolonit@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "libmimalloc-sys";
+            packageId = "libmimalloc-sys";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "debug" = [ "libmimalloc-sys/debug" ];
+          "debug_in_debug" = [ "libmimalloc-sys/debug_in_debug" ];
+          "extended" = [ "libmimalloc-sys/extended" ];
+          "local_dynamic_tls" = [ "libmimalloc-sys/local_dynamic_tls" ];
+          "no_thp" = [ "libmimalloc-sys/no_thp" ];
+          "override" = [ "libmimalloc-sys/override" ];
+          "secure" = [ "libmimalloc-sys/secure" ];
+          "v2" = [ "libmimalloc-sys/v2" ];
+          "win_direct_tls" = [ "libmimalloc-sys/win_direct_tls" ];
         };
         resolvedDefaultFeatures = [ "default" ];
       };
@@ -19748,6 +19801,12 @@ complex, rational, range iterators, generic integers, and more!
             features = [ "i128" ];
           }
           {
+            name = "rand";
+            packageId = "rand 0.8.8";
+            optional = true;
+            usesDefaultFeatures = false;
+          }
+          {
             name = "serde";
             packageId = "serde";
             optional = true;
@@ -19762,7 +19821,7 @@ complex, rational, range iterators, generic integers, and more!
           "serde" = [ "dep:serde" ];
           "std" = [ "num-integer/std" "num-traits/std" ];
         };
-        resolvedDefaultFeatures = [ "default" "serde" "std" ];
+        resolvedDefaultFeatures = [ "default" "rand" "serde" "std" ];
       };
       "num-complex" = rec {
         crateName = "num-complex";
@@ -22663,9 +22722,9 @@ a Message Authentication Code (MAC)
         crateBin = [];
         workspace_member = null;
         src = builtins.fetchGit {
-          url = "https://github.com/informalsystems/quint";
-          rev = "644e6438a4b7f6f8fa8ee3084bde43d36e7ba265";
-          ref = "refs/tags/v0.29.0";
+          url = "https://github.com/quint-co/quint";
+          rev = "d7ef819575c1ebcad7ba11018ce6c64377cfbe3c";
+          ref = "refs/tags/v0.33.0";
           submodules = true;
         };
         dependencies = [
@@ -22712,8 +22771,21 @@ a Message Authentication Code (MAC)
             packageId = "itf";
           }
           {
+            name = "mimalloc";
+            packageId = "mimalloc";
+          }
+          {
+            name = "num-bigint";
+            packageId = "num-bigint";
+            features = [ "rand" ];
+          }
+          {
+            name = "num-traits";
+            packageId = "num-traits";
+          }
+          {
             name = "rand";
-            packageId = "rand 0.9.5";
+            packageId = "rand 0.8.8";
           }
           {
             name = "serde";
@@ -22727,6 +22799,10 @@ a Message Authentication Code (MAC)
           {
             name = "serde_path_to_error";
             packageId = "serde_path_to_error";
+          }
+          {
+            name = "serde_repr";
+            packageId = "serde_repr";
           }
           {
             name = "squares-rnd";
