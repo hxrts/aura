@@ -20,7 +20,7 @@ single-live-successor, conflict suppression and emergency policy invariants.
 These steps publish no native certificate/finalization facts, mint no signatures
 or consensus IDs, and prove neither cryptographic admission nor physical
 cryptoshred. Actual A2 witness issuance and owned A3 committee coverage remain
-unfinished in `work/10.md`. Missing artifacts and replay failures fail the test; they cannot skip
+unfinished in `work/8.md` (systemic `S` tasks). Missing artifacts and replay failures fail the test; they cannot skip
 execution. Each fixture agent must complete native threshold-service authority
 bootstrap before replay, retaining its protected genesis, active epoch and
 physical signing allocation. Do not replace that setup with channel bootstrap
@@ -35,7 +35,7 @@ must not repair state. Schema-one reduction tests must invert opaque tokens,
 insertion and journal merge order, reject unversioned rejoin and all-departed
 sender bypass, and preserve original clock failure with no append. Selected
 transition commitments are not successor roster/inclusion evidence; that owned
-witness remains an explicit unfinished task in `work/10.md`. To regenerate
+witness remains an explicit unfinished task in `work/8.md` (systemic `S` tasks). To regenerate
 the fixture, run:
 
 ```sh

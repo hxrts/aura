@@ -50,7 +50,7 @@ The shared UI and TUI library tests cover failure and recovery transitions,
 duplicate shell observer prevention, and snapshot serialization. The browser
 and TUI semantic-observation smoke scenarios remain the end-to-end anchors for
 startup, navigation, and `ui_state` convergence; they do not yet inject stream
-closure or runtime rebootstrap. The recovery smoke in `work/10.md` Task 14
+closure or runtime rebootstrap. The recovery smoke in `work/8.md` Task S14
 must add those fault-injection cases to the PR lane.
 
 ## Projection source revisions
