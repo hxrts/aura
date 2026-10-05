@@ -1107,8 +1107,16 @@ ci-dry-run profile="push":
     ci_prune_target_gib="${AURA_CI_DRY_RUN_PRUNE_TARGET_GIB:-20}"
     mkdir -p "$log_root"
 
+    # AURA_CI_DRY_RUN_SKIP: comma-separated step names to exclude explicitly,
+    # e.g. "Tests + Protocol Compat" while test fixtures still open the
+    # platform keychain. Skipped steps are listed and fail parity-free.
+    SKIPPED_STEPS=()
     add_step() {
         local name="$1" cmd="$2"
+        if [[ ",${AURA_CI_DRY_RUN_SKIP:-}," == *",${name},"* ]]; then
+            SKIPPED_STEPS+=("${name}")
+            return 0
+        fi
         STEPS+=("${name}:::${cmd}")
     }
 
@@ -1283,6 +1291,9 @@ ci-dry-run profile="push":
     fi
 
     total=${#STEPS[@]}
+    if [[ ${#SKIPPED_STEPS[@]} -gt 0 ]]; then
+        printf "${YELLOW}Explicitly skipped (AURA_CI_DRY_RUN_SKIP):${NC} %s\n" "${SKIPPED_STEPS[*]}"
+    fi
 
     echo "CI Dry Run (profile: $profile)"
     echo "==============================="
