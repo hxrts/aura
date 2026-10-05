@@ -101,6 +101,27 @@ fn digest(invitation: &Invitation) -> AgentResult<[u8; 32]> {
         })
     })
 }
+/// The issued binding covers the invitation as created. The only later change
+/// it admits is an open contact invitation's placeholder receiver (the
+/// sender itself) being replaced by the authenticated acceptor once the
+/// inviter records the acceptance; every other field must still match.
+fn issued_digest_matches(
+    original: &OriginalIdentityRecord,
+    invitation: &Invitation,
+) -> AgentResult<bool> {
+    if original.invitation_digest == digest(invitation)? {
+        return Ok(true);
+    }
+    if !matches!(invitation.invitation_type, InvitationType::Contact { .. })
+        || invitation.receiver_id == invitation.sender_id
+    {
+        return Ok(false);
+    }
+    let mut as_issued = invitation.clone();
+    as_issued.receiver_id = invitation.sender_id;
+    Ok(original.invitation_digest == digest(&as_issued)?)
+}
+
 fn require_sender(sender: &SenderInvitationRecordCapability) -> AgentResult<()> {
     let effects = sender.runtime_owner();
     if !matches!(
@@ -214,7 +235,7 @@ async fn read_original(
         || original.authority != invitation.sender_id
         || original.device != effects.device_id()
         || original.invitation != invitation.invitation_id
-        || original.invitation_digest != digest(invitation)?
+        || !issued_digest_matches(&original, invitation)?
         || original.public_key == [0; 32]
     {
         return Err(invalid(IssuedInvitationIdentityError::Binding));
@@ -324,6 +345,73 @@ pub(crate) async fn export_owned_invitation_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issued_binding_admits_only_the_open_contact_receiver_transition() {
+        let sender = AuthorityId::new_from_entropy([0x51; 32]);
+        let acceptor = AuthorityId::new_from_entropy([0x52; 32]);
+        let issued = Invitation {
+            invitation_id: InvitationId::new("inv-open-contact"),
+            context_id: ContextId::new_from_entropy([0x53; 32]),
+            sender_id: sender,
+            receiver_id: sender,
+            invitation_type: InvitationType::Contact { nickname: None },
+            status: InvitationStatus::Pending,
+            created_at: 7,
+            expires_at: None,
+            message: None,
+            receiver_nickname: None,
+        };
+        let original = OriginalIdentityRecord {
+            version: 1,
+            authority: sender,
+            device: DeviceId::new_from_entropy([0x54; 32]),
+            invitation: issued.invitation_id.clone(),
+            invitation_digest: digest(&issued).unwrap(),
+            epoch: 0,
+            public_key: [1; 32],
+        };
+        let mut accepted = issued.clone();
+        accepted.status = InvitationStatus::Accepted;
+        accepted.receiver_id = acceptor;
+        assert!(issued_digest_matches(&original, &issued).unwrap());
+        assert!(
+            issued_digest_matches(&original, &accepted).unwrap(),
+            "recording the acceptor of an open contact invitation keeps its binding"
+        );
+
+        let mut altered = accepted.clone();
+        altered.created_at = 8;
+        assert!(!issued_digest_matches(&original, &altered).unwrap());
+
+        // A directed invitation's receiver is part of the issued binding.
+        let mut directed = issued.clone();
+        directed.receiver_id = acceptor;
+        let directed_original = OriginalIdentityRecord {
+            invitation_digest: digest(&directed).unwrap(),
+            ..original
+        };
+        let mut redirected = directed.clone();
+        redirected.receiver_id = AuthorityId::new_from_entropy([0x55; 32]);
+        assert!(!issued_digest_matches(&directed_original, &redirected).unwrap());
+
+        // Only contact invitations admit the transition.
+        let mut channel = issued.clone();
+        channel.invitation_type = InvitationType::Channel {
+            home_id: ChannelId::from_bytes([0x56; 32]),
+            nickname_suggestion: None,
+            bootstrap: None,
+            home: false,
+        };
+        let channel_original = OriginalIdentityRecord {
+            invitation_digest: digest(&channel).unwrap(),
+            ..directed_original
+        };
+        let mut channel_accepted = channel.clone();
+        channel_accepted.receiver_id = acceptor;
+        assert!(!issued_digest_matches(&channel_original, &channel_accepted).unwrap());
+    }
+
     use crate::runtime::services::ThresholdSigningService;
     use aura_core::effects::ThresholdSigningEffects;
     use base64::Engine;
