@@ -91,6 +91,10 @@ Run `just ci-dry-run` only after Cargo, Dioxus and LAN harness consumers
 have stopped. Its startup and per-step preflight refuses active consumers,
 checks free space, and can collect only idle compiler caches. It preserves
 `.tmp/e2e` and current CI logs.
+A complete run needs about 40 GiB free at start. To exclude a step
+explicitly, set `AURA_CI_DRY_RUN_SKIP` to comma-separated step names (for
+example `"Tests + Protocol Compat"`); excluded steps are announced at the
+start of the run.
 If stale native release variants dominate after the LAN run ends, preview
 `bash scripts/dev/prune-inactive-lane.sh --lane release --dry-run` and then
 use `--apply` to reset that whole idle cache. The command refuses active
