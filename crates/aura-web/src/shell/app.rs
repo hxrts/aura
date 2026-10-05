@@ -20,9 +20,7 @@ use crate::workflows::{self, AccountCreationStageMode};
 use super::bootstrap::submit_runtime_bootstrap_handoff;
 use super::storage::{
     active_storage_prefix, bootstrap_broker_auth_token, bootstrap_broker_url,
-    clear_demo_tablet_enrollment_code, demo_tablet_enrollment_code_key, dual_demo_web_enabled,
-    load_selected_runtime_identity, logged_optional, persist_demo_tablet_enrollment_code,
-    selected_runtime_identity_key,
+    demo_tablet_enrollment_code_key, dual_demo_web_enabled, persist_demo_tablet_enrollment_code,
 };
 use crate::browser_promises::browser_sleep_ms;
 
