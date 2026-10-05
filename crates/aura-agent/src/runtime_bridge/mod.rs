@@ -125,31 +125,14 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
     }
 }
 
-fn deterministic_test_transport_receipt(envelope: &TransportEnvelope) -> TransportReceipt {
-    TransportReceipt {
-        context: envelope.context,
-        src: envelope.source,
-        dst: envelope.destination,
-        epoch: 1,
-        cost: 1,
-        nonce: 1,
-        prev: [0u8; 32],
-        sig: vec![1u8],
-    }
-}
-
 fn attach_chat_fact_test_receipt_if_needed(
     effects: &crate::runtime::AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    if effects.is_testing()
-        && envelope
-            .receipt
-            .as_ref()
-            .map_or(true, |receipt| receipt.sig.is_empty())
-    {
-        envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
-    }
+    crate::runtime::receipt_model::attach_test_transport_receipt_if_needed(
+        effects.is_testing(),
+        envelope,
+    );
 }
 
 fn descriptor_has_placeholder_crypto(descriptor: &aura_rendezvous::RendezvousDescriptor) -> bool {
@@ -573,7 +556,11 @@ impl AgentRuntimeBridge {
             self.agent.runtime().sync(),
             self.agent.runtime().rendezvous(),
         ) {
-            for peer_device in rendezvous.list_reachable_peer_devices().await {
+            let local_device = self.agent.runtime().effects().device_id();
+            for peer_device in rendezvous
+                .list_reachable_sibling_devices(local_device)
+                .await
+            {
                 sync.add_peer(peer_device).await;
             }
         }
@@ -2136,6 +2123,33 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .collect::<Vec<_>>();
 
         let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
+
+        // Step 0: every guardian must have accepted a guardian invitation, which
+        // records the verified key the ceremony needs. Fail before rotating
+        // keys instead of reporting a started ceremony that fails at once.
+        {
+            use aura_core::effects::StorageCoreEffects;
+            let effects = self.agent.runtime().effects();
+            for guardian in guardian_ids {
+                let key = effects
+                    .retrieve(
+                        &crate::handlers::recovery::recovery_guardian_public_key_storage_key(
+                            *guardian,
+                        ),
+                    )
+                    .await
+                    .map_err(|error| {
+                        IntentError::internal_error(format!(
+                            "Failed to read guardian key for {guardian}: {error}"
+                        ))
+                    })?;
+                if key.is_none() {
+                    return Err(IntentError::validation_failed(format!(
+                        "{guardian} has not accepted a guardian invitation yet; invite them as a guardian first"
+                    )));
+                }
+            }
+        }
 
         // Step 1: Generate FROST keys at new epoch
         let (new_epoch, key_packages, _public_key) = self

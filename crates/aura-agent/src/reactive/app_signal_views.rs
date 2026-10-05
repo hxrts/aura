@@ -498,11 +498,28 @@ pub(crate) async fn materialize_unverified_invitation_fixture_signal(
     materialize_pending_invitation_witness(reactive, witness).await
 }
 
+/// A known contact's display name for `sender_id`, used to name the sender of
+/// guardian and channel invitations, which carry no nickname.
+async fn known_contact_name(reactive: &ReactiveHandler, sender_id: AuthorityId) -> Option<String> {
+    let contacts = reactive
+        .read(&*aura_app::signal_defs::CONTACTS_SIGNAL)
+        .await
+        .ok()?;
+    let contact = contacts.contact(&sender_id)?;
+    let name = if contact.nickname.trim().is_empty() {
+        contact.nickname_suggestion.clone().unwrap_or_default()
+    } else {
+        contact.nickname.clone()
+    };
+    (!name.trim().is_empty()).then_some(name)
+}
+
 async fn materialize_pending_invitation_witness(
     reactive: &ReactiveHandler,
     witness: InvitationCreationWitness,
 ) -> Result<(), String> {
     let invitation_id = witness.id().to_string();
+    let sender_name = known_contact_name(reactive, witness.sender_id()).await;
     let result = ProjectionOwner::new(reactive.clone())
         .update(
             ProjectionSlot::invitations(),
@@ -511,6 +528,9 @@ async fn materialize_pending_invitation_witness(
                     return Err(());
                 }
                 invitations.add_invitation(witness);
+                if let Some(name) = &sender_name {
+                    invitations.name_unknown_sender(&invitation_id, name);
+                }
 
                 Ok(())
             },
@@ -602,6 +622,8 @@ impl ReactiveView for InvitationsSignalView {
                                 .invitation_sent_witness(&sent_fact, self.own_authority)
                                 .expect("matched InvitationFact::Sent");
                             let invitation_id = invitation.id().to_string();
+                            let sender_name =
+                                known_contact_name(&self.reactive, invitation.sender_id()).await;
                             // A replayed Sent fact cannot recreate a pending row after
                             // a newer acceptance, rejection, or cancellation.
                             if state.invitation(&invitation_id).is_some() {
@@ -624,6 +646,9 @@ impl ReactiveView for InvitationsSignalView {
                             }
                             let pending_status = next_deferred_status.remove(&invitation_id);
                             state.add_invitation(invitation);
+                            if let Some(name) = &sender_name {
+                                state.name_unknown_sender(&invitation_id, name);
+                            }
                             match pending_status {
                                 Some(InvitationStatus::Accepted) => {
                                     let _ = state.accept_invitation(&invitation_id);
@@ -1222,9 +1247,23 @@ impl HomeSignalView {
     ) -> bool {
         let first_home = homes.is_empty();
         let before = homes.iter().count();
+        let roles = |homes: &HomesState, id: &ChannelId| {
+            homes.home_state(id).map(|home| {
+                (
+                    home.my_role,
+                    home.members
+                        .iter()
+                        .map(|member| member.role)
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        let home_id = witness.id();
+        let roles_before = roles(homes, &home_id);
         let result = homes.materialize_created_home(witness, self.own_authority);
         if homes.iter().count() == before {
-            return false;
+            // An invited home learns its creator moderator from this fact.
+            return roles(homes, &home_id) != roles_before;
         }
         tracing::info!(home_id = %result.home_id, "materialized home from HomeCreated fact");
         if first_home {
@@ -1263,6 +1302,71 @@ impl HomeSignalView {
             storage_allocated: *storage_allocated,
         });
         Some(true)
+    }
+    /// Applies committed home governance facts: access overrides (committed by
+    /// `set_access_override` and sent to the home's members; without this the
+    /// target never saw its override and the setter lost it on restart, run
+    /// 148, work/8.md Task 10 F16) and neighborhood joins (charged against the
+    /// home's neighborhood budget once per neighborhood, so replays are no-ops).
+    fn apply_home_governance(homes: &mut HomesState, social_facts: &[SocialFact]) -> bool {
+        let neighborhood_names: std::collections::HashMap<String, String> = social_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                SocialFact::NeighborhoodCreated {
+                    neighborhood_id,
+                    name,
+                    ..
+                } => Some((
+                    ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string(),
+                    name.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        let mut changed = false;
+        for fact in social_facts {
+            match fact {
+                SocialFact::AccessOverrideSet {
+                    authority_id,
+                    home_id,
+                    access_level,
+                    ..
+                } => {
+                    let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+                    let Some(home) = homes.home_mut(&home_id) else {
+                        continue;
+                    };
+                    if home.access_overrides.get(authority_id) != Some(access_level) {
+                        home.set_access_override(*authority_id, *access_level);
+                        changed = true;
+                    }
+                }
+                SocialFact::HomeJoinedNeighborhood {
+                    home_id,
+                    neighborhood_id,
+                    ..
+                } => {
+                    let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+                    let neighborhood =
+                        ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string();
+                    let name = neighborhood_names
+                        .get(&neighborhood)
+                        .cloned()
+                        .unwrap_or_else(|| "Neighborhood".to_string());
+                    let Some(home) = homes.home_mut(&home_id) else {
+                        continue;
+                    };
+                    match home.join_neighborhood(&neighborhood, &name) {
+                        Ok(joined) => changed |= joined,
+                        Err(error) => {
+                            tracing::warn!(%home_id, %error, "neighborhood join fact exceeds the home budget");
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        changed
     }
 }
 
@@ -1321,6 +1425,8 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
 
+                changed |= Self::apply_home_governance(&mut homes, &social_facts);
+
                 for fact in facts {
                     let FactContent::Relational(RelationalFact::Generic {
                         context_id,
@@ -1345,6 +1451,9 @@ impl ReactiveView for HomeSignalView {
                     };
 
                     match moderation {
+                        RequiredModerationProjection::Ban(ban)
+                            if !home_state
+                                .actor_may_moderate(&ban.actor_authority, "moderate:ban") => {}
                         RequiredModerationProjection::Ban(ban) => {
                             let record = BanRecord {
                                 authority_id: ban.banned_authority,
@@ -1356,11 +1465,17 @@ impl ReactiveView for HomeSignalView {
                             let _ = home_state.remove_member(&ban.banned_authority);
                             changed = true;
                         }
+                        RequiredModerationProjection::Unban(unban)
+                            if !home_state
+                                .actor_may_moderate(&unban.actor_authority, "moderate:ban") => {}
                         RequiredModerationProjection::Unban(unban) => {
                             if home_state.remove_ban(&unban.unbanned_authority).is_some() {
                                 changed = true;
                             }
                         }
+                        RequiredModerationProjection::Mute(mute)
+                            if !home_state
+                                .actor_may_moderate(&mute.actor_authority, "moderate:mute") => {}
                         RequiredModerationProjection::Mute(mute) => {
                             let record = MuteRecord {
                                 authority_id: mute.muted_authority,
@@ -1372,11 +1487,17 @@ impl ReactiveView for HomeSignalView {
                             home_state.add_mute(record);
                             changed = true;
                         }
+                        RequiredModerationProjection::Unmute(unmute)
+                            if !home_state
+                                .actor_may_moderate(&unmute.actor_authority, "moderate:mute") => {}
                         RequiredModerationProjection::Unmute(unmute) => {
                             if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
                                 changed = true;
                             }
                         }
+                        RequiredModerationProjection::Kick(kick)
+                            if !home_state
+                                .actor_may_moderate(&kick.actor_authority, "moderate:kick") => {}
                         RequiredModerationProjection::Kick(kick) => {
                             let record = KickRecord {
                                 authority_id: kick.kicked_authority,
@@ -1389,6 +1510,9 @@ impl ReactiveView for HomeSignalView {
                             let _ = home_state.remove_member(&kick.kicked_authority);
                             changed = true;
                         }
+                        RequiredModerationProjection::Pin(pin)
+                            if !home_state
+                                .actor_may_moderate(&pin.actor_authority, "pin_content") => {}
                         RequiredModerationProjection::Pin(pin) => {
                             home_state.pin_message_with_meta(PinnedMessageMeta {
                                 message_id: pin.message_id,
@@ -1397,11 +1521,17 @@ impl ReactiveView for HomeSignalView {
                             });
                             changed = true;
                         }
+                        RequiredModerationProjection::Unpin(unpin)
+                            if !home_state
+                                .actor_may_moderate(&unpin.actor_authority, "pin_content") => {}
                         RequiredModerationProjection::Unpin(unpin) => {
                             if home_state.unpin_message(&unpin.message_id) {
                                 changed = true;
                             }
                         }
+                        RequiredModerationProjection::GrantModerator(grant)
+                            if !home_state
+                                .actor_may_designate_moderators(&grant.actor_authority) => {}
                         RequiredModerationProjection::GrantModerator(grant) => {
                             if let Some(member) = home_state.member_mut(&grant.target_authority) {
                                 if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
@@ -1419,6 +1549,9 @@ impl ReactiveView for HomeSignalView {
                                 changed = true;
                             }
                         }
+                        RequiredModerationProjection::RevokeModerator(revoke)
+                            if !home_state
+                                .actor_may_designate_moderators(&revoke.actor_authority) => {}
                         RequiredModerationProjection::RevokeModerator(revoke) => {
                             if let Some(member) = home_state.member_mut(&revoke.target_authority) {
                                 if matches!(member.role, HomeRole::Moderator) {
@@ -1672,6 +1805,12 @@ impl ChatSignalView {
         if candidates
             .iter()
             .any(|home| home.is_muted(&sender_id, sent_at_ms))
+        {
+            return false;
+        }
+        if candidates
+            .iter()
+            .any(|home| !home.allows_access_capability(&sender_id, "send_message"))
         {
             return false;
         }
@@ -2400,13 +2539,17 @@ mod tests {
         register_app_signals(reactive).await.unwrap();
 
         let home_id = ChannelId::from_bytes([7u8; 32]);
-        let home_state = HomeState::new(
+        let mut home_state = HomeState::new(
             home_id,
             Some("test-home".to_string()),
             AuthorityId::new_from_entropy([1u8; 32]),
             0,
             context,
         );
+        // The creator is designated moderator so its moderation facts apply.
+        if let Some(creator) = home_state.member_mut(&AuthorityId::new_from_entropy([1u8; 32])) {
+            creator.role = aura_app::views::home::HomeRole::Moderator;
+        }
 
         let mut homes = HomesState::new();
         let result = add_fixture_home(&mut homes, home_state);
@@ -2431,7 +2574,11 @@ mod tests {
     #[test]
     fn canonical_entity_creation_stays_in_owned_publication_paths() {
         fn has_forbidden_creation_bypass(source: &str) -> bool {
-            let production = source.split("\nmod tests {").next().expect("source prefix");
+            let production = ["\nmod tests {", "\n#[cfg(test)]\nmod "]
+                .iter()
+                .filter_map(|marker| source.find(marker))
+                .min()
+                .map_or(source, |end| &source[..end]);
             production.contains("ChatState::from_channels(")
                 || production.contains("ContactsState::from_contacts(")
                 || production.contains("InvitationsState::from_parts(")
@@ -4124,5 +4271,288 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[tokio::test]
+    async fn sender_allowed_for_context_denies_limited_access_sender() {
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+        let own_authority = AuthorityId::new_from_entropy([45u8; 32]);
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(
+                &AgentConfig::default(),
+                own_authority,
+            )
+            .unwrap(),
+        );
+        let view = ChatSignalView::new(own_authority, reactive.clone(), effects);
+        let context_id = ContextId::new_from_entropy([46u8; 32]);
+        let sender_id = AuthorityId::new_from_entropy([47u8; 32]);
+        let home_id = ChannelId::from_bytes([48u8; 32]);
+
+        let mut home = HomeState::new(
+            home_id,
+            Some("home".to_string()),
+            own_authority,
+            0,
+            context_id,
+        );
+        home.add_member(aura_app::views::home::HomeMember {
+            id: sender_id,
+            name: "sender".to_string(),
+            role: aura_app::views::home::HomeRole::Participant,
+            is_online: true,
+            joined_at: 1,
+            last_seen: Some(1),
+            storage_allocated: 0,
+        });
+        let mut homes = HomesState::new();
+        add_fixture_home(&mut homes, home.clone());
+        reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
+        assert!(
+            view.sender_allowed_for_context(context_id, home_id, sender_id, 1, false)
+                .await
+        );
+
+        home.set_access_override(sender_id, aura_social::AccessLevel::Limited);
+        let mut homes = HomesState::new();
+        add_fixture_home(&mut homes, home);
+        reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
+        assert!(
+            !view
+                .sender_allowed_for_context(context_id, home_id, sender_id, 2, false)
+                .await,
+            "a Limited override removes send_message"
+        );
+    }
+
+    #[tokio::test]
+    async fn home_created_designates_creator_moderator_for_each_viewer() {
+        let creator = AuthorityId::new_from_entropy([21u8; 32]);
+        let other = AuthorityId::new_from_entropy([22u8; 32]);
+        let context_id = ContextId::new_from_entropy([23u8; 32]);
+        let home_id = aura_social::HomeId::from_bytes([24u8; 32]);
+        for (viewer, expected) in [
+            (creator, aura_app::views::home::HomeRole::Moderator),
+            (other, aura_app::views::home::HomeRole::Participant),
+        ] {
+            let reactive = ReactiveHandler::new();
+            register_app_signals(&reactive).await.unwrap();
+            let view = HomeSignalView::new(viewer, reactive.clone());
+            let created =
+                SocialFact::home_created_ms(home_id, context_id, 1, creator, "Den".to_string())
+                    .to_generic();
+            view.update(&[fact_from_relational(created)]).await.unwrap();
+            let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+            let home = homes
+                .home_state(&ChannelId::from_bytes([24u8; 32]))
+                .unwrap();
+            assert_eq!(home.my_role, expected);
+            assert_eq!(
+                home.member(&creator).unwrap().role,
+                aura_app::views::home::HomeRole::Moderator
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invited_home_learns_creator_moderator_from_home_created() {
+        let creator = AuthorityId::new_from_entropy([31u8; 32]);
+        let invitee = AuthorityId::new_from_entropy([32u8; 32]);
+        let target = AuthorityId::new_from_entropy([33u8; 32]);
+        let context_id = ContextId::new_from_entropy([34u8; 32]);
+        let home_bytes = [35u8; 32];
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+
+        // The invitee materialized the home from the invitation: the creator is
+        // a plain member there and the invitee a participant.
+        let mut home = HomeState::new(
+            ChannelId::from_bytes(home_bytes),
+            Some("Den".to_string()),
+            creator,
+            1,
+            context_id,
+        );
+        home.my_role = aura_app::views::home::HomeRole::Participant;
+        let mut homes = HomesState::new();
+        add_fixture_home(&mut homes, home);
+        reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
+        let view = HomeSignalView::new(invitee, reactive.clone());
+
+        let ban = HomeBanFact::new_ms(context_id, None, target, creator, "x".to_string(), 5, None)
+            .to_generic();
+        view.update(&[fact_from_relational(ban.clone())])
+            .await
+            .unwrap();
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes(home_bytes))
+            .unwrap();
+        assert!(
+            !home.ban_list.contains_key(&target),
+            "no moderator known yet"
+        );
+
+        let created = SocialFact::home_created_ms(
+            aura_social::HomeId::from_bytes(home_bytes),
+            context_id,
+            1,
+            creator,
+            "Den".to_string(),
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(created), fact_from_relational(ban)])
+            .await
+            .unwrap();
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes(home_bytes))
+            .unwrap();
+        assert_eq!(
+            home.member(&creator).unwrap().role,
+            aura_app::views::home::HomeRole::Moderator
+        );
+        assert_eq!(home.my_role, aura_app::views::home::HomeRole::Participant);
+        assert!(home.ban_list.contains_key(&target), "creator ban applies");
+    }
+
+    #[tokio::test]
+    async fn home_signal_view_ignores_moderation_from_non_moderator() {
+        let reactive = ReactiveHandler::new();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let mut homes = setup_homes(&reactive, context_id).await;
+        let member = AuthorityId::new_from_entropy([7u8; 32]);
+        let target = AuthorityId::new_from_entropy([9u8; 32]);
+        {
+            let home = homes.current_home_mut().expect("home exists");
+            home.add_member(aura_app::views::home::HomeMember {
+                id: member,
+                name: "member".to_string(),
+                role: aura_app::views::home::HomeRole::Member,
+                is_online: true,
+                joined_at: 1,
+                last_seen: Some(1),
+                storage_allocated: 0,
+            });
+            reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
+        }
+        let view = HomeSignalView::new(member, reactive.clone());
+
+        let ban = HomeBanFact::new_ms(context_id, None, target, member, "x".to_string(), 999, None)
+            .to_generic();
+        let unknown_actor = AuthorityId::new_from_entropy([8u8; 32]);
+        let grant =
+            HomeGrantModeratorFact::new_ms(context_id, member, unknown_actor, 100).to_generic();
+        view.update(&[fact_from_relational(ban), fact_from_relational(grant)])
+            .await
+            .unwrap();
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        assert!(!home_state.ban_list.contains_key(&target));
+        assert!(matches!(
+            home_state.member(&member).unwrap().role,
+            aura_app::views::home::HomeRole::Member
+        ));
+    }
+
+    #[tokio::test]
+    async fn home_signal_view_materializes_access_overrides() {
+        let reactive = ReactiveHandler::new();
+        let context = ContextId::new_from_entropy([7u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let target = AuthorityId::new_from_entropy([8u8; 32]);
+        let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+        let view = HomeSignalView::new(target, reactive.clone());
+        let home_id = aura_social::HomeId::from_bytes([46u8; 32]);
+        let override_fact = || {
+            fact_from_relational(
+                SocialFact::access_override_set_ms(
+                    target,
+                    home_id,
+                    context,
+                    aura_social::AccessLevel::Partial,
+                    70,
+                )
+                .to_generic(),
+            )
+        };
+        view.update(&[
+            fact_from_relational(
+                SocialFact::home_created_ms(home_id, context, 50, owner, "Den".to_string())
+                    .to_generic(),
+            ),
+            override_fact(),
+        ])
+        .await
+        .unwrap();
+        view.update(&[override_fact()]).await.unwrap(); // replay is a no-op
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes([46u8; 32]))
+            .expect("home");
+        assert_eq!(
+            home.access_overrides.get(&target),
+            Some(&aura_social::AccessLevel::Partial)
+        );
+    }
+
+    #[tokio::test]
+    async fn home_signal_view_materializes_neighborhoods_within_the_home_budget() {
+        let reactive = ReactiveHandler::new();
+        let context = ContextId::new_from_entropy([6u8; 32]);
+        let actor = AuthorityId::new_from_entropy([1u8; 32]);
+        let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+        let view = HomeSignalView::new(actor, reactive.clone());
+        let home_id = aura_social::HomeId::from_bytes([45u8; 32]);
+        let channel = ChannelId::from_bytes([45u8; 32]);
+        view.update(&[fact_from_relational(
+            SocialFact::home_created_ms(home_id, context, 50, actor, "Den".to_string())
+                .to_generic(),
+        )])
+        .await
+        .unwrap();
+
+        let neighborhood_facts = |seed: u8| {
+            let neighborhood = aura_social::NeighborhoodId::from_bytes([seed; 32]);
+            vec![
+                fact_from_relational(
+                    SocialFact::neighborhood_created_ms(
+                        neighborhood,
+                        context,
+                        60,
+                        format!("Block {seed}"),
+                    )
+                    .to_generic(),
+                ),
+                fact_from_relational(
+                    SocialFact::home_joined_neighborhood_ms(home_id, neighborhood, context, 60)
+                        .to_generic(),
+                ),
+            ]
+        };
+        let first = neighborhood_facts(70);
+        view.update(&first).await.unwrap();
+        view.update(&first).await.unwrap(); // replay
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes.home_state(&channel).expect("home");
+        assert_eq!(home.neighborhoods.len(), 1, "a replay does not join twice");
+        assert_eq!(
+            home.neighborhoods.values().next().map(String::as_str),
+            Some("Block 70")
+        );
+
+        for seed in 71..75 {
+            view.update(&neighborhood_facts(seed)).await.unwrap();
+        }
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let mut home = homes.home_state(&channel).expect("home").clone();
+        assert_eq!(
+            home.neighborhoods.len(),
+            4, // MAX_NEIGHBORHOODS (docs/115)
+            "a fifth neighborhood is refused by the home budget"
+        );
+        assert!(home.join_neighborhood("one-more", "Block 99").is_err());
     }
 }

@@ -2568,6 +2568,12 @@ with optional architecture-specific hardware acceleration
             features = [ "full-effect-system" ];
           }
           {
+            name = "hxrts-aura-app";
+            packageId = "hxrts-aura-app";
+            rename = "aura-app";
+            features = [ "native" "app-internals" ];
+          }
+          {
             name = "insta";
             packageId = "insta";
           }

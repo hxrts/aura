@@ -64,12 +64,44 @@ fn resolve_home_name(
         .unwrap_or_else(|| home_id.to_string())
 }
 
-/// Move position in neighborhood view.
+/// Highest entry depth (0 limited, 1 partial, 2 full) the viewer may use for
+/// a home: an explicit access override wins, otherwise the hop-based default
+/// (own/member home full, 1-hop neighbor partial, anything else limited).
+fn allowed_entry_depth(
+    neighborhood: &NeighborhoodState,
+    homes: &HomesState,
+    target: &ChannelId,
+    viewer: Option<&AuthorityId>,
+) -> u32 {
+    if let (Some(home), Some(viewer)) = (homes.home_state(target), viewer) {
+        if let Some(level) = home.access_override(viewer) {
+            return match level {
+                aura_social::AccessLevel::Limited => 0,
+                aura_social::AccessLevel::Partial => 1,
+                aura_social::AccessLevel::Full => 2,
+            };
+        }
+        if home.member(viewer).is_some() {
+            return 2;
+        }
+    }
+    if *target == neighborhood.home_home_id {
+        2
+    } else if neighborhood.neighbor(target).is_some() {
+        1
+    } else {
+        0
+    }
+}
+
+/// Move position in neighborhood view. The requested depth is clamped to the
+/// viewer\x27s allowed access level for the target home; returns the granted depth
+/// (0 limited, 1 partial, 2 full).
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
     depth: &str,
-) -> Result<(), AuraError> {
+) -> Result<u32, AuraError> {
     let depth_value = match depth.to_lowercase().as_str() {
         "limited" => 0,
         "partial" => 1,
@@ -78,11 +110,24 @@ pub async fn move_position(
     };
 
     let selector = HomeSelector::parse(home_id)?;
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let viewer = {
+        let core = app_core.read().await;
+        core.authority()
+            .copied()
+            .or_else(|| core.runtime().map(|runtime| runtime.authority_id()))
+    };
     let gate = app_core.read().await.navigation_projection_gate();
     let _navigation = gate.lock().await;
-    let target_home_id =
+    let (target_home_id, granted_depth) =
         try_update_neighborhood_projection_observed(app_core, move |neighborhood| {
             let target_home_id = resolve_target_home_id(neighborhood, selector)?;
+            let granted_depth = depth_value.min(allowed_entry_depth(
+                neighborhood,
+                &homes,
+                &target_home_id,
+                viewer.as_ref(),
+            ));
             let home_name = neighborhood
                 .neighbor(&target_home_id)
                 .map(|neighbor| neighbor.name.clone())
@@ -96,10 +141,10 @@ pub async fn move_position(
             neighborhood.position = Some(TraversalPosition {
                 current_home_id: target_home_id,
                 current_home_name: home_name,
-                depth: depth_value,
+                depth: granted_depth,
                 path: vec![target_home_id],
             });
-            Ok(target_home_id)
+            Ok((target_home_id, granted_depth))
         })
         .await?;
     let (selected, revision) = update_homes_projection_with_revision(app_core, move |homes| {
@@ -118,7 +163,7 @@ pub async fn move_position(
             .set_active_home_selection_if_projection_current(revision, target_home_id);
     }
     crate::workflows::observed_projection::mirror_homes_signal_into_view_locked(app_core).await?;
-    Ok(())
+    Ok(granted_depth)
 }
 
 /// Create or select the active neighborhood.
@@ -143,15 +188,52 @@ pub async fn create_neighborhood(
     }
     .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
 
-    let neighborhood_id = ChannelId::from_bytes(hash(
+    let neighborhood_channel = ChannelId::from_bytes(hash(
         format!("neighborhood:{authority}:{neighborhood_name}:{timestamp_ms}").as_bytes(),
-    ))
-    .to_string();
+    ));
+    let neighborhood_id = neighborhood_channel.to_string();
 
+    // The active home joins the new neighborhood. Charge its neighborhood
+    // budget on a copy first so an over-budget home fails before anything is
+    // committed.
+    let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
+    let home = homes
+        .current_home()
+        .ok_or_else(|| AuraError::invalid("Create a home before creating a neighborhood"))?;
+    let home_id = home.id;
+    let context_id = home
+        .context_id
+        .ok_or_else(|| AuraError::invalid("The active home has no context"))?;
+    home.clone()
+        .join_neighborhood(&neighborhood_id, &neighborhood_name)
+        .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+
+    persist_created_neighborhood(
+        app_core,
+        neighborhood_channel,
+        home_id,
+        context_id,
+        &neighborhood_name,
+        timestamp_ms,
+    )
+    .await?;
+    let (joined_id, joined_name) = (neighborhood_id.clone(), neighborhood_name.clone());
+    crate::workflows::observed_projection::try_update_homes_projection_observed(
+        app_core,
+        move |homes| {
+            if let Some(home) = homes.home_mut(&home_id) {
+                home.join_neighborhood(&joined_id, &joined_name)
+                    .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+            }
+            Ok(())
+        },
+    )
+    .await?;
     let publication_id = neighborhood_id.clone();
     update_neighborhood_projection_observed(app_core, move |neighborhood| {
         neighborhood.neighborhood_id = Some(publication_id);
         neighborhood.neighborhood_name = Some(neighborhood_name);
+        neighborhood.add_member_home(home_id);
     })
     .await?;
     Ok(neighborhood_id)
@@ -178,21 +260,40 @@ pub async fn add_home_to_neighborhood(
         .home_state(&target_home_id)
         .map(|home| home.member_count);
 
+    // A materialized home records a join of the active neighborhood (charging
+    // its neighborhood budget once per neighborhood) and commits it in its own
+    // context; without an active neighborhood only the storage is reserved.
+    let active = neighborhood
+        .neighborhood_id
+        .clone()
+        .zip(neighborhood.neighborhood_name.clone());
+    let reservation = active.clone();
     // Reserve the fallible storage allocation before publishing membership.
     let reserved = crate::workflows::observed_projection::try_update_homes_projection_observed(
         app_core,
         move |homes| {
-            if let Some(home) = homes.home_mut(&target_home_id) {
-                home.storage
-                    .join_neighborhood()
-                    .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
-                Ok(true)
-            } else {
-                Ok(false)
+            let Some(home) = homes.home_mut(&target_home_id) else {
+                return Ok(None);
+            };
+            match reservation {
+                Some((neighborhood_id, name)) => {
+                    let joined = home
+                        .join_neighborhood(&neighborhood_id, &name)
+                        .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+                    Ok(joined.then_some(home.context_id))
+                }
+                None => {
+                    home.storage
+                        .join_neighborhood()
+                        .map_err(|error| AuraError::budget_exceeded(error.to_string()))?;
+                    Ok(Some(None))
+                }
             }
         },
     )
     .await?;
+    let durable_context = reserved.flatten();
+    let reserved = reserved.is_some();
     let inserted = update_neighborhood_projection_observed(app_core, move |neighborhood| {
         if target_home_id != neighborhood.home_home_id
             && neighborhood.neighbor(&target_home_id).is_none()
@@ -209,6 +310,7 @@ pub async fn add_home_to_neighborhood(
         neighborhood.add_member_home(target_home_id)
     })
     .await;
+    let rollback = active.clone();
     if reserved && (inserted.is_err() || inserted.as_ref().is_ok_and(|inserted| !inserted)) {
         // Publication failed or another writer joined while storage was being
         // reserved. Remove only this attempt's allocation.
@@ -219,14 +321,112 @@ pub async fn add_home_to_neighborhood(
                     home.storage
                         .leave_neighborhood()
                         .map_err(|error| AuraError::internal(error.to_string()))?;
+                    if let Some((neighborhood_id, _)) = &rollback {
+                        home.neighborhoods.remove(neighborhood_id);
+                    }
                 }
                 Ok(())
             },
         )
         .await?;
     }
-    let _ = inserted?;
+    if inserted? {
+        if let (Some(context_id), Some((neighborhood_id, _))) = (durable_context, active) {
+            let timestamp_ms = crate::workflows::time::local_first_timestamp_ms(
+                app_core,
+                "context-local-first",
+                &[],
+            )
+            .await?;
+            persist_home_joined_neighborhood(
+                app_core,
+                target_home_id,
+                context_id,
+                &neighborhood_id,
+                timestamp_ms,
+            )
+            .await?;
+        }
+    }
     Ok(())
+}
+
+/// Commits a created neighborhood and the home's membership in it. Without a
+/// runtime the neighborhood stays local.
+async fn persist_created_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    neighborhood: ChannelId,
+    home_id: ChannelId,
+    context_id: ContextId,
+    name: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    let neighborhood_id = aura_social::NeighborhoodId::from_bytes(*neighborhood.as_bytes());
+    let facts = [
+        aura_social::SocialFact::neighborhood_created_ms(
+            neighborhood_id,
+            context_id,
+            timestamp_ms,
+            name.to_string(),
+        )
+        .to_generic(),
+        aura_social::SocialFact::home_joined_neighborhood_ms(
+            aura_social::HomeId::from_bytes(*home_id.as_bytes()),
+            neighborhood_id,
+            context_id,
+            timestamp_ms,
+        )
+        .to_generic(),
+    ];
+    runtime
+        .commit_relational_facts(&facts)
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "persist neighborhood".to_owned(),
+            source: Some(Arc::new(error)),
+        })
+}
+
+/// Commits a home's join of an existing neighborhood. Without a runtime the
+/// join stays local.
+async fn persist_home_joined_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: ChannelId,
+    context_id: ContextId,
+    neighborhood_id: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Ok(());
+    };
+    let neighborhood: ChannelId = neighborhood_id
+        .parse()
+        .map_err(|_| AuraError::invalid("The active neighborhood id is malformed"))?;
+    let fact = aura_social::SocialFact::home_joined_neighborhood_ms(
+        aura_social::HomeId::from_bytes(*home_id.as_bytes()),
+        aura_social::NeighborhoodId::from_bytes(*neighborhood.as_bytes()),
+        context_id,
+        timestamp_ms,
+    )
+    .to_generic();
+    runtime
+        .commit_relational_facts(&[fact])
+        .await
+        .map_err(|error| AuraError::Storage {
+            message: "persist neighborhood membership".to_owned(),
+            source: Some(Arc::new(error)),
+        })
 }
 
 /// Force direct one_hop_link between local home and the target home in the active neighborhood.

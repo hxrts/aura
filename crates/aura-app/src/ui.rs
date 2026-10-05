@@ -121,6 +121,7 @@ pub mod workflows {
     pub use crate::workflows::sync;
     pub use crate::workflows::system;
     pub use crate::workflows::time;
+    pub use crate::workflows::user_errors;
 
     #[cfg(feature = "signals")]
     pub use crate::workflows::messaging;

@@ -269,15 +269,20 @@ impl FlowBudget {
     /// - `epoch` advances monotonically (maximum)
     #[must_use]
     pub fn merge(&self, other: &Self) -> Self {
-        Self {
-            limit: self.limit.min(other.limit),
-            spent: self.spent.max(other.spent),
-            epoch: if self.epoch.value() >= other.epoch.value() {
-                self.epoch
-            } else {
-                other.epoch
-            },
-        }
+        self.join(other)
+    }
+
+    /// The budget after adopting a receiver checkpoint (docs/111 §3.1):
+    /// `spent` is the sender's monotone generation, so a later epoch only
+    /// raises the absolute `limit` to `base_gen + window`. Stale checkpoints
+    /// change nothing.
+    #[must_use]
+    pub fn with_checkpoint(&self, checkpoint: &super::flow_window::FlowWindowCheckpoint) -> Self {
+        self.join(&Self {
+            limit: checkpoint.limit(),
+            spent: self.spent,
+            epoch: checkpoint.epoch,
+        })
     }
 
     /// Advance to a new epoch, resetting spent if the epoch increases.
@@ -303,9 +308,17 @@ impl Default for FlowBudget {
 
 impl JoinSemilattice for FlowBudget {
     fn join(&self, other: &Self) -> Self {
+        // `spent` is a monotone generation (join). The limit belongs to the
+        // epoch's checkpoint: a later epoch's limit supersedes, and replicas of
+        // the same epoch take the more restrictive one (meet).
+        let limit = match self.epoch.value().cmp(&other.epoch.value()) {
+            std::cmp::Ordering::Greater => self.limit,
+            std::cmp::Ordering::Less => other.limit,
+            std::cmp::Ordering::Equal => self.limit.min(other.limit),
+        };
         Self {
-            limit: self.limit.min(other.limit), // Meet for limit (more restrictive)
-            spent: self.spent.max(other.spent), // Join for spent (more spent)
+            limit,
+            spent: self.spent.max(other.spent),
             epoch: if self.epoch.value() >= other.epoch.value() {
                 self.epoch
             } else {
@@ -421,6 +434,31 @@ mod tests {
 
     // CRDT merge law tests (join convergence, idempotency, commutativity,
     // associativity) are in tests/laws/flow_budget_crdt.rs.
+
+    #[test]
+    fn a_receiver_checkpoint_raises_the_limit_without_resetting_spend() {
+        use crate::types::flow_window::FlowWindowCheckpoint;
+        let mut budget = FlowBudget::new(4, Epoch::initial());
+        for _ in 0..4 {
+            budget
+                .record_charge(FlowCost::new(1))
+                .expect("within window");
+        }
+        assert!(budget.record_charge(FlowCost::new(1)).is_err());
+
+        let bumped = budget.with_checkpoint(&FlowWindowCheckpoint {
+            epoch: Epoch::new(1),
+            base_gen: 2,
+            window: 4,
+        });
+        assert_eq!(
+            (bumped.epoch.value(), bumped.limit, bumped.spent),
+            (1, 6, 4)
+        );
+        // A stale checkpoint changes nothing.
+        let stale = bumped.with_checkpoint(&FlowWindowCheckpoint::initial(4));
+        assert_eq!(stale, bumped);
+    }
 
     #[test]
     fn record_charge_enforces_limit() {

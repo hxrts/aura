@@ -441,7 +441,49 @@ pub(crate) fn bootstrap_broker_url() -> Option<String> {
 }
 
 pub(crate) fn bootstrap_broker_auth_token() -> Option<String> {
+    adopt_fragment_credential(BOOTSTRAP_BROKER_AUTH_SESSION_KEY);
     session_value(BOOTSTRAP_BROKER_AUTH_SESSION_KEY)
+}
+
+/// A credential handed over in the URL fragment (`#key=value`), which the
+/// browser never sends to a server, moves into session storage and is
+/// stripped from the address bar so it does not linger in history. This is
+/// the only way to hand a broker token to a page that has no account yet.
+fn adopt_fragment_credential(key: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(hash) = window.location().hash() else {
+        return;
+    };
+    let fragment = hash.strip_prefix('#').unwrap_or(&hash);
+    let Some(value) = fragment_value(fragment, key) else {
+        return;
+    };
+    let Ok(Some(storage)) = WebSessionStorage::optional_lookup(WebUiOperation::BootstrapController)
+    else {
+        return;
+    };
+    if storage
+        .set_string(
+            key,
+            &value,
+            WebUiOperation::BootstrapController,
+            "WEB_BOOTSTRAP_SESSION_WRITE_FAILED",
+            "bootstrap broker session credential",
+        )
+        .is_ok()
+    {
+        let _ = window.location().set_hash("");
+    }
+}
+
+/// The value of `key` in a `k=v&k2=v2` URL fragment.
+fn fragment_value(fragment: &str, key: &str) -> Option<String> {
+    fragment.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (name == key && !value.is_empty()).then(|| value.to_string())
+    })
 }
 
 pub(crate) fn bootstrap_broker_invitation_token() -> Option<String> {
@@ -723,6 +765,22 @@ pub(crate) fn persist_demo_tablet_enrollment_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fragment_credentials_are_read_by_exact_key() {
+        let fragment = "x=1&aura_bootstrap_broker_auth=tok-123&y=";
+        assert_eq!(
+            fragment_value(fragment, "aura_bootstrap_broker_auth").as_deref(),
+            Some("tok-123")
+        );
+        assert_eq!(
+            fragment_value(fragment, "y"),
+            None,
+            "empty values are ignored"
+        );
+        assert_eq!(fragment_value(fragment, "aura_bootstrap_broker"), None);
+        assert_eq!(fragment_value("", "aura_bootstrap_broker_auth"), None);
+    }
 
     #[test]
     fn browser_storage_classifies_sensitive_and_restart_values() {

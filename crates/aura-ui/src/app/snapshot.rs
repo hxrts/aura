@@ -199,9 +199,12 @@ pub(in crate::app) fn runtime_semantic_snapshot(
         );
     }
 
+    let mut seen_notifications = std::collections::HashSet::new();
     let notifications = notifications_runtime
         .items
         .iter()
+        // A repeated id would export several selected items for one selection.
+        .filter(|item| seen_notifications.insert(item.id.clone()))
         .map(|item| ListItemSnapshot {
             id: item.id.clone(),
             selected: model.selected_notification_id.as_ref().map(|id| &id.0) == Some(&item.id),

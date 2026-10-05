@@ -1248,6 +1248,36 @@ impl SocialFact {
         }
     }
 
+    /// Create a NeighborhoodCreated fact with millisecond timestamp
+    pub fn neighborhood_created_ms(
+        neighborhood_id: NeighborhoodId,
+        context_id: ContextId,
+        created_at_ms: u64,
+        name: String,
+    ) -> Self {
+        Self::NeighborhoodCreated {
+            neighborhood_id,
+            context_id,
+            created_at: Self::physical_time(created_at_ms),
+            name,
+        }
+    }
+
+    /// Create a HomeJoinedNeighborhood fact with millisecond timestamp
+    pub fn home_joined_neighborhood_ms(
+        home_id: HomeId,
+        neighborhood_id: NeighborhoodId,
+        context_id: ContextId,
+        joined_at_ms: u64,
+    ) -> Self {
+        Self::HomeJoinedNeighborhood {
+            home_id,
+            neighborhood_id,
+            context_id,
+            joined_at: Self::physical_time(joined_at_ms),
+        }
+    }
+
     /// Create a MemberJoined fact with millisecond timestamp
     pub fn member_joined_ms(
         authority_id: AuthorityId,

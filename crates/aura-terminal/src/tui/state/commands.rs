@@ -210,6 +210,8 @@ pub enum DispatchCommand {
     SendSelectedFriendRequest,
     /// Send a guardian invitation to the selected contact.
     AddSelectedContactAsGuardian,
+    /// Toggle whether read receipts are sent to the selected contact.
+    ToggleSelectedContactReadReceipts,
     AcceptSelectedFriendRequest,
     DeclineSelectedFriendRequest,
     RevokeSelectedFriendship,

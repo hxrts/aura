@@ -482,6 +482,31 @@ pub(super) async fn process_ui_update_match(
             message_count,
             selected_index,
         } => {
+            // Viewing a channel sends read receipts for its unread received
+            // messages (the contact's read-receipt policy decides).
+            let mut viewing_chat = false;
+            tui.with_mut(|state| viewing_chat = state.screen() == Screen::Chat);
+            if viewing_chat {
+                if let Some(channel_id) =
+                    tui_selected_for_updates
+                        .read()
+                        .as_ref()
+                        .and_then(|selection| {
+                            selection
+                                .channel_id()
+                                .parse::<aura_core::types::identifiers::ChannelId>()
+                                .ok()
+                        })
+                {
+                    let app_core = app_core.raw().clone();
+                    tasks_for_updates.spawn(async move {
+                        let _ = aura_app::ui::workflows::contacts::mark_channel_viewed(
+                            &app_core, channel_id,
+                        )
+                        .await;
+                    });
+                }
+            }
             tui.with_mut(|state| {
                 let prev_message_count = state.chat.message_count;
                 let was_at_bottom = state.chat.message_scroll == 0;
@@ -1050,9 +1075,7 @@ pub(super) async fn process_ui_update_match(
             };
             if needs_update {
                 tui.with_mut(|state| {
-                    state.contacts.contact_count = count;
-                    state.contacts.selected_index =
-                        clamp_list_index(state.contacts.selected_index, count);
+                    state.contacts.set_contact_count(count);
                 });
             }
         }

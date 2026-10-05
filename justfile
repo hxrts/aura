@@ -590,6 +590,16 @@ ci-lan-deep:
 # Test suite (excludes patchbay tests and contract_suite PTY/SSH tests which run in ci-harness-contract)
 ci-test: ci-amp-lifecycle-trace
     cargo test --workspace -- --skip patchbay --skip contract_pty_control_path --skip contract_ssh_dry_run_lifecycle --skip contract_replay_and_artifacts_subsystems
+    just ci-test-terminal-development
+
+# aura-terminal `development` feature (demo mode, demo peers, regression
+# suite): no other lane builds it, so it rotted unnoticed (work/8.md Tasks
+# 58, 66). The multifactor control needs a device enrolled under the demo
+# account and is blocked on device enrollment (work/8.md Task 60 / Task 7).
+ci-test-terminal-development:
+    cargo clippy -p aura-terminal --features development --tests -- -D warnings
+    cargo test -p aura-terminal --features development --lib
+    cargo test -p aura-terminal --features development --test demo --test regression -- --skip control_multifactor_ceremony_works_with_shared_transport
 
 # Required deterministic AMP lifecycle artifact; replay runs in ci-test.
 ci-amp-lifecycle-trace:

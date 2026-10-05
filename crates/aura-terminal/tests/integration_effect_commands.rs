@@ -185,6 +185,8 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     .await
     .unwrap();
 
+    support::signals::wait_for_contacts(&app_core, |state| state.all_contacts().next().is_some())
+        .await;
     // Get Alice's ID from contacts
     let alice_id = {
         let core = app_core.read().await;
@@ -219,11 +221,11 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
         result
     );
 
-    // Verify channel was created in signal
-    let final_state = {
-        let core = app_core.read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap()
-    };
+    // The chat signal updates asynchronously; wait for the new DM channel.
+    let final_state = support::signals::wait_for_chat(&app_core, |state| {
+        state.channel_count() > initial_channels && state.all_channels().any(|c| c.is_dm)
+    })
+    .await;
 
     println!("Final channels: {}", final_state.channel_count());
     for ch in final_state.all_channels() {
@@ -752,6 +754,8 @@ async fn test_send_message_propagates_to_chat_signal() {
         .await
         .expect("Import should succeed");
 
+    support::signals::wait_for_contacts(&app_core, |state| state.all_contacts().next().is_some())
+        .await;
     let alice_id = {
         let core = app_core.read().await;
         core.read(&*CONTACTS_SIGNAL)
@@ -772,6 +776,7 @@ async fn test_send_message_propagates_to_chat_signal() {
     })
     .await
     .expect("StartDirectChat should succeed");
+    support::signals::wait_for_chat(&app_core, |state| state.all_channels().any(|c| c.is_dm)).await;
 
     // Get the DM channel ID
     let dm_channel_id = {
@@ -802,6 +807,13 @@ async fn test_send_message_propagates_to_chat_signal() {
 
     println!("  SendMessage result: {:?}", result);
 
+    // The chat signal updates asynchronously; wait for the sent message.
+    if result.is_ok() {
+        support::signals::wait_for_chat(&app_core, |state| {
+            state.message_count() > initial_messages
+        })
+        .await;
+    }
     // Check final message count
     let final_messages = {
         let core = app_core.read().await;

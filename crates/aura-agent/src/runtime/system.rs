@@ -1935,8 +1935,13 @@ async fn handle_inbound_transport_envelope(
     // The queued envelope retains untrusted source metadata; protocol owners
     // must resolve a trusted authority/device key before privileged mutation.
     let envelope = ingress.into_routable_envelope();
+    if let Ok(now) = effects.time_effects().physical_time().await {
+        effects.record_peer_reachable(envelope.source, now.ts_ms);
+    }
     if matches!(
-        effects.requeue_envelope(envelope),
+        // A fresh network envelope: it is admitted against its flow window when
+        // taken, so it must not go through `requeue_envelope`'s readmit pass.
+        effects.queue_runtime_envelope(envelope),
         crate::runtime::subsystems::transport::QueueEnvelopeOutcome::DroppedOverflow
     ) {
         tracing::warn!("dropping LAN envelope because the runtime inbox is at capacity");
@@ -2293,6 +2298,62 @@ mod tests {
         assert_eq!(
             sync_peer_reconcile_interval(&manager),
             Duration::from_secs(1)
+        );
+    }
+
+    /// Every receipt a sender stamps across a full flow window must pass the
+    /// receiver's LAN checks: generations are monotone and never zero (a zero
+    /// nonce is rejected as a replay).
+    #[test]
+    fn lan_ingress_accepts_every_receipt_in_a_flow_window() {
+        use aura_core::effects::FlowBudgetEffects;
+
+        let source = AuthorityId::new_from_entropy([12u8; 32]);
+        let destination = AuthorityId::new_from_entropy([13u8; 32]);
+        let context = ContextId::new_from_entropy([14u8; 32]);
+        let runtime = EffectSystemBuilder::testing()
+            .with_authority(source)
+            .build_sync()
+            .expect("build_sync should succeed in testing mode");
+        let effects = runtime.effects();
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+        let window = aura_core::types::flow_window::DEFAULT_FLOW_WINDOW;
+        for send in 1..=window {
+            let receipt = rt
+                .block_on(effects.charge_flow(&context, &destination, aura_core::FlowCost::new(1)))
+                .unwrap_or_else(|error| panic!("send {send} was refused: {error}"));
+            assert_eq!(receipt.nonce.value(), send, "monotone generation");
+
+            let mut envelope = test_envelope();
+            envelope.source = source;
+            envelope.destination = destination;
+            envelope.context = context;
+            let mut transport_receipt = aura_core::effects::transport::TransportReceipt {
+                context: receipt.ctx,
+                src: receipt.src,
+                dst: receipt.dst,
+                epoch: receipt.epoch.value(),
+                cost: receipt.cost.value(),
+                nonce: receipt.nonce.value(),
+                prev: receipt.prev.0,
+                sig: Vec::new(),
+            };
+            crate::runtime::receipt_model::sign_transport_receipt_for_envelope(
+                &mut transport_receipt,
+                &envelope,
+                &crate::runtime::receipt_model::test_receipt_signing_key(),
+            )
+            .expect("test receipt should sign");
+            envelope.receipt = Some(transport_receipt);
+
+            check_lan_transport_integrity(envelope)
+                .unwrap_or_else(|error| panic!("send {send} rejected at ingress: {error}"));
+        }
+        assert!(
+            rt.block_on(effects.charge_flow(&context, &destination, aura_core::FlowCost::new(1)))
+                .is_err(),
+            "the sender stops at its window without a checkpoint"
         );
     }
 

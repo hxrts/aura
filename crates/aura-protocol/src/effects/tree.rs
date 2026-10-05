@@ -145,6 +145,11 @@ pub trait TreeEffects: Send + Sync {
     /// ```
     async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError>;
 
+    /// The canonical, ordered log of attested operations this tree applied.
+    ///
+    /// Anti-entropy digests, pushes and deduplicates against this log.
+    async fn list_attested_ops(&self) -> Result<Vec<AttestedOp>, AuraError>;
+
     /// Verify an aggregate signature
     ///
     /// Verifies that an operation's aggregate signature is valid for the
@@ -341,6 +346,10 @@ impl<T: TreeEffects + ?Sized> TreeEffects for std::sync::Arc<T> {
 
     async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
         (**self).apply_attested_op(op).await
+    }
+
+    async fn list_attested_ops(&self) -> Result<Vec<AttestedOp>, AuraError> {
+        (**self).list_attested_ops().await
     }
 
     async fn verify_aggregate_sig(

@@ -118,8 +118,12 @@ async fn wait_for_message(
 // ============================================================================
 
 /// Test that demo hint invite codes can be successfully parsed by ShareableInvitation
-#[tokio::test]
-async fn test_demo_invitation_codes_are_parseable() {
+#[test]
+fn test_demo_invitation_codes_are_parseable() {
+    support::run_with_terminal_stack(test_demo_invitation_codes_are_parseable_body);
+}
+
+async fn test_demo_invitation_codes_are_parseable_body() {
     println!("\n=== Demo Invite Code Parsing Test ===\n");
 
     let seed = 2024; // Standard demo seed
@@ -222,17 +226,29 @@ async fn test_demo_invitation_codes_are_parseable() {
 }
 
 /// Test that ImportInvitation command successfully imports demo codes
-#[tokio::test]
-async fn test_import_invitation_command_with_demo_codes() {
+#[test]
+fn test_import_invitation_command_with_demo_codes() {
+    support::run_with_terminal_stack(test_import_invitation_command_with_demo_codes_body);
+}
+
+async fn test_import_invitation_command_with_demo_codes_body() {
     println!("\n=== ImportInvitation Command Test ===\n");
 
-    let env = FullTestEnv::new("import-demo").await;
-    let seed = 2024;
-    // Names and seeds must match AgentFactory::create_demo_agents
-    let alice_code = generate_demo_invite_code("Alice", seed);
-    let carol_code = generate_demo_invite_code("Carol", seed + 1);
-    let alice_sender = parse_demo_invite_code(&alice_code).sender_id;
-    let carol_sender = parse_demo_invite_code(&carol_code).sender_id;
+    // Demo peers share this agent's transport so they can confirm the
+    // contact invitations; the codes are what demo mode shows as hints.
+    let env = FullTestEnv::with_config(support::FullTestEnvConfig {
+        name: "import-demo".to_string(),
+        with_demo_peers: true,
+        ..Default::default()
+    })
+    .await;
+    let simulator = env.demo_peers.as_ref().expect("demo peers started");
+    let (alice_code, carol_code) = simulator
+        .signed_contact_invite_codes()
+        .await
+        .expect("demo peers create signed contact codes");
+    let alice_sender = simulator.alice_authority();
+    let carol_sender = simulator.carol_authority();
 
     // Phase 1: Import Alice's invite code via EffectCommand
     println!("Phase 1: Import Alice's invitation via EffectCommand");
@@ -436,8 +452,12 @@ async fn test_complete_demo_invitation_flow() {
 }
 
 /// Test that deterministic seeds produce consistent invite codes
-#[tokio::test]
-async fn test_demo_hints_deterministic() {
+#[test]
+fn test_demo_hints_deterministic() {
+    support::run_with_terminal_stack(test_demo_hints_deterministic_body);
+}
+
+async fn test_demo_hints_deterministic_body() {
     println!("\n=== Demo Hints Determinism Test ===\n");
 
     let seed = 2024;
@@ -487,8 +507,12 @@ async fn test_demo_hints_deterministic() {
 }
 
 /// Test invalid invite codes are properly rejected
-#[tokio::test]
-async fn test_invalid_invitation_code_rejection() {
+#[test]
+fn test_invalid_invitation_code_rejection() {
+    support::run_with_terminal_stack(test_invalid_invitation_code_rejection_body);
+}
+
+async fn test_invalid_invitation_code_rejection_body() {
     println!("\n=== Invalid Invite Code Rejection Test ===\n");
 
     let env = FullTestEnv::new("invalid-codes").await;
@@ -527,6 +551,7 @@ async fn test_invalid_invitation_code_rejection() {
     assert!(result.is_err(), "Invalid base64 should fail");
 
     // Test 4: Valid base64 but invalid JSON
+    use base64::Engine as _;
     println!("\nTest 4: Valid base64 but invalid JSON");
     let invalid_json =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode("not json at all".as_bytes());
@@ -554,8 +579,12 @@ async fn test_invalid_invitation_code_rejection() {
 /// This test ensures the guardian display bug is fixed:
 /// - Contacts imported from invitations have the same AuthorityId as SimulatedAgents
 /// - When signal_coordinator sets is_guardian=true, the lookup succeeds
-#[tokio::test]
-async fn test_guardian_authority_id_matching() {
+#[test]
+fn test_guardian_authority_id_matching() {
+    support::run_with_terminal_stack(test_guardian_authority_id_matching_body);
+}
+
+async fn test_guardian_authority_id_matching_body() {
     println!("\n=== Guardian AuthorityId Matching Test ===\n");
 
     let seed = 2024u64;
@@ -616,8 +645,12 @@ async fn test_guardian_authority_id_matching() {
 }
 
 /// Test that verifies the complete derivation chain from seed to AuthorityId
-#[tokio::test]
-async fn test_derivation_chain_consistency() {
+#[test]
+fn test_derivation_chain_consistency() {
+    support::run_with_terminal_stack(test_derivation_chain_consistency_body);
+}
+
+async fn test_derivation_chain_consistency_body() {
     println!("\n=== Derivation Chain Consistency Test ===\n");
 
     let seed = 2024u64;

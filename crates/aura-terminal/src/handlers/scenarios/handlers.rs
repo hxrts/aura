@@ -18,7 +18,7 @@ pub async fn handle_discover(
     validate: bool,
 ) -> TerminalResult<()> {
     println!("Discovering scenarios in: {}", root.display());
-    println!("Validation: {}", validate);
+    println!("Validation: {validate}");
 
     // Check if root directory exists through storage effects
     let root_exists = ctx
@@ -41,7 +41,7 @@ pub async fn handle_discover(
     println!("Found {} scenarios", scenarios.len());
 
     for scenario in &scenarios {
-        println!("  - {}", scenario);
+        println!("  - {scenario}");
     }
 
     if validate {
@@ -60,7 +60,7 @@ pub async fn handle_list(
     detailed: bool,
 ) -> TerminalResult<()> {
     println!("Listing scenarios in: {}", directory.display());
-    println!("Detailed: {}", detailed);
+    println!("Detailed: {detailed}");
 
     // Get scenarios through storage effects
     let scenarios = list_scenarios_through_effects(ctx, directory).await?;
@@ -87,7 +87,7 @@ pub async fn handle_validate(
     println!("Validating scenarios in: {}", directory.display());
 
     if let Some(level) = strictness {
-        println!("Strictness: {}", level);
+        println!("Strictness: {level}");
     }
 
     // Validate scenarios through storage effects
@@ -117,16 +117,16 @@ pub async fn handle_run(
         println!("Directory: {}", dir.display());
     }
     if let Some(pat) = pattern {
-        println!("Pattern: {}", pat);
+        println!("Pattern: {pat}");
     }
-    println!("Parallel: {}", parallel);
+    println!("Parallel: {parallel}");
     if let Some(max) = max_parallel {
-        println!("Max parallel: {}", max);
+        println!("Max parallel: {max}");
     }
     if let Some(output) = output_file {
         println!("Output file: {}", output.display());
     }
-    println!("Detailed report: {}", detailed_report);
+    println!("Detailed report: {detailed_report}");
 
     // Execute scenarios through effects
     let results = execute_scenarios(ctx, directory, pattern, parallel, max_parallel).await?;
@@ -154,16 +154,15 @@ pub async fn handle_report(
     println!("Output: {}", output.display());
 
     if let Some(fmt) = format {
-        println!("Format: {}", fmt);
+        println!("Format: {fmt}");
     }
-    println!("Detailed: {}", detailed);
+    println!("Detailed: {detailed}");
 
     // Load results through storage effects
     let input_key = format!("scenario_results:{}", input.display());
     let results_data = match ctx.effects().retrieve(&input_key).await {
-        Ok(Some(data)) => String::from_utf8(data).map_err(|e| {
-            TerminalError::Operation(format!("Invalid UTF-8 in results file: {}", e))
-        })?,
+        Ok(Some(data)) => String::from_utf8(data)
+            .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results file: {e}")))?,
         Ok(None) => {
             return Err(TerminalError::Operation(format!(
                 "Results file not found: {}",
@@ -172,8 +171,7 @@ pub async fn handle_report(
         }
         Err(e) => {
             return Err(TerminalError::Operation(format!(
-                "Failed to read results file via storage effects: {}",
-                e
+                "Failed to read results file via storage effects: {e}"
             )))
         }
     };
@@ -187,7 +185,7 @@ pub async fn handle_report(
         .store(&output_key, report.as_bytes().to_vec())
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to save report via storage effects: {}", e))
+            TerminalError::Operation(format!("Failed to save report via storage effects: {e}"))
         })?;
 
     println!("Report generated successfully");
@@ -223,15 +221,14 @@ async fn validate_scenarios_through_effects(
     scenarios: &[String],
 ) -> TerminalResult<()> {
     for scenario in scenarios {
-        println!("Validating: {}", scenario);
+        println!("Validating: {scenario}");
 
         // Simulate validation
         if scenario.contains("invalid") {
             let _ = ctx;
-            eprintln!("Invalid scenario: {}", scenario);
+            eprintln!("Invalid scenario: {scenario}");
             return Err(TerminalError::Operation(format!(
-                "Invalid scenario: {}",
-                scenario
+                "Invalid scenario: {scenario}"
             )));
         }
     }
@@ -285,17 +282,17 @@ async fn save_scenario_results(
     } else {
         serde_json::to_string(results)
     }
-    .map_err(|e| TerminalError::Operation(format!("Failed to serialize results: {}", e)))?;
+    .map_err(|e| TerminalError::Operation(format!("Failed to serialize results: {e}")))?;
 
     let output_key = format!("scenario_output:{}", output_path.display());
     ctx.effects()
         .store(&output_key, results_json.as_bytes().to_vec())
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to save results via storage effects: {}", e))
+            TerminalError::Operation(format!("Failed to save results via storage effects: {e}"))
         })?;
 
-    println!("Results saved to storage key: {}", output_key);
+    println!("Results saved to storage key: {output_key}");
 
     Ok(())
 }
@@ -307,14 +304,14 @@ fn generate_report_from_results(
     detailed: bool,
 ) -> TerminalResult<String> {
     let results_str = String::from_utf8(results_data.to_vec())
-        .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Invalid UTF-8 in results: {e}")))?;
 
     let results: Vec<ScenarioResult> = serde_json::from_str(&results_str)
-        .map_err(|e| TerminalError::Operation(format!("Failed to parse results: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to parse results: {e}")))?;
 
     let report = match format.unwrap_or("text") {
         "json" => serde_json::to_string_pretty(&results)
-            .map_err(|e| TerminalError::Operation(format!("Failed to format JSON: {}", e)))?,
+            .map_err(|e| TerminalError::Operation(format!("Failed to format JSON: {e}")))?,
         _ => {
             let mut report = String::new();
             report.push_str("=== Scenario Results Report ===\n\n");
@@ -323,8 +320,7 @@ fn generate_report_from_results(
             let total = results.len();
 
             report.push_str(&format!(
-                "Summary: {}/{} scenarios passed\n\n",
-                success_count, total
+                "Summary: {success_count}/{total} scenarios passed\n\n"
             ));
 
             if detailed {
@@ -336,7 +332,7 @@ fn generate_report_from_results(
                     ));
                     report.push_str(&format!("  Duration: {}ms\n", result.duration_ms));
                     if let Some(error) = &result.error {
-                        report.push_str(&format!("  Error: {}\n", error));
+                        report.push_str(&format!("  Error: {error}\n"));
                     }
                     report.push('\n');
                 }

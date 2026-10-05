@@ -290,7 +290,9 @@ pub(crate) fn apply_harness_command(
                 state.contacts.selected_index = selected_index;
                 Ok(Vec::new())
             }
-            _ => Ok(Vec::new()),
+            unsupported => Err(format!(
+                "list {unsupported:?} cannot be activated through the TUI harness command"
+            )),
         },
         HarnessUiCommand::ExportDeviceEnrollmentSetup => {
             Err("setup export requires the app workflow command owner".to_string())

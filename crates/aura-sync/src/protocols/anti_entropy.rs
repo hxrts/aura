@@ -752,9 +752,11 @@ impl AntiEntropyProtocol {
             )
         })?;
 
-        // Currently uses empty operations list; transport-level sync fills in ops
-        // this would come from the journal's operation log
-        let local_ops: Vec<AttestedOp> = vec![];
+        // The canonical attested tree-op log: digest, push and dedupe use it.
+        let local_ops: Vec<AttestedOp> = effects
+            .list_attested_ops()
+            .await
+            .map_err(|e| sync_session_error(format!("Failed to read the tree-op log: {e}")))?;
 
         // Step 2: Compute local digest
         let local_digest = self.compute_digest(&local_journal, &local_ops)?;
@@ -909,7 +911,11 @@ impl AntiEntropyProtocol {
             );
 
             // Merge operations into local state
-            let mut local_ops = vec![]; // In full implementation, get from journal
+            // Deduplicate against the canonical tree-op log.
+            let mut local_ops = effects
+                .list_attested_ops()
+                .await
+                .map_err(|e| sync_session_error(format!("Failed to read the tree-op log: {e}")))?;
             let merge_chunk_size = self.merge_chunk_size();
             let merge_batch_count =
                 Self::merge_batch_count(remote_ops.payload().len(), merge_chunk_size);
@@ -1668,6 +1674,10 @@ mod tests {
 
     #[async_trait]
     impl TreeEffects for VerificationTestEffects {
+        async fn list_attested_ops(&self) -> Result<Vec<AttestedOp>, AuraError> {
+            Ok(self.applied.lock().unwrap().clone())
+        }
+
         async fn get_current_state(&self) -> Result<TreeState, AuraError> {
             Ok(self.state.lock().unwrap().clone())
         }

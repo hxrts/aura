@@ -99,7 +99,8 @@ pub fn all_command_help() -> Vec<CommandHelp> {
         CommandHelp {
             name: "join",
             syntax: "/join <channel>",
-            description: "Join or create a channel (e.g., /join general)",
+            description:
+                "Join an existing channel (e.g., /join general); create channels with New Group",
             capability: CommandCapability::JoinChannel,
             category: CommandCategory::User,
         },

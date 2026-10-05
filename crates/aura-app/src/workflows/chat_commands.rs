@@ -148,7 +148,7 @@ pub enum ChatCommand {
     /// `/leave` - Leave current context
     Leave,
 
-    /// `/join <channel>` - Join or create a channel
+    /// `/join <channel>` - Join an existing channel you can see
     Join {
         /// Channel name to join/create (normalized, without leading #)
         channel: String,

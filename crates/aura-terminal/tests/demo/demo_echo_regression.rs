@@ -1,4 +1,3 @@
-#![cfg(feature = "development")]
 //! Regression test for demo mode echo functionality.
 //!
 //! This test mimics the exact TUI flow:
@@ -14,21 +13,12 @@
 #![cfg(feature = "development")]
 #![allow(clippy::expect_used, clippy::unwrap_used, missing_docs)]
 
-use async_lock::RwLock;
-use std::sync::Arc;
 use std::time::Duration;
 
-use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_app::ui::workflows::{invitation, messaging, query};
-use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::ExecutionMode;
-use aura_core::hash;
-use aura_core::types::identifiers::{AuthorityId, ContextId};
-use aura_terminal::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, EchoPeer};
-use aura_terminal::ids;
-use aura_terminal::tui::context::InitializedAppCore;
+use aura_terminal::demo::{spawn_amp_inbox_listener, EchoPeer};
 
 #[allow(clippy::duplicate_mod)]
 #[path = "../support/mod.rs"]
@@ -56,67 +46,35 @@ fn collect_messages(chat_state: &aura_app::views::ChatState) -> Vec<&aura_app::v
 /// The issue is in how `accept_invitation` handles contact creation.
 /// Either the contact is not being committed to the fact journal, or the
 /// reactive reducer is not surfacing contacts to the CONTACTS_SIGNAL.
-#[tokio::test]
-async fn demo_echo_after_importing_contacts_via_invitation() {
-    let seed = 2024u64;
+#[test]
+fn demo_echo_after_importing_contacts_via_invitation() {
+    support::run_with_terminal_stack(demo_echo_after_importing_contacts_via_invitation_body);
+}
 
-    // Match demo-mode authority/context derivation used by the TUI handler.
-    let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
-
-    let test_dir = support::unique_test_dir("aura-demo-echo-regression");
-
-    // Start demo peers (Alice + Carol) as real runtimes.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
-        .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
-    // Build Bob's runtime with shared transport wiring.
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    let agent_config = AgentConfig {
-        device_id: bob_device_id,
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
+async fn demo_echo_after_importing_contacts_via_invitation_body() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init(); // DIAG
+                     // Bob is a real account (signing identity, demo-mode rendezvous and sync)
+                     // whose agent shares the demo peers' transport.
+    let env = support::FullTestEnv::with_config(support::FullTestEnvConfig {
+        name: "demo-echo-regression".to_string(),
+        nickname_suggestion: Some("Bob".to_string()),
+        with_demo_peers: true,
         ..Default::default()
-    };
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
-        .await
-        .expect("Failed to build demo simulation agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-    InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
+    })
+    .await;
+    let simulator = env.demo_peers.as_ref().expect("demo peers started");
+    let app_core = env.app_core.clone();
+    let agent = env.agent.clone();
+    let bob_authority = env.authority_id;
 
     // Get demo hints (invite codes) - this is how the TUI gets them
-    let hints = DemoHints::new(seed);
-    eprintln!("[Test] Alice invite code: {}", hints.alice_invite_code);
-    eprintln!("[Test] Carol invite code: {}", hints.carol_invite_code);
+    let (alice_code, carol_code) = simulator
+        .signed_contact_invite_codes()
+        .await
+        .expect("demo peers create signed contact codes");
 
     // Start demo AMP echo listener (like TUI does)
     let peers = vec![
@@ -139,27 +97,29 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     // Step 1: import_invitation_details parses the code and returns InvitationInfo with invitation_id
     // Step 2: accept_invitation uses that invitation_id to accept
     eprintln!("[Test] Importing Alice via invite code...");
-    let alice_info = invitation::import_invitation_details(&app_core, &hints.alice_invite_code)
+    let alice_info = invitation::import_invitation_details(&app_core, &alice_code)
         .await
         .expect("Alice import should succeed");
     eprintln!(
         "[Test] Alice imported: invitation_id={}, sender_id={}",
-        alice_info.invitation_id, alice_info.sender_id
+        alice_info.invitation_id(),
+        alice_info.info().sender_id
     );
-    let alice_accept = invitation::accept_invitation(&app_core, &alice_info.invitation_id).await;
-    eprintln!("[Test] Alice accept result: {:?}", alice_accept);
+    let alice_accept = invitation::accept_invitation(&app_core, alice_info).await;
+    eprintln!("[Test] Alice accept result: {alice_accept:?}");
 
     // Import and accept Carol as a contact
     eprintln!("[Test] Importing Carol via invite code...");
-    let carol_info = invitation::import_invitation_details(&app_core, &hints.carol_invite_code)
+    let carol_info = invitation::import_invitation_details(&app_core, &carol_code)
         .await
         .expect("Carol import should succeed");
     eprintln!(
         "[Test] Carol imported: invitation_id={}, sender_id={}",
-        carol_info.invitation_id, carol_info.sender_id
+        carol_info.invitation_id(),
+        carol_info.info().sender_id
     );
-    let carol_accept = invitation::accept_invitation(&app_core, &carol_info.invitation_id).await;
-    eprintln!("[Test] Carol accept result: {:?}", carol_accept);
+    let carol_accept = invitation::accept_invitation(&app_core, carol_info).await;
+    eprintln!("[Test] Carol accept result: {carol_accept:?}");
 
     // Allow time for contact imports to complete
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -193,10 +153,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
         );
     }
 
-    eprintln!(
-        "[Test] Creating channel with members from contacts list: {:?}",
-        members
-    );
+    eprintln!("[Test] Creating channel with members from contacts list: {members:?}");
 
     // Also log what the echo listener expects
     eprintln!(
@@ -207,7 +164,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
 
     let channel_result =
         messaging::create_channel(&app_core, "test-channel", None, &members, 0, 1).await;
-    eprintln!("[Test] Channel creation result: {:?}", channel_result);
+    eprintln!("[Test] Channel creation result: {channel_result:?}");
     // Now returns typed ChannelId, not String - this enforces type safety!
     let channel_id = channel_result.expect("create channel");
 
@@ -227,11 +184,9 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
             .expect("chat signal should be registered")
     };
 
-    eprintln!("[Test] Sending message to channel {}...", channel_id);
+    eprintln!("[Test] Sending message to channel {channel_id}...");
     // Using typed ChannelId ensures we send to the EXACT channel we created
-    messaging::send_message(&app_core, channel_id, content, 2)
-        .await
-        .expect("send message");
+    env.send_when_channel_ready(channel_id, content).await;
 
     // Wait for signal updates and check for echo
     let mut found_echo = false;
@@ -284,133 +239,33 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
     );
 }
 
-/// Test echo when the channel has empty member_ids (simulates potential race condition)
-#[tokio::test]
-async fn demo_echo_with_empty_channel_members() {
-    let seed = 2026u64;
+/// A channel created with no members has no recipients, so sending to it is
+/// refused with a typed error instead of silently echoing (the old demo
+/// fallback that delivered to peers who were never members).
+#[test]
+fn demo_send_to_channel_without_members_is_refused() {
+    support::run_with_terminal_stack(demo_send_to_channel_without_members_is_refused_body);
+}
 
-    let bob_device_id_str = "demo:bob-empty";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
+async fn demo_send_to_channel_without_members_is_refused_body() {
+    let env = support::FullTestEnv::demo_bob("demo-echo-empty").await;
+    env.add_demo_peers_as_contacts().await;
+    let app_core = env.app_core.clone();
 
-    let test_dir = support::unique_test_dir("aura-demo-echo-empty");
-
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
-        .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    let agent_config = AgentConfig {
-        device_id: bob_device_id,
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
-        .await
-        .expect("Failed to build agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
-
-    let peers = vec![
-        EchoPeer {
-            authority_id: simulator.alice_authority(),
-            name: "Alice".to_string(),
-        },
-        EchoPeer {
-            authority_id: simulator.carol_authority(),
-            name: "Carol".to_string(),
-        },
-    ];
-    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
-
-    // Create channel with NO members (empty list) - this tests the fallback behavior
-    // The echo listener should still work because it falls back when member_ids is empty
     let members: Vec<String> = vec![];
     let channel_id =
         messaging::create_channel(&app_core, "empty-members-channel", None, &members, 0, 1)
             .await
             .expect("create channel");
 
-    tokio::time::sleep(Duration::from_millis(400)).await;
-
-    let content = "empty-members-test";
-    let mut chat_stream = {
-        let core = app_core.read().await;
-        core.subscribe(&*CHAT_SIGNAL)
-            .expect("chat signal should be registered")
-    };
-
-    // Using typed ChannelId ensures we send to the EXACT channel we created
-    messaging::send_message(&app_core, channel_id, content, 2)
+    let error = messaging::send_message(&app_core, channel_id, "empty-members-test", 2)
         .await
-        .expect("send message");
-
-    let mut found_echo = false;
-    let timeout = Duration::from_secs(5);
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    while tokio::time::Instant::now() < deadline {
-        tokio::select! {
-            Ok(chat_state) = chat_stream.recv() => {
-                let messages = collect_messages(&chat_state);
-                eprintln!(
-                    "[Empty Members Test] Signal update: {} messages",
-                    messages.len()
-                );
-                for msg in &messages {
-                    eprintln!(
-                        "[Empty Members Test]   - '{}' from {} (is_own={})",
-                        msg.content,
-                        msg.sender_id,
-                        msg.is_own
-                    );
-                }
-
-                if messages
-                    .iter()
-                    .any(|msg| msg.content == content && msg.sender_id != bob_authority)
-                {
-                    found_echo = true;
-                    eprintln!("[Empty Members Test] Found echo!");
-                    break;
-                }
-            }
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
-        }
-    }
-
-    // This test should PASS because the echo listener falls back when member_ids is empty
+        .expect_err("a channel without members has no recipients");
     assert!(
-        found_echo,
-        "Echo should work even with empty channel members (fallback behavior)"
+        error
+            .to_string()
+            .contains("Recipient peers are not resolved"),
+        "unexpected error: {error}"
     );
 }
 
@@ -422,59 +277,19 @@ async fn demo_echo_with_empty_channel_members() {
 /// - create_channel returned String, send_message parsed the name to a hash-based ChannelId
 /// - The hash-based ChannelId didn't match the runtime-generated ChannelId
 /// - Fix: create_channel now returns typed ChannelId, send_message accepts ChannelId
-#[tokio::test]
-async fn demo_echo_persists_after_scheduler_update() {
-    let seed = 2027u64;
+#[test]
+fn demo_echo_persists_after_scheduler_update() {
+    support::run_with_terminal_stack(demo_echo_persists_after_scheduler_update_body);
+}
 
-    let bob_device_id_str = "demo:bob-persist";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
-
-    let test_dir = support::unique_test_dir("aura-demo-echo-persist");
-
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
-        .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    let agent_config = AgentConfig {
-        device_id: bob_device_id,
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
-        .await
-        .expect("Failed to build agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
+async fn demo_echo_persists_after_scheduler_update_body() {
+    // Bob is a real account whose demo peers are contacts (the TUI flow).
+    let env = support::FullTestEnv::demo_bob("demo-echo-persist").await;
+    env.add_demo_peers_as_contacts().await;
+    let simulator = env.demo_peers.as_ref().expect("demo peers started");
+    let app_core = env.app_core.clone();
+    let agent = env.agent.clone();
+    let bob_authority = env.authority_id;
 
     let peers = vec![
         EchoPeer {
@@ -514,9 +329,7 @@ async fn demo_echo_persists_after_scheduler_update() {
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created
-    messaging::send_message(&app_core, channel_id, content, 2)
-        .await
-        .expect("send message");
+    env.send_when_channel_ready(channel_id, content).await;
 
     // Wait for signal updates and check for echo (matches TUI pattern)
     let mut found_echo = false;
@@ -543,59 +356,19 @@ async fn demo_echo_persists_after_scheduler_update() {
 
 /// Test that echoes work when channel is created with members directly
 /// (without importing contacts first). This is the control test.
-#[tokio::test]
-async fn demo_echo_with_direct_member_ids_control() {
-    let seed = 2025u64; // Different seed to avoid conflicts
+#[test]
+fn demo_echo_with_direct_member_ids_control() {
+    support::run_with_terminal_stack(demo_echo_with_direct_member_ids_control_body);
+}
 
-    let bob_device_id_str = "demo:bob-control";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
-
-    let test_dir = support::unique_test_dir("aura-demo-echo-control");
-
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
-        .await
-        .expect("Failed to create demo simulator");
-    simulator
-        .start()
-        .await
-        .expect("Failed to start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    let agent_config = AgentConfig {
-        device_id: bob_device_id,
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
-        .await
-        .expect("Failed to build agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore");
-    let app_core = Arc::new(RwLock::new(app_core));
-    InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
+async fn demo_echo_with_direct_member_ids_control_body() {
+    // Bob is a real account whose demo peers are contacts (the TUI flow).
+    let env = support::FullTestEnv::demo_bob("demo-echo-control").await;
+    env.add_demo_peers_as_contacts().await;
+    let simulator = env.demo_peers.as_ref().expect("demo peers started");
+    let app_core = env.app_core.clone();
+    let agent = env.agent.clone();
+    let bob_authority = env.authority_id;
 
     let peers = vec![
         EchoPeer {
@@ -629,9 +402,7 @@ async fn demo_echo_with_direct_member_ids_control() {
     };
 
     // Using typed ChannelId ensures we send to the EXACT channel we created
-    messaging::send_message(&app_core, channel_id, content, 2)
-        .await
-        .expect("send message");
+    env.send_when_channel_ready(channel_id, content).await;
 
     let mut found_echo = false;
     let timeout = Duration::from_secs(5);

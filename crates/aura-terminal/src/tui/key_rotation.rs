@@ -24,6 +24,7 @@ pub(crate) fn key_rotation_status_update(status: &KeyRotationCeremonyStatus) -> 
 pub(crate) fn key_rotation_lifecycle_toast(
     kind: CeremonyKind,
     state: CeremonyLifecycleState,
+    error: Option<&str>,
 ) -> Option<ToastMessage> {
     let (id_prefix, label) = match kind {
         CeremonyKind::GuardianRotation => ("guardian-ceremony", "Guardian ceremony"),
@@ -47,6 +48,45 @@ pub(crate) fn key_rotation_lifecycle_toast(
                 "{label} failed and rollback was incomplete; manual intervention may be required"
             ),
         )),
-        CeremonyLifecycleState::Completed | CeremonyLifecycleState::Failed => None,
+        // A failed ceremony must be visible: the start reported success, so
+        // without this the failure reached only the log (work/8.md Task 56).
+        CeremonyLifecycleState::Failed => Some(ToastMessage::error(
+            format!("{id_prefix}-failed"),
+            match error.map(str::trim).filter(|error| !error.is_empty()) {
+                Some(error) => format!("{label} failed: {error}"),
+                None => format!("{label} failed"),
+            },
+        )),
+        CeremonyLifecycleState::Completed => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_ceremony_produces_an_error_toast_with_its_reason() {
+        let toast = key_rotation_lifecycle_toast(
+            CeremonyKind::GuardianRotation,
+            CeremonyLifecycleState::Failed,
+            Some("guardian declined"),
+        )
+        .expect("failure is surfaced");
+        assert!(toast
+            .message
+            .contains("Guardian ceremony failed: guardian declined"));
+        assert!(key_rotation_lifecycle_toast(
+            CeremonyKind::DeviceRotation,
+            CeremonyLifecycleState::Failed,
+            None,
+        )
+        .is_some_and(|toast| toast.message == "Multifactor ceremony failed"));
+        assert!(key_rotation_lifecycle_toast(
+            CeremonyKind::GuardianRotation,
+            CeremonyLifecycleState::Completed,
+            None,
+        )
+        .is_none());
     }
 }

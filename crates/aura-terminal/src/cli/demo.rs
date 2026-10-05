@@ -64,8 +64,7 @@ impl FromStr for DemoScenarioArg {
             "failed-recovery" => Ok(DemoScenarioArg::FailedRecovery),
             "interactive" => Ok(DemoScenarioArg::Interactive),
             other => Err(format!(
-                "Invalid scenario '{}'. Expected one of: happy-path, slow-guardian, failed-recovery, interactive",
-                other
+                "Invalid scenario '{other}'. Expected one of: happy-path, slow-guardian, failed-recovery, interactive"
             )),
         }
     }

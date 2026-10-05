@@ -86,6 +86,7 @@ impl TransportEffects for AuraEffectSystem {
             .await
             .unwrap_or_else(|| fallback_direct_route(&envelope));
 
+        let destination_for_log = envelope.destination;
         if let Some(move_manager) = self.move_manager() {
             let batch = move_manager
                 .enqueue_for_delivery(envelope, route, now_ms, self)
@@ -94,13 +95,24 @@ impl TransportEffects for AuraEffectSystem {
                     details: error.to_string(),
                 })?;
 
-            for plan in batch {
+            if batch.is_empty() {
+                tracing::debug!(destination = %destination_for_log, "move send produced an empty delivery batch");
+            }
+            // The batch starts with this caller's envelope; later plans are
+            // other queued envelopes. Every plan is attempted and settled so a
+            // failure never strands the rest, and only the caller's own
+            // outcome is returned.
+            let mut own_result = Ok(());
+            for (index, plan) in batch.into_iter().enumerate() {
                 let payload_len = plan.envelope.payload.len();
                 let context = plan.envelope.context;
                 let destination = plan.envelope.destination;
                 match send_planned_envelope(self, plan.envelope, &plan.route).await {
                     Ok(()) => {
                         self.transport.record_send(payload_len);
+                        if destination != self.authority_id {
+                            self.transport.record_peer_reachable(destination, now_ms);
+                        }
                         move_manager
                             .record_delivery_result(
                                 plan.replay_marker,
@@ -122,18 +134,30 @@ impl TransportEffects for AuraEffectSystem {
                                 now_ms,
                             )
                             .await;
-                        return Err(error);
+                        if index == 0 {
+                            own_result = Err(error);
+                        } else {
+                            tracing::debug!(
+                                destination = %destination,
+                                error = %error,
+                                "queued move envelope delivery failed"
+                            );
+                        }
                     }
                 }
             }
-            return Ok(());
+            return own_result;
         }
 
         let payload_len = envelope.payload.len();
         let fallback_route = fallback_direct_route(&envelope);
+        let destination = envelope.destination;
         match send_planned_envelope(self, envelope, &fallback_route).await {
             Ok(()) => {
                 self.transport.record_send(payload_len);
+                if destination != self.authority_id {
+                    self.transport.record_peer_reachable(destination, now_ms);
+                }
                 Ok(())
             }
             Err(err) => {
@@ -236,6 +260,34 @@ async fn resolve_peer_addr(
     resolve_move_route(effects, context, peer)
         .await
         .and_then(|route| route_destination_addr(&route.destination))
+}
+
+/// Any verified descriptor for `peer`, regardless of context, as a dialable
+/// address. Only for choreography envelopes, which travel on the peer's
+/// authority-scoped path: a browser never learns LAN-discovered descriptors,
+/// only the ones its invitations cached.
+async fn resolve_any_authority_addr(
+    effects: &AuraEffectSystem,
+    peer: AuthorityId,
+) -> Option<String> {
+    let manager = effects.rendezvous_manager()?;
+    let descriptor = manager.get_any_descriptor_for_authority(peer).await?;
+    if descriptor_has_placeholder_crypto(&descriptor)
+        && !(effects.is_testing() || effects.harness_mode_enabled())
+    {
+        return None;
+    }
+    order_routes_for_local_dialer(
+        descriptor
+            .advertised_move_paths()
+            .into_iter()
+            .map(|path| path.route)
+            .collect(),
+        LOCAL_DIALABLE_PROTOCOLS,
+    )
+    .into_iter()
+    .find(|route| direct_route_allowed(effects, route))
+    .and_then(|route| route_destination_addr(&route.destination))
 }
 
 async fn resolve_own_device_addr(
@@ -386,6 +438,9 @@ async fn send_planned_envelope(
         return selected.send_envelope(envelope).await;
     }
     if let Some(shared) = effects.transport.shared_transport() {
+        if is_choreography_envelope(&envelope) {
+            tracing::debug!(destination = %envelope.destination, "choreography envelope routed through shared transport");
+        }
         shared.route_envelope(envelope);
         return Ok(());
     }
@@ -401,6 +456,9 @@ async fn send_planned_envelope(
         destination_device_id.is_some_and(|dst| dst == &self_device_id)
     };
     if is_local {
+        if is_choreography_envelope(&envelope) {
+            tracing::debug!(destination = %envelope.destination, "choreography envelope queued locally");
+        }
         effects.queue_runtime_envelope(envelope);
         return Ok(());
     }
@@ -437,14 +495,13 @@ async fn send_planned_envelope(
         // has a peer descriptor. Like invitation delivery, they ride the
         // receiver's authority-scoped peer path; the envelope keeps its session
         // context so the receiver can still match it.
-        None if is_choreography_envelope(&envelope) => {
-            resolve_peer_addr(
-                effects,
-                default_context_id_for_authority(envelope.destination),
-                envelope.destination,
-            )
-            .await
-        }
+        None if is_choreography_envelope(&envelope) => resolve_peer_addr(
+            effects,
+            default_context_id_for_authority(envelope.destination),
+            envelope.destination,
+        )
+        .await
+        .or(resolve_any_authority_addr(effects, envelope.destination).await),
         None => None,
     }
     .ok_or(TransportError::DestinationUnreachable {
@@ -525,7 +582,9 @@ fn fallback_direct_route(envelope: &TransportEnvelope) -> Route {
     ))
 }
 
-fn validate_inbound_transport_receipt(envelope: &TransportEnvelope) -> Result<(), TransportError> {
+pub(super) fn validate_inbound_transport_receipt(
+    envelope: &TransportEnvelope,
+) -> Result<(), TransportError> {
     let Some(receipt) = envelope.receipt.as_ref() else {
         return Ok(());
     };
@@ -1009,31 +1068,90 @@ impl AuraEffectSystem {
         &self,
         accept: impl Fn(&TransportEnvelope) -> bool,
     ) -> Result<TransportEnvelope, TransportError> {
-        let self_device_id = self.config.device_id.to_string();
+        self.drain_flow_checkpoint_envelopes();
         let inbox = self.transport.inbox();
-        let maybe = {
-            let mut inbox = inbox.write();
-            // In shared transport mode, filter by destination (this agent's authority ID)
-            inbox
-                .iter()
-                .position(|env| {
-                    let addressed_here = match env.metadata.get("aura-destination-device-id") {
-                        Some(dst) => dst == &self_device_id,
-                        // Device-less envelopes are addressed to the whole authority.
-                        None => env.destination == self.authority_id,
-                    };
-                    addressed_here && accept(env)
-                })
-                .map(|pos| inbox.remove(pos))
-        };
-
-        match maybe {
-            Some(env) => {
-                validate_inbound_transport_receipt(&env)?;
+        loop {
+            let maybe = {
+                let mut inbox = inbox.write();
+                inbox
+                    .iter()
+                    .position(|env| self.addressed_here(env) && accept(env))
+                    .map(|pos| inbox.remove(pos))
+            };
+            let Some(env) = maybe else {
+                return Err(TransportError::NoMessage);
+            };
+            if self.admit_inbound_envelope(&env)? {
                 self.transport.record_receive();
-                Ok(env)
+                return Ok(env);
             }
-            None => Err(TransportError::NoMessage),
+        }
+    }
+
+    fn addressed_here(&self, env: &TransportEnvelope) -> bool {
+        match env.metadata.get("aura-destination-device-id") {
+            Some(dst) => dst == &self.config.device_id.to_string(),
+            // Device-less envelopes are addressed to the whole authority.
+            None => env.destination == self.authority_id,
+        }
+    }
+
+    /// Validate an inbound envelope's receipt and admit it against the
+    /// sender's flow window (docs/111 §3.1). `Ok(false)` means the envelope
+    /// was outside the window and has been dropped without a response.
+    pub(super) fn admit_inbound_envelope(
+        &self,
+        env: &TransportEnvelope,
+    ) -> Result<bool, TransportError> {
+        validate_inbound_transport_receipt(env)?;
+        if let Some(receipt) = env.receipt.as_ref() {
+            let device = env
+                .metadata
+                .get("aura-source-device-id")
+                .map(String::as_str);
+            if let Err(rejection) = self.transport.flow().admit(receipt, device) {
+                tracing::warn!(
+                    source = %env.source,
+                    context = %receipt.context,
+                    epoch = receipt.epoch,
+                    generation = receipt.nonce,
+                    content_type = ?env.metadata.get("content-type"),
+                    %rejection,
+                    "dropping inbound envelope outside its flow window"
+                );
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Take every flow checkpoint addressed here and queue it for adoption.
+    fn drain_flow_checkpoint_envelopes(&self) {
+        let checkpoints: Vec<TransportEnvelope> = {
+            let inbox = self.transport.inbox();
+            let mut inbox = inbox.write();
+            let mut taken = Vec::new();
+            let mut index = 0;
+            while index < inbox.len() {
+                let env = &inbox[index];
+                if self.addressed_here(env)
+                    && env.metadata.get("content-type").map(String::as_str)
+                        == Some(crate::runtime::flow_ingress::FLOW_CHECKPOINT_CONTENT_TYPE)
+                {
+                    taken.push(inbox.remove(index));
+                } else {
+                    index += 1;
+                }
+            }
+            taken
+        };
+        for env in checkpoints {
+            if matches!(self.admit_inbound_envelope(&env), Ok(true)) {
+                self.transport.record_receive();
+                self.transport
+                    .flow()
+                    .record_inbound(env.source, &env.payload);
+            }
         }
     }
 }
@@ -1221,6 +1339,59 @@ mod tests {
 
         let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
         assert!(resolved.is_none());
+        RuntimeService::stop(&manager).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn choreography_fallback_uses_a_descriptor_from_any_context() {
+        let authority = AuthorityId::new_from_entropy([213u8; 32]);
+        let peer = AuthorityId::new_from_entropy([214u8; 32]);
+        // e.g. the context of an invitation exchange, not the peer default.
+        let invitation_context = ContextId::new_from_entropy([215u8; 32]);
+
+        let config = AgentConfig::default();
+        let effects =
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap();
+        let manager = RendezvousManager::new_with_default_udp(
+            authority,
+            RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+        let original_startup = aura_core::TimeoutBudget::from_start_and_timeout(
+            &effects
+                .physical_time()
+                .await
+                .expect("actual transport fixture startup observation"),
+            std::time::Duration::from_secs(30),
+        )
+        .expect("original transport fixture startup window");
+        let service_context = RuntimeServiceContext::new(
+            Arc::new(TaskSupervisor::new()),
+            Arc::new(effects.time_effects().clone()),
+            original_startup,
+        );
+        RuntimeService::start(&manager, &service_context)
+            .await
+            .unwrap();
+        manager
+            .cache_descriptor(descriptor(
+                peer,
+                invitation_context,
+                vec![TransportHint::tcp_direct("192.168.1.20:55003").unwrap()],
+            ))
+            .await
+            .unwrap();
+
+        assert!(
+            resolve_peer_addr(&effects, default_context_id_for_authority(peer), peer)
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            resolve_any_authority_addr(&effects, peer).await.as_deref(),
+            Some("192.168.1.20:55003")
+        );
         RuntimeService::stop(&manager).await.unwrap();
     }
 

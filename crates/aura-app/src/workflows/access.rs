@@ -198,9 +198,8 @@ pub async fn configure_home_capabilities_resolved(
         if peer == actor {
             continue;
         }
-        send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact)
-            .await
-            .map_err(|e| map_runtime_error("Send capability config fact", e))?;
+        // Committed above; delivery is best-effort and peers catch up via sync.
+        let _ = send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
     }
 
     update_homes_projection_observed(app_core, |homes| {
@@ -327,9 +326,8 @@ pub async fn set_access_override_resolved(
         if peer == actor {
             continue;
         }
-        send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact)
-            .await
-            .map_err(|e| map_runtime_error("Send access override fact", e))?;
+        // Committed above; delivery is best-effort and peers catch up via sync.
+        let _ = send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
     }
 
     update_homes_projection_observed(app_core, |homes| {

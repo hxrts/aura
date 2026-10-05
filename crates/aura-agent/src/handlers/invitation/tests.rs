@@ -5645,6 +5645,20 @@ async fn run_guardian_choreography(seed: u8, guardian_delay: std::time::Duration
             .is_some(),
         "guardian records the signed post-verification confirmation"
     );
+    let bound = principal_effects
+        .load_committed_facts(principal_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .any(|fact| {
+            matches!(
+                fact.content,
+                FactContent::Relational(RelationalFact::Protocol(
+                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id: bound, .. }
+                )) if bound == guardian_id
+            )
+        });
+    assert!(bound, "a verified acceptance commits the guardian binding");
 }
 
 large_stack_async_test!(
@@ -7463,4 +7477,84 @@ async fn interrupted_signed_issuance_resumes_actual_original_registration_owner(
         receiver.expect("invitee owned cleanup");
     });
     case.await;
+}
+
+// Run 119: the inviter's first response never reached the invitee. The
+// invitee's acceptance resend must draw a second, deliverable response.
+large_stack_async_test!(contact_acceptance_completes_when_the_first_response_is_lost, {
+    use super::contact_confirmation::CONTACT_INVITATION_RESPONSE_CONTENT_TYPE;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let pair = contact_pair(58).await;
+    let invitation = pair.create_contact_invitation().await;
+    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+
+    let dropped = AtomicBool::new(false);
+    let respond_and_drop_first = async {
+        loop {
+            let _ = pair
+                .sender_handler
+                .process_contact_invitation_acceptances(pair.sender_effects.clone())
+                .await;
+            if !dropped.load(Ordering::Relaxed)
+                && pair
+                    .receiver_effects
+                    .take_inbound_envelope(|env| {
+                        env.metadata.get("content-type").map(String::as_str)
+                            == Some(CONTACT_INVITATION_RESPONSE_CONTENT_TYPE)
+                    })
+                    .is_ok()
+            {
+                dropped.store(true, Ordering::Relaxed);
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let accept = timeout(
+        Duration::from_secs(60),
+        Box::pin(
+            pair.receiver_handler
+                .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
+        ),
+    );
+    let result = tokio::select! {
+        result = accept => result,
+        () = respond_and_drop_first => unreachable!("the inviter loop never ends"),
+    }
+    .expect("the resend must complete within the confirmation wait")
+    .expect("a resent acceptance draws a deliverable response");
+
+    assert!(dropped.load(Ordering::Relaxed), "the first response was lost");
+    assert_eq!(result.new_status, InvitationStatus::Accepted);
+});
+
+#[tokio::test]
+async fn verified_peer_descriptors_survive_a_runtime_restart() {
+    let own = AuthorityId::new_from_entropy([231u8; 32]);
+    let peer = AuthorityId::new_from_entropy([232u8; 32]);
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority(&AgentConfig::default(), own).unwrap(),
+    );
+    let handler = handler_for_id(own);
+    let _first = attach_test_rendezvous_manager(effects.as_ref(), own).await;
+    handler
+        .cache_verified_peer_descriptor_for_peer(
+            effects.as_ref(),
+            peer,
+            None,
+            Some("tcp://192.168.1.30:55031"),
+            1_700_000_000_000,
+        )
+        .await;
+
+    // A restart: a fresh rendezvous manager has no descriptors in memory.
+    let _second = attach_test_rendezvous_manager(effects.as_ref(), own).await;
+    let manager = effects.rendezvous_manager().unwrap();
+    assert!(manager.get_any_descriptor_for_authority(peer).await.is_none());
+
+    handler.restore_verified_peer_descriptors(effects.as_ref()).await;
+    assert!(
+        manager.get_any_descriptor_for_authority(peer).await.is_some(),
+        "the persisted verified hint is re-cached"
+    );
 }

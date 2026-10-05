@@ -1739,6 +1739,15 @@ impl AuraEffectSystem {
         &self,
         envelope: TransportEnvelope,
     ) -> crate::runtime::subsystems::transport::QueueEnvelopeOutcome {
+        // The envelope was already admitted against its flow window when it
+        // was taken; putting it back must not make it look like a replay.
+        if let Some(receipt) = envelope.receipt.as_ref() {
+            let device = envelope
+                .metadata
+                .get("aura-source-device-id")
+                .map(String::as_str);
+            self.transport.flow().allow_readmit(receipt, device);
+        }
         self.queue_runtime_envelope(envelope)
     }
 
@@ -1751,6 +1760,20 @@ impl AuraEffectSystem {
         self.choreography_state
             .write()
             .take_unclaimed_session_envelope(accept)
+    }
+
+    /// Record that `peer` was verified reachable at `now_ms`.
+    // Only the native LAN ingress path records reachability.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn record_peer_reachable(&self, peer: AuthorityId, now_ms: u64) {
+        if peer != self.authority_id {
+            self.transport.record_peer_reachable(peer, now_ms);
+        }
+    }
+
+    /// Distinct peers verified reachable within `window_ms` of `now_ms`.
+    pub(crate) fn reachable_peer_count(&self, now_ms: u64, window_ms: u64) -> usize {
+        self.transport.reachable_peer_count(now_ms, window_ms)
     }
 
     pub(crate) fn queue_runtime_envelope(

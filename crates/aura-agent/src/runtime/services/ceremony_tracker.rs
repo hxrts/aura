@@ -1103,15 +1103,17 @@ impl CeremonyTracker {
 
     fn timeout_for_kind(kind: CeremonyKind) -> Duration {
         match kind {
-            CeremonyKind::GuardianRotation | CeremonyKind::DeviceRotation => {
-                Duration::from_secs(60)
-            }
+            // Guardians and other devices approve on their own screens, as a
+            // person does for enrollment; 60 s timed out in practice (run 147).
+            CeremonyKind::GuardianRotation
+            | CeremonyKind::DeviceRotation
+            | CeremonyKind::Recovery => Duration::from_secs(600),
             // Enrollment waits for a person to import the code on the new device.
             CeremonyKind::DeviceEnrollment => Duration::from_millis(
                 aura_invitation::enrollment_manifest::ENROLLMENT_ALLOCATION_TIMEOUT_MS,
             ),
             CeremonyKind::DeviceRemoval => Duration::from_secs(45),
-            CeremonyKind::Recovery | CeremonyKind::OtaActivation => Duration::from_secs(90),
+            CeremonyKind::OtaActivation => Duration::from_secs(90),
             // Invitations wait on a human accepting on another device.
             CeremonyKind::Invitation => Duration::from_secs(600),
             CeremonyKind::RendezvousSecureChannel => Duration::from_secs(20),
@@ -4793,7 +4795,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(enrollment.timeout, Duration::from_secs(600));
-        assert_eq!(recovery.timeout, Duration::from_secs(90));
+        // Recovery waits on guardians approving on their devices (Task 61).
+        assert_eq!(recovery.timeout, Duration::from_secs(600));
     }
 
     #[tokio::test]

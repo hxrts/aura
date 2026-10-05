@@ -22,7 +22,7 @@ An authority (`AuthorityId`) is the cryptographic identity that holds capabiliti
 
 A nickname suggestion (`nickname_suggestion`) is metadata an authority optionally shares when connecting with someone. Users configure a default suggestion sent to all new connections. Users can share different suggestions with different people or opt out entirely.
 
-`Contact` is unilateral reachability or identification state. It means the local user knows how to recognize or reach an authority. It does not imply bilateral trust.
+`Contact` is unilateral reachability or identification state. It means the local user knows how to recognize or reach an authority. It does not imply bilateral trust. Removing a contact is therefore local: it deletes this authority's own record and does not notify the peer, whose contact record for this authority is unaffected. Ending bilateral trust is a `Friend` revocation, which both sides observe.
 
 `Friend` is bilateral accepted trust in the `Web of Trust Plane`. Friend lifecycle facts live in relational contexts. Friends of friends are local derivations or bounded introduction evidence, not canonical shared graph state.
 

@@ -20,6 +20,37 @@ pub use fact_types::{
 // Re-export registration function
 pub use reducers::register_moderation_facts;
 
+/// The actor a moderation fact claims as its author, or `None` for any other
+/// fact type. Ingress compares this with the authenticated sender so a peer
+/// cannot author moderation in another authority's name.
+pub fn claimed_moderation_actor(
+    envelope: &aura_core::types::facts::FactEnvelope,
+) -> Option<aura_core::types::identifiers::AuthorityId> {
+    use aura_journal::DomainFact;
+    match envelope.type_id.as_str() {
+        HOME_BAN_FACT_TYPE_ID => HomeBanFact::from_envelope(envelope).map(|f| f.actor_authority),
+        HOME_UNBAN_FACT_TYPE_ID => {
+            HomeUnbanFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        HOME_MUTE_FACT_TYPE_ID => HomeMuteFact::from_envelope(envelope).map(|f| f.actor_authority),
+        HOME_UNMUTE_FACT_TYPE_ID => {
+            HomeUnmuteFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        HOME_KICK_FACT_TYPE_ID => HomeKickFact::from_envelope(envelope).map(|f| f.actor_authority),
+        HOME_PIN_FACT_TYPE_ID => HomePinFact::from_envelope(envelope).map(|f| f.actor_authority),
+        HOME_UNPIN_FACT_TYPE_ID => {
+            HomeUnpinFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
+            HomeGrantModeratorFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
+            HomeRevokeModeratorFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,6 +72,25 @@ mod tests {
             ts_ms,
             uncertainty: None,
         }
+    }
+
+    #[test]
+    fn claimed_moderation_actor_reads_actor_and_ignores_other_facts() {
+        let actor = test_authority_id(2);
+        let ban = HomeBanFact::new_ms(
+            test_context_id(),
+            None,
+            test_authority_id(3),
+            actor,
+            "spam".to_string(),
+            1,
+            None,
+        );
+        assert_eq!(claimed_moderation_actor(&ban.to_envelope()), Some(actor));
+
+        let mut other = ban.to_envelope();
+        other.type_id = aura_core::types::facts::FactTypeId::from("chat:message");
+        assert_eq!(claimed_moderation_actor(&other), None);
     }
 
     #[test]

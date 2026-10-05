@@ -50,6 +50,21 @@ This structure defines a receipt. A receipt binds a cost to a specific context a
 
 Receipt transcript verification and sender authentication are separate checks. A signature verified with the public key embedded in its own receipt establishes integrity under that key; it does not bind the claimed source authority or device. An ingress owner may publish verified peer identity only after resolving an expected active key from trusted local authority/device state, checking the key and epoch against that binding, and applying replay state. LAN bootstrap frames that have only a self-certified receipt remain untrusted routing input even when their bytes are intact.
 
+### 3.1 Budget Epochs, Generations and Windows
+
+Flow budget accounting reuses the AMP ratchet model ([AMP](112_amp.md) §5–§8) without its key derivation. Every quantity is derived from replicated facts in the shared relational context, so no wall clock decides which budget is in force and every device of an authority converges on the same position.
+
+- Epoch: for each context and direction (sender → receiver), the budget epoch advances only through a committed transition fact, reduced deterministically to one canonical epoch, as AMP channel epochs are.
+- Generation: the receipt `nonce` is the sender's budget generation within the epoch. It is derived from reduced journal state rather than a local counter, so `spent` for the epoch is the generation span consumed.
+- Window: a checkpoint fact anchors the epoch's `base_gen`. The receiver accepts a receipt only if its generation lies inside the granted window above `base_gen`. Generations below the window (replays) or above it (sends beyond the allowance) are rejected structurally.
+- Dual window: at an epoch boundary the receiver keeps the previous window open alongside the successor window, as AMP's alternating windows do, so receipts the sender stamped before observing the new epoch are still accepted and nothing in flight is dropped.
+- Replenishment: the receiver opens the successor epoch once it has accepted half a window of receipts in the current epoch, AMP's routine spacing rule, with `base_gen` set to the highest accepted generation. Counting accepted receipts rather than trusting stamped generations means a sender cannot skip generations or name an unopened epoch to send more than its allowance; it tolerates losing up to half a window per epoch. A peer that stays within its window therefore keeps sending; a receiver withholds or delays the bump to throttle a peer.
+- Allowance: the window size resolves in priority order from a per-peer override fact, then a context policy fact, then the default (1024), as AMP's skip window does. Adjusting a peer's allowance is committing an override; an adaptive anti-spam policy writes overrides or delays bumps without changing the protocol. The sender's effective limit is the minimum of this window and the limit it derives from its Biscuit tokens and local policy.
+
+Before any checkpoint exists for a direction, both sides use the default window at the initial epoch with `base_gen = 0`.
+
+The current runtime realizes this contract with runtime-owned state rather than replicated facts. The receiver delivers each successor checkpoint to the sender as a receipted `application/aura-flow-checkpoint` transport message, offers it again while the sender still stamps the previous epoch, and keeps its windows in memory; after a restart it adopts the first receipt it sees from a sender as that direction's checkpoint, which resets accounting by at most one window. Receipts outside the window are dropped without a response. The sender keeps its generation and adopted limit in its local journal budget; a sender that reaches its limit fails the send locally until the checkpoint arrives.
+
 ## 4. Information Flow Budgets
 
 Information flow budgets define limits on metadata leakage. Budgets exist for external leakage, neighbor leakage, and group leakage. Each protocol message carries leakage annotations. These annotations specify the cost for each leakage dimension.

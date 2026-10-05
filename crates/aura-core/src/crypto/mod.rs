@@ -9,6 +9,7 @@ pub mod merkle;
 pub mod participant_proof;
 pub mod signature_input;
 pub mod single_signer;
+pub mod threshold_prf;
 pub mod tree_signing;
 
 // Merkle helpers

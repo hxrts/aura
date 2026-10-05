@@ -16,7 +16,7 @@ The contract applies to information flows across privacy boundaries:
 - Leakage tracking: Metadata exposure accounting by observer class
 - Context isolation: Separation of identities and journals across contexts
 - Receipt chains: Multi-hop forwarding accountability
-- Epoch boundaries: Temporal isolation of budget and receipt state
+- Epoch boundaries: Isolation of budget and receipt state between logical budget epochs (AMP-style generations and windows)
 - Service families: `Establish`, `Move`, and `Hold` as the privacy-relevant service surfaces
 - Selector retrieval: Capability-derived retrieval without identity-addressed mailbox polling
 - Hold custody: Neighborhood-scoped opaque retention with bounded retrieval authority
@@ -92,7 +92,7 @@ Trust evidence may affect `Permit` and runtime-local weighting. It must not appe
 
 Transport observables require prior local authorization, accounting, and fact-coupling.
 
-Budget state is monotone within its active epoch. Over-budget sends must remain local. Receipt validity is epoch-scoped and old receipts must not be replayable in new epochs.
+Budget state is monotone within its active epoch. Over-budget sends must remain local. Receipt validity is epoch-scoped and old receipts must not be replayable in new epochs. Budget epochs are logical and follow the AMP ratchet model: receipt generations must fall inside the receiver-anchored window, the receiver advances the epoch by the spacing rule, and the window (allowance) resolves from per-peer override, context policy, then default (see [Transport and Information Flow](111_transport_and_information_flow.md) §3.1).
 
 Forwarding is hop-local. Each hop must validate the required upstream accountability state before emitting downstream transport.
 

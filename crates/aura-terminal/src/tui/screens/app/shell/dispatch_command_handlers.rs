@@ -2,6 +2,7 @@ use super::dispatch::*;
 use super::dispatch_handlers_neighborhood::handle_neighborhood_dispatch;
 use super::*;
 
+use crate::tui::types::ReadReceiptPolicy;
 use aura_app::ui::types::ContactRelationshipState;
 use aura_app::ui::workflows::ceremonies::{
     monitor_key_rotation_ceremony_with_policy, start_device_threshold_ceremony,
@@ -246,6 +247,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
+                                        lifecycle.status.error_message.as_deref(),
                                     ) {
                                         send_optional_ui_update_required(
                                             &update_tx_monitor,
@@ -424,6 +426,7 @@ fn handle_recovery_and_ceremonies_dispatch(
                                     if let Some(toast) = key_rotation_lifecycle_toast(
                                         lifecycle.status.kind,
                                         lifecycle.state,
+                                        lifecycle.status.error_message.as_deref(),
                                     ) {
                                         send_optional_ui_update_required(
                                             &update_tx_monitor,
@@ -1062,6 +1065,34 @@ pub(super) fn handle_dispatch_command_match(
             );
             (cb.recovery.on_select_guardian)(contact.id, operation);
         }
+        DispatchCommand::ToggleSelectedContactReadReceipts => {
+            let idx = new_state.contacts.selected_index;
+            let contact = {
+                let guard = shared_contacts_for_dispatch.read();
+                guard.get(idx).cloned()
+            };
+            let Some(contact) = contact else {
+                new_state.toast_error("No contact selected");
+                return EventCommandLoopAction::ContinueCommand;
+            };
+            let policy = match contact.read_receipt_policy {
+                ReadReceiptPolicy::Enabled => ReadReceiptPolicy::Disabled,
+                ReadReceiptPolicy::Disabled => ReadReceiptPolicy::Enabled,
+            };
+            new_state.toast_info(match policy {
+                ReadReceiptPolicy::Enabled => "Read receipts on for this contact",
+                ReadReceiptPolicy::Disabled => "Read receipts off for this contact",
+            });
+            let app_core = app_core_for_events;
+            tasks_for_events.spawn(async move {
+                let _ = aura_app::ui::workflows::contacts::set_read_receipt_policy(
+                    &app_core,
+                    &contact.id,
+                    policy,
+                )
+                .await;
+            });
+        }
         DispatchCommand::SendSelectedFriendRequest => {
             let idx = new_state.contacts.selected_index;
             let contact = {
@@ -1371,6 +1402,21 @@ pub(super) fn handle_dispatch_command_match(
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
             );
+            if let Some(NotificationSelection::FriendRequest(authority)) = &selected {
+                let Some(update_tx) = update_tx_for_events else {
+                    new_state.toast_error("UI update sender is unavailable");
+                    return EventCommandLoopAction::ContinueCommand;
+                };
+                let operation = submit_local_terminal_operation(
+                    app_core_for_events,
+                    tasks_for_events,
+                    update_tx,
+                    OperationId::accept_friend_request(),
+                    SemanticOperationKind::AcceptFriendRequest,
+                );
+                (cb.contacts.on_accept_friend_request)(authority.clone(), operation);
+                return EventCommandLoopAction::ContinueCommand;
+            }
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 if let Some(update_tx) = update_tx_for_dispatch {
                     let accept_kind = semantic_accept_kind_for_invitation(
@@ -1415,6 +1461,21 @@ pub(super) fn handle_dispatch_command_match(
                 shared_pending_requests_for_dispatch,
                 &new_state.runtime_facts,
             );
+            if let Some(NotificationSelection::FriendRequest(authority)) = &selected {
+                let Some(update_tx) = update_tx_for_events else {
+                    new_state.toast_error("UI update sender is unavailable");
+                    return EventCommandLoopAction::ContinueCommand;
+                };
+                let operation = submit_local_terminal_operation(
+                    app_core_for_events,
+                    tasks_for_events,
+                    update_tx,
+                    OperationId::decline_friend_request(),
+                    SemanticOperationKind::DeclineFriendRequest,
+                );
+                (cb.contacts.on_decline_friend_request)(authority.clone(), operation);
+                return EventCommandLoopAction::ContinueCommand;
+            }
             if let Some(NotificationSelection::ReceivedInvitation(invitation_id)) = selected {
                 let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");

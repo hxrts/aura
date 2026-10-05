@@ -61,6 +61,11 @@ fn main() -> Result<(), AuraError> {
             source: Some(std::sync::Arc::new(source)),
         })?
         .block_on(async_main())
+        .or_else(|error| {
+            // Readable message instead of the Debug dump `main` would print.
+            eprintln!("error: {error}");
+            std::process::exit(1)
+        })
 }
 
 async fn async_main() -> Result<(), AuraError> {
@@ -81,8 +86,13 @@ async fn async_main() -> Result<(), AuraError> {
                 CliOutput::new().println(e.unwrap_stdout()).render();
                 std::process::exit(0);
             }
-            // For other errors, show our friendly usage
-            usage_output(true).render();
+            // With no arguments, show the friendly overview; otherwise bpaf's
+            // message names the missing option and the subcommand's usage.
+            if std::env::args().len() <= 1 {
+                usage_output(true).render();
+            } else {
+                eprintln!("{}", e.unwrap_stderr());
+            }
             std::process::exit(1);
         }
     };
@@ -142,11 +152,35 @@ async fn async_main() -> Result<(), AuraError> {
     let loaded_account = try_load_account_from_path(&storage_base_path)
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
+    if let Commands::Init(init) = &command {
+        if init.output.is_absolute() {
+            return Err(AuraError::invalid(format!(
+                "--output must be a relative path; init writes it under the data directory ({})",
+                storage_base_path.display()
+            )));
+        }
+    }
+    let init_seed = match &command {
+        Commands::Init(init) => Some(format!("cli:init:{}", init.output.display())),
+        _ => None,
+    };
     let (authority_id, context_id) = match loaded_account {
         aura_terminal::handlers::tui::AccountLoadResult::Loaded {
             authority, context, ..
         } => (authority, context),
+        // `init` writes new threshold configs; it needs no existing account, so
+        // its effects run under an identity derived from the output directory.
+        aura_terminal::handlers::tui::AccountLoadResult::NotFound if init_seed.is_some() => {
+            let seed = init_seed.unwrap_or_default();
+            (ids::authority_id(&seed), ids::context_id(&seed))
+        }
         aura_terminal::handlers::tui::AccountLoadResult::NotFound => {
+            CliOutput::new()
+                .eprintln(format!(
+                    "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
+                    storage_base_path.display()
+                ))
+                .render();
             let bootstrap_event = BootstrapEvent::new(
                 BootstrapSurface::Terminal,
                 BootstrapEventKind::RuntimeBootstrapRequired,
@@ -253,12 +287,12 @@ async fn async_main() -> Result<(), AuraError> {
         Commands::Scenarios { action } => cli_handler
             .handle_scenarios(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         #[cfg(feature = "development")]
         Commands::Demo { command } => cli_handler
             .handle_demo(&command)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Snapshot { action } => cli_handler
             .handle_snapshot(&action)
             .await

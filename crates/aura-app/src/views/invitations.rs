@@ -166,9 +166,15 @@ impl InvitationCreationWitness {
             DomainInvitationType::Channel {
                 home_id,
                 nickname_suggestion,
+                home,
                 ..
             } => (
-                InvitationType::Chat,
+                // A home invitation joins a home; others join a chat channel.
+                if *home {
+                    InvitationType::Home
+                } else {
+                    InvitationType::Chat
+                },
                 Some(*home_id),
                 nickname_suggestion
                     .as_deref()
@@ -218,6 +224,12 @@ impl InvitationCreationWitness {
     /// Return the stable invitation id without exposing the witness payload.
     pub fn id(&self) -> &str {
         &self.invitation.id
+    }
+
+    /// The invitation's sender authority.
+    #[must_use]
+    pub fn sender_id(&self) -> AuthorityId {
+        self.invitation.from_id
     }
 }
 
@@ -305,6 +317,30 @@ impl InvitationsState {
     /// Get invitation history.
     pub fn all_history(&self) -> &[Invitation] {
         &self.history
+    }
+
+    /// Name the sender of an invitation that carries no sender nickname
+    /// (guardian and channel invitations) with a known contact's name.
+    /// Returns whether the name changed.
+    pub fn name_unknown_sender(&mut self, id: &str, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let Some(invitation) = self
+            .pending
+            .iter_mut()
+            .chain(self.sent.iter_mut())
+            .chain(self.history.iter_mut())
+            .find(|inv| inv.id == id)
+        else {
+            return false;
+        };
+        if invitation.from_name != "Unknown" {
+            return false;
+        }
+        invitation.from_name = name.to_string();
+        true
     }
 
     /// Get invitation by ID (searches all lists).

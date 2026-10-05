@@ -538,7 +538,7 @@ mod native_cause_tests {
             source.downcast_ref::<aura_guards::GuardError>()),
             Some(aura_guards::GuardError::MissingCapability { capability })
             if capability == "sync:test"));
-        let copied = failure.clone();
+        let copied = failure;
         assert!(matches!(
             copied
                 .source()

@@ -405,9 +405,11 @@ pub async fn set_read_receipt_policy(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: &str,
     policy: ReadReceiptPolicy,
-    timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core)
+        .await
+        .map_err(|error| AuraError::internal(error.to_string()))?;
 
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();
@@ -462,6 +464,7 @@ pub async fn emit_read_receipts(
 
     let mut facts = Vec::new();
     let mut count = 0u32;
+    let mut recipients = Vec::new();
 
     for (message_id, sender_id) in unread_messages {
         // Skip own messages
@@ -480,6 +483,7 @@ pub async fn emit_read_receipts(
             ChatFact::message_read_ms(context_id, channel_id, message_id, reader_id, timestamp_ms)
                 .to_generic();
 
+        recipients.push((sender_id, fact.clone()));
         facts.push(fact);
         count += 1;
     }
@@ -496,5 +500,88 @@ pub async fn emit_read_receipts(
         .map_err(|e| runtime_call("emit read receipts", e))?;
     }
 
+    // The sender learns its message was read from the receipt itself; delivery
+    // is best effort, like delivery receipts.
+    for (sender_id, fact) in &recipients {
+        let _ = timeout_runtime_call(
+            &runtime,
+            "emit_read_receipts",
+            "send_chat_fact",
+            CONTACTS_RUNTIME_TIMEOUT,
+            || runtime.send_chat_fact(*sender_id, context_id, fact),
+        )
+        .await;
+    }
+
     Ok(count)
+}
+
+/// Send read receipts for the received messages of a channel the user is
+/// viewing that have not been marked read yet. Returns how many were sent.
+///
+/// OWNERSHIP: observed
+pub async fn mark_channel_viewed(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<u32, AuraError> {
+    let chat = crate::workflows::signals::read_signal(
+        app_core,
+        &*crate::signal_defs::CHAT_SIGNAL,
+        crate::signal_defs::CHAT_SIGNAL_NAME,
+    )
+    .await?;
+    let Some(context_id) = chat
+        .all_channels()
+        .find(|channel| channel.id == channel_id)
+        .and_then(|channel| channel.context_id)
+    else {
+        return Ok(0);
+    };
+    let unread: Vec<_> = chat
+        .messages_for_channel(&channel_id)
+        .iter()
+        .filter(|message| !message.is_own && !message.is_read)
+        .map(|message| (message.id.clone(), message.sender_id))
+        .collect();
+    if unread.is_empty() {
+        return Ok(0);
+    }
+    let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
+    emit_read_receipts(app_core, context_id, channel_id, unread, timestamp_ms).await
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+    use crate::{AppConfig, AppCore};
+    use aura_journal::fact::RelationalFact;
+
+    /// Contacts are unilateral (docs/115 §1.3): removing one commits only this
+    /// authority's own removal fact; nothing is addressed to the peer.
+    #[tokio::test]
+    async fn removing_a_contact_commits_only_a_local_removal_fact() {
+        let own = AuthorityId::new_from_entropy([181u8; 32]);
+        let peer = AuthorityId::new_from_entropy([182u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(own));
+        runtime.record_relational_facts();
+        let bridge: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime.clone();
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), bridge).unwrap(),
+        ));
+
+        remove_contact(&app_core, &peer.to_string(), 1)
+            .await
+            .expect("remove contact");
+
+        let facts = runtime.recorded_relational_facts();
+        assert_eq!(facts.len(), 1, "exactly one fact: {facts:?}");
+        let RelationalFact::Generic { envelope, .. } = &facts[0] else {
+            panic!("contact removal is a generic relational fact");
+        };
+        assert!(matches!(
+            ContactFact::from_envelope(envelope),
+            Some(ContactFact::Removed { owner_id, contact_id, .. })
+                if owner_id == own && contact_id == peer
+        ));
+    }
 }

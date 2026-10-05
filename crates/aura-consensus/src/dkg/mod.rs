@@ -1,7 +1,9 @@
 //! BFT-DKG orchestration and transcript handling.
 
 pub mod ceremony;
+pub mod context_session;
 pub mod dealer;
+pub mod frost_rounds;
 pub mod recovery;
 pub mod state_machine;
 pub mod storage;

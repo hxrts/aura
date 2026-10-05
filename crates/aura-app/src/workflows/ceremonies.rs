@@ -243,14 +243,14 @@ fn ceremony_start_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration
 
 fn ceremony_monitor_timeout(kind: crate::runtime_bridge::CeremonyKind) -> Duration {
     match kind {
+        // Approvals by guardians or other devices, and enrollment imports, wait on
+        // a person; this matches the runtime's 10 minute window for each.
         crate::runtime_bridge::CeremonyKind::GuardianRotation
-        | crate::runtime_bridge::CeremonyKind::DeviceRotation => Duration::from_secs(60),
-        // Enrollment waits for a person to import the code on the new device; this
-        // matches the runtime's 10 minute acceptance window.
-        crate::runtime_bridge::CeremonyKind::DeviceEnrollment => Duration::from_secs(600),
+        | crate::runtime_bridge::CeremonyKind::DeviceRotation
+        | crate::runtime_bridge::CeremonyKind::Recovery
+        | crate::runtime_bridge::CeremonyKind::DeviceEnrollment => Duration::from_secs(600),
         crate::runtime_bridge::CeremonyKind::DeviceRemoval => Duration::from_secs(45),
-        crate::runtime_bridge::CeremonyKind::Recovery
-        | crate::runtime_bridge::CeremonyKind::OtaActivation => Duration::from_secs(90),
+        crate::runtime_bridge::CeremonyKind::OtaActivation => Duration::from_secs(90),
         crate::runtime_bridge::CeremonyKind::Invitation
         | crate::runtime_bridge::CeremonyKind::RendezvousSecureChannel => Duration::from_secs(20),
     }
@@ -1583,7 +1583,12 @@ mod tests {
             CeremonyPollPolicy::for_kind(crate::runtime_bridge::CeremonyKind::Recovery, interval);
 
         assert_eq!(enrollment.max_attempts, 2402);
-        assert_eq!(recovery.max_attempts, 362);
+        assert_eq!(recovery.max_attempts, 2402);
+        let removal = CeremonyPollPolicy::for_kind(
+            crate::runtime_bridge::CeremonyKind::DeviceRemoval,
+            interval,
+        );
+        assert_eq!(removal.max_attempts, 182);
         assert!(!enrollment.rollback_on_failure);
         assert!(!recovery.rollback_on_failure);
     }
@@ -1600,6 +1605,10 @@ mod tests {
         );
         assert_eq!(
             ceremony_monitor_timeout(crate::runtime_bridge::CeremonyKind::Recovery),
+            Duration::from_secs(600)
+        );
+        assert_eq!(
+            ceremony_monitor_timeout(crate::runtime_bridge::CeremonyKind::OtaActivation),
             Duration::from_secs(90)
         );
     }

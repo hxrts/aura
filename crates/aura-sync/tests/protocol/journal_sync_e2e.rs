@@ -190,6 +190,10 @@ impl PhysicalTimeEffects for TestEffects {
 
 #[async_trait]
 impl TreeEffects for TestEffects {
+    async fn list_attested_ops(&self) -> Result<Vec<aura_core::AttestedOp>, aura_core::AuraError> {
+        Ok(Vec::new())
+    }
+
     async fn get_current_state(&self) -> Result<TreeState, aura_core::AuraError> {
         Ok(TreeState::new())
     }

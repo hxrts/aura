@@ -355,6 +355,7 @@ mod tests {
 
         {
             let mut core = app_core.write().await;
+            core.set_authority(authority);
             let mut homes = core.views().get_homes();
             let result = homes.add_home(HomeState::new(
                 home_a,
@@ -406,5 +407,45 @@ mod tests {
             Some(home_b)
         );
         assert_eq!(neighborhood.position.as_ref().map(|p| p.depth), Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_move_position_clamps_depth_to_access_override() {
+        let config = AppConfig::default();
+        let app_core = crate::testing::test_app_core(config);
+        init_signals_for_test(&app_core).await;
+        let owner = aura_core::types::identifiers::AuthorityId::new_from_entropy([12u8; 32]);
+        let viewer = aura_core::types::identifiers::AuthorityId::new_from_entropy([13u8; 32]);
+        let home = ChannelId::from_bytes(hash(b"home-limited"));
+        let ctx = ContextId::new_from_entropy(hash(b"ctx-limited"));
+
+        {
+            let mut core = app_core.write().await;
+            core.set_authority(viewer);
+            let mut homes = core.views().get_homes();
+            let mut state = HomeState::new(home, Some("Gamma".to_string()), owner, 1, ctx);
+            state.set_access_override(viewer, aura_social::AccessLevel::Limited);
+            homes.add_home(state);
+            core.views_mut().set_homes(homes);
+            let mut neighborhood = core.views().get_neighborhood();
+            neighborhood.add_neighbor(NeighborHome {
+                id: home,
+                name: "Gamma".to_string(),
+                one_hop_link: OneHopLinkType::Direct,
+                shared_contacts: 0,
+                member_count: Some(1),
+                can_traverse: true,
+            });
+            core.views_mut().set_neighborhood(neighborhood);
+        }
+        publish_test_homes_signal(&app_core).await;
+
+        move_position(&app_core, &home.to_string(), "full")
+            .await
+            .unwrap();
+
+        let core = app_core.read().await;
+        let neighborhood = core.views().get_neighborhood();
+        assert_eq!(neighborhood.position.as_ref().map(|p| p.depth), Some(0));
     }
 }

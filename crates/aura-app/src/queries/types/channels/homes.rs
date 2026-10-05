@@ -153,6 +153,7 @@ impl Query for HomesQuery {
                     kick_log: Vec::new(),
                     created_at: get_int(&row, "created_at") as u64,
                     context_id: get_optional_context_id(&row, "context_id")?,
+                    neighborhoods: std::collections::BTreeMap::new(),
                 })
             })
             .collect::<Result<_, _>>()?;

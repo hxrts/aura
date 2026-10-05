@@ -43,8 +43,7 @@ pub async fn persist_log(
         .await
         .map_err(|e| {
             TerminalError::Operation(format!(
-                "Failed to persist scenario log via storage effects: {}",
-                e
+                "Failed to persist scenario log via storage effects: {e}"
             ))
         })?;
 
@@ -60,5 +59,5 @@ fn scenario_log_output_path(scenario_path: &Path) -> PathBuf {
 
     Path::new("work")
         .join("scenario_logs")
-        .join(format!("{}.log", file_stem))
+        .join(format!("{file_stem}.log"))
 }

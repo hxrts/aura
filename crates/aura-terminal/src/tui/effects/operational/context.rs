@@ -153,7 +153,7 @@ pub async fn handle_context(
         } => {
             // Delegate to workflow
             match move_position(app_core, home_id, depth).await {
-                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Ok(_) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
             }
         }

@@ -189,6 +189,43 @@ mod tests {
     }
 
     #[test]
+    fn test_contacts_navigation_after_removing_selected_last_contact() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Contacts);
+        state.contacts.set_contact_count(3);
+        state.contacts.selected_index = 2;
+
+        // The selected (last) contact is removed.
+        assert!(state.contacts.set_contact_count(2));
+        assert_eq!(state.contacts.selected_index, 1);
+
+        let (state, _) = transition(&state, events::char('k'));
+        assert_eq!(state.contacts.selected_index, 0);
+        let (state, _) = transition(&state, events::char('j'));
+        assert_eq!(state.contacts.selected_index, 1);
+
+        // Removing every contact keeps the selection at the empty origin.
+        let mut state = state;
+        assert!(state.contacts.set_contact_count(0));
+        assert_eq!(state.contacts.selected_index, 0);
+        let (state, _) = transition(&state, events::char('j'));
+        assert_eq!(state.contacts.selected_index, 0);
+    }
+
+    #[test]
+    fn test_contacts_shift_r_toggles_read_receipts() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Contacts);
+
+        let (_, commands) = transition(&state, events::char('R'));
+
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            TuiCommand::Dispatch(DispatchCommand::ToggleSelectedContactReadReceipts)
+        )));
+    }
+
+    #[test]
     fn test_contacts_i_opens_create_invitation_modal() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Contacts);

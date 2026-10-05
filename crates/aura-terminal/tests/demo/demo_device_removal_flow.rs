@@ -192,7 +192,7 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .await
         .expect("import device enrollment code should succeed");
     runtime_b
-        .accept_invitation(invitation.invitation_id().as_str())
+        .accept_invitation(invitation.invitation_id.as_str())
         .await
         .expect("accept device enrollment invitation should succeed");
 

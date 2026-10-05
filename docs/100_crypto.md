@@ -376,6 +376,15 @@ Leader selection (lottery/round seed/fixed coordinator) and pipelining are ortho
 
 High-level signing operations use `AppCore` or direct `ThresholdSigningEffects` trait calls. See [Effects and Handlers Guide](802_effects_guide.md) for recommended patterns.
 
+### 7.5 Threshold PRF for Shared Symmetric Keys
+
+FROST DKG leaves the group secret `s` unknown to every participant, so a symmetric key that all members of a relational context share (AMP channel base keys, [AMP](112_amp.md) §4) is derived with a DDH-based threshold PRF over the DKG shares rather than from any public value.
+
+- `H(x)` hashes the input to a prime-order Ed25519 point whose discrete log is unknown (domain-separated try-and-increment; canonical decoding rejects identity and small-order points).
+- Participant `i` with share `s_i` publishes `σ_i = s_i · H(x)` and a Chaum-Pedersen proof that `log_B(Y_i) = log_H(σ_i)` for its public verifying share `Y_i = s_i · B`. Partials that do not verify are discarded, so a faulty member cannot corrupt the key.
+- Any threshold of verified partials from distinct participants combine by Lagrange interpolation at zero to `s · H(x)`; the key is `KDF(s · H(x), x)`. Every member derives the same key, and data available to non-members (the group verifying key, verifying shares, `x`) does not determine it.
+- The proof nonce comes from `RandomEffects`; the primitive is pure and lives in `aura-core::crypto::threshold_prf`.
+
 ### 7.6 FROST Minimum Threshold
 
 FROST requires `threshold >= 2`. Calling `frost_generate_keys(1, 1)` returns an error. For single-signer scenarios, use `generate_signing_keys(1, 1)` which routes to Ed25519 automatically.

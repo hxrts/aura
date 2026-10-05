@@ -388,6 +388,7 @@ fn build_demo_io_context(
     has_existing_account: bool,
     pending_runtime_bootstrap: bool,
     simulator: Option<&DemoSimulator>,
+    signed_codes: Option<(String, String)>,
 ) -> crate::error::TerminalResult<IoContext> {
     let seed = match launch.mode {
         TuiMode::Demo { seed } => seed,
@@ -397,7 +398,11 @@ fn build_demo_io_context(
             ));
         }
     };
-    let hints = DemoHints::new(seed);
+    let mut hints = DemoHints::new(seed);
+    if let Some((alice, carol)) = signed_codes {
+        hints.alice_invite_code = alice;
+        hints.carol_invite_code = carol;
+    }
     let mut builder = IoContext::builder()
         .with_app_core(app_core)
         .with_base_path(launch.base_path.clone())
@@ -762,7 +767,7 @@ async fn handle_tui_launch_with_bootstrap(
                                 ))
                             })?;
                         sim.start().await.map_err(|error| {
-                            AuraError::internal(format!("Failed to start simulator: {}", error))
+                            AuraError::internal(format!("Failed to start simulator: {error}"))
                         })?;
 
                         stdio.println(format_args!("Alice online: {}", sim.alice_authority()));
@@ -890,6 +895,17 @@ async fn handle_tui_launch_with_bootstrap(
     #[cfg(feature = "development")]
     let ctx = match launch.mode {
         TuiMode::Demo { .. } => {
+            // Hint codes must be real signed invitations or they cannot import.
+            let signed_codes = match simulator.as_ref() {
+                Some(sim) => match sim.signed_contact_invite_codes().await {
+                    Ok(codes) => Some(codes),
+                    Err(error) => {
+                        tracing::warn!(error = %error, "demo: could not create signed contact codes");
+                        None
+                    }
+                },
+                None => None,
+            };
             let ctx = build_demo_io_context(
                 app_core,
                 &launch,
@@ -897,6 +913,7 @@ async fn handle_tui_launch_with_bootstrap(
                 has_existing_account,
                 pending_runtime_bootstrap,
                 simulator.as_ref(),
+                signed_codes,
             )?;
             stdio.println(format_args!("Demo hints available."));
             ctx
@@ -966,8 +983,7 @@ async fn handle_tui_launch_with_bootstrap(
         stdio.println(format_args!("Stopping demo simulator..."));
         if let Err(error) = sim.stop().await {
             stdio.eprintln(format_args!(
-                "Warning: Failed to stop simulator cleanly: {}",
-                error
+                "Warning: Failed to stop simulator cleanly: {error}"
             ));
         }
     }

@@ -25,6 +25,8 @@ pub(super) enum NotificationSelection {
     ReceivedInvitation(String),
     SentInvitation(String),
     RecoveryRequest(String),
+    /// An inbound friend request from the contact with this authority id.
+    FriendRequest(String),
     PassiveRuntimeEvent(String),
 }
 
@@ -266,6 +268,11 @@ pub(super) fn read_selected_notification(
     // Resolve through the row the screen rendered at this index; the screen
     // omits some items (e.g. sent invitations), so positions can differ.
     if let Some(rendered_id) = visible_ids.get(selected_index) {
+        if let Some(authority) =
+            rendered_id.strip_prefix(crate::tui::types::FRIEND_REQUEST_NOTIFICATION_PREFIX)
+        {
+            return Some(NotificationSelection::FriendRequest(authority.to_string()));
+        }
         if let Some((_, selection)) = notifications.iter().find(|(_, selection)| {
             notification_selection_id(selection) == Some(rendered_id.as_str())
         }) {
@@ -282,7 +289,8 @@ fn notification_selection_id(selection: &NotificationSelection) -> Option<&str> 
     match selection {
         NotificationSelection::ReceivedInvitation(id)
         | NotificationSelection::SentInvitation(id)
-        | NotificationSelection::RecoveryRequest(id) => Some(id.as_str()),
+        | NotificationSelection::RecoveryRequest(id)
+        | NotificationSelection::FriendRequest(id) => Some(id.as_str()),
         NotificationSelection::PassiveRuntimeEvent(_) => None,
     }
 }
@@ -1045,14 +1053,24 @@ fn open_ceremony_setup_modal(
                 return Some(EventCommandLoopAction::ContinueCommand);
             }
 
+            // Only contacts who accepted a guardian invitation have the
+            // verified key a guardian ceremony needs (work/8.md Task 56);
+            // offering others led to a ceremony that failed at once.
             let candidates: Vec<crate::tui::state::GuardianCandidate> = current_contacts
                 .iter()
+                .filter(|c| c.is_guardian)
                 .map(|c| crate::tui::state::GuardianCandidate {
                     id: c.id.clone(),
                     name: c.display_name(),
                     is_current_guardian: c.is_guardian,
                 })
                 .collect();
+            if candidates.is_empty() {
+                new_state.toast_error(
+                    "No guardians yet: select a contact and press G to invite them as a guardian",
+                );
+                return Some(EventCommandLoopAction::ContinueCommand);
+            }
             let selected: Vec<usize> = candidates
                 .iter()
                 .enumerate()

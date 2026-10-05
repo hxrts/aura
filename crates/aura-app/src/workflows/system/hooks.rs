@@ -573,7 +573,22 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             "authoritative_homes_readiness_hook",
             Arc::new(|app_core| {
                 Box::pin(async move {
-                    refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+                    // A home joined live (e.g. an accepted home invitation)
+                    // must reach the neighborhood projection without a restart.
+                    let mut best_effort = workflow_best_effort();
+                    let _ = best_effort
+                        .capture(
+                            crate::workflows::observed_projection::mirror_homes_signal_into_view(
+                                &app_core,
+                            ),
+                        )
+                        .await;
+                    let _ = best_effort
+                        .capture(refresh_authoritative_channel_and_recipient_readiness_hook(
+                            &app_core,
+                        ))
+                        .await;
+                    best_effort.finish()
                 })
             }),
             (cancel_rx.clone(), health.clone()),

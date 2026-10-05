@@ -21,6 +21,8 @@ const RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY: &str =
     "runtime_bridge_sync_ceremony_processing";
 const RUNTIME_BRIDGE_SYNC_WITH_PEER_CAPABILITY: &str = "runtime_bridge_sync_with_peer";
 const RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY: &str = "runtime_bridge_sync_peer_channel";
+/// How long a verified transport observation keeps a peer counted as connected.
+const REACHABLE_PEER_WINDOW_MS: u64 = 60_000;
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
@@ -42,9 +44,21 @@ pub(super) async fn get_sync_status(
     let active_sessions = health.as_ref().map(|h| h.active_sessions).unwrap_or(0);
     let last_sync_ms = health.and_then(|h| h.last_sync);
 
+    // Native LAN sends use short-lived connections, so count peers verified
+    // reachable recently (a successful send or an authenticated envelope).
+    let now_ms = effects
+        .time_effects()
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .unwrap_or(0);
+    let reachable_peers = effects.reachable_peer_count(now_ms, REACHABLE_PEER_WINDOW_MS);
+
     Ok(SyncStatus {
         is_running,
-        connected_peers: (transport_stats.active_channels as usize).max(active_sessions as usize),
+        connected_peers: (transport_stats.active_channels as usize)
+            .max(active_sessions as usize)
+            .max(reachable_peers),
         last_sync_ms,
         pending_facts: 0,
         active_sessions: active_sessions as usize,

@@ -40,9 +40,21 @@ cfg_if! {
         fn main() {
             aura_app::platform::wasm::initialize();
             apply_harness_mode_document_flags();
+            // `?log=debug`, or a harness-run page (it carries the relay query),
+            // opts into debug tracing for diagnosis.
+            let max_level = if web_sys::window()
+                .and_then(|window| window.location().search().ok())
+                .is_some_and(|search| {
+                    search.contains("log=debug") || search.contains("__aura_harness_relay_addr=")
+                })
+            {
+                tracing::Level::DEBUG
+            } else {
+                tracing::Level::INFO
+            };
             let mut tracing_config = tracing_wasm::WASMLayerConfigBuilder::new();
             tracing_config
-                .set_max_level(tracing::Level::INFO)
+                .set_max_level(max_level)
                 .set_report_logs_in_timings(false);
             tracing_wasm::set_as_global_default_with_config(tracing_config.build());
             dioxus::launch(App);
@@ -912,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn web_onboarding_releases_rerender_ownership_and_stops_candidate_polling() {
+    fn web_onboarding_releases_rerender_ownership_and_bounds_candidate_polling() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let app_path = repo_root.join("crates/aura-web/src/shell/app.rs");
         let source = std::fs::read_to_string(&app_path)
@@ -933,8 +945,9 @@ mod tests {
         );
         assert!(
             body.contains("if onboarding_finished(&controller) {")
-                && body.contains("if !app.has_runtime() {"),
-            "onboarding candidate refresh must stop once the account is ready or when no runtime exists"
+                && body.contains("aura_agent::fetch_bootstrap_broker_candidates(")
+                && body.contains("(bootstrap_broker_url(), bootstrap_broker_auth_token())"),
+            "onboarding candidate refresh must stop once the account is ready, list broker candidates before a runtime exists, and stop when there is neither a runtime nor a broker"
         );
     }
 }

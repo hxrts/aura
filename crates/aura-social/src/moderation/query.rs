@@ -581,7 +581,7 @@ mod tests {
             try_is_user_banned_and_muted(&[mismatch], &context, &subject, 101, None),
             Err(RequiredModerationQueryError::ContextMismatch { .. })
         ));
-        let mut mislabeled = original.clone();
+        let mut mislabeled = original;
         mislabeled.encoding = FactEncoding::Json;
         assert!(matches!(
             try_is_user_banned_and_muted(&[wrap(mislabeled)], &context, &subject, 101, None),

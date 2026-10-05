@@ -40,6 +40,13 @@ retention_root_for_config() {
 case "${1:-}" in
 start)
   [ -n "${2:-}" ] || { echo "usage: $0 start <config>" >&2; exit 2; }
+  # Configs name this host's LAN address as __HOST_ADDR__; render a copy.
+  if grep -q __HOST_ADDR__ "$2"; then
+    [ -n "$AURA_E2E_HOST_ADDR" ] || { echo "set AURA_E2E_HOST_ADDR to this host's LAN address" >&2; exit 2; }
+    rendered="$D/$(basename "$2")"
+    sed "s/__HOST_ADDR__/$AURA_E2E_HOST_ADDR/g" "$2" > "$rendered"
+    set -- "$1" "$rendered"
+  fi
   [[ "$AURA_E2E_RUN_TOKEN" =~ ^[a-z0-9][a-z0-9-]*$ ]] || {
     echo 'LAN run token must be lowercase letters, digits and hyphens' >&2; exit 2;
   }

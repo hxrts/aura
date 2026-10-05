@@ -95,7 +95,7 @@ pub async fn simulate_cli_recovery_demo(
     steps.push(SimStep {
         phase: "group_chat_setup".into(),
         action: "create_group".into(),
-        details: Some(format!("Group ID: {}", group_id)),
+        details: Some(format!("Group ID: {group_id}")),
     });
 
     let messages = vec![
@@ -122,7 +122,7 @@ pub async fn simulate_cli_recovery_demo(
         steps.push(SimStep {
             phase: (*phase).into(),
             action: "send_message".into(),
-            details: Some(format!("{}: {}", sender, message)),
+            details: Some(format!("{sender}: {message}")),
         });
     }
 
@@ -179,7 +179,7 @@ pub async fn simulate_cli_recovery_demo(
         steps.push(SimStep {
             phase: (*phase).into(),
             action: "send_message".into(),
-            details: Some(format!("{}: {}", sender, message)),
+            details: Some(format!("{sender}: {message}")),
         });
     }
 

@@ -262,7 +262,7 @@ impl DemoSignalCoordinator {
                     is_own: false,
                     reply_to: None,
                     is_read: false,
-                    delivery_status: Default::default(),
+                    delivery_status: MessageDeliveryStatus::default(),
                     epoch_hint: None,
                     is_finalized: false,
                 };

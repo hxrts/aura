@@ -394,6 +394,7 @@ pub fn NeighborhoodScreen(
     let active_scope: Arc<std::sync::RwLock<String>> = active_scope_ref.read().clone();
 
     let reactive_members = hooks.use_state(Vec::new);
+    let reactive_member_counts = hooks.use_state(std::collections::HashMap::<String, usize>::new);
     let reactive_budget = hooks.use_state(HomeBudget::default);
     let reactive_channels = hooks.use_state(Vec::new);
     let reactive_contacts = hooks.use_state(Vec::new);
@@ -460,8 +461,15 @@ pub fn NeighborhoodScreen(
         let app_core = app_ctx.for_subscription_scope("neighborhood");
         let mut reactive_members = reactive_members.clone();
         let mut reactive_budget = reactive_budget.clone();
+        let mut reactive_member_counts = reactive_member_counts.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |home_state| {
+                reactive_member_counts.set(
+                    home_state
+                        .iter()
+                        .map(|(id, home)| (id.to_string(), home.members.len()))
+                        .collect(),
+                );
                 if let Some(current_home) = home_state.current_home() {
                     let members: Vec<HomeMember> =
                         current_home.members.iter().map(convert_member).collect();
@@ -503,13 +511,27 @@ pub fn NeighborhoodScreen(
     });
 
     let neighborhood_name = reactive_neighborhood_name.read().clone();
-    let homes = reactive_homes.read().clone();
+    let mut homes = reactive_homes.read().clone();
     let members = reactive_members.read().clone();
+    // Every tile counts its home's members from the one homes projection.
+    let member_counts = reactive_member_counts.read().clone();
+    for home in &mut homes {
+        if let Some(count) = member_counts.get(&home.id) {
+            home.member_count = u8::try_from(*count).unwrap_or(u8::MAX);
+        }
+    }
     let budget = reactive_budget.read().clone();
     let channels = reactive_channels.read().clone();
 
     let is_detail = props.view.mode == NeighborhoodMode::Detail;
     let is_entered = props.view.entered_home_id.is_some();
+    // Once entered, show the depth the workflow granted (clamped to the
+    // viewer's access level), not the requested one.
+    let effective_depth = if is_entered {
+        reactive_depth.get()
+    } else {
+        props.view.enter_depth
+    };
 
     let current_home_name = homes
         .get(props.view.selected_home)
@@ -521,8 +543,7 @@ pub fn NeighborhoodScreen(
         .unwrap_or_default();
     // Only expose channel/member detail when full access is active.
     // This keeps Limited/Partial traversal views from leaking full-only data.
-    let full_entered =
-        is_detail && is_entered && matches!(props.view.enter_depth, AccessLevel::Full);
+    let full_entered = is_detail && is_entered && matches!(effective_depth, AccessLevel::Full);
     let show_detail_lists = !is_detail || full_entered;
     let display_channels = if show_detail_lists {
         channels
@@ -629,7 +650,7 @@ pub fn NeighborhoodScreen(
                         neighborhood_name: neighborhood_name,
                         selected_home_name: current_home_name,
                         selected_home_id: selected_home_id,
-                        enter_depth: props.view.enter_depth,
+                        enter_depth: effective_depth,
                         entered_home: is_entered,
                         homes_count: homes_count,
                         channel_count: channel_count,

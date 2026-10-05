@@ -59,6 +59,19 @@ pub struct ContactsViewState {
     // Use modal_queue.enqueue(QueuedModal::ContactsNickname/Import/Create/Code(...)) to show modals.
 }
 
+impl ContactsViewState {
+    /// Record a new contact count, keeping the selection inside the list.
+    ///
+    /// Returns whether anything changed.
+    pub fn set_contact_count(&mut self, count: usize) -> bool {
+        let selected_index = crate::tui::navigation::clamp_list_index(self.selected_index, count);
+        let changed = self.contact_count != count || self.selected_index != selected_index;
+        self.contact_count = count;
+        self.selected_index = selected_index;
+        changed
+    }
+}
+
 /// State for nickname edit modal
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.

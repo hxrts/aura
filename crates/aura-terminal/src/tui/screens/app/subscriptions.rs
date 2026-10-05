@@ -673,25 +673,33 @@ pub fn use_notifications_subscription(
     let invite_count = invite_count_ref.read().clone();
     let recovery_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
     let recovery_count = recovery_count_ref.read().clone();
+    // Inbound friend requests, listed from contacts (see the notifications screen).
+    let friend_request_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(0)));
+    let friend_request_count = friend_request_count_ref.read().clone();
     let last_total_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
     let last_total = last_total_ref.read().clone();
     let tasks = app_ctx.tasks();
 
-    let send_total = |tasks: &Arc<UiTaskOwner>,
-                      tx: &Option<UiUpdateSender>,
-                      invites: &Arc<AtomicUsize>,
-                      recovery: &Arc<AtomicUsize>,
-                      last_total: &Arc<AtomicUsize>| {
-        if let Some(ref tx) = tx {
-            let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
-            let previous = last_total.swap(total, Ordering::Relaxed);
-            if previous != total {
-                spawn_ui_update(
-                    tasks,
-                    tx,
-                    UiUpdate::NotificationsCountChanged(total),
-                    UiUpdatePublication::RequiredUnordered,
-                );
+    let send_total = {
+        let friend_request_count = friend_request_count.clone();
+        move |tasks: &Arc<UiTaskOwner>,
+              tx: &Option<UiUpdateSender>,
+              invites: &Arc<AtomicUsize>,
+              recovery: &Arc<AtomicUsize>,
+              last_total: &Arc<AtomicUsize>| {
+            if let Some(ref tx) = tx {
+                let total = invites.load(Ordering::Relaxed)
+                    + recovery.load(Ordering::Relaxed)
+                    + friend_request_count.load(Ordering::Relaxed);
+                let previous = last_total.swap(total, Ordering::Relaxed);
+                if previous != total {
+                    spawn_ui_update(
+                        tasks,
+                        tx,
+                        UiUpdate::NotificationsCountChanged(total),
+                        UiUpdatePublication::RequiredUnordered,
+                    );
+                }
             }
         }
     };
@@ -699,6 +707,7 @@ pub fn use_notifications_subscription(
     // Invitations
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
+        let send_total = send_total.clone();
         let invite_count = invite_count.clone();
         let recovery_count = recovery_count.clone();
         let last_total = last_total.clone();
@@ -713,6 +722,43 @@ pub fn use_notifications_subscription(
                     // Matches the rows the notifications screen lists: received and
                     // sent invitations still awaiting a response.
                     invite_count.store(state.open_invitations().count(), Ordering::Relaxed);
+                    send_total(
+                        &tasks,
+                        &update_tx,
+                        &invite_count,
+                        &recovery_count,
+                        &last_total,
+                    );
+                },
+                degradation,
+            )
+            .await;
+        }
+    });
+
+    // Inbound friend requests
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let send_total = send_total.clone();
+        let invite_count = invite_count.clone();
+        let recovery_count = recovery_count.clone();
+        let last_total = last_total.clone();
+        let update_tx = update_tx.clone();
+        let tasks = tasks.clone();
+        let degradation = StructuralDegradationSink::new(tasks.clone(), update_tx.clone());
+        async move {
+            subscribe_update_bridge_signal(
+                app_core,
+                &*CONTACTS_SIGNAL,
+                move |state| {
+                    let pending = state
+                        .all_contacts()
+                        .filter(|contact| {
+                            contact.relationship_state
+                                == aura_app::ui::types::ContactRelationshipState::PendingInbound
+                        })
+                        .count();
+                    friend_request_count.store(pending, Ordering::Relaxed);
                     send_total(
                         &tasks,
                         &update_tx,

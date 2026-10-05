@@ -1878,6 +1878,10 @@ impl InvitationHandler {
         invitation: Option<&Invitation>,
     ) -> AgentResult<()> {
         let Some(invitation) = invitation else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                "accept follow-up skipped: invitation not loaded for choreography"
+            );
             return Ok(());
         };
 
@@ -1889,6 +1893,7 @@ impl InvitationHandler {
                 );
             }
             InvitationType::Guardian { .. } => {
+                tracing::debug!(invitation_id = %invitation_id, "guardian accept follow-up starting");
                 self
                     .execute_guardian_invitation_guardian(effects.clone(), invitation)
                     .await
@@ -2276,6 +2281,59 @@ impl InvitationHandler {
             let descriptor =
                 Self::verified_hint_descriptor(peer, device_id, context_id, hints.clone(), now_ms);
             let _ = manager.cache_descriptor(descriptor).await;
+        }
+        // Persist the verified hint so a restarted (e.g. reloaded browser)
+        // runtime can still reach this peer; descriptors live only in memory.
+        if let Some(addr) = addr {
+            let record = format!(
+                "{peer}\n{}\n{addr}",
+                device_id.map(|id| id.to_string()).unwrap_or_default()
+            );
+            let key = format!(
+                "{}{peer}",
+                Self::verified_peer_hint_prefix(self.context.authority.authority_id())
+            );
+            let _ = effects.store(&key, record.into_bytes()).await;
+        }
+    }
+
+    fn verified_peer_hint_prefix(own: AuthorityId) -> String {
+        format!("verified_peer_hints/{own}/")
+    }
+
+    /// Re-caches every persisted verified peer hint (see
+    /// [`Self::cache_verified_peer_descriptor_for_peer`]) after a restart.
+    pub(crate) async fn restore_verified_peer_descriptors(&self, effects: &AuraEffectSystem) {
+        let prefix = Self::verified_peer_hint_prefix(self.context.authority.authority_id());
+        let Ok(keys) = effects.list_keys(Some(&prefix)).await else {
+            return;
+        };
+        let now_ms = Self::best_effort_current_timestamp_ms(effects).await;
+        for key in keys {
+            let Ok(Some(bytes)) = effects.retrieve(&key).await else {
+                continue;
+            };
+            let Ok(record) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let mut fields = record.splitn(3, '\n');
+            let (Some(peer), Some(device), Some(addr)) =
+                (fields.next(), fields.next(), fields.next())
+            else {
+                continue;
+            };
+            let Ok(peer) = peer.parse::<AuthorityId>() else {
+                continue;
+            };
+            let device_id = device.parse::<DeviceId>().ok();
+            self.cache_verified_peer_descriptor_for_peer(
+                effects,
+                peer,
+                device_id,
+                Some(addr),
+                now_ms,
+            )
+            .await;
         }
     }
 
@@ -3658,31 +3716,14 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
     }
 }
 
-fn deterministic_test_transport_receipt(envelope: &TransportEnvelope) -> TransportReceipt {
-    TransportReceipt {
-        context: envelope.context,
-        src: envelope.source,
-        dst: envelope.destination,
-        epoch: 1,
-        cost: 1,
-        nonce: 1,
-        prev: [0u8; 32],
-        sig: vec![1u8],
-    }
-}
-
 fn attach_invitation_test_receipt_if_needed(
     effects: &AuraEffectSystem,
     envelope: &mut TransportEnvelope,
 ) {
-    if effects.is_testing()
-        && envelope
-            .receipt
-            .as_ref()
-            .map_or(true, |receipt| receipt.sig.is_empty())
-    {
-        envelope.receipt = Some(deterministic_test_transport_receipt(envelope));
-    }
+    crate::runtime::receipt_model::attach_test_transport_receipt_if_needed(
+        effects.is_testing(),
+        envelope,
+    );
 }
 
 async fn execute_record_receipt(

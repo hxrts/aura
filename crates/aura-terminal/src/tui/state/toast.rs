@@ -117,57 +117,22 @@ impl QueuedToast {
     }
 }
 
-/// Markers that identify internal error chains rather than user-facing text.
-const INTERNAL_ERROR_MARKERS: &[&str] = &[
-    "internal error",
-    "agent configuration error",
-    "json parsing",
-    "detail=",
-    "_id=",
-    "amp operation failed",
-    "operation failed:",
-    "invalid:",
-];
-
 /// Turn a raw error string into a short user-facing message.
 ///
 /// Returns the message to show and, when it differs, the raw text kept as
 /// details for copying (`y`) and diagnostics.
 #[must_use]
 pub fn user_facing_error(raw: &str) -> (String, Option<String>) {
-    let lowered = raw.to_ascii_lowercase();
-    let friendly = if let Some(outcome) =
-        aura_app::ui::workflows::invitation::contact_acceptance_outcome_message(raw)
-    {
-        Some(outcome)
-    } else if lowered.contains("invalid invite code") || lowered.contains("invalid invitation code")
-    {
-        Some("That invitation code isn't valid".to_string())
-    } else if lowered.contains("amp_send_message") || lowered.contains("send_message failed") {
-        Some("Couldn't send the message - retry".to_string())
-    } else if INTERNAL_ERROR_MARKERS
-        .iter()
-        .any(|marker| lowered.contains(marker))
-    {
-        // Keep the leading human label ("Failed to import invitation") and drop
-        // the internal chain behind it.
-        let head = raw.split(": ").next().unwrap_or(raw).trim();
-        let head_is_internal = INTERNAL_ERROR_MARKERS
-            .iter()
-            .any(|marker| head.to_ascii_lowercase().contains(marker))
-            || head.chars().next().is_some_and(|c| !c.is_ascii_uppercase());
-        Some(if head_is_internal || head.len() == raw.trim().len() {
+    use aura_app::ui::workflows::user_errors::{classify, UserFacingError};
+    let message = match classify(raw) {
+        UserFacingError::Unchanged => return (raw.to_string(), None),
+        UserFacingError::Sentence(sentence) => sentence,
+        UserFacingError::SeeDetails(Some(head)) => format!("{head} (press y to copy details)"),
+        UserFacingError::SeeDetails(None) => {
             "Something went wrong (press y to copy details)".to_string()
-        } else {
-            format!("{head} (press y to copy details)")
-        })
-    } else {
-        None
+        }
     };
-    match friendly {
-        Some(message) => (message, Some(raw.to_string())),
-        None => (raw.to_string(), None),
-    }
+    (message, Some(raw.to_string()))
 }
 
 impl ToastQueue {

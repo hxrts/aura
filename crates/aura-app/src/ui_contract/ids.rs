@@ -802,7 +802,9 @@ impl ControlId {
             Self::ContactsDeclineFriendRequestButton => Some("x"),
             Self::ContactsRemoveFriendButton => Some("r"),
             Self::ContactsInviteToChannelButton => Some("i"),
-            Self::ContactsAddGuardianButton => Some("g"),
+            // `G`: `g` in the TUI opens the threshold setup wizard over guardians
+            // who already accepted; this control sends the invitation itself.
+            Self::ContactsAddGuardianButton => Some("G"),
             Self::ChatNewGroupButton => Some("n"),
             Self::ChatEditChannelButton => Some("e"),
             Self::ChatCloseChannelButton => Some("x"),

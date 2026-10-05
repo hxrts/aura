@@ -32,11 +32,11 @@ use aura_journal::fact::{
 };
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
-use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
+use aura_recovery::guardian_ceremony::CeremonyProposal;
 use aura_relational::ContactFact;
 
 use super::identities::{demo_authority_id, demo_context_id, demo_device_id, GuardianAcceptance};
-use crate::error::TerminalResult;
+use crate::error::{TerminalError, TerminalResult};
 use crate::tui::tasks::UiTaskOwner;
 
 const EXTENDED_DEMO_PEER_NAMES: [&str; 13] = [
@@ -190,6 +190,33 @@ impl DemoSimulator {
 
     pub fn carol_agent(&self) -> Arc<AuraAgent> {
         self.carol.clone()
+    }
+
+    /// Signed contact invitation codes from Alice and Carol to Bob, created
+    /// through each peer's invitation service so they carry a real sender
+    /// proof and import like any other contact code.
+    pub async fn signed_contact_invite_codes(&self) -> TerminalResult<(String, String)> {
+        async fn code_for(
+            agent: &AuraAgent,
+            name: &str,
+            receiver: AuthorityId,
+        ) -> TerminalResult<String> {
+            let invitations = agent
+                .invitations()
+                .map_err(|error| TerminalError::Operation(error.to_string()))?;
+            let invitation = invitations
+                .invite_as_contact(receiver, Some(name.to_string()), None, None, None)
+                .await
+                .map_err(|error| TerminalError::Operation(error.to_string()))?;
+            invitations
+                .export_code(&invitation.invitation_id)
+                .await
+                .map_err(|error| TerminalError::Operation(error.to_string()))
+        }
+        Ok((
+            code_for(&self.alice, "Alice", self.bob_authority).await?,
+            code_for(&self.carol, "Carol", self.bob_authority).await?,
+        ))
     }
 
     pub fn mobile_device_id(&self) -> aura_core::DeviceId {
@@ -392,8 +419,10 @@ async fn build_demo_peer_agent(
     storage_dir: PathBuf,
     shared_transport: SharedTransport,
 ) -> TerminalResult<Arc<AuraAgent>> {
-    let mut config = AgentConfig::default();
-    config.device_id = device_id;
+    let mut config = AgentConfig {
+        device_id,
+        ..AgentConfig::default()
+    };
     config.storage.base_path = storage_dir;
 
     let ctx = EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
@@ -407,7 +436,19 @@ async fn build_demo_peer_agent(
             aura_core::AuraError::internal(format!("Failed to build {name} agent: {e}"))
         })?;
 
-    Ok(Arc::new(agent))
+    // Give the peer a signing identity the way account creation does, so it
+    // can sign invitation responses and ceremony messages.
+    let agent = Arc::new(agent);
+    agent
+        .clone()
+        .as_runtime_bridge()
+        .bootstrap_signing_keys()
+        .await
+        .map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to bootstrap {name} signing keys: {e}"))
+        })?;
+
+    Ok(agent)
 }
 
 async fn establish_contact_exchange(
@@ -453,9 +494,33 @@ async fn establish_contact_exchange(
 }
 
 /// Peer-side automation: currently only guardian setup auto-acceptance.
+/// Register queued guardian ceremony proposals and approve each through the
+/// runtime bridge, the same path a guardian takes from Notifications.
+async fn approve_guardian_proposals(name: &str, agent: &Arc<AuraAgent>) {
+    let Ok(recovery) = agent.recovery() else {
+        return;
+    };
+    let ceremonies = match recovery.discover_guardian_ceremony_proposals().await {
+        Ok(ceremonies) => ceremonies,
+        Err(err) => {
+            tracing::warn!("{name} failed to discover guardian ceremony proposals: {err}");
+            return;
+        }
+    };
+    let bridge = agent.clone().as_runtime_bridge();
+    for ceremony_id in ceremonies {
+        if let Err(err) = bridge
+            .respond_to_guardian_ceremony(&ceremony_id, true, None)
+            .await
+        {
+            tracing::warn!("{name} failed to approve guardian ceremony {ceremony_id}: {err}");
+        }
+    }
+}
+
 async fn process_peer_transport_messages(
     name: &str,
-    agent: &AuraAgent,
+    agent: &Arc<AuraAgent>,
     bob_authority: AuthorityId,
 ) -> TerminalResult<Vec<PeerObservedMessage>> {
     let effects = agent.runtime().effects();
@@ -553,6 +618,11 @@ async fn process_peer_transport_messages(
     // monopolize the loop and starve other traffic (e.g. AMP echoes).
     const MAX_ENVELOPES_PER_TICK: usize = 128;
 
+    // Envelopes the demo does not answer itself (contact acceptances,
+    // invitation responses, ...) go back to the agent's own runtime
+    // handlers after this tick instead of being dropped.
+    let mut deferred = Vec::new();
+
     for _ in 0..MAX_ENVELOPES_PER_TICK {
         let envelope = match effects.receive_envelope().await {
             Ok(env) => env,
@@ -618,43 +688,10 @@ async fn process_peer_transport_messages(
                         }
                     }
                 }
-                "application/aura-invitation" => {
-                    let code = match String::from_utf8(envelope.payload) {
-                        Ok(code) => code,
-                        Err(err) => {
-                            tracing::warn!("{name} received invalid invitation payload: {err}");
-                            continue;
-                        }
-                    };
-
-                    let invitation_service = match agent.invitations() {
-                        Ok(service) => service,
-                        Err(err) => {
-                            tracing::warn!("{name} failed to load invitation service: {err}");
-                            continue;
-                        }
-                    };
-
-                    let invitation = match invitation_service.import_and_cache(&code).await {
-                        Ok(invitation) => invitation,
-                        Err(err) => {
-                            tracing::warn!("{name} failed to import invitation: {err}");
-                            continue;
-                        }
-                    };
-
-                    if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                        accept_channel_invitation(
-                            name,
-                            agent,
-                            &effects,
-                            &invitation_service,
-                            &invitation,
-                            envelope.context,
-                        )
-                        .await;
-                    }
-                }
+                // Inbound invitations go through the runtime's own import path
+                // (sender authenticated by the transport receipt); the demo then
+                // accepts them from the pending list below, as a person would.
+                "application/aura-invitation" => deferred.push(envelope),
                 "application/aura-chat-fact" => {
                     let relational_fact = match from_slice::<RelationalFact>(&envelope.payload) {
                         Ok(fact) => fact,
@@ -833,60 +870,17 @@ async fn process_peer_transport_messages(
 
                     // Try to deserialize as CeremonyProposal (bincode format)
                     if let Ok(proposal) = from_slice::<CeremonyProposal>(&envelope.payload) {
+                        // Leave the proposal queued for this agent's guardian session
+                        // and approve it as a person would (Notifications `r`):
+                        // discovery registers it, then the runtime bridge responds
+                        // and the session signs the real response.
                         tracing::info!(
                             "{name} received guardian ceremony proposal for ceremony {}",
                             proposal.ceremony_id
                         );
-
-                        // Create response accepting the ceremony
-                        let response_msg = CeremonyResponseMsg {
-                            ceremony_id: proposal.ceremony_id,
-                            guardian_id: agent.authority_id(),
-                            response: CeremonyResponse::Accept,
-                            encrypted_key_package_hash: proposal.encrypted_key_package_hash,
-                            signature: Vec::new(), // Signature would be added in production
-                        };
-
-                        // Serialize response in bincode format (same as choreography uses)
-                        let payload = match to_vec(&response_msg) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!("{name} failed to serialize ceremony response: {e}");
-                                continue;
-                            }
-                        };
-
-                        // Include choreography metadata so the response is routed correctly
-                        let mut response_metadata = std::collections::HashMap::new();
-                        response_metadata.insert(
-                            "content-type".to_string(),
-                            "application/aura-choreography".to_string(),
-                        );
-                        if let Some(session_id) = envelope.metadata.get("session-id") {
-                            response_metadata.insert("session-id".to_string(), session_id.clone());
-                        }
-
-                        let response = aura_core::effects::TransportEnvelope {
-                            destination: envelope.source,
-                            source: agent.authority_id(),
-                            context: envelope.context,
-                            payload,
-                            metadata: response_metadata,
-                            receipt: None,
-                        };
-
-                        if let Err(e) =
-                            send_demo_raw_envelope_for_simulation(effects.as_ref(), response).await
-                        {
-                            tracing::warn!(
-                                "{name} failed to send choreography ceremony response: {e}"
-                            );
-                        } else {
-                            tracing::info!(
-                                "{name} sent guardian ceremony acceptance for ceremony {}",
-                                proposal.ceremony_id
-                            );
-                        }
+                        effects.requeue_envelope(envelope);
+                        approve_guardian_proposals(name, agent).await;
+                        continue;
                     } else if let Ok(enrollment_request) =
                         from_slice::<DeviceEnrollmentRequest>(&envelope.payload)
                     {
@@ -961,16 +955,38 @@ async fn process_peer_transport_messages(
                         continue;
                     }
                 }
-                _ => {}
+                _ => deferred.push(envelope),
             }
+        } else {
+            deferred.push(envelope);
         }
     }
+    for envelope in deferred {
+        effects.requeue_envelope(envelope);
+    }
+    // Process them the way a real client's maintenance loop does (contact
+    // acceptances, invitation responses, rendezvous handshakes).
+    if let Err(err) = agent
+        .clone()
+        .as_runtime_bridge()
+        .process_ceremony_messages()
+        .await
+    {
+        tracing::debug!("{name} inbox processing failed: {err}");
+    }
 
-    // Auto-accept pending channel invitations for demo peers.
+    // Auto-accept pending guardian and channel invitations for demo peers.
     if let Ok(invitation_service) = agent.invitations() {
         let pending = invitation_service.list_pending().await;
         for invitation in pending {
-            if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+            if matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+                if let Err(err) = invitation_service.accept(&invitation.invitation_id).await {
+                    tracing::warn!(
+                        "{name} failed to accept guardian invitation {}: {err}",
+                        invitation.invitation_id
+                    );
+                }
+            } else if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
                 let context = invitation.context_id;
                 accept_channel_invitation(
                     name,
@@ -1167,6 +1183,7 @@ pub fn spawn_amp_inbox_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids;
 
     #[tokio::test]
     async fn demo_simulator_builds_peers() {
@@ -1180,5 +1197,44 @@ mod tests {
         assert_ne!(sim.alice_authority(), sim.carol_authority());
         assert_ne!(sim.mobile_authority(), sim.alice_authority());
         sim.stop().await.unwrap();
+    }
+
+    #[test]
+    fn signed_contact_invite_codes_carry_sender_proofs() {
+        // Invitation creation needs the terminal's 32 MiB worker stack.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(signed_contact_invite_codes_body());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    async fn signed_contact_invite_codes_body() {
+        use aura_agent::handlers::ShareableInvitation;
+        let dir = std::env::temp_dir().join("aura-demo-sim-signed-codes");
+        let bob_authority = ids::authority_id("demo:test:bob:authority");
+        let bob_context = ids::context_id("demo:test:bob:context");
+        let sim = DemoSimulator::new(2024, dir, bob_authority, bob_context)
+            .await
+            .unwrap();
+        let (alice_code, carol_code) = sim.signed_contact_invite_codes().await.unwrap();
+        for (code, sender) in [
+            (alice_code, sim.alice_authority()),
+            (carol_code, sim.carol_authority()),
+        ] {
+            let (invitation, proof) = ShareableInvitation::from_code_with_proof(&code).unwrap();
+            assert_eq!(invitation.sender_id, sender);
+            assert!(
+                proof.is_some(),
+                "demo contact codes must carry a sender proof"
+            );
+        }
     }
 }

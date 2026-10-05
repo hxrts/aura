@@ -604,6 +604,24 @@ impl InvitationServiceApi {
         tasks: Arc<TaskSupervisor>,
     ) -> AgentResult<Self> {
         let handler = InvitationHandler::new(authority_context)?;
+        {
+            // Peers this authority verified before a restart stay reachable.
+            let handler = handler.clone();
+            let effects = effects.clone();
+            let fut = async move {
+                handler
+                    .restore_verified_peer_descriptors(effects.as_ref())
+                    .await;
+            };
+            let restore_tasks = tasks.group("invitation_service.restore_peer_hints");
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    let _task_handle = restore_tasks.spawn_local_named("restore_peer_hints", fut);
+                } else {
+                    let _task_handle = restore_tasks.spawn_named("restore_peer_hints", fut);
+                }
+            }
+        }
         Ok(Self {
             handler,
             effects,

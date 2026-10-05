@@ -236,3 +236,7 @@ mod display_name_tests {
         );
     }
 }
+
+/// Notification row id prefix for an inbound friend request
+/// (`friend-request:<authority>`); the dispatcher resolves rows by it.
+pub const FRIEND_REQUEST_NOTIFICATION_PREFIX: &str = "friend-request:";

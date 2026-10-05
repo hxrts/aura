@@ -227,13 +227,17 @@ pub(crate) async fn mirror_homes_signal_into_view_locked(
                         if let Some((home_id, home_name)) = selected {
                             neighborhood.home_home_id = home_id;
                             neighborhood.home_name = home_name.clone();
-                            neighborhood.position =
-                                Some(crate::views::neighborhood::TraversalPosition {
-                                    current_home_id: home_id,
-                                    current_home_name: home_name,
-                                    depth: 2,
-                                    path: vec![home_id],
-                                });
+                            // Anchoring keeps a traversal the user already made
+                            // (its depth may be clamped by access).
+                            if neighborhood.position.is_none() {
+                                neighborhood.position =
+                                    Some(crate::views::neighborhood::TraversalPosition {
+                                        current_home_id: home_id,
+                                        current_home_name: home_name,
+                                        depth: 2,
+                                        path: vec![home_id],
+                                    });
+                            }
                         }
                     } else if should_reconcile
                         && neighborhood.position.as_ref().is_some_and(|position| {
@@ -255,6 +259,7 @@ pub(crate) async fn mirror_homes_signal_into_view_locked(
                 .await?;
             }
         }
+        restore_neighborhood_membership(app_core, &homes).await?;
         let latest = owner
             .snapshot(ProjectionSlot::homes())
             .await
@@ -263,6 +268,51 @@ pub(crate) async fn mirror_homes_signal_into_view_locked(
             return Ok(());
         }
     }
+}
+
+/// The active neighborhood is durable through the anchored home's committed
+/// joins: restore one after a restart (keeping a selection the user already
+/// made), and list every home this authority belongs to, including homes
+/// joined through an invitation after the anchor was set.
+async fn restore_neighborhood_membership(
+    app_core: &Arc<RwLock<AppCore>>,
+    homes: &HomesState,
+) -> Result<(), AuraError> {
+    let mut neighborhood = app_core.read().await.views().get_neighborhood();
+    if neighborhood.home_home_id == ChannelId::default() {
+        return Ok(());
+    }
+    let mut changed = false;
+    if neighborhood.neighborhood_id.is_none() {
+        if let Some((neighborhood_id, name)) = homes
+            .home_state(&neighborhood.home_home_id)
+            .and_then(|home| home.neighborhoods.iter().next())
+        {
+            neighborhood.neighborhood_id = Some(neighborhood_id.clone());
+            neighborhood.neighborhood_name = Some(name.clone());
+            neighborhood.add_member_home(neighborhood.home_home_id);
+            changed = true;
+        }
+    }
+    for (home_id, home) in homes.iter() {
+        if *home_id == neighborhood.home_home_id || neighborhood.neighbor(home_id).is_some() {
+            continue;
+        }
+        neighborhood.add_neighbor(crate::views::neighborhood::NeighborHome {
+            id: *home_id,
+            name: home.name.clone(),
+            one_hop_link: crate::views::neighborhood::OneHopLinkType::Direct,
+            shared_contacts: 0,
+            member_count: Some(home.member_count),
+            can_traverse: true,
+        });
+        changed = true;
+    }
+    if changed {
+        update_neighborhood_projection_observed(app_core, move |current| *current = neighborhood)
+            .await?;
+    }
+    Ok(())
 }
 
 pub async fn homes_signal_snapshot(
@@ -965,6 +1015,86 @@ mod tests {
         assert_eq!(view_state.current_home_id(), homes.current_home_id());
         assert_eq!(view_state.count(), homes.count());
         assert!(view_state.home_state(&home_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn mirror_homes_lists_every_joined_home_in_the_neighborhood() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+
+        let home_state = |seed: &[u8], name: &str| {
+            let id = ChannelId::from_bytes(hash(seed));
+            (
+                id,
+                crate::views::home::HomeState::new(
+                    id,
+                    Some(name.to_string()),
+                    AuthorityId::new_from_entropy([21u8; 32]),
+                    1,
+                    ContextId::new_from_entropy([22u8; 32]),
+                ),
+            )
+        };
+        let (first_id, first) = home_state(b"mirror-first-home", "First");
+        let (joined_id, joined) = home_state(b"mirror-joined-home", "Joined");
+
+        let publish = |homes: HomesState| {
+            let app_core = app_core.clone();
+            async move {
+                update_homes_projection_observed(&app_core, move |state| *state = homes)
+                    .await
+                    .unwrap();
+                mirror_homes_signal_into_view(&app_core).await.unwrap();
+            }
+        };
+        publish(HomesState::from_parts(
+            std::collections::HashMap::from([(first_id, first.clone())]),
+            Some(first_id),
+        ))
+        .await;
+        // A home joined later (e.g. an accepted home invitation).
+        publish(HomesState::from_parts(
+            std::collections::HashMap::from([(first_id, first), (joined_id, joined)]),
+            Some(first_id),
+        ))
+        .await;
+
+        let neighborhood = app_core.read().await.views().get_neighborhood();
+        assert_eq!(neighborhood.home_home_id, first_id);
+        assert!(neighborhood.neighbor(&joined_id).is_some());
+    }
+
+    // work/8.md Task 51: after a restart the homes signal is rebuilt from
+    // facts, including joined neighborhoods; the active neighborhood is
+    // restored from the anchored home.
+    #[tokio::test]
+    async fn mirror_homes_restores_the_active_neighborhood_after_restart() {
+        let app_core = crate::testing::default_test_app_core();
+        init_signals_for_test(&app_core).await;
+
+        let home_id = ChannelId::from_bytes(hash(b"mirror-neighborhood-home"));
+        let mut home = crate::views::home::HomeState::new(
+            home_id,
+            Some("Den".to_string()),
+            AuthorityId::new_from_entropy([23u8; 32]),
+            1,
+            ContextId::new_from_entropy([24u8; 32]),
+        );
+        home.join_neighborhood("block-1", "Block One")
+            .expect("within budget");
+        let homes = HomesState::from_parts(
+            std::collections::HashMap::from([(home_id, home)]),
+            Some(home_id),
+        );
+        update_homes_projection_observed(&app_core, move |state| *state = homes)
+            .await
+            .unwrap();
+        mirror_homes_signal_into_view(&app_core).await.unwrap();
+
+        let neighborhood = app_core.read().await.views().get_neighborhood();
+        assert_eq!(neighborhood.neighborhood_id.as_deref(), Some("block-1"));
+        assert_eq!(neighborhood.neighborhood_name.as_deref(), Some("Block One"));
+        assert!(neighborhood.is_member_home(&home_id));
     }
 
     #[tokio::test]

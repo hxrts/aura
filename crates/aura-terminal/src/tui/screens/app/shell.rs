@@ -271,7 +271,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
             state.settings.demo_mobile_device_id = demo_mobile_device_id.clone();
-            state.settings.demo_mobile_authority_id = demo_mobile_authority_id.clone();
+            state.settings.demo_mobile_authority_id = demo_mobile_authority_id;
             state
         }
 

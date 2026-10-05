@@ -247,7 +247,19 @@ impl MoveManager {
 
         let batch_size = self.config.flush_batch_size.max(1);
         let mut batch = Vec::new();
-        for _ in 0..batch_size {
+        // The caller's own envelope always goes out in its own call (first in
+        // the batch), so a successful send means this envelope was delivered;
+        // the rest of the batch keeps the shuffled order.
+        if let Some(position) = state.queue.iter().position(|entry| entry.marker == marker) {
+            if let Some(entry) = state.queue.remove(position) {
+                batch.push(MoveDeliveryPlan {
+                    envelope: entry.envelope,
+                    route: entry.route,
+                    replay_marker: entry.marker,
+                });
+            }
+        }
+        while batch.len() < batch_size {
             let Some(entry) = state.queue.pop_front() else {
                 break;
             };

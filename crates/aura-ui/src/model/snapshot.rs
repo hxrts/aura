@@ -107,9 +107,12 @@ impl UiModel {
             });
         }
 
+        let mut seen_notifications = std::collections::HashSet::new();
         let notification_items = self
             .notification_ids
             .iter()
+            // A repeated id would export several selected items for one selection.
+            .filter(|notification| seen_notifications.insert(notification.0.clone()))
             .map(|notification| ListItemSnapshot {
                 id: notification.0.clone(),
                 selected: self.selected_notification_id.as_ref() == Some(notification),
@@ -286,5 +289,23 @@ impl UiController {
         if let Ok(mut last_snapshot) = self.last_published_ui_snapshot.lock() {
             *last_snapshot = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod notification_snapshot_tests {
+    use super::super::{NotificationSelectionId, UiModel};
+
+    #[test]
+    fn repeated_notification_ids_export_a_valid_snapshot() {
+        let mut model = UiModel::new("authority-test".to_string());
+        let id = NotificationSelectionId("inv-repeated".to_string());
+        model.notification_ids = vec![id.clone(), id.clone()];
+        model.selected_notification_id = Some(id);
+
+        let snapshot = model.semantic_snapshot();
+        snapshot
+            .validate_invariants()
+            .unwrap_or_else(|error| panic!("snapshot must stay valid: {error}"));
     }
 }

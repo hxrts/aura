@@ -62,9 +62,9 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 
     // === Setup: Create authority/context matching demo pattern ===
     let device_id_str = "demo:bob";
-    let authority_entropy = hash::hash(format!("authority:{}", device_id_str).as_bytes());
+    let authority_entropy = hash::hash(format!("authority:{device_id_str}").as_bytes());
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
-    let context_entropy = hash::hash(format!("context:{}", device_id_str).as_bytes());
+    let context_entropy = hash::hash(format!("context:{device_id_str}").as_bytes());
     let context_id = ContextId::new_from_entropy(context_entropy);
 
     let agent_config = AgentConfig {
@@ -137,90 +137,34 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
     // Give signal time to update
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // === Phase 2: Attempt guardian ceremony (THIS IS WHERE THE BUG MANIFESTS) ===
-    // The TUI calls initiate_guardian_ceremony with the contact IDs
-    // Since no DemoSimulator is running with shared transport,
-    // there are no actual peer agents to communicate with
-
+    // === Phase 2: Attempt guardian ceremony ===
+    // Alice and Carol are contacts but never accepted a guardian invitation,
+    // so there is no verified guardian key to run the ceremony against.
     let threshold = FrostThreshold::new(2).expect("valid threshold");
-    let guardian_ids = vec![alice_id.to_string(), carol_id.to_string()];
-
-    let result = {
-        let core = app_core.read().await;
-        core.initiate_guardian_ceremony(threshold, 2, &guardian_ids)
-            .await
-    };
+    let result = aura_app::ui::workflows::ceremonies::start_guardian_ceremony(
+        &app_core,
+        threshold,
+        2,
+        vec![alice_id, carol_id],
+    )
+    .await;
 
     // === Phase 3: Assert on the result ===
-    // The ceremony should fail with a clear error message about peers being unreachable.
-
-    match result {
-        Ok(ceremony_id) => {
-            // If ceremony starts, we should be able to check its status
-            // It might start but then fail/timeout waiting for responses
-            println!("Ceremony started with ID: {ceremony_id}");
-
-            // Wait a bit and check status
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            let status = {
-                let core = app_core.read().await;
-                core.get_ceremony_status(&ceremony_id).await
-            };
-
-            match status {
-                Ok(s) => {
-                    println!(
-                        "Ceremony status: complete={}, failed={}, error={:?}",
-                        s.is_complete, s.has_failed, s.error_message
-                    );
-
-                    // Ceremony should either be pending (waiting for responses that will never come)
-                    // or failed due to timeout/unreachable peers
-                    // Either is acceptable behavior - the point is it shouldn't fail to start
-                    if s.has_failed {
-                        println!("Ceremony failed (may be expected): {:?}", s.error_message);
-                    } else if !s.is_complete {
-                        println!("Ceremony is pending (waiting for unreachable peers)");
-                    }
-                }
-                Err(e) => {
-                    println!("Could not get ceremony status: {e}");
-                }
-            }
-        }
-        Err(e) => {
-            let error_str = e.to_string();
-
-            // Check for the IMPROVED error message that explains the issue clearly
-            let has_improved_message = error_str.contains("no responses received from guardians")
-                && error_str.contains("Ensure guardian peers are online and connected");
-
-            if has_improved_message {
-                // SUCCESS: The error message now clearly explains the problem
-                println!(
-                    "SUCCESS: Guardian ceremony failed with clear error message:\n{error_str}"
-                );
-                // Test passes - the improved error message is present
-            } else {
-                // Check for the OLD cryptic error messages (regression)
-                let is_failed_to_start =
-                    error_str.contains("internal error") && error_str.contains("failed to start");
-                let is_no_message_provider = error_str.contains("message provider returned None");
-                let is_protocol_violation = error_str.contains("Protocol violation");
-
-                if is_failed_to_start || is_no_message_provider || is_protocol_violation {
-                    panic!(
-                        "REGRESSION: Guardian ceremony failed with cryptic error message.\n\n\
-                         Error: {error_str}\n\n\
-                         The error should explain that guardian peers are unreachable."
-                    );
-                }
-
-                // Other errors might be legitimate - still fail to capture them
-                panic!("Guardian ceremony failed with unexpected error: {error_str}");
-            }
-        }
+    // The ceremony is refused up front with a clear, actionable error instead
+    // of starting and then failing silently (work/8.md Task 56) or failing
+    // with a cryptic internal error (the original regression).
+    let error = result.expect_err("guardians without verified keys must be refused");
+    let error_str = error.to_string();
+    assert!(
+        error_str.contains("has not accepted a guardian invitation yet"),
+        "expected the missing-guardian-key refusal, got: {error_str}"
+    );
+    for cryptic in [
+        "failed to start",
+        "message provider returned None",
+        "Protocol violation",
+    ] {
+        assert!(!error_str.contains(cryptic), "cryptic error: {error_str}");
     }
 
     // Cleanup
@@ -231,8 +175,12 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 ///
 /// This test currently FAILS because DemoSimulator does not automatically respond
 /// to guardian ceremony requests. This is the next issue to fix.
-#[tokio::test]
-async fn control_guardian_ceremony_works_with_demo_peers() {
+#[test]
+fn control_guardian_ceremony_works_with_demo_peers() {
+    support::run_with_terminal_stack(control_guardian_ceremony_works_with_demo_peers_body);
+}
+
+async fn control_guardian_ceremony_works_with_demo_peers_body() {
     use aura_core::hash;
     use aura_core::types::identifiers::ContextId;
     use aura_journal::DomainFact;
@@ -244,10 +192,10 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
 
     // Match the demo-mode authority/context derivation
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
     let bob_authority =
         aura_core::types::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
+    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 
     // Start demo peers WITH shared transport
@@ -323,27 +271,49 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
         .await
         .expect("commit contact facts");
 
-    // Start guardian ceremony - this should work
-    let ceremony_id = {
-        let core = app_core.read().await;
-        let threshold = FrostThreshold::new(2).expect("valid threshold");
-        core.initiate_guardian_ceremony(threshold, 2, &[alice_id.to_string(), carol_id.to_string()])
+    // Guardians must accept a guardian invitation first; that records the
+    // verified key the ceremony needs (work/8.md Task 56). The demo peers
+    // accept guardian bindings on their own.
+    use aura_app::ui::workflows::{ceremonies, invitation};
+    for guardian in [alice_id, carol_id] {
+        invitation::create_guardian_invitation(&app_core, guardian, bob_authority, None, None)
             .await
-            .expect("initiate_guardian_ceremony should succeed with demo peers")
-    };
+            .expect("send guardian invitation to a demo peer");
+    }
 
-    println!("Control test: Ceremony started with ID: {ceremony_id}");
+    // Start guardian ceremony once both guardians' keys are verified.
+    let threshold = FrostThreshold::new(2).expect("valid threshold");
+    let start = tokio::time::Instant::now();
+    let ceremony = loop {
+        match ceremonies::start_guardian_ceremony(&app_core, threshold, 2, vec![alice_id, carol_id])
+            .await
+        {
+            Ok(handle) => break handle,
+            Err(error)
+                if error
+                    .to_string()
+                    .contains("has not accepted a guardian invitation yet")
+                    && start.elapsed() < Duration::from_secs(30) =>
+            {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+            Err(error) => panic!("guardian ceremony should start with demo peers: {error}"),
+        }
+    };
+    let status_handle = ceremony.status_handle();
+
+    println!(
+        "Control test: Ceremony started with ID: {}",
+        status_handle.ceremony_id()
+    );
     // Wait for completion
     let start = tokio::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        let status = {
-            let core = app_core.read().await;
-            core.get_ceremony_status(&ceremony_id)
-                .await
-                .expect("get_ceremony_status")
-        };
+        let status = ceremonies::get_key_rotation_ceremony_status(&app_core, &status_handle)
+            .await
+            .expect("get ceremony status");
 
         if status.has_failed {
             let error_signal = read_error_signal(&app_core).await;

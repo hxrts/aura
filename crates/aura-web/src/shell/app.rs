@@ -19,8 +19,10 @@ use crate::workflows::{self, AccountCreationStageMode};
 
 use super::bootstrap::submit_runtime_bootstrap_handoff;
 use super::storage::{
-    active_storage_prefix, demo_tablet_enrollment_code_key, dual_demo_web_enabled,
-    persist_demo_tablet_enrollment_code,
+    active_storage_prefix, bootstrap_broker_auth_token, bootstrap_broker_url,
+    clear_demo_tablet_enrollment_code, demo_tablet_enrollment_code_key, dual_demo_web_enabled,
+    load_selected_runtime_identity, logged_optional, persist_demo_tablet_enrollment_code,
+    selected_runtime_identity_key,
 };
 use crate::browser_promises::browser_sleep_ms;
 
@@ -136,6 +138,30 @@ pub(crate) fn App() -> Element {
     }
 }
 
+/// Broker records as onboarding candidates, labelled by where the broker is.
+fn broker_candidates(
+    base_url: &str,
+    records: Vec<aura_agent::BootstrapBrokerCandidateRecord>,
+) -> Vec<BootstrapCandidateInfo> {
+    let origin = if aura_agent::bootstrap_broker_endpoint_is_loopback(base_url) {
+        BootstrapCandidateOrigin::LocalBroker
+    } else {
+        BootstrapCandidateOrigin::LanBroker
+    };
+    records
+        .into_iter()
+        .filter_map(|record| {
+            Some(BootstrapCandidateInfo {
+                authority_id: record.authority_id()?,
+                origin,
+                address: record.address,
+                discovered_at_ms: record.discovered_at_ms,
+                nickname_suggestion: record.nickname_suggestion,
+            })
+        })
+        .collect()
+}
+
 fn onboarding_finished(controller: &aura_ui::UiController) -> bool {
     let snapshot = controller.semantic_model_snapshot();
     snapshot.readiness == UiReadiness::Ready && snapshot.screen != ScreenId::Onboarding
@@ -219,17 +245,25 @@ fn BootstrappedApp(state: BootstrapState) -> Element {
                     if onboarding_finished(&controller) {
                         break;
                     }
-                    let candidate_result = {
+                    let has_runtime = app_core.read().await.has_runtime();
+                    let candidate_result = if has_runtime {
                         let app = app_core.read().await;
-                        // Discovery is runtime-owned and there is no
-                        // agent-free candidate source: without a runtime, stop
-                        // instead of polling a call that can only fail.
-                        if !app.has_runtime() {
-                            break;
-                        }
                         app.get_bootstrap_candidates()
                             .await
                             .map_err(|error| error.to_string())
+                    } else {
+                        // Before an account exists there is no runtime, so LAN
+                        // discovery is unavailable; the configured bootstrap
+                        // broker is the agent-free source. Without one, stop
+                        // instead of polling a call that can only fail.
+                        let (Some(base_url), Some(auth_token)) =
+                            (bootstrap_broker_url(), bootstrap_broker_auth_token())
+                        else {
+                            break;
+                        };
+                        aura_agent::fetch_bootstrap_broker_candidates(&base_url, &auth_token)
+                            .await
+                            .map(|records| broker_candidates(&base_url, records))
                     };
 
                     match candidate_result {

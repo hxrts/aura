@@ -659,6 +659,21 @@ impl<'a> InvitationGuardianHandler<'a> {
                                 &accept.0,
                             )
                             .await?;
+                            // A verified acceptance makes the contact this
+                            // authority's guardian (the threshold is set separately
+                            // by guardian setup).
+                            effects
+                                .commit_relational_facts(vec![
+                                    aura_journal::RelationalFact::Protocol(
+                                        aura_journal::ProtocolRelationalFact::GuardianBinding {
+                                            account_id: authority_id,
+                                            guardian_id: invitation.receiver_id,
+                                            binding_hash: aura_core::Hash32::default(),
+                                        },
+                                    ),
+                                ])
+                                .await
+                                .map_err(|error| AgentError::effects(error.to_string()))?;
                             let signature = sign_guardian_transcript(
                                 effects.as_ref(),
                                 &guardian_confirmation_payload(invitation),

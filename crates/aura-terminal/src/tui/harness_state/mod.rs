@@ -891,6 +891,32 @@ mod tests {
         assert_eq!(state.chat.selected_channel, 1);
     }
 
+    #[test]
+    fn harness_command_rejects_unsupported_list_activation() {
+        let app_snapshot = StateSnapshot::default();
+        let mut state = TuiState::new();
+        let result = apply_harness_command(
+            &mut state,
+            HarnessUiCommand::ActivateListItem {
+                list_id: ListId::Notifications,
+                item_id: "notification:1".to_string(),
+            },
+            TuiSemanticInputs {
+                app_snapshot: &app_snapshot,
+                contacts: &[],
+                settings_devices: &[],
+                chat_channels: &[],
+                chat_messages: &[],
+                bootstrap_candidates: &[],
+            },
+        );
+
+        assert!(
+            result.is_err(),
+            "unsupported list activation must not be a silent no-op"
+        );
+    }
+
     #[tokio::test]
     async fn harness_command_bridge_acknowledges_submission_and_emits_update() {
         let _guard = lock_harness_bridge_test().await;

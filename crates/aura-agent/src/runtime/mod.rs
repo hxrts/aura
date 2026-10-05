@@ -51,9 +51,11 @@ pub mod shared_transport;
 pub mod simulation_factory;
 
 // Cross-cutting concerns
+pub(crate) mod context_dkg;
 pub mod contracts;
 pub mod diagnostics;
 pub mod errors;
+pub(crate) mod flow_ingress;
 pub mod instrumentation;
 pub(crate) mod receipt_model;
 pub mod reliability;

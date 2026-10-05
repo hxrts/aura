@@ -34,7 +34,7 @@ use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
-use aura_core::hash::{self, hash};
+use aura_core::hash::{self};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::types::FrostThreshold;
 use aura_journal::DomainFact;
@@ -65,9 +65,9 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
 
     // === Setup: Create Bob's authority/context matching demo pattern ===
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
     let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
+    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 
     // === Setup: Create mobile device authority (as demo would) ===
@@ -75,7 +75,7 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
     // adds it via contact fact without setting up shared transport for that device
     let mobile_device_id_str = "demo:bob-mobile";
     let mobile_authority_entropy =
-        hash::hash(format!("authority:{}", mobile_device_id_str).as_bytes());
+        hash::hash(format!("authority:{mobile_device_id_str}").as_bytes());
     let mobile_authority = AuthorityId::new_from_entropy(mobile_authority_entropy);
 
     let agent_config = AgentConfig {
@@ -152,28 +152,32 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
     let threshold = FrostThreshold::new(2).expect("valid threshold");
     let device_ids = vec![bob_device_id.to_string(), mobile_device_id.to_string()];
 
-    let result = {
-        let core = app_core.read().await;
-        core.initiate_device_threshold_ceremony(threshold, 2, &device_ids)
-            .await
-    };
+    let result = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+        &app_core, threshold, 2, device_ids,
+    )
+    .await
+    .map(|handle| handle.status_handle());
 
     // === Phase 4: Assert on the result ===
     // The ceremony should either succeed with proper transport setup
     // OR fail with a clear, helpful error message
 
     match result {
-        Ok(ceremony_id) => {
+        Ok(status_handle) => {
             // If ceremony starts, check its status
-            println!("Multifactor ceremony started with ID: {ceremony_id}");
+            println!(
+                "Multifactor ceremony started with ID: {}",
+                status_handle.ceremony_id()
+            );
 
             // Wait a bit and check status
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let status = {
-                let core = app_core.read().await;
-                core.get_ceremony_status(&ceremony_id).await
-            };
+            let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                &app_core,
+                &status_handle,
+            )
+            .await;
 
             match status {
                 Ok(s) => {
@@ -191,10 +195,7 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
                         {
                             println!("SUCCESS: Clear error message about unreachable device");
                         } else {
-                            panic!(
-                                "REGRESSION: Ceremony failed with unclear error: {}",
-                                error_msg
-                            );
+                            panic!("REGRESSION: Ceremony failed with unclear error: {error_msg}");
                         }
                     } else if !s.is_complete {
                         println!("Ceremony pending (acceptable - waiting for device responses)");
@@ -248,17 +249,23 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
 /// - Key package envelopes are sent to the device's own authority
 /// - The target authority (for threshold signing) is passed via metadata
 /// - After ceremony completion, the device gains access to the target authority
-#[tokio::test]
-async fn control_multifactor_ceremony_works_with_shared_transport() {
+#[test]
+fn control_multifactor_ceremony_works_with_shared_transport() {
+    support::run_with_terminal_stack(|| {
+        control_multifactor_ceremony_works_with_shared_transport_body()
+    });
+}
+
+async fn control_multifactor_ceremony_works_with_shared_transport_body() {
     use aura_terminal::demo::DemoSimulator;
 
     let seed = 3025u64;
     let test_dir = support::unique_test_dir("aura-multifactor-with-transport");
 
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
+    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
     let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
+    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 
     // Start demo simulator WITH shared transport
@@ -316,7 +323,7 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         format!("authority:{mobile_device_id_str}").as_bytes(),
     ));
 
-    let mobile_context_entropy = hash::hash(format!("context:{}", mobile_device_id_str).as_bytes());
+    let mobile_context_entropy = hash::hash(format!("context:{mobile_device_id_str}").as_bytes());
     let mobile_context = ContextId::new_from_entropy(mobile_context_entropy);
 
     let mobile_agent_config = AgentConfig {
@@ -344,7 +351,7 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         )
         .await
         .expect("build mobile agent");
-    let mobile_agent = Arc::new(mobile_agent);
+    let _mobile_agent = Arc::new(mobile_agent);
 
     // Add mobile device as a contact so Bob can communicate with it
     let contact_facts = vec![ContactFact::added_with_timestamp_ms(
@@ -369,31 +376,32 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
     let bob_device_id = ids::device_id(bob_device_id_str);
     // mobile_device_id already defined above
 
-    let ceremony_id = {
-        let core = app_core.read().await;
-        let threshold = FrostThreshold::new(2).expect("valid threshold");
-        core.initiate_device_threshold_ceremony(
-            threshold,
-            2,
-            &[bob_device_id.to_string(), mobile_device_id.to_string()],
-        )
-        .await
-        .expect("initiate_device_threshold_ceremony should succeed with shared transport")
-    };
+    let status_handle = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+        &app_core,
+        FrostThreshold::new(2).expect("valid threshold"),
+        2,
+        vec![bob_device_id.to_string(), mobile_device_id.to_string()],
+    )
+    .await
+    .expect("device threshold ceremony should start with shared transport")
+    .status_handle();
 
-    println!("Control test: Multifactor ceremony started with ID: {ceremony_id}");
+    println!(
+        "Control test: Multifactor ceremony started with ID: {}",
+        status_handle.ceremony_id()
+    );
 
     // Wait for completion
     let start = tokio::time::Instant::now();
     loop {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
-        let status = {
-            let core = app_core.read().await;
-            core.get_ceremony_status(&ceremony_id)
-                .await
-                .expect("get_ceremony_status")
-        };
+        let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+            &app_core,
+            &status_handle,
+        )
+        .await
+        .expect("get ceremony status");
 
         if status.has_failed {
             let error_signal = support::read_error_signal(&app_core).await;
