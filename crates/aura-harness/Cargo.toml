@@ -54,6 +54,8 @@ tempfile = { workspace = true }
 patchbay = { git = "https://github.com/n0-computer/patchbay", rev = "cecd3b22e23396874169fa12d4441a6bdcaa1de9", optional = true }
 
 [dev-dependencies]
+# Test builds use the file-backed credential store, never the real keychain.
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-keyring"] }
 tokio = { workspace = true, features = ["net"] }
 serial_test = "3.0"
 

@@ -69,6 +69,8 @@ serial_test = { workspace = true }
 cfg-if = "1"
 
 [dev-dependencies]
+# Test builds use the file-backed credential store, never the real keychain.
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-keyring"] }
 aura-composition = { package = "hxrts-aura-composition", version = "=0.2.0", path = "../aura-composition" }
 aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
 bincode = { workspace = true }

@@ -22,6 +22,9 @@ simulation = ["aura-core/simulation"]
 telltale-runtime-capability = ["dep:telltale-machine"]
 transparent_onion = ["aura-core/transparent_onion"]
 test-support = []
+# Route platform keyring entries to a file-backed test store. Enable only
+# through dev-dependencies: test binaries must never open the real keychain.
+test-keyring = []
 
 [dependencies]
 aura-core = { package = "hxrts-aura-core", path = "../aura-core", version = "=0.2.0" }

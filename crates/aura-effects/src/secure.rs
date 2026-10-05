@@ -1383,6 +1383,8 @@ impl PlatformSecureStorageHandler {
     }
 
     fn entry_for_user(&self, user: &str) -> Result<keyring::Entry, SecureStorageError> {
+        #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
+        test_keyring::install();
         keyring::Entry::new(&self.service, user).map_err(Self::map_keyring_error)
     }
 
@@ -4670,6 +4672,8 @@ mod platform_secure_record_fault_tests {
 
 #[cfg(unix)]
 mod allocation_lifetime;
+#[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
+mod test_keyring;
 #[cfg(unix)]
 pub(crate) use allocation_lifetime::InitialCutoverIdentities;
 #[cfg(unix)]

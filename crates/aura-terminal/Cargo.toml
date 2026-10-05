@@ -95,6 +95,8 @@ dirs = "6"
 arboard = "3"
 
 [dev-dependencies]
+# Test builds use the file-backed credential store, never the real keychain.
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-keyring"] }
 aura-app = { package = "hxrts-aura-app", path = "../aura-app", version = "=0.2.0", features = ["native", "app-internals"] }
 aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 tempfile = { workspace = true }

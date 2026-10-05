@@ -96,7 +96,7 @@ getrandom = { workspace = true }
 uniffi = { version = "0.25", features = ["build"], optional = true }
 
 [dev-dependencies]
-aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-support"] }
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-support", "test-keyring"] }
 futures = { workspace = true }
 proptest = { workspace = true }
 trybuild = { workspace = true }

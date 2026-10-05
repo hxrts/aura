@@ -56,6 +56,8 @@ telltale-machine = { workspace = true }
 telltale-types = { workspace = true }
 
 [dev-dependencies]
+# Test builds use the file-backed credential store, never the real keychain.
+aura-effects = { package = "hxrts-aura-effects", path = "../aura-effects", version = "=0.2.0", features = ["test-keyring"] }
 tempfile = { workspace = true }
 aura-macros = { package = "hxrts-aura-macros", version = "=0.2.0", path = "../aura-macros" }
 aura-anti-entropy = { package = "hxrts-aura-anti-entropy", path = "../aura-anti-entropy", version = "=0.2.0" }

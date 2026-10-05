@@ -445,6 +445,16 @@ The macro wraps the test body with tracing initialization and a 30-second timeou
 
 ## 3. Test Fixtures
 
+### Platform credential store in tests
+
+Test builds never open the real platform credential store. The `test-keyring`
+feature of `aura-effects`, enabled only through dev-dependencies (and always
+for its own unit tests), routes every `keyring::Entry` to a file-backed store
+under `$TMPDIR/aura-test-keyring` (override with `AURA_TEST_KEYRING_DIR`).
+Rebuilt test binaries otherwise trigger a macOS Keychain prompt on every run.
+Release builds do not compile this store. Add the feature to a crate's
+`aura-effects` dev-dependency when its tests assemble a production runtime.
+
 Fixtures provide consistent test environments with deterministic configuration.
 
 ### Creating Fixtures
