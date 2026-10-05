@@ -958,6 +958,12 @@ impl<'a> InvitationContactHandler<'a> {
                                 false,
                             )
                             .await?;
+                        self.send_home_governance_facts(
+                            effects.as_ref(),
+                            updated.context_id,
+                            updated.receiver_id,
+                        )
+                        .await?;
                     }
                     let _ = home_name;
 
@@ -1124,6 +1130,92 @@ impl<'a> InvitationContactHandler<'a> {
             }
             Err(TimeoutRunError::Operation(error)) => Err(error),
         }
+    }
+
+    /// Whether a home-context fact is governance state a joining member needs
+    /// to evaluate moderation and access: creation (the creator's moderator
+    /// designation), moderator grants/revokes, access overrides and the
+    /// capability config.
+    fn is_home_governance_envelope(envelope: &aura_core::types::facts::FactEnvelope) -> bool {
+        use aura_social::moderation::facts::{
+            HOME_GRANT_MODERATOR_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
+        };
+        match envelope.type_id.as_str() {
+            HOME_GRANT_MODERATOR_FACT_TYPE_ID | HOME_REVOKE_MODERATOR_FACT_TYPE_ID => true,
+            aura_social::SOCIAL_FACT_TYPE_ID => matches!(
+                aura_social::SocialFact::from_envelope(envelope),
+                Some(
+                    aura_social::SocialFact::HomeCreated { .. }
+                        | aura_social::SocialFact::AccessOverrideSet { .. }
+                        | aura_social::SocialFact::AccessLevelCapabilitiesConfigured { .. }
+                )
+            ),
+            _ => false,
+        }
+    }
+
+    /// Send a newly joined home member the home's governance facts this
+    /// authority committed (docs/115 §3.2: current members sync home state to
+    /// newcomers). Without them the newcomer's roster has no moderator and it
+    /// ignores every moderation fact. Delivery is best-effort per fact.
+    async fn send_home_governance_facts(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        newcomer: AuthorityId,
+    ) -> AgentResult<()> {
+        let own_authority = self.handler.context.authority.authority_id();
+        let facts = effects
+            .load_committed_facts(own_authority)
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        for fact in facts {
+            let aura_journal::fact::FactContent::Relational(relational) = &fact.content else {
+                continue;
+            };
+            let RelationalFact::Generic {
+                context_id: fact_context,
+                envelope,
+            } = relational
+            else {
+                continue;
+            };
+            if *fact_context != context_id || !Self::is_home_governance_envelope(envelope) {
+                continue;
+            }
+            let payload = aura_core::util::serialization::to_vec(relational)
+                .map_err(|error| AgentError::internal(error.to_string()))?;
+            let delivery_context = default_context_id_for_authority(newcomer);
+            let mut governance_envelope = TransportEnvelope {
+                destination: newcomer,
+                source: own_authority,
+                context: delivery_context,
+                payload,
+                metadata: crate::handlers::shared::build_transport_metadata(
+                    CHAT_FACT_CONTENT_TYPE,
+                    [("home-context", context_id.to_string())],
+                ),
+                receipt: super::execute_charge_flow_budget(
+                    FlowCost::new(1),
+                    delivery_context,
+                    newcomer,
+                    effects,
+                )
+                .await?
+                .map(transport_receipt_from_flow),
+            };
+            super::attach_invitation_test_receipt_if_needed(effects, &mut governance_envelope);
+            if let Err(error) = super::execution::attempt_network_send_envelope(
+                effects,
+                "home governance fact send failed",
+                governance_envelope,
+            )
+            .await
+            {
+                tracing::warn!(error = %error, newcomer = %newcomer, "home governance fact not delivered");
+            }
+        }
+        Ok(())
     }
 
     /// Tell the sender of an inbound message that it reached this authority, so
