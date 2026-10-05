@@ -82,13 +82,17 @@ pub(super) async fn enforce_home_moderation_for_sender(
         ));
     }
 
+    // Resolve the home the way inbound gating does: by the channel's home id
+    // or by its context (a home channel's id need not equal the home id).
     let homes = crate::workflows::observed_projection::homes_signal_snapshot(app_core).await?;
-    if let Some(home) = homes.home_state(&channel_id) {
-        if !home.allows_access_capability(&sender_id, "send_message") {
-            return Err(AuraError::permission_denied(
-                "Your access level in this home does not allow sending messages",
-            ));
-        }
+    let denied = homes.iter().any(|(id, home)| {
+        (*id == channel_id || home.context_id == Some(context_id))
+            && !home.allows_access_capability(&sender_id, "send_message")
+    });
+    if denied {
+        return Err(AuraError::permission_denied(
+            "Your access level in this home does not allow sending messages",
+        ));
     }
 
     Ok(())

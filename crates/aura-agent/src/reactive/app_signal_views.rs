@@ -1048,8 +1048,15 @@ impl HomeSignalView {
                 ..
             } => {
                 let home_id = ChannelId::from_bytes(*home_id.as_bytes());
-                if homes.has_home(&home_id) {
-                    return false;
+                // A home first seen through an invitation already exists; its
+                // creation fact still designates the creator moderator.
+                if let Some(existing) = homes.home_mut(&home_id) {
+                    let before = existing.member(&creator_id).map(|member| member.role);
+                    if before.is_none() {
+                        return false;
+                    }
+                    existing.designate_creator_moderator(&creator_id, own_authority);
+                    return before != Some(HomeRole::Moderator);
                 }
                 let mut home = HomeState::new(
                     home_id,
@@ -2654,6 +2661,65 @@ mod tests {
                 aura_app::views::home::HomeRole::Moderator
             );
         }
+    }
+
+    #[tokio::test]
+    async fn invited_home_learns_creator_moderator_from_home_created() {
+        let creator = AuthorityId::new_from_entropy([31u8; 32]);
+        let invitee = AuthorityId::new_from_entropy([32u8; 32]);
+        let target = AuthorityId::new_from_entropy([33u8; 32]);
+        let context_id = ContextId::new_from_entropy([34u8; 32]);
+        let home_bytes = [35u8; 32];
+        let reactive = ReactiveHandler::new();
+        register_app_signals(&reactive).await.unwrap();
+
+        // The invitee materialized the home from the invitation: the creator is
+        // a plain member there and the invitee a participant.
+        let mut home = HomeState::new(
+            ChannelId::from_bytes(home_bytes),
+            Some("Den".to_string()),
+            creator,
+            1,
+            context_id,
+        );
+        home.my_role = aura_app::views::home::HomeRole::Participant;
+        let mut homes = HomesState::new();
+        homes.add_home(home);
+        reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
+        let view = HomeSignalView::new(invitee, reactive.clone());
+
+        let ban = HomeBanFact::new_ms(context_id, None, target, creator, "x".to_string(), 5, None)
+            .to_generic();
+        view.update(&[fact_from_relational(ban.clone())]).await;
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes(home_bytes))
+            .unwrap();
+        assert!(
+            !home.ban_list.contains_key(&target),
+            "no moderator known yet"
+        );
+
+        let created = SocialFact::home_created_ms(
+            aura_social::HomeId::from_bytes(home_bytes),
+            context_id,
+            1,
+            creator,
+            "Den".to_string(),
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(created), fact_from_relational(ban)])
+            .await;
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home = homes
+            .home_state(&ChannelId::from_bytes(home_bytes))
+            .unwrap();
+        assert_eq!(
+            home.member(&creator).unwrap().role,
+            aura_app::views::home::HomeRole::Moderator
+        );
+        assert_eq!(home.my_role, aura_app::views::home::HomeRole::Participant);
+        assert!(home.ban_list.contains_key(&target), "creator ban applies");
     }
 
     #[tokio::test]
