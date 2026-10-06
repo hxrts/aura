@@ -81,6 +81,7 @@ pub struct Peer {
     pub agent: Arc<AuraAgent>,
     pub app: Arc<RwLock<AppCore>>,
     pub id: AuthorityId,
+    seed: u8,
 }
 
 impl SimNet {
@@ -100,12 +101,22 @@ impl SimNet {
 
     /// A simulation runtime on the shared transport and clock.
     pub async fn peer(&self, seed: u8) -> Result<Peer> {
+        self.simulation_peer(seed, tempfile::tempdir()?).await
+    }
+
+    async fn simulation_peer(&self, seed: u8, temp: tempfile::TempDir) -> Result<Peer> {
         let transport = self.transport.clone();
-        Peer::build(seed, &self.clock, |builder, ctx| async move {
-            builder
-                .build_simulation_async_with_shared_transport(u64::from(seed), &ctx, transport)
-                .await
-        })
+        // Boxed: runtime assembly is a large future, kept off the test stack.
+        Box::pin(Peer::build(
+            seed,
+            &self.clock,
+            temp,
+            |builder, ctx| async move {
+                builder
+                    .build_simulation_async_with_shared_transport(u64::from(seed), &ctx, transport)
+                    .await
+            },
+        ))
         .await
     }
 
@@ -143,26 +154,62 @@ impl SimNet {
 
     /// A standalone testing runtime on the shared clock.
     pub async fn testing_peer(&self, seed: u8) -> Result<Peer> {
-        Peer::build(seed, &self.clock, |builder, ctx| async move {
-            builder.build_testing_async(&ctx).await
-        })
+        Peer::build(
+            seed,
+            &self.clock,
+            tempfile::tempdir()?,
+            |builder, ctx| async move { builder.build_testing_async(&ctx).await },
+        )
         .await
     }
 }
 
 impl Peer {
-    async fn build<F, Fut>(seed: u8, clock: &QuiescentClock, assemble: F) -> Result<Self>
+    fn context(seed: u8) -> EffectContext {
+        EffectContext::new(
+            AuthorityId::new_from_entropy([seed; 32]),
+            ContextId::new_from_entropy([seed.wrapping_add(1); 32]),
+            ExecutionMode::Testing,
+        )
+    }
+
+    /// Shut this simulation runtime down and reopen it from its persisted
+    /// profile, on the same transport and clock.
+    pub async fn restart(self, net: &SimNet) -> Result<Peer> {
+        let Peer {
+            _temp: temp,
+            agent,
+            app,
+            seed,
+            ..
+        } = self;
+        drop(app);
+        // Runtime tasks (periodic sync, services) hold the agent; stop them
+        // first so this handle becomes the last one.
+        agent
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(Duration::from_secs(5))
+            .await?;
+        quiesce().await;
+        let agent = Arc::try_unwrap(agent)
+            .map_err(|_| anyhow!("peer {seed}: runtime still shared at restart"))?;
+        agent.shutdown(&Self::context(seed)).await?;
+        net.simulation_peer(seed, temp).await
+    }
+
+    async fn build<F, Fut>(
+        seed: u8,
+        clock: &QuiescentClock,
+        temp: tempfile::TempDir,
+        assemble: F,
+    ) -> Result<Self>
     where
         F: FnOnce(AgentBuilder, EffectContext) -> Fut,
         Fut: std::future::Future<Output = aura_agent::AgentResult<AuraAgent>>,
     {
         let id = AuthorityId::new_from_entropy([seed; 32]);
-        let ctx = EffectContext::new(
-            id,
-            ContextId::new_from_entropy([seed.wrapping_add(1); 32]),
-            ExecutionMode::Testing,
-        );
-        let temp = tempfile::tempdir()?;
+        let ctx = Self::context(seed);
         let mut config = AgentConfig {
             device_id: DeviceId::new_from_entropy([seed.wrapping_add(2); 32]),
             ..AgentConfig::default()
@@ -192,6 +239,7 @@ impl Peer {
             agent,
             app,
             id,
+            seed,
         })
     }
 }

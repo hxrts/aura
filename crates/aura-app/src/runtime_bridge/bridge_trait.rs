@@ -9,7 +9,9 @@ use super::{
     RuntimeStatus, SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
-use crate::ui_contract::{AmpChannelTransitionSnapshot, SupervisedTaskFailureSnapshot};
+use crate::ui_contract::{
+    AmpChannelTransitionSnapshot, InboundMessageDropSnapshot, SupervisedTaskFailureSnapshot,
+};
 use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_chat::view::CanonicalChannelCreation;
@@ -75,6 +77,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// task, in occurrence order. Not parity-critical; runtimes without a
     /// task supervisor (offline, mocks) report none.
     fn supervised_task_failures(&self) -> Vec<SupervisedTaskFailureSnapshot> {
+        Vec::new()
+    }
+
+    /// Diagnostic observation of recent inbound chat messages the receive
+    /// gate refused, newest last, with typed reasons. Not parity-critical;
+    /// runtimes without a chat receive gate report none.
+    fn inbound_message_drops(&self) -> Vec<InboundMessageDropSnapshot> {
         Vec::new()
     }
 

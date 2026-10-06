@@ -16,6 +16,7 @@ use crate::core::config::{default_storage_path, SecureStorageBackend};
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
+use crate::reactive::{InboundMessageDrop, InboundMessageDropLog};
 use crate::runtime::services::{
     LanTransportService, LogicalClockManager, MoveManager, RendezvousManager,
 };
@@ -238,6 +239,36 @@ type RuntimeJournalHandler = aura_journal::JournalHandler<
     JournalBiscuitAuthorizationHandler,
 >;
 
+/// A fact received from `source` and rejected at ingress because the required
+/// views cannot decode it (`cause` keeps the codec or schema fault).
+#[derive(Debug, thiserror::Error)]
+#[error("peer fact {type_id} (schema {schema_version}) from {source_authority} rejected: {cause}")]
+pub struct PeerFactRejection {
+    pub source_authority: AuthorityId,
+    pub type_id: String,
+    pub schema_version: u16,
+    #[source]
+    pub cause: AuraError,
+}
+
+impl PeerFactRejection {
+    fn new(source_authority: AuthorityId, fact: &RelationalFact, cause: AuraError) -> Self {
+        let (type_id, schema_version) = match fact {
+            RelationalFact::Generic { envelope, .. } => (
+                envelope.type_id.as_str().to_owned(),
+                envelope.schema_version,
+            ),
+            _ => (String::from("protocol"), 0),
+        };
+        Self {
+            source_authority,
+            type_id,
+            schema_version,
+            cause,
+        }
+    }
+}
+
 /// Concrete effect system combining all effects for runtime usage
 ///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
@@ -263,6 +294,12 @@ pub struct AuraEffectSystem {
     /// Cryptographic operations subsystem
     crypto: CryptoSubsystem,
     enrollment_generation_gate: tokio::sync::Mutex<()>,
+    /// Facts received from peers and rejected at ingress (see
+    /// [`AuraEffectSystem::admit_peer_fact`]).
+    rejected_peer_facts: std::sync::atomic::AtomicU64,
+    /// Inbound chat messages refused by the receive gate (see
+    /// [`AuraEffectSystem::record_inbound_message_drop`]).
+    inbound_message_drops: std::sync::Mutex<InboundMessageDropLog>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
     enrollment_retirement_fault: std::sync::Mutex<Option<u64>>,
     /// Network transport subsystem
@@ -1157,6 +1194,8 @@ impl AuraEffectSystem {
             harness_mode_enabled,
             crypto,
             enrollment_generation_gate: tokio::sync::Mutex::new(()),
+            rejected_peer_facts: std::sync::atomic::AtomicU64::new(0),
+            inbound_message_drops: std::sync::Mutex::new(InboundMessageDropLog::default()),
             #[cfg(all(test, not(target_arch = "wasm32")))]
             enrollment_retirement_fault: std::sync::Mutex::new(None),
             transport,
@@ -2266,14 +2305,74 @@ impl AuraEffectSystem {
             .unwrap_or_else(|| unreachable!("commit_relational_facts committed exactly one")))
     }
 
+    /// Admit a relational fact received from a peer (or a sibling device, which
+    /// may run another build) before it is committed. Required views treat a
+    /// decode fault of a committed fact as terminal, so a fact they cannot
+    /// decode (an unsupported schema, a malformed payload) is rejected here,
+    /// per fact: logged, counted in [`Self::rejected_peer_fact_count`], and
+    /// never committed. Locally committed facts keep the terminal contract.
+    pub(crate) fn admit_peer_fact(
+        &self,
+        source: AuthorityId,
+        fact: &RelationalFact,
+    ) -> Result<(), PeerFactRejection> {
+        crate::reactive::app_signal_views::check_required_projection_fact(fact).map_err(|cause| {
+            let rejection = PeerFactRejection::new(source, fact, cause);
+            self.rejected_peer_facts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!(error = %rejection, "rejected peer fact at ingress");
+            rejection
+        })
+    }
+
+    /// How many peer facts [`Self::admit_peer_fact`] has rejected.
+    pub fn rejected_peer_fact_count(&self) -> u64 {
+        self.rejected_peer_facts
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record an inbound chat message the receive gate refused: logged at
+    /// warn with its typed reason, counted, and kept (bounded, newest last)
+    /// for diagnostics. Observation only; never parity-critical.
+    pub(crate) fn record_inbound_message_drop(&self, drop: InboundMessageDrop) {
+        tracing::warn!(
+            context_id = %drop.context_id,
+            channel_id = %drop.channel_id,
+            sender_id = %drop.sender_id,
+            message_id = %drop.message_id,
+            reason = %drop.reason,
+            "inbound chat message refused by receive gate"
+        );
+        self.inbound_message_drops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(drop);
+    }
+
+    /// Recent inbound chat messages refused by the receive gate (newest
+    /// last) and the total refused since startup.
+    pub fn inbound_message_drops(&self) -> (Vec<InboundMessageDrop>, u64) {
+        let log = self
+            .inbound_message_drops
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (log.recent.iter().cloned().collect(), log.total)
+    }
+
     /// Import committed facts replicated from another device of this authority.
     ///
     /// Facts keep their original order key, so importing is idempotent; only
-    /// facts not already stored are persisted and published. Returns how many
-    /// were new.
+    /// facts not already stored are persisted and published. A fact the
+    /// required views cannot decode is rejected per fact
+    /// ([`Self::admit_peer_fact`]). Returns how many were new.
     pub async fn import_committed_facts(&self, facts: Vec<TypedFact>) -> Result<usize, AuraError> {
         let mut imported = Vec::new();
         for fact in facts {
+            if let FactContent::Relational(relational) = &fact.content {
+                if self.admit_peer_fact(self.authority_id, relational).is_err() {
+                    continue;
+                }
+            }
             let key = Self::typed_fact_storage_key(self.authority_id, &fact.order);
             let present = self
                 .retrieve(&key)

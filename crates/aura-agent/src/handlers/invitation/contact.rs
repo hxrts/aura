@@ -1053,6 +1053,16 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                     };
                     let fact = fact.payload();
+                    // A fact the required views cannot decode (e.g. an older
+                    // peer's schema) is rejected here, never committed.
+                    let sender = in_flight_envelope
+                        .as_ref()
+                        .map(|envelope| envelope.source)
+                        .expect("in-flight envelope exists while processing chat fact");
+                    if effects.admit_peer_fact(sender, fact).is_err() {
+                        in_flight_envelope = None;
+                        continue;
+                    }
                     // The receipt binds the envelope source to the sender, so a
                     // moderation fact must name that sender as its actor.
                     if let RelationalFact::Generic { envelope: inner, .. } = fact {

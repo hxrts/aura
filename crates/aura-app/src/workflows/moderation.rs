@@ -60,6 +60,19 @@ pub enum ModerationDenial {
         /// Authority whose ban status was queried.
         authority: aura_core::AuthorityId,
     },
+    /// The authority's effective access level in the home does not grant
+    /// the capability the operation requires.
+    #[error("Your access level in this home does not allow {capability}")]
+    AccessRestricted {
+        /// Authoritative context queried by the workflow.
+        context: aura_core::ContextId,
+        /// Canonical channel in that context.
+        channel: aura_core::ChannelId,
+        /// Authority whose access level was evaluated.
+        authority: aura_core::AuthorityId,
+        /// Access capability the operation requires, as user-facing text.
+        capability: &'static str,
+    },
 }
 
 impl ModerationDenial {
@@ -70,6 +83,7 @@ impl ModerationDenial {
             Self::NotMember { .. } => C::NotMember,
             Self::Muted { .. } => C::Muted,
             Self::Banned { .. } => C::Banned,
+            Self::AccessRestricted { .. } => C::PermissionDenied,
         }
     }
 }

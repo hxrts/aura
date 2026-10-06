@@ -24,7 +24,7 @@ use aura_app::runtime_bridge::{
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui_contract::{
     AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
-    AmpTransitionState, ChannelFactKey, SupervisedTaskFailureSnapshot,
+    AmpTransitionState, ChannelFactKey, InboundMessageDropSnapshot, SupervisedTaskFailureSnapshot,
 };
 use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
@@ -717,6 +717,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .supervised_task_failures()
             .iter()
             .map(supervised_task_failure_snapshot)
+            .collect()
+    }
+
+    fn inbound_message_drops(&self) -> Vec<InboundMessageDropSnapshot> {
+        let (drops, _) = self.agent.runtime().effects().inbound_message_drops();
+        drops
+            .into_iter()
+            .map(|drop| InboundMessageDropSnapshot {
+                context_id: drop.context_id.to_string(),
+                channel_id: drop.channel_id.to_string(),
+                sender_id: drop.sender_id.to_string(),
+                message_id: drop.message_id,
+                reason: drop.reason.to_string(),
+            })
             .collect()
     }
 

@@ -7750,3 +7750,119 @@ async fn verified_peer_descriptors_survive_a_runtime_restart() {
         "the persisted verified hint is re-cached"
     );
 }
+
+/// Deliver `fact` from `peer` to `authority` as an inbound chat-fact envelope
+/// whose receipt carries `nonce` (distinct per delivery: replays are dropped).
+async fn send_peer_relational_fact(
+    effects: &Arc<AuraEffectSystem>,
+    authority: AuthorityId,
+    peer: AuthorityId,
+    context_id: ContextId,
+    fact: &RelationalFact,
+    nonce: u64,
+) {
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        CHAT_FACT_CONTENT_TYPE.to_string(),
+    );
+    let mut envelope = TransportEnvelope {
+        destination: authority,
+        source: peer,
+        context: context_id,
+        payload: aura_core::util::serialization::to_vec(fact).unwrap(),
+        metadata,
+        receipt: None,
+    };
+    envelope.receipt = Some(aura_core::effects::transport::TransportReceipt {
+        nonce,
+        ..test_transport_receipt_for_envelope(&envelope)
+    });
+    crate::runtime::transport_boundary::send_guarded_transport_envelope(effects.as_ref(), envelope)
+        .await
+        .unwrap();
+}
+
+// Task 119: a peer on an older build sends facts at a schema this runtime's
+// required views cannot decode. Ingress rejects them per fact; they are not
+// committed, the reactive scheduler stays alive, and a later valid fact from
+// the same peer still commits and processes.
+large_stack_async_test!(unsupported_schema_peer_facts_are_rejected_at_ingress, {
+    let authority = AuthorityId::new_from_entropy([209u8; 32]);
+    let peer = AuthorityId::new_from_entropy([210u8; 32]);
+    let config = AgentConfig::default();
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+    let pipeline = start_test_reactive_pipeline(&effects).await;
+    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+    let context_id = ContextId::new_from_entropy([211u8; 32]);
+    let grant = |ts| {
+        HomeGrantModeratorFact::new_ms(
+            context_id,
+            authority,
+            peer,
+            ts,
+            aura_social::moderation::governance::test_support::causal(
+                1,
+                aura_social::HomeGovernanceKey::GrantModerator { target: authority },
+                &[],
+            ),
+        )
+        .to_generic()
+    };
+    let with_schema = |fact: RelationalFact, type_id: Option<&str>, schema_version| {
+        let RelationalFact::Generic {
+            context_id,
+            mut envelope,
+        } = fact
+        else {
+            unreachable!("domain facts are generic")
+        };
+        if let Some(type_id) = type_id {
+            envelope.type_id = aura_core::types::facts::FactTypeId::from(type_id);
+        }
+        envelope.schema_version = schema_version;
+        RelationalFact::Generic {
+            context_id,
+            envelope,
+        }
+    };
+    // Contact facts are at schema 2 and governance facts at schema 3.
+    let old_contact = with_schema(grant(1_700_000_000_001), Some(CONTACT_FACT_TYPE_ID), 1);
+    let old_governance = with_schema(grant(1_700_000_000_002), None, 2);
+
+    for (rejected, fact) in [(1, &old_contact), (2, &old_governance)] {
+        send_peer_relational_fact(&effects, authority, peer, context_id, fact, rejected).await;
+        handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(effects.rejected_peer_fact_count(), rejected);
+    }
+
+    let valid = grant(1_700_000_000_003);
+    send_peer_relational_fact(&effects, authority, peer, context_id, &valid, 3).await;
+    let processed = handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+    assert_eq!(processed, 1, "the later valid fact processes");
+    assert!(
+        pipeline.terminal_failure().is_none(),
+        "peer input must not stop the reactive scheduler"
+    );
+
+    let committed: Vec<RelationalFact> = effects
+        .load_committed_facts(authority)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|fact| match fact.content {
+            FactContent::Relational(relational) => Some(relational),
+            _ => None,
+        })
+        .collect();
+    assert!(!committed.contains(&old_contact));
+    assert!(!committed.contains(&old_governance));
+    assert!(committed.contains(&valid));
+});

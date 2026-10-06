@@ -115,9 +115,15 @@ pub(super) async fn enforce_home_moderation_for_sender(
             && !home.allows_access_capability(&sender_id, "send_message")
     });
     if denied {
-        return Err(AuraError::permission_denied(
-            "Your access level in this home does not allow sending messages",
-        ));
+        return Err(
+            crate::workflows::moderation::ModerationDenial::AccessRestricted {
+                context: context_id,
+                channel: channel_id,
+                authority: sender_id,
+                capability: "sending messages",
+            }
+            .into(),
+        );
     }
 
     Ok(())
@@ -227,6 +233,7 @@ mod tests {
                     channel: h,
                     authority: a,
                 } => assert_eq!((*c, *h, *a), (context, channel, target)),
+                D::AccessRestricted { .. } => panic!("unexpected access denial: {denial}"),
             }
             assert_eq!(classify_terminal_execution_error(&error).reason, reason);
             let retained = aura_core::AuraError::from(crate::workflows::error::runtime_call(
@@ -267,6 +274,40 @@ mod tests {
         enforce_home_moderation_for_sender(&core, context, channel, target, 1_000)
             .await
             .expect("member allowed");
+
+        // Task 121: a Limited access override refuses the send with the typed
+        // permission denial, not an internal error.
+        let mut home = crate::views::home::HomeState::new(channel, None, authority, 0, context);
+        home.set_access_override(target, aura_social::AccessLevel::Limited);
+        let mut homes = crate::views::home::HomesState::default();
+        homes.add_home(home);
+        crate::workflows::signals::emit_signal(
+            &core,
+            &*crate::signal_defs::HOMES_SIGNAL,
+            homes,
+            crate::signal_defs::HOMES_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+        let error = enforce_home_moderation_for_sender(&core, context, channel, target, 1_000)
+            .await
+            .expect_err("Limited access refuses send_message");
+        assert!(matches!(
+            crate::workflows::moderation::denial_from_error(&error),
+            Some(D::AccessRestricted { context: c, channel: h, authority: a, .. })
+                if (*c, *h, *a) == (context, channel, target)
+        ));
+        assert!(error.to_string().contains("access level"), "{error}");
+        assert_eq!(
+            classify_terminal_execution_error(&error).reason,
+            R::PermissionDenied
+        );
+        let semantic =
+            super::super::SendMessageError::ModerationDenied { source: error }.semantic_error();
+        assert_eq!(
+            semantic.code,
+            crate::ui_contract::SemanticFailureCode::PermissionDenied
+        );
     }
 
     #[tokio::test]

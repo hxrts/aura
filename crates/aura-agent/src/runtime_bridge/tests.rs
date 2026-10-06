@@ -3029,3 +3029,63 @@ async fn bridge_reports_supervised_task_failures_with_group_task_and_cause() {
         .iter()
         .any(|f| f.group == "runtime.probe" && f.task == "boom" && f.cause == "panicked"));
 }
+
+/// Task 120: a moderator's later access override observes its earlier one,
+/// so the register resolves to the later write rather than treating the two
+/// as concurrent (most restrictive).
+#[tokio::test]
+async fn sequential_access_overrides_by_one_writer_supersede() {
+    use aura_social::moderation::resolved_access_overrides;
+    use aura_social::{HomeGovernanceEvent, TaggedHomeGovernanceEvent};
+    use aura_social::{AccessLevel, HomeId, SocialFact};
+    let authority = AuthorityId::new_from_entropy([120u8; 32]);
+    let context = ContextId::new_from_entropy([121u8; 32]);
+    let target = AuthorityId::new_from_entropy([122u8; 32]);
+    let build_context = EffectContext::new(authority, context, ExecutionMode::Testing);
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(authority)
+            .build_testing_async(&build_context)
+            .await
+            .expect("build testing agent"),
+    );
+    let bridge = AgentRuntimeBridge::new(agent);
+    let mut written = Vec::new();
+    for (ms, level) in [(1, AccessLevel::Limited), (2, AccessLevel::Partial)] {
+        let causal = bridge
+            .causal_stamp(CausalStampKey::HomeGovernance {
+                context_id: context,
+                key: HomeGovernanceKey::AccessOverride { target },
+            })
+            .await
+            .expect("stamp override");
+        let fact = SocialFact::access_override_set_ms(
+            target,
+            HomeId::from_bytes([123u8; 32]),
+            context,
+            level,
+            authority,
+            ms,
+            causal,
+        );
+        bridge
+            .commit_relational_facts(&[fact.to_generic()])
+            .await
+            .expect("commit override");
+        written.push(
+            TaggedHomeGovernanceEvent::from_event(HomeGovernanceEvent::AccessOverride(fact))
+                .expect("governance event"),
+        );
+    }
+    let (limited, partial) = (&written[0], &written[1]);
+    assert!(
+        partial.causal.supersedes.contains(&limited.tag),
+        "the Partial write must supersede the observed Limited write: {:?}",
+        partial.causal
+    );
+    let refs: Vec<_> = written.iter().collect();
+    assert_eq!(
+        resolved_access_overrides(&refs).get(&target),
+        Some(&AccessLevel::Partial)
+    );
+}

@@ -104,6 +104,68 @@ fn required_projection_fact_source(
     }
 }
 
+fn required_invitation_fact_source(
+    source: aura_invitation::facts::InvitationFactDecodeError,
+) -> aura_core::AuraError {
+    use aura_invitation::facts::InvitationFactDecodeError;
+    let message = "decode required invitation projection fact".into();
+    if matches!(
+        &source,
+        InvitationFactDecodeError::Envelope(_) | InvitationFactDecodeError::ContextMismatch { .. }
+    ) {
+        aura_core::AuraError::Invalid {
+            message,
+            source: Some(Arc::new(source)),
+        }
+    } else {
+        aura_core::AuraError::Serialization {
+            message,
+            source: Some(Arc::new(source)),
+        }
+    }
+}
+
+/// Decode a relational fact exactly as the required signal views will, without
+/// projecting it. The views treat a decode fault as terminal (correct for
+/// locally committed state), so peer ingress runs this before committing a
+/// received fact and rejects one that would fault a view.
+pub(crate) fn check_required_projection_fact(
+    fact: &RelationalFact,
+) -> Result<(), aura_core::AuraError> {
+    let RelationalFact::Generic {
+        context_id,
+        envelope,
+    } = fact
+    else {
+        return Ok(());
+    };
+    match envelope.type_id.as_str() {
+        CONTACT_FACT_TYPE_ID => ContactFact::try_from_envelope(envelope)
+            .map(|_| ())
+            .map_err(required_projection_fact_source),
+        FRIENDSHIP_FACT_TYPE_ID => FriendshipFact::try_from_envelope(envelope)
+            .map(|_| ())
+            .map_err(required_projection_fact_source),
+        RECOVERY_FACT_TYPE_ID => RecoveryFact::try_from_envelope(envelope)
+            .map(|_| ())
+            .map_err(required_projection_fact_source),
+        CHAT_FACT_TYPE_ID => ChatFact::try_from_envelope(envelope).map(|_| ()),
+        INVITATION_FACT_TYPE_ID => {
+            InvitationFact::try_from_envelope_in_context(envelope, *context_id)
+                .map(|_| ())
+                .map_err(required_invitation_fact_source)
+        }
+        type_id => {
+            if type_id == SOCIAL_FACT_TYPE_ID {
+                SocialFact::try_from_envelope(envelope).map_err(required_projection_fact_source)?;
+            }
+            TaggedHomeGovernanceEvent::try_decode(*context_id, envelope)
+                .map_err(aura_core::AuraError::from)?;
+            required_pin_projection(envelope, *context_id).map(|_| ())
+        }
+    }
+}
+
 /// Canonical AMP checkpoint and joined-participant evidence for projecting an
 /// accepted home on the joining runtime. Fields are private to the owner.
 pub(crate) struct VerifiedJoinedHome {
@@ -546,25 +608,7 @@ impl ReactiveView for InvitationsSignalView {
                     }
 
                     let inv = InvitationFact::try_from_envelope_in_context(envelope, *context_id)
-                        .map_err(|source| {
-                        use aura_invitation::facts::InvitationFactDecodeError;
-                        let message = "decode required invitation projection fact".into();
-                        if matches!(
-                            &source,
-                            InvitationFactDecodeError::Envelope(_)
-                                | InvitationFactDecodeError::ContextMismatch { .. }
-                        ) {
-                            aura_core::AuraError::Invalid {
-                                message,
-                                source: Some(Arc::new(source)),
-                            }
-                        } else {
-                            aura_core::AuraError::Serialization {
-                                message,
-                                source: Some(Arc::new(source)),
-                            }
-                        }
-                    })?;
+                        .map_err(required_invitation_fact_source)?;
 
                     match inv {
                         sent_fact @ InvitationFact::Sent { .. } => {
@@ -1117,17 +1161,18 @@ impl HomeSignalView {
         }
     }
 
-    /// The materialized home for a context. Homes exist only once their
+    /// Every materialized home for a context. Homes exist only once their
     /// `SocialFact::HomeCreated` is reduced; facts for an unknown context are
-    /// not given a fabricated placeholder home.
-    fn home_for_context_mut<'a>(
+    /// not given a fabricated placeholder home. Context facts reduce into
+    /// every home of that context (never an arbitrary first match), so none
+    /// is left stale: the inbound chat gate consults all of them.
+    fn homes_for_context_mut<'a>(
         homes: &'a mut HomesState,
-        context_id: &ContextId,
-    ) -> Option<&'a mut HomeState> {
-        let home_id = homes.iter().find_map(|(home_id, home)| {
-            (home.context_id == Some(*context_id)).then_some(*home_id)
-        })?;
-        homes.home_mut(&home_id)
+        context_id: ContextId,
+    ) -> impl Iterator<Item = &'a mut HomeState> + 'a {
+        homes
+            .all_homes_mut()
+            .filter(move |home| home.context_id == Some(context_id))
     }
 
     /// Applies a social fact that creates a home or changes its membership.
@@ -1333,35 +1378,32 @@ impl ReactiveView for HomeSignalView {
                 }
 
                 for (context_id, log) in &mut governance {
-                    if let Some(home) = Self::home_for_context_mut(&mut homes, context_id) {
+                    for home in Self::homes_for_context_mut(&mut homes, *context_id) {
                         changed |= reduce_home_governance(home, log, &self.own_authority);
                     }
                 }
 
                 for (context_id, pin) in pins {
-                    let Some(home_state) = Self::home_for_context_mut(&mut homes, &context_id)
-                    else {
-                        continue;
-                    };
-                    match pin {
-                        RequiredPinProjection::Pin(pin)
-                            if !home_state
-                                .actor_may_moderate(&pin.actor_authority, "pin_content") => {}
-                        RequiredPinProjection::Pin(pin) => {
-                            home_state.pin_message_with_meta(PinnedMessageMeta {
-                                message_id: pin.message_id,
-                                pinned_by: pin.actor_authority,
-                                pinned_at: pin.pinned_at.ts_ms,
-                            });
-                            changed = true;
-                        }
-                        RequiredPinProjection::Unpin(unpin)
-                            if !home_state
-                                .actor_may_moderate(&unpin.actor_authority, "pin_content") => {}
-                        RequiredPinProjection::Unpin(unpin) => {
-                            if home_state.unpin_message(&unpin.message_id) {
+                    for home_state in Self::homes_for_context_mut(&mut homes, context_id) {
+                        match &pin {
+                            RequiredPinProjection::Pin(pin)
+                                if home_state
+                                    .actor_may_moderate(&pin.actor_authority, "pin_content") =>
+                            {
+                                home_state.pin_message_with_meta(PinnedMessageMeta {
+                                    message_id: pin.message_id.clone(),
+                                    pinned_by: pin.actor_authority,
+                                    pinned_at: pin.pinned_at.ts_ms,
+                                });
                                 changed = true;
                             }
+                            RequiredPinProjection::Unpin(unpin)
+                                if home_state
+                                    .actor_may_moderate(&unpin.actor_authority, "pin_content") =>
+                            {
+                                changed |= home_state.unpin_message(&unpin.message_id);
+                            }
+                            RequiredPinProjection::Pin(_) | RequiredPinProjection::Unpin(_) => {}
                         }
                     }
                 }
@@ -1396,6 +1438,108 @@ impl ReactiveView for HomeSignalView {
 // =============================================================================
 // Chat
 // =============================================================================
+
+/// Why the inbound chat gate refused a peer message. Observation only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InboundMessageDropReason {
+    /// The sender's departure from the channel was observed.
+    DepartedChannel,
+    /// The homes projection could not be read (fail closed).
+    HomesUnavailable,
+    Banned {
+        home: ChannelId,
+        homes_considered: usize,
+    },
+    Muted {
+        home: ChannelId,
+        homes_considered: usize,
+    },
+    /// The sender's effective access level in `home` lacks `send_message`.
+    AccessLevel {
+        home: ChannelId,
+        level: Option<String>,
+        homes_considered: usize,
+    },
+    /// The context's homes have a roster without the sender, and no channel
+    /// invitation admits them.
+    NotHomeMember { homes_considered: usize },
+    /// The context's homes have no roster yet and the sender is neither a
+    /// known channel member nor invited.
+    RosterUnknownNotChannelMember { homes_considered: usize },
+    /// No home for the context and the sender is neither a known channel
+    /// member nor invited.
+    NoHomeNotChannelMember,
+}
+
+impl std::fmt::Display for InboundMessageDropReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DepartedChannel => write!(f, "departed_channel"),
+            Self::HomesUnavailable => write!(f, "homes_unavailable"),
+            Self::Banned {
+                home,
+                homes_considered,
+            } => {
+                write!(f, "banned home={home} homes={homes_considered}")
+            }
+            Self::Muted {
+                home,
+                homes_considered,
+            } => {
+                write!(f, "muted home={home} homes={homes_considered}")
+            }
+            Self::AccessLevel {
+                home,
+                level,
+                homes_considered,
+            } => write!(
+                f,
+                "access_level level={} home={home} homes={homes_considered}",
+                level.as_deref().unwrap_or("none")
+            ),
+            Self::NotHomeMember { homes_considered } => {
+                write!(f, "not_home_member homes={homes_considered}")
+            }
+            Self::RosterUnknownNotChannelMember { homes_considered } => {
+                write!(
+                    f,
+                    "roster_unknown_not_channel_member homes={homes_considered}"
+                )
+            }
+            Self::NoHomeNotChannelMember => write!(f, "no_home_not_channel_member"),
+        }
+    }
+}
+
+/// One inbound message the chat gate refused, with where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InboundMessageDrop {
+    pub context_id: ContextId,
+    pub channel_id: ChannelId,
+    pub sender_id: AuthorityId,
+    pub message_id: String,
+    pub reason: InboundMessageDropReason,
+}
+
+/// Bounded record of refused inbound messages: the newest
+/// [`Self::CAPACITY`] drops and the total since startup.
+#[derive(Debug, Default)]
+pub struct InboundMessageDropLog {
+    pub(crate) recent: std::collections::VecDeque<InboundMessageDrop>,
+    pub(crate) total: u64,
+}
+
+impl InboundMessageDropLog {
+    pub const CAPACITY: usize = 64;
+
+    pub(crate) fn push(&mut self, drop: InboundMessageDrop) {
+        if self.recent.len() == Self::CAPACITY {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(drop);
+        self.total += 1;
+    }
+}
 
 pub struct ChatSignalView {
     own_authority: AuthorityId,
@@ -1563,6 +1707,8 @@ impl ChatSignalView {
         })
     }
 
+    /// Inbound chat gate: `Ok` admits the sender, `Err` names the first check
+    /// that refused (in evaluation order) and the home that refused it.
     async fn sender_allowed_for_context(
         &self,
         context_id: ContextId,
@@ -1571,7 +1717,8 @@ impl ChatSignalView {
         sent_at_ms: u64,
         // Sender is a recorded member of the channel (e.g. its creator).
         known_channel_member: bool,
-    ) -> bool {
+    ) -> Result<(), InboundMessageDropReason> {
+        use InboundMessageDropReason as Drop;
         if self
             .membership
             .lock()
@@ -1579,67 +1726,70 @@ impl ChatSignalView {
             .get(&(context_id, channel_id))
             .is_some_and(|membership| membership.departed(sender_id))
         {
-            return false;
+            return Err(Drop::DepartedChannel);
         }
         if sender_id == self.own_authority {
-            return true;
+            return Ok(());
         }
 
-        let homes = match self.reactive.read(&*HOMES_SIGNAL).await {
-            Ok(homes) => homes,
-            Err(_) => return false,
-        };
+        let homes = self
+            .reactive
+            .read(&*HOMES_SIGNAL)
+            .await
+            .map_err(|_| Drop::HomesUnavailable)?;
         let candidates =
             app_signal_projection::collect_moderation_homes(&homes, context_id, channel_id);
-        if candidates.is_empty() {
-            return known_channel_member
-                || self
-                    .sender_allowed_via_channel_invitation(channel_id, sender_id)
-                    .await;
+        let homes_considered = candidates.len();
+        if let Some(home) = candidates.iter().find(|home| home.is_banned(&sender_id)) {
+            return Err(Drop::Banned {
+                home: home.id,
+                homes_considered,
+            });
         }
-
-        if candidates.iter().any(|home| home.is_banned(&sender_id)) {
-            return false;
-        }
-        if candidates
+        if let Some(home) = candidates
             .iter()
-            .any(|home| home.is_muted(&sender_id, sent_at_ms))
+            .find(|home| home.is_muted(&sender_id, sent_at_ms))
         {
-            return false;
+            return Err(Drop::Muted {
+                home: home.id,
+                homes_considered,
+            });
         }
-        if candidates
+        if let Some(home) = candidates
             .iter()
-            .any(|home| !home.allows_access_capability(&sender_id, "send_message"))
+            .find(|home| !home.allows_access_capability(&sender_id, "send_message"))
         {
-            return false;
+            return Err(Drop::AccessLevel {
+                home: home.id,
+                level: home
+                    .effective_access_level(&sender_id)
+                    .map(|level| format!("{level:?}")),
+                homes_considered,
+            });
         }
         let has_member_roster = candidates.iter().any(|home| !home.members.is_empty());
-        let sender_is_member = candidates
+        if candidates
             .iter()
-            .any(|home| home.member(&sender_id).is_some());
-        if !has_member_roster {
-            return known_channel_member
-                || self
-                    .sender_allowed_via_channel_invitation(channel_id, sender_id)
-                    .await;
+            .any(|home| home.member(&sender_id).is_some())
+        {
+            return Ok(());
         }
-        if !sender_is_member {
-            if self
-                .sender_allowed_via_channel_invitation(channel_id, sender_id)
-                .await
-            {
-                return true;
-            }
-            tracing::debug!(
-                context_id = %context_id,
-                channel_id = %channel_id,
-                sender_id = %sender_id,
-                "Dropping inbound message because moderation membership is unavailable or denies sender"
-            );
-            return false;
+        if !has_member_roster && known_channel_member {
+            return Ok(());
         }
-
-        true
+        if self
+            .sender_allowed_via_channel_invitation(channel_id, sender_id)
+            .await
+        {
+            return Ok(());
+        }
+        Err(if candidates.is_empty() {
+            Drop::NoHomeNotChannelMember
+        } else if has_member_roster {
+            Drop::NotHomeMember { homes_considered }
+        } else {
+            Drop::RosterUnknownNotChannelMember { homes_considered }
+        })
     }
 }
 
@@ -1821,7 +1971,7 @@ impl ReactiveView for ChatSignalView {
                                             channel.member_ids.contains(&sender_id)
                                         });
                                     drop(state);
-                                    if !self
+                                    if let Err(reason) = self
                                         .sender_allowed_for_context(
                                             context,
                                             channel_id,
@@ -1831,12 +1981,14 @@ impl ReactiveView for ChatSignalView {
                                         )
                                         .await
                                     {
-                                        tracing::debug!(
-                                            context_id = %context,
-                                            channel_id = %channel_id,
-                                            message_id = %message_id,
-                                            sender_id = %sender_id,
-                                            "Dropping message due to moderation policy"
+                                        self.effects.record_inbound_message_drop(
+                                            InboundMessageDrop {
+                                                context_id: context,
+                                                channel_id,
+                                                sender_id,
+                                                message_id: message_id.clone(),
+                                                reason,
+                                            },
                                         );
                                         state = self.state.lock().await;
                                         continue;
@@ -3059,7 +3211,7 @@ mod tests {
             .await;
 
         assert!(
-            !allowed,
+            allowed.is_err(),
             "missing moderation state must fail closed for inbound sender gating"
         );
     }
@@ -3114,7 +3266,10 @@ mod tests {
             .await;
 
         assert!(
-            !allowed,
+            allowed
+                == Err(InboundMessageDropReason::NotHomeMember {
+                    homes_considered: 2
+                }),
             "ambiguous moderation context must fail closed for inbound sender gating"
         );
     }
@@ -3509,9 +3664,9 @@ mod tests {
                 "removed peers cannot leave stale counts"
             );
             assert!(
-                !view
-                    .sender_allowed_for_context(context, channel, peer, 100, true)
-                    .await,
+                view.sender_allowed_for_context(context, channel, peer, 100, true)
+                    .await
+                    == Err(InboundMessageDropReason::DepartedChannel),
                 "known-membership and invitation fallback cannot override observed departure"
             );
             view.update(&[left.clone(), join.clone(), hint.clone()])
@@ -3609,9 +3764,9 @@ mod tests {
             "unversioned join is not a certified successor"
         );
         assert!(
-            !view
-                .sender_allowed_for_context(context, channel, own, 100, true)
+            view.sender_allowed_for_context(context, channel, own, 100, true)
                 .await
+                == Err(InboundMessageDropReason::DepartedChannel)
         );
     }
 
@@ -4164,19 +4319,21 @@ mod tests {
         let mut homes = HomesState::new();
         add_fixture_home(&mut homes, home.clone());
         reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
-        assert!(
-            view.sender_allowed_for_context(context_id, home_id, sender_id, 1, false)
-                .await
-        );
+        assert!(view
+            .sender_allowed_for_context(context_id, home_id, sender_id, 1, false)
+            .await
+            .is_ok());
 
         home.set_access_override(sender_id, aura_social::AccessLevel::Limited);
         let mut homes = HomesState::new();
         add_fixture_home(&mut homes, home);
         reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
         assert!(
-            !view
-                .sender_allowed_for_context(context_id, home_id, sender_id, 2, false)
-                .await,
+            matches!(
+                view.sender_allowed_for_context(context_id, home_id, sender_id, 2, false)
+                    .await,
+                Err(InboundMessageDropReason::AccessLevel { .. })
+            ),
             "a Limited override removes send_message"
         );
     }
@@ -4372,6 +4529,65 @@ mod tests {
             home.access_overrides.get(&target),
             Some(&aura_social::AccessLevel::Partial)
         );
+    }
+
+    /// Task 120: governance reduces into every home of a context, so the
+    /// inbound gate (which consults all of them) never sees a stale one.
+    #[tokio::test]
+    async fn governance_reduces_into_every_home_of_a_context() {
+        let reactive = ReactiveHandler::new();
+        let context = ContextId::new_from_entropy([7u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let target = AuthorityId::new_from_entropy([8u8; 32]);
+        let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+        let view = HomeSignalView::new(target, reactive.clone());
+        let home_ids = [46u8, 47u8].map(|b| aura_social::HomeId::from_bytes([b; 32]));
+        use aura_social::moderation::governance::test_support::causal;
+        let key = aura_social::moderation::HomeGovernanceKey::AccessOverride { target };
+        let override_fact = |level, at| {
+            SocialFact::access_override_set_ms(target, home_ids[0], context, level, owner, 70, at)
+                .to_generic()
+        };
+        // Limited, then Partial written by the same moderator after observing it.
+        let limited = override_fact(aura_social::AccessLevel::Limited, causal(1, key, &[]));
+        let RelationalFact::Generic { envelope, .. } = &limited else {
+            unreachable!("governance facts are generic")
+        };
+        let observed = TaggedHomeGovernanceEvent::try_decode(context, envelope)
+            .unwrap()
+            .expect("access override is a governance fact");
+        let partial = override_fact(
+            aura_social::AccessLevel::Partial,
+            causal(1, key, &[observed]),
+        );
+        let mut facts: Vec<_> = home_ids
+            .iter()
+            .map(|id| {
+                fact_from_relational(
+                    SocialFact::home_created_ms(*id, context, 50, owner, "Den".to_string())
+                        .to_generic(),
+                )
+            })
+            .collect();
+        facts.push(fact_from_relational(limited));
+        view.update(&facts).await.unwrap();
+        view.update(&[fact_from_relational(partial)]).await.unwrap();
+
+        let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let candidates = app_signal_projection::collect_moderation_homes(
+            &homes,
+            context,
+            ChannelId::from_bytes([46u8; 32]),
+        );
+        assert_eq!(candidates.len(), 2, "fixture has two homes for one context");
+        for home in candidates {
+            assert_eq!(
+                home.access_overrides.get(&target),
+                Some(&aura_social::AccessLevel::Partial),
+                "home {} kept a stale access level",
+                home.id
+            );
+        }
     }
 
     #[tokio::test]

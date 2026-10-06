@@ -32,6 +32,7 @@ fn command_domain_failure(error: &AuraError) -> Option<CommandTerminalClassifica
                 D::NotMember { .. } => R::NotMember,
                 D::Muted { .. } => R::Muted,
                 D::Banned { .. } => R::Banned,
+                D::AccessRestricted { .. } => R::PermissionDenied,
             };
             return Some(CommandTerminalClassification::new(S::Denied, reason));
         }

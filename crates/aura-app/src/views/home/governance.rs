@@ -577,6 +577,24 @@ mod tests {
         );
     }
 
+    /// Task 120: one moderator sets Limited, then Partial, observing the
+    /// Limited write; Partial holds in every order.
+    #[test]
+    fn sequential_overrides_by_one_moderator_keep_the_later_level_in_every_order() {
+        let limited = override_by(1, OWNER, AccessLevel::Limited, &[]);
+        let partial = override_by(
+            1,
+            OWNER,
+            AccessLevel::Partial,
+            std::slice::from_ref(&limited),
+        );
+        let state = assert_permutation_invariant(&[limited, partial], |order| reduce(order, OWNER));
+        assert_eq!(
+            state.overrides.get(&who(TARGET)),
+            Some(&AccessLevel::Partial)
+        );
+    }
+
     #[test]
     fn channel_scoped_ban_stays_out_of_the_home_wide_list() {
         let channel = ChannelId::from_bytes([9; 32]);

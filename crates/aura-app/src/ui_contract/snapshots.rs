@@ -67,6 +67,18 @@ pub struct SupervisedTaskFailureSnapshot {
     pub cause: String,
 }
 
+/// Diagnostic record of one inbound chat message the receive gate refused,
+/// with the typed refusal reason. Observation only: not parity-critical,
+/// excluded from web/TUI parity comparison, readiness and quiescence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InboundMessageDropSnapshot {
+    pub context_id: String,
+    pub channel_id: String,
+    pub sender_id: String,
+    pub message_id: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionFailureCode {
@@ -758,6 +770,10 @@ pub struct UiSnapshot {
     /// Diagnostic-only list of dead runtime-supervised tasks.
     #[serde(default)]
     pub supervised_task_failures: Vec<SupervisedTaskFailureSnapshot>,
+    /// Diagnostic-only list of recent inbound chat messages refused by the
+    /// receive gate.
+    #[serde(default)]
+    pub inbound_message_drops: Vec<InboundMessageDropSnapshot>,
 }
 
 impl UiSnapshot {
@@ -785,6 +801,7 @@ impl UiSnapshot {
             runtime_events: Vec::new(),
             subscription_health: Vec::new(),
             supervised_task_failures: Vec::new(),
+            inbound_message_drops: Vec::new(),
         }
     }
 

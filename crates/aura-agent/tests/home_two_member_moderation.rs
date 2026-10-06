@@ -13,8 +13,8 @@ use anyhow::{anyhow, Result};
 use async_lock::RwLock;
 use aura_agent::{LinkFault, SharedTransport};
 use aura_app::core::AppCore;
-use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
-use aura_app::ui::workflows::{access, context, messaging, strong_command as sc};
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL};
+use aura_app::ui::workflows::{access, contacts, context, messaging, strong_command as sc};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use std::sync::Arc;
@@ -139,6 +139,41 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     );
     assert_tui_sends_refused(&alex.app, home, "access level").await;
 
+    // Task 120: the same moderator raises Alex to Partial. The later write
+    // supersedes the Limited one on both clients, so Alex's send is accepted
+    // by his own client and by Barbara's receiver gate.
+    faulted(
+        &net.transport,
+        alex.id,
+        barbara.id,
+        fault,
+        access::set_access_override(
+            &barbara.app,
+            None,
+            alex.id,
+            aura_social::AccessLevel::Partial,
+        ),
+    )
+    .await?;
+    for (who, app) in [("Alex", &alex.app), ("Barbara", &barbara.app)] {
+        wait_until(&format!("{who} sees Alex's Partial override"), || async {
+            home_view(app, home).await.is_some_and(|h| {
+                h.access_override(&alex.id) == Some(aura_social::AccessLevel::Partial)
+            })
+        })
+        .await?;
+    }
+    messaging::send_message(&alex.app, home, "partial send", 1_700_000_000_250).await?;
+    wait_until("Barbara receives Alex's Partial send", || async {
+        let chat = barbara.app.read().await.read(&*CHAT_SIGNAL).await;
+        chat.is_ok_and(|c| {
+            c.messages_for_channel(&home)
+                .iter()
+                .any(|m| m.sender_id == alex.id && m.content == "partial send")
+        })
+    })
+    .await?;
+
     // Barbara owns a second home (as in the live run) that is now the
     // selected home, while she types `/ban` in BarbHome's channel.
     let other = context::create_home(&barbara.app, Some("OtherHome".to_string()), None).await?;
@@ -235,4 +270,95 @@ async fn assert_tui_sends_refused(app: &Arc<RwLock<AppCore>>, home: ChannelId, r
             .is_err_and(|e| e.to_string().contains(reason)),
         "TUI send by name must be refused ({reason}): {by_name:?}"
     );
+}
+
+/// Task 118: contacts and home governance reduce from fact sets, so a
+/// restarted runtime must seed both views from its whole committed fact set
+/// before later facts (a rename, an unban) reduce against them.
+#[tokio::test(start_paused = true)]
+async fn contact_and_governance_views_survive_restart() -> Result<()> {
+    let net = SimNet::new();
+    let barbara = net.peer(91).await?;
+    let alex = net.peer(95).await?;
+    link_contacts(&barbara, &alex).await?;
+    let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    access::set_access_override(
+        &barbara.app,
+        None,
+        alex.id,
+        aura_social::AccessLevel::Limited,
+    )
+    .await?;
+    strong(
+        &barbara.app,
+        barbara.id,
+        home,
+        sc::ParsedCommand::Ban {
+            target: alex.id.to_string(),
+            reason: Some("spam".to_string()),
+        },
+    )
+    .await?;
+    let limited_and_banned = |h: &aura_app::views::home::HomeState| {
+        h.ban_list.contains_key(&alex.id)
+            && h.access_override(&alex.id) == Some(aura_social::AccessLevel::Limited)
+    };
+    wait_until("Barbara sees the override and the ban", || async {
+        home_view(&barbara.app, home)
+            .await
+            .is_some_and(|h| limited_and_banned(&h))
+    })
+    .await?;
+
+    let barbara = barbara.restart(&net).await?;
+    wait_until(
+        "restarted Barbara still has Alex and the governance",
+        || async {
+            support::is_contact(&barbara.app, alex.id).await
+                && home_view(&barbara.app, home)
+                    .await
+                    .is_some_and(|h| limited_and_banned(&h))
+        },
+    )
+    .await?;
+
+    contacts::update_contact_nickname(
+        &barbara.app,
+        &alex.id.to_string(),
+        "Alexander",
+        1_700_000_001_000,
+    )
+    .await?;
+    strong(
+        &barbara.app,
+        barbara.id,
+        home,
+        sc::ParsedCommand::Unban {
+            target: alex.id.to_string(),
+        },
+    )
+    .await?;
+    wait_until(
+        "rename and unban reduce against the seeded views",
+        || async {
+            let renamed = barbara
+                .app
+                .read()
+                .await
+                .read(&*CONTACTS_SIGNAL)
+                .await
+                .is_ok_and(|c| {
+                    c.all_contacts()
+                        .any(|c| c.id == alex.id && c.nickname == "Alexander")
+                });
+            renamed
+                && home_view(&barbara.app, home).await.is_some_and(|h| {
+                    !h.ban_list.contains_key(&alex.id)
+                        && h.access_override(&alex.id) == Some(aura_social::AccessLevel::Limited)
+                })
+        },
+    )
+    .await?;
+    net.finish().await
 }
