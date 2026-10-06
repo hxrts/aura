@@ -3265,12 +3265,8 @@ async fn execute_charge_flow_budget(
     effects: &AuraEffectSystem,
 ) -> AgentResult<Option<Receipt>> {
     emit_browser_harness_debug_event("invite_charge_begin", &format!("{context_id}:{peer}"));
-    // Deterministic testing/simulation modes do not model flow charging.
-    if effects.is_testing() {
-        emit_browser_harness_debug_event("invite_charge_testing", "");
-        return Ok(None);
-    }
-
+    // Deterministic modes charge through the same flow-budget path as
+    // production so receipt routing (context/src/dst) is validated in-process.
     let receipt = effects
         .charge_flow(&context_id, &peer, cost)
         .await

@@ -124,7 +124,7 @@ pub use session_ingress::{
     caller_session_owner_label, handle_owned_vm_round, open_owned_manifest_vm_session_admitted,
     OwnedVmSession, RuntimeSessionOwner, SessionIngressError,
 };
-pub use shared_transport::SharedTransport;
+pub use shared_transport::{LinkFault, SharedTransport};
 #[allow(unused_imports)] // Re-exported for public API
 pub use system::{RuntimeActivityGate, RuntimeActivityState, RuntimePublicOperationError};
 #[allow(unused_imports)] // Re-exported for public API

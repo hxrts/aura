@@ -82,6 +82,22 @@ impl RequiredIdentitySigningContext<'_> {
     }
 }
 
+/// Whether first-run bootstrap has created this authority's active identity.
+///
+/// A runtime can start before account bootstrap; optional announcements defer
+/// on `Ok(false)` instead of failing.
+pub(crate) async fn active_identity_exists(
+    effects: &crate::runtime::AuraEffectSystem,
+    authority: &AuthorityId,
+) -> Result<bool, aura_invitation::enrollment_manifest::EnrollmentManifestError> {
+    use aura_invitation::enrollment_manifest::EnrollmentManifestError as Error;
+    let location = SecureStorageLocation::new("epoch_state", authority.to_string());
+    effects
+        .secure_exists(&location)
+        .await
+        .map_err(|source| Error::Runtime(Box::new(source)))
+}
+
 pub(crate) async fn require_active_identity_signing_context<'a>(
     effects: &'a crate::runtime::AuraEffectSystem,
     authority: &AuthorityId,

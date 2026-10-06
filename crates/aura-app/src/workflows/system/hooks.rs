@@ -97,6 +97,10 @@ impl HookExecutionError {
 
 struct HookHealth {
     first_failure: async_lock::Mutex<Option<Arc<HookExecutionError>>>,
+    /// Most recent failed refresh of one signal update, per listener. It does
+    /// not end the attachment: the listener keeps serving later updates.
+    last_update_failures:
+        async_lock::Mutex<std::collections::BTreeMap<&'static str, Arc<HookExecutionError>>>,
     cancelled: AtomicBool,
     abort: futures::future::AbortHandle,
 }
@@ -111,6 +115,7 @@ impl HookHealth {
         (
             Arc::new(Self {
                 first_failure: async_lock::Mutex::new(None),
+                last_update_failures: async_lock::Mutex::new(std::collections::BTreeMap::new()),
                 cancelled: AtomicBool::new(false),
                 abort,
             }),
@@ -135,6 +140,31 @@ impl HookHealth {
         self.cancelled.store(true, Ordering::SeqCst);
         self.abort.abort();
         source
+    }
+
+    /// Retain the typed failure of one signal-driven refresh without
+    /// cancelling the group; the next update re-reads current state.
+    async fn record_update_failure(
+        &self,
+        name: &'static str,
+        stage: HookFailureStage,
+        source: AuraError,
+    ) {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!(
+            hook = name,
+            stage = ?stage,
+            error = ?source,
+            "refresh hook update failed; the listener continues with later updates"
+        );
+        self.last_update_failures.lock().await.insert(
+            name,
+            Arc::new(HookExecutionError {
+                name,
+                stage,
+                source,
+            }),
+        );
     }
 }
 
@@ -286,10 +316,12 @@ where
                 _ = cancel.clone().fuse() => break,
                 outcome = refresh(app_core.clone()).fuse() => outcome,
             };
+            // A failed refresh belongs to this update only. It is retained as a
+            // typed per-update failure; later updates still refresh.
             if let Err(error) = outcome {
-                return Err(health
-                    .fail(refresh_name, HookFailureStage::Refresh, error)
-                    .await);
+                health
+                    .record_update_failure(refresh_name, HookFailureStage::Refresh, error)
+                    .await;
             }
         }
         Ok(())
@@ -428,6 +460,18 @@ impl HookGroup {
 
     pub(crate) async fn failure(&self) -> Option<Arc<HookExecutionError>> {
         self.health.first_failure.lock().await.clone()
+    }
+
+    /// Most recent per-update refresh failure of each listener; none of them
+    /// ended the group.
+    pub(crate) async fn update_failures(&self) -> Vec<Arc<HookExecutionError>> {
+        self.health
+            .last_update_failures
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -1157,13 +1201,14 @@ mod required_hook_health_tests {
     use aura_core::OwnedShutdownToken;
     use aura_effects::reactive::CountingTestTaskSpawner;
     use std::error::Error;
+    use std::sync::atomic::AtomicUsize;
 
     #[derive(Debug, thiserror::Error)]
     #[error("required projection storage unavailable")]
     struct ProjectionStorageFault;
 
     #[tokio::test]
-    async fn actual_signal_owner_retains_required_fault_and_cancels_attachment() {
+    async fn actual_signal_owner_retains_update_fault_and_keeps_attachment() {
         let spawner = Arc::new(CountingTestTaskSpawner::default());
         let mut runtime = crate::runtime_bridge::OfflineRuntimeBridge::new(
             aura_core::AuthorityId::new_from_entropy([173; 32]),
@@ -1194,12 +1239,19 @@ mod required_hook_health_tests {
             cancellation: cancellation.clone(),
             shutdown: OwnedShutdownToken::detached(),
         };
-        let refresh: RefreshHook = Arc::new(|_| {
-            Box::pin(async {
-                Err(AuraError::Storage {
-                    message: "required projection read failed".into(),
-                    source: Some(Arc::new(ProjectionStorageFault)),
-                })
+        let calls = Arc::new(AtomicUsize::new(0));
+        let refresh_calls = calls.clone();
+        let refresh: RefreshHook = Arc::new(move |_| {
+            let call = refresh_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if call == 0 {
+                    Err(AuraError::Storage {
+                        message: "required projection read failed".into(),
+                        source: Some(Arc::new(ProjectionStorageFault)),
+                    })
+                } else {
+                    Ok(())
+                }
             })
         });
         spawn_owned_signal_refresh(
@@ -1218,20 +1270,16 @@ mod required_hook_health_tests {
             .emit(signal.id(), 1u32)
             .await
             .expect("emit real signal");
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let failure = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
-                if spawner.failure().await.is_some() {
-                    break;
+                if let Some(failure) = group.update_failures().await.into_iter().next() {
+                    break failure;
                 }
                 tokio::task::yield_now().await;
             }
         })
         .await
-        .expect("required fault must reach retained supervisor");
-        let failure = group
-            .failure()
-            .await
-            .expect("attachment retains structural health");
+        .expect("the failed update must be retained");
         assert_eq!(failure.stage(), HookFailureStage::Refresh);
         assert_eq!(failure.name(), "actual-required-hook");
         assert!(failure
@@ -1239,16 +1287,26 @@ mod required_hook_health_tests {
             .source()
             .expect("provider source")
             .is::<ProjectionStorageFault>());
-        assert!(!group.is_active());
-        let rejected = group
-            .publish_ready(|_| panic!("already-failed owner must not publish Ready"))
+        assert!(group.is_active(), "one failed update keeps the attachment");
+        assert!(group.failure().await.is_none());
+        assert!(spawner.failure().await.is_none());
+
+        reactive
+            .graph()
+            .emit(signal.id(), 2u32)
             .await
-            .expect_err("retain first admission failure");
-        assert_eq!(rejected.stage(), HookFailureStage::Refresh);
-        cancellation.await;
-        assert!(matches!(
-            spawner.failure().await,
-            Some(AuraError::Storage { .. })
-        ));
+            .expect("emit real signal");
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while calls.load(Ordering::SeqCst) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the listener must refresh the next update");
+        assert!(group.is_active());
+        group
+            .publish_ready(|_| {})
+            .await
+            .expect("an active attachment still publishes Ready");
     }
 }

@@ -665,7 +665,28 @@ impl RuntimeMaintenanceService {
             return Ok(());
         };
 
-        match publish_lan_descriptor_with(
+        // Before first-run account bootstrap the authority has no identity
+        // yet. Account bootstrap republishes once it exists and the refresh
+        // loop retries, so the startup attempt defers instead of failing.
+        let identity_exists = crate::handlers::rendezvous_identity::active_identity_exists(
+            self.effects.as_ref(),
+            &self.authority_id,
+        )
+        .await
+        .map_err(|error| {
+            ServiceError::startup_failed("lan_discovery_identity", error.to_string())
+                .with_cause(error)
+        })?;
+        if !identity_exists {
+            tracing::debug!(
+                event = "runtime.service.maintenance.lan_descriptor_deferred",
+                authority = %self.authority_id,
+                "Deferring initial LAN descriptor until account bootstrap creates the identity"
+            );
+            return Ok(());
+        }
+
+        publish_lan_descriptor_with(
             self.effects.clone(),
             self.authority_id,
             self.device_id,
@@ -673,19 +694,6 @@ impl RuntimeMaintenanceService {
             lan_transport.as_ref(),
         )
         .await
-        {
-            // Before first-run account bootstrap the authority has no identity
-            // key yet; the descriptor refresh loop publishes once it exists.
-            Err(error) if error.to_string().contains("missing local identity key") => {
-                tracing::debug!(
-                    event = "runtime.service.maintenance.lan_descriptor_deferred",
-                    error = %error,
-                    "Deferring initial LAN descriptor until the identity key exists"
-                );
-                Ok(())
-            }
-            other => other,
-        }
     }
 }
 
@@ -792,6 +800,59 @@ mod tests {
             ServiceHealth::Degraded {
                 reason: "initial_lan_descriptor: publish failed".to_string(),
             }
+        );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod fresh_account_descriptor_tests {
+    use super::*;
+    use crate::runtime::services::RendezvousManager;
+    use aura_core::effects::time::PhysicalTimeEffects;
+
+    /// Task 85: a runtime that starts before first-run account bootstrap has
+    /// no identity yet. The initial descriptor is deferred, not failed.
+    #[tokio::test]
+    async fn fresh_account_initial_lan_descriptor_defers_without_identity() {
+        let authority_id = AuthorityId::new_from_entropy([31u8; 32]);
+        let config = crate::core::AgentConfig {
+            device_id: DeviceId::new_from_entropy([32u8; 32]),
+            ..Default::default()
+        };
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_test_for_authority(&config, authority_id).unwrap(),
+        );
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(effects.time_effects().clone());
+        let lan = Arc::new(
+            LanTransportService::bind("0.0.0.0:0")
+                .await
+                .expect("bind LAN transport"),
+        );
+        assert!(
+            !lan.advertised_addrs().is_empty() || !lan.websocket_addrs().is_empty(),
+            "fixture needs an advertisable address"
+        );
+        let rendezvous = RendezvousManager::with_defaults(authority_id, time_effects.clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects.clone());
+        let service = RuntimeMaintenanceService::new(
+            effects.clone(),
+            authority_id,
+            config.device_id,
+            ceremony_tracker.clone(),
+            CeremonyRunner::new(ceremony_tracker),
+            ThresholdSigningService::new(effects.clone()),
+            ReconfigurationManager::new(),
+            None,
+            Some(rendezvous),
+            None,
+            Some(lan),
+        );
+
+        let result = service.publish_initial_lan_descriptor().await;
+        assert!(
+            result.is_ok(),
+            "fresh account publication failed: {result:?}"
         );
     }
 }

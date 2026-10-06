@@ -295,7 +295,9 @@ impl<'a> InvitationChannelHandler<'a> {
             let update_envelope = TransportEnvelope {
                 destination: invitation.sender_id,
                 source: acceptor_id,
-                context: invitation_context,
+                // The fact carries the home context; the envelope rides the
+                // sender's authority route, the context its receipt is charged in.
+                context: delivery_context,
                 payload: update_payload,
                 metadata: crate::handlers::shared::build_transport_metadata(
                     CHAT_FACT_CONTENT_TYPE,

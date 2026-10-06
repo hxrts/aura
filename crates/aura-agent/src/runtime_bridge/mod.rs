@@ -720,20 +720,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
             0
         };
 
-        let flow_receipt = if effects.is_testing() {
-            None
-        } else {
-            Some(
-                effects
-                    .charge_flow(
-                        &default_context_id_for_authority(peer),
-                        &peer,
-                        FlowCost::new(1),
-                    )
-                    .await
-                    .map_err(|e| bridge_network("Charge chat fact flow failed", e))?,
-            )
-        };
+        // Charged in every mode so deterministic runs exercise production
+        // receipt issuance and envelope-route validation.
+        let flow_receipt = Some(
+            effects
+                .charge_flow(
+                    &default_context_id_for_authority(peer),
+                    &peer,
+                    FlowCost::new(1),
+                )
+                .await
+                .map_err(|e| bridge_network("Charge chat fact flow failed", e))?,
+        );
 
         let mut envelope = TransportEnvelope {
             destination: peer,

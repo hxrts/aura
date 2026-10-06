@@ -9,7 +9,7 @@
 
 use anyhow::{anyhow, Result};
 use async_lock::RwLock;
-use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, SharedTransport};
+use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, LinkFault, SharedTransport};
 use aura_app::core::{AppConfig, AppCore};
 use aura_app::ui::signals::{CONTACTS_SIGNAL, HOMES_SIGNAL};
 use aura_app::ui::workflows::{access, context, invitation, messaging, strong_command as sc};
@@ -116,9 +116,36 @@ async fn strong(
 
 #[tokio::test]
 async fn limited_then_banned_member_is_refused_on_own_client() -> Result<()> {
+    moderation_reaches_member(None).await
+}
+
+/// The override and ban fanout is delayed past the moderation workflow's
+/// completion (held on the Alex<->Barbara link, then released).
+#[tokio::test]
+async fn moderation_reaches_member_after_delayed_fanout() -> Result<()> {
+    moderation_reaches_member(Some(LinkFault::Hold)).await
+}
+
+/// Run `action` with the Alex<->Barbara link faulted, then heal it.
+async fn faulted<T, Fut: std::future::Future<Output = T>>(
+    transport: &SharedTransport,
+    alex: AuthorityId,
+    barbara: AuthorityId,
+    fault: Option<LinkFault>,
+    action: Fut,
+) -> T {
+    if let Some(fault) = fault {
+        transport.fault_link(alex, barbara, fault);
+    }
+    let out = action.await;
+    transport.heal_links();
+    out
+}
+
+async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     let transport = SharedTransport::new();
     let barbara = peer(91, transport.clone()).await?;
-    let alex = peer(95, transport).await?;
+    let alex = peer(95, transport.clone()).await?;
 
     // Contacts first.
     let invite = invitation::create_contact_invitation(
@@ -178,11 +205,17 @@ async fn limited_then_banned_member_is_refused_on_own_client() -> Result<()> {
 
     // Limited override (BarbHome is still the selected home): it must reach
     // Alex's view and his own client must refuse his send.
-    access::set_access_override(
-        &barbara.app,
-        None,
+    faulted(
+        &transport,
         alex.id,
-        aura_social::AccessLevel::Limited,
+        barbara.id,
+        fault,
+        access::set_access_override(
+            &barbara.app,
+            None,
+            alex.id,
+            aura_social::AccessLevel::Limited,
+        ),
     )
     .await?;
     wait_until("Alex sees his Limited override", || async {
@@ -217,14 +250,20 @@ async fn limited_then_banned_member_is_refused_on_own_client() -> Result<()> {
         "the new home becomes the selected home"
     );
 
-    let ban = strong(
-        &barbara.app,
+    let ban = faulted(
+        &transport,
+        alex.id,
         barbara.id,
-        home,
-        sc::ParsedCommand::Ban {
-            target: alex.id.to_string(),
-            reason: Some("spam".to_string()),
-        },
+        fault,
+        strong(
+            &barbara.app,
+            barbara.id,
+            home,
+            sc::ParsedCommand::Ban {
+                target: alex.id.to_string(),
+                reason: Some("spam".to_string()),
+            },
+        ),
     )
     .await?;
     assert!(

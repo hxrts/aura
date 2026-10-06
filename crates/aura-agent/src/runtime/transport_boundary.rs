@@ -70,7 +70,9 @@ pub(crate) async fn send_guarded_transport_envelope(
         });
     };
     let mut receipt = GuardChainSendReceipt::bind_to_envelope(receipt, &envelope)?;
-    if !effects.is_testing() {
+    // Deterministic placeholder receipts (`attach_test_transport_receipt_if_needed`)
+    // carry no flow signature; every charged receipt is verified in all modes.
+    if !effects.is_testing() || receipt.as_transport_receipt().sig.len() > 1 {
         effects.verify_transport_flow_receipt(receipt.as_transport_receipt())?;
     }
     effects

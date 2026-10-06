@@ -192,7 +192,7 @@ pub use runtime::AuraHandlerAdapter;
 pub use runtime::{
     EffectContext, EffectExecutor, EffectOperation, EffectRegistry, EffectRegistryError,
     EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager, LifecycleManager,
-    OperationSessionId, ReceiptManager, RuntimeChoreographySessionId, RuntimeService,
+    LinkFault, OperationSessionId, ReceiptManager, RuntimeChoreographySessionId, RuntimeService,
     RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
     TaskSupervisor,
 };

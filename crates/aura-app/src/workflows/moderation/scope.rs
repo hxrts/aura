@@ -163,12 +163,13 @@ pub(crate) async fn moderation_scope_for_home(
 ) -> Result<ModerationScope, AuraError> {
     let runtime = require_runtime(app_core).await?;
     let homes = homes_signal_snapshot(app_core).await?;
-    let target_home = match home_id {
-        Some(home_id) => Some(homes.home_state(&home_id).ok_or_else(|| {
-            AuraError::not_found("Moderation target home is not materialized")
-        })?),
-        None => homes.current_home(),
-    };
+    let target_home =
+        match home_id {
+            Some(home_id) => Some(homes.home_state(&home_id).ok_or_else(|| {
+                AuraError::not_found("Moderation target home is not materialized")
+            })?),
+            None => homes.current_home(),
+        };
 
     if let Some(current_home) = target_home {
         let context_id = current_home

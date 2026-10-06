@@ -44,6 +44,17 @@ struct SharedTransportState {
     inbox_notifiers: HashMap<AuthorityId, Arc<Notify>>,
     online: HashSet<AuthorityId>,
     device_authorities: HashMap<aura_core::DeviceId, AuthorityId>,
+    link_faults: HashMap<(AuthorityId, AuthorityId), LinkFault>,
+    held: Vec<TransportEnvelope>,
+}
+
+/// Directed link fault applied by [`SharedTransport::route_envelope`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkFault {
+    /// Envelopes are lost (a partition the sender cannot observe).
+    Drop,
+    /// Envelopes are parked until [`SharedTransport::heal_links`] (delay).
+    Hold,
 }
 
 impl SharedTransportState {
@@ -130,6 +141,20 @@ impl SharedTransport {
 
     /// Route an envelope into the destination authority inbox.
     pub fn route_envelope(&self, envelope: TransportEnvelope) {
+        let fault = self.with_state(|state| {
+            state
+                .link_faults
+                .get(&(envelope.source, envelope.destination))
+                .copied()
+        });
+        match fault {
+            Some(LinkFault::Drop) => return,
+            Some(LinkFault::Hold) => {
+                self.with_state_mut(|state| state.held.push(envelope));
+                return;
+            }
+            None => {}
+        }
         // Device routing selects a physical mailbox, never rewrites identity evidence.
         let mailbox = envelope
             .metadata
@@ -194,6 +219,25 @@ impl SharedTransport {
     /// Check whether a peer authority is online in this shared network.
     pub fn is_peer_online(&self, peer: AuthorityId) -> bool {
         self.with_state(|state| state.online.contains(&peer))
+    }
+
+    /// Fault both directions of the link between two authorities.
+    pub fn fault_link(&self, a: AuthorityId, b: AuthorityId, fault: LinkFault) {
+        self.with_state_mut(|state| {
+            state.link_faults.insert((a, b), fault);
+            state.link_faults.insert((b, a), fault);
+        });
+    }
+
+    /// Clear every link fault and deliver held envelopes in send order.
+    pub fn heal_links(&self) {
+        let held = self.with_state_mut(|state| {
+            state.link_faults.clear();
+            std::mem::take(&mut state.held)
+        });
+        for envelope in held {
+            self.route_envelope(envelope);
+        }
     }
 
     /// Return the authority-scoped inbox notifier used by shared transport delivery.

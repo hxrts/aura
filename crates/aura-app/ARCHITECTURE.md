@@ -415,7 +415,7 @@ Required timeout checkpoint storage/codec failures retain their actual lower-own
 
 ### Required refresh attachment health
 
-One hook group owns its attached signal streams, bounded first failure, and shared cancellation. Required signal receipt, refresh, or interval failure cancels the entire group and returns the original native error to the fallible runtime spawner. `AppCore::refresh_hook_failure` exposes the typed stage and original cause even without tracing. Failed groups are inactive; explicit reattachment replaces attachment health but does not clear the runtime supervisor's retained failure. Cancellation alone remains successful task completion.
+One hook group owns its attached signal streams, bounded first failure, and shared cancellation. Required signal receipt or interval failure cancels the entire group and returns the original native error to the fallible runtime spawner. A failed signal-driven refresh belongs to that update only: the listener retains it as a typed per-update failure (`AppCore::refresh_hook_update_failures`, stage `Refresh`, original cause) and keeps serving later updates, which re-read current state. `AppCore::refresh_hook_failure` exposes the typed stage and original cause of a terminal failure even without tracing. Failed groups are inactive; explicit reattachment replaces attachment health but does not clear the runtime supervisor's retained failure. Cancellation alone remains successful task completion.
 
 ### Enrollment terminal failure projection
 

@@ -27,6 +27,17 @@ impl AppCore {
         }
     }
 
+    /// Most recent failed refresh of one signal update, per listener. Such a
+    /// failure leaves the attachment active; later updates still refresh.
+    pub async fn refresh_hook_update_failures(
+        &self,
+    ) -> Vec<Arc<crate::workflows::system::hooks::HookExecutionError>> {
+        match &self.hook_install_state {
+            HookInstallState::Ready(group) => group.update_failures().await,
+            _ => Vec::new(),
+        }
+    }
+
     /// Initialize signals and attach one complete runtime-backed hook group.
     pub async fn init_signals_with_hooks(
         app_core: &Arc<RwLock<AppCore>>,
