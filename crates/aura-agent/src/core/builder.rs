@@ -131,8 +131,9 @@ impl AgentBuilder {
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let mut builder = EffectSystemBuilder::testing()
-            .with_config(self.config)
+        let (config, profile) = Self::owned_nonproduction_profile(self.config)?;
+        let mut builder = EffectSystemBuilder::testing_with_owned_profile(profile)
+            .with_config(config)
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
@@ -154,8 +155,9 @@ impl AgentBuilder {
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let mut builder = EffectSystemBuilder::testing()
-            .with_config(self.config)
+        let (config, profile) = Self::owned_nonproduction_profile(self.config)?;
+        let mut builder = EffectSystemBuilder::testing_with_owned_profile(profile)
+            .with_config(config)
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
@@ -204,8 +206,9 @@ impl AgentBuilder {
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let mut builder = EffectSystemBuilder::simulation(seed)
-            .with_config(self.config)
+        let (config, profile) = Self::owned_nonproduction_profile(self.config)?;
+        let mut builder = EffectSystemBuilder::simulation_with_owned_profile(seed, profile)
+            .with_config(config)
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
@@ -235,8 +238,9 @@ impl AgentBuilder {
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        let mut builder = EffectSystemBuilder::simulation(seed)
-            .with_config(self.config)
+        let (config, profile) = Self::owned_nonproduction_profile(self.config)?;
+        let mut builder = EffectSystemBuilder::simulation_with_owned_profile(seed, profile)
+            .with_config(config)
             .with_authority(authority_id)
             .with_shared_transport(shared_transport);
         if let Some(sync_config) = sync_config {
@@ -248,6 +252,23 @@ impl AgentBuilder {
         let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
+    }
+}
+
+impl AgentBuilder {
+    /// Testing and simulation agents own an isolated profile directory, so
+    /// enrollment and key rotation run under original selected secret
+    /// custody. The configuration is normalized first so the lease and the
+    /// runtime select the same directory.
+    fn owned_nonproduction_profile(
+        config: AgentConfig,
+    ) -> AgentResult<(
+        AgentConfig,
+        crate::runtime::builder::TestingOwnedProfileCapability,
+    )> {
+        let config = crate::runtime::AuraEffectSystem::normalized_nonproduction_config(config)?;
+        let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)?;
+        Ok((config, profile))
     }
 }
 

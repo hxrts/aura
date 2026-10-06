@@ -238,7 +238,8 @@ async fn demo_mode_sequential_device_enrollments() {
     // Small delay between ceremonies
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Second enrollment (should supersede the first if not completed)
+    // A pending enrollment owns its generation: a second enrollment is refused
+    // until the first is cancelled, never silently superseded.
     let (_invitee_11, setup_code_11) = enrollment_support::provisional_invitee_setup(
         &env.test_dir.join("setup-peer-11"),
         aura_core::DeviceId::new_from_entropy([11; 32]),
@@ -246,17 +247,40 @@ async fn demo_mode_sequential_device_enrollments() {
         env.shared_transport.clone(),
     )
     .await;
-    let result2 = env
+    let start1 = result1.unwrap();
+    let refused = env
         .ctx
-        .start_device_enrollment("Tablet", setup_code_11)
+        .start_device_enrollment("Tablet", setup_code_11.clone())
         .await;
     assert!(
+        refused.is_err(),
+        "a second enrollment must not replace a pending one"
+    );
+    aura_app::ui::workflows::ceremonies::cancel_key_rotation_ceremony(
+        env.ctx.app_core_raw(),
+        start1.cancel_handle,
+    )
+    .await
+    .expect("cancel the pending first enrollment");
+    // Cancellation retires the pending generation asynchronously (after the
+    // signed notice owner runs); a refused start reserves nothing, so retry
+    // within a bounded window until the generation is released.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let result2 = loop {
+        let attempt = env
+            .ctx
+            .start_device_enrollment("Tablet", setup_code_11.clone())
+            .await;
+        if attempt.is_ok() || tokio::time::Instant::now() >= deadline {
+            break attempt;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert!(
         result2.is_ok(),
-        "Second enrollment should succeed: {:?}",
+        "Second enrollment should succeed after cancelling the first: {:?}",
         result2.err()
     );
-
-    let start1 = result1.unwrap();
     let start2 = result2.unwrap();
 
     // Different enrollments should have different ceremony IDs and device IDs

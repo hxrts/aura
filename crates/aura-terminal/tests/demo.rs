@@ -12,6 +12,7 @@ mod demo {
     mod demo_invitation_flow;
     mod demo_multi_device_enrollment_flow;
     mod demo_peer_count;
+    #[cfg(feature = "development")]
     #[path = "../support/enrollment.rs"]
     mod enrollment_support;
 }

@@ -109,8 +109,9 @@ impl DemoSimulator {
         let carol_device = demo_device_id(seed + 1, "Carol");
         let mobile_device = demo_device_id(seed + 2, "Mobile");
 
-        // Each peer has its own storage sandbox under the demo directory.
-        let peers_root = base_path.join("peers");
+        // Each peer has its own storage sandbox beside (never inside) the demo
+        // user's profile, which its runtime owns exclusively.
+        let peers_root = demo_peers_root(&base_path);
         let alice_dir = peers_root.join("alice");
         let carol_dir = peers_root.join("carol");
         let mobile_dir = peers_root.join("mobile");
@@ -232,7 +233,7 @@ impl DemoSimulator {
             return Ok(());
         }
 
-        let peers_root = base_path.join("peers").join("community");
+        let peers_root = demo_peers_root(&base_path).join("community");
         let mut social_peers = Vec::with_capacity(EXTENDED_DEMO_PEER_NAMES.len());
 
         for (idx, name) in EXTENDED_DEMO_PEER_NAMES.iter().enumerate() {
@@ -1180,6 +1181,17 @@ pub fn spawn_amp_inbox_listener(
         }
     });
     tasks
+}
+
+/// Directory for the simulated peers' storage: a sibling of the demo user's
+/// profile directory. The demo user's runtime owns its profile directory
+/// exclusively, so peer sandboxes must not live inside it.
+fn demo_peers_root(base_path: &std::path::Path) -> PathBuf {
+    let name = base_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "aura".to_string());
+    base_path.with_file_name(format!("{name}-demo-peers"))
 }
 
 #[cfg(test)]

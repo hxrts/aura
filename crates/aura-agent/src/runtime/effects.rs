@@ -820,7 +820,6 @@ impl AuraEffectSystem {
             test_filesystem_secure_storage_allowed,
             None,
             None,
-            #[cfg(test)]
             None,
         )
     }
@@ -836,7 +835,7 @@ impl AuraEffectSystem {
         test_filesystem_secure_storage_allowed: bool,
         selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
         custom: Option<SelectedCustomProviders>,
-        #[cfg(test)] testing_profile: Option<super::builder::TestingOwnedProfileCapability>,
+        testing_profile: Option<super::builder::TestingOwnedProfileCapability>,
     ) -> Result<Self, crate::core::AgentError> {
         let entropy = super::entropy::NonProductionEntropySeed::admit(execution_mode, crypto_seed)
             .map_err(crate::core::AgentError::from)?;
@@ -863,24 +862,25 @@ impl AuraEffectSystem {
                 ),
             ));
         }
-        #[cfg(test)]
         let owned_testing = testing_profile.is_some();
-        #[cfg(not(test))]
-        let owned_testing = false;
-        #[cfg(test)]
-        let selected_profile_owner = match testing_profile {
-            Some(profile) if matches!(execution_mode, ExecutionMode::Testing) => {
-                Some(profile.into_owner())
-            }
-            Some(_) => {
-                return Err(profile_error(
+        let selected_profile_owner =
+            match testing_profile {
+                Some(profile)
+                    if matches!(
+                        execution_mode,
+                        ExecutionMode::Testing | ExecutionMode::Simulation { .. }
+                    ) =>
+                {
+                    Some(profile.into_owner())
+                }
+                Some(_) => return Err(profile_error(
                     aura_core::effects::profile_storage::ProfileStorageError::Invalid(
-                        "testing profile capability supplied outside Testing assembly".into(),
+                        "owned testing profile capability supplied outside nonproduction assembly"
+                            .into(),
                     ),
-                ))
-            }
-            None => selected_profile_owner,
-        };
+                )),
+                None => selected_profile_owner,
+            };
         let profile_owner = if execution_mode.is_production() || owned_testing {
             let owned = match selected_profile_owner {
                 Some(owned) => owned,
@@ -2674,7 +2674,6 @@ impl AuraEffectSystem {
     }
 
     /// Retains the actual isolated lease before selected-provider construction.
-    #[cfg(test)]
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "TestingOwnedProfileCapability",
@@ -2701,6 +2700,49 @@ impl AuraEffectSystem {
             custom,
             Some(profile),
         )
+    }
+
+    /// Simulation runtime that retains an actual isolated profile lease, so
+    /// enrollment and key rotation have original selected secret custody (the
+    /// demo and simulation fixtures). Unowned simulation constructors keep
+    /// returning typed `MissingSelectedCustody`.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "TestingOwnedProfileCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn simulation_with_owned_profile(
+        config: &AgentConfig,
+        seed: u64,
+        authority_id: AuthorityId,
+        shared_transport: Option<SharedTransport>,
+        profile: super::builder::TestingOwnedProfileCapability,
+    ) -> Result<Self, crate::core::AgentError> {
+        let config = Self::normalize_test_config(config.clone())?;
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Self::build_internal_owned(
+            config,
+            composite,
+            ExecutionMode::Simulation { seed },
+            Some(crypto_seed),
+            shared_transport,
+            None,
+            authority_id,
+            false,
+            None,
+            None,
+            Some(profile),
+        )
+    }
+
+    /// Normalize a nonproduction configuration before acquiring its profile
+    /// lease, so the lease and the runtime select the same directory.
+    pub(crate) fn normalized_nonproduction_config(
+        config: AgentConfig,
+    ) -> Result<AgentConfig, crate::core::AgentError> {
+        Self::normalize_test_config(config)
     }
 
     /// Create effect system for testing with default configuration.
@@ -2880,7 +2922,6 @@ impl AuraEffectSystem {
             false,
             owner,
             Some(providers),
-            #[cfg(test)]
             None,
         )
     }
@@ -2914,7 +2955,6 @@ impl AuraEffectSystem {
             false,
             Some(owner),
             None,
-            #[cfg(test)]
             None,
         )
     }
@@ -3392,13 +3432,12 @@ mod tests {
         assert!(matches!(failure, AuraError::Crypto { .. }));
         assert!(failure.source().is_some());
         assert!(effects.biscuit_cache().is_none());
+        // An owned profile stays leased until its runtime shuts down.
+        drop(effects);
         agent
-            .runtime()
-            .tasks()
-            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .shutdown(&context)
             .await
             .expect("acknowledge original runtime shutdown before reopen");
-        drop(agent);
         let returning = crate::AgentBuilder::new()
             .with_authority(authority)
             .with_config(config)

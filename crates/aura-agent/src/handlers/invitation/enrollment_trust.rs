@@ -1268,7 +1268,18 @@ mod real_crypto_tests {
                 .await
                 .is_err());
             let invitee_authority = invitee.authority_id();
-            drop(invitee);
+            // An owned profile stays leased until its runtime shuts down.
+            let Ok(invitee) = Arc::try_unwrap(invitee) else {
+                panic!("invitee runtime must be unshared before reopening its profile");
+            };
+            invitee
+                .shutdown(&EffectContext::new(
+                    invitee_authority,
+                    ContextId::new_from_entropy([117; 32]),
+                    ExecutionMode::Testing,
+                ))
+                .await
+                .expect("shut down the original invitee runtime");
             let recreated = runtime(invitee_authority, invitee_config).await;
             let recovered = recreated
                 .runtime()

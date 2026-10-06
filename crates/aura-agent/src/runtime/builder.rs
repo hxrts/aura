@@ -27,11 +27,9 @@ use aura_core::types::identifiers::AuthorityId;
 // Re-export ExecutionMode from aura_core for convenience
 pub use aura_core::effects::ExecutionMode;
 
-#[cfg(test)]
 pub(crate) struct TestingOwnedProfileCapability {
     owner: Arc<aura_effects::profile_storage::OwnedProfileLease>,
 }
-#[cfg(test)]
 impl TestingOwnedProfileCapability {
     #[aura_macros::capability_boundary(
         category = "capability_gated",
@@ -60,6 +58,7 @@ impl TestingOwnedProfileCapability {
         }
         #[cfg(not(unix))]
         {
+            let _ = config;
             Err(aura_core::effects::secret_lifetime::SecretLifetimeProviderUnavailable::UnsupportedSelectedProvider.into_aura_error().into())
         }
     }
@@ -81,7 +80,6 @@ pub struct EffectSystemBuilder {
     receipt_config: Option<ReceiptManagerConfig>,
     shared_transport: Option<SharedTransport>,
     selected_profile_owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
-    #[cfg(test)]
     testing_profile_owner: Option<TestingOwnedProfileCapability>,
 }
 
@@ -100,7 +98,6 @@ impl EffectSystemBuilder {
             receipt_config: None,
             shared_transport: None,
             selected_profile_owner: None,
-            #[cfg(test)]
             testing_profile_owner: None,
         }
     }
@@ -122,7 +119,6 @@ impl EffectSystemBuilder {
 
     /// Actual selected profile custody for integration tests, kept separate from
     /// production-lease ingress and the ordinary unowned Testing constructor.
-    #[cfg(test)]
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "TestingOwnedProfileCapability",
@@ -130,6 +126,21 @@ impl EffectSystemBuilder {
     )]
     pub(crate) fn testing_with_owned_profile(profile: TestingOwnedProfileCapability) -> Self {
         let mut builder = Self::testing();
+        builder.testing_profile_owner = Some(profile);
+        builder
+    }
+
+    /// Simulation assembly retaining the same kind of isolated profile lease.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "TestingOwnedProfileCapability",
+        family = "runtime_helper"
+    )]
+    pub(crate) fn simulation_with_owned_profile(
+        seed: u64,
+        profile: TestingOwnedProfileCapability,
+    ) -> Self {
+        let mut builder = Self::simulation(seed);
         builder.testing_profile_owner = Some(profile);
         builder
     }
@@ -148,7 +159,6 @@ impl EffectSystemBuilder {
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
             selected_profile_owner: None,
-            #[cfg(test)]
             testing_profile_owner: None,
         }
     }
@@ -167,7 +177,6 @@ impl EffectSystemBuilder {
             receipt_config: Some(ReceiptManagerConfig::for_testing()),
             shared_transport: None,
             selected_profile_owner: None,
-            #[cfg(test)]
             testing_profile_owner: None,
         }
     }
@@ -358,7 +367,6 @@ impl EffectSystemBuilder {
                         super::AuraEffectSystem::testing_for_authority(&config, authority_id)
                     }
                 };
-                #[cfg(test)]
                 let system = match self.testing_profile_owner {
                     Some(profile) => super::AuraEffectSystem::testing_with_owned_profile(
                         &config,
@@ -369,8 +377,6 @@ impl EffectSystemBuilder {
                     ),
                     None => unowned(self.custom_providers, self.shared_transport),
                 };
-                #[cfg(not(test))]
-                let system = unowned(self.custom_providers, self.shared_transport);
                 let system = system.map_err(|source| {
                     crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(source))
                 })?;
@@ -380,7 +386,18 @@ impl EffectSystemBuilder {
                 let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
                 // Use shared transport inbox if provided, otherwise standard simulation mode
                 #[allow(clippy::disallowed_methods)]
-                let system = if let Some(providers) = self.custom_providers {
+                let system = if let Some(profile) = self.testing_profile_owner {
+                    super::AuraEffectSystem::simulation_with_owned_profile(
+                        &config,
+                        seed,
+                        authority_id,
+                        self.shared_transport,
+                        profile,
+                    )
+                    .map_err(|e| {
+                        crate::builder::error::BuildError::RuntimeConstructionSource(Box::new(e))
+                    })?
+                } else if let Some(providers) = self.custom_providers {
                     super::AuraEffectSystem::custom_for_authority(
                         config.clone(),
                         authority_id,

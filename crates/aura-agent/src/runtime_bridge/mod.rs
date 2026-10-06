@@ -3285,6 +3285,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
                         error,
                     )
                 })?;
+            // Release the cancelled pending generation now, as restart recovery
+            // would; otherwise every later enrollment is refused until restart.
+            // The tracker requires the durable Cancelled decision first.
+            tracker
+                .retire_failed_enrollment_generation(ceremony_id)
+                .await
+                .map_err(|error| {
+                    error_boundary::bridge_runtime_internal(
+                        "Retire cancelled enrollment generation",
+                        error,
+                    )
+                })?;
             return Ok(());
         }
 
