@@ -357,8 +357,8 @@ fn invitation_service_for(
     .unwrap()
 }
 
-#[test]
-fn invitation_acceptance_caller_future_is_bounded() {
+#[tokio::test]
+async fn invitation_acceptance_caller_future_is_bounded() {
     let authority = create_test_authority(187);
     let effects = unbootstrapped_effects_for(&authority);
     let service = invitation_service_for(authority, effects);
@@ -396,6 +396,11 @@ pub(crate) struct ContactPair {
     pub(crate) sender_handler: InvitationHandler,
     pub(crate) receiver_handler: InvitationHandler,
     _tasks: (Arc<TaskSupervisor>, Arc<TaskSupervisor>),
+    // The receiver pipeline is owned by the pair that created the receiver.
+    _pipelines: (
+        crate::reactive::ReactivePipeline,
+        Option<crate::reactive::ReactivePipeline>,
+    ),
 }
 
 /// Each side retains its actual selected physical profile lease and provider.
@@ -405,6 +410,8 @@ fn contact_pair_effects(
     transport: crate::runtime::SharedTransport,
 ) -> Arc<AuraEffectSystem> {
     let config = AgentConfig {
+        // Distinct devices: the shared transport routes responses by device.
+        device_id: DeviceId::new_from_entropy(aura_core::hash::hash(&authority_id.to_bytes())),
         storage: crate::core::config::StorageConfig {
             base_path: tempfile::Builder::new()
                 .prefix("aura-contact-pair-owned-")
@@ -418,12 +425,18 @@ fn contact_pair_effects(
     let owner = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
         .expect("actual selected contact profile lease");
     let effects = Arc::new(
-        AuraEffectSystem::testing_with_owned_profile(
+        // A per-authority seed keeps generated ids (invitations) distinct
+        // between the runtimes of one test.
+        AuraEffectSystem::simulation_with_owned_profile(
             &config,
+            u64::from_le_bytes(
+                authority_id.to_bytes()[..8]
+                    .try_into()
+                    .expect("authority id has at least 8 bytes"),
+            ),
             authority_id,
             Some(transport),
             owner,
-            None,
         )
         .expect("same physical provider, lifetime custody and shared transport"),
     );
@@ -460,6 +473,10 @@ pub(crate) async fn contact_pair(seed: u8) -> ContactPair {
     .await;
     bootstrap_test_signing_authority(&sender_effects, sender_id).await;
     bootstrap_test_signing_authority(&receiver_effects, receiver_id).await;
+    let pipelines = (
+        start_test_reactive_pipeline(&sender_effects).await,
+        Some(start_test_reactive_pipeline(&receiver_effects).await),
+    );
     let sender_handler = handler_for(AuthorityContext::new_with_device(
         sender_id,
         sender_effects.device_id(),
@@ -477,6 +494,7 @@ pub(crate) async fn contact_pair(seed: u8) -> ContactPair {
         sender_handler,
         receiver_handler,
         _tasks: (sender_tasks, receiver_tasks),
+        _pipelines: pipelines,
     }
 }
 
@@ -504,6 +522,7 @@ impl ContactPair {
         )
         .await;
         bootstrap_test_signing_authority(&sender_effects, sender_id).await;
+        let sender_pipeline = start_test_reactive_pipeline(&sender_effects).await;
         let sender_handler = handler_for(AuthorityContext::new_with_device(
             sender_id,
             sender_effects.device_id(),
@@ -517,6 +536,7 @@ impl ContactPair {
             sender_handler,
             receiver_handler: self.receiver_handler.clone(),
             _tasks: (sender_tasks, self._tasks.1.clone()),
+            _pipelines: (sender_pipeline, None),
         }
     }
 
@@ -1523,7 +1543,13 @@ async fn creating_invitation_is_denied_when_biscuit_lacks_invitation_send_capabi
         )
         .await
         .expect_err("missing invitation:send capability should deny invitation creation");
-    assert!(error.to_string().contains("Guard denied operation"));
+    assert!(
+        matches!(
+            error,
+            crate::core::AgentError::Aura(aura_core::AuraError::PermissionDenied { .. })
+        ),
+        "missing invitation:send must be a typed permission denial: {error}"
+    );
 }
 
 #[tokio::test]

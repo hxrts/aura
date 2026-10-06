@@ -3241,16 +3241,17 @@ async fn execute_effect_command_owned(
 async fn execute_journal_append(
     fact: InvitationFact,
     authority: &AuthorityContext,
-    _local_context_id: ContextId,
+    local_context_id: ContextId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
-    // Journal the fact under its own context: reducers and the required
-    // invitation projection reject a payload context that differs from the
-    // journal context, and that rejection stops the reactive pipeline.
+    // A fact that names its context is journaled there: the required invitation
+    // projection rejects a payload context that differs from the journal
+    // context, and that rejection stops the reactive pipeline. Context-free
+    // facts stay in the local default context where their readers look.
     HandlerUtilities::append_generic_fact(
         authority,
         effects,
-        fact.context_id_for_fact(),
+        fact.context_id_opt().unwrap_or(local_context_id),
         INVITATION_FACT_TYPE_ID.into(),
         &fact.to_bytes(),
     )

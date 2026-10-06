@@ -793,6 +793,13 @@ impl InvitationHandler {
         let payload = contact.build_contact_invitation_acceptance(&original).await?;
         let continuation = acknowledge_contact_acceptance(original, payload, &confirmation_window).await?;
         let mut next_send_ms = continuation.window.started_at_ms();
+        // Resend at least twice per confirmation window so a lost response (or
+        // acceptance) is recovered before the window closes.
+        let window_ms = continuation
+            .window
+            .deadline_at_ms()
+            .saturating_sub(continuation.window.started_at_ms());
+        let resend_ms = CONTACT_ACCEPTANCE_RESEND_MS.min((window_ms / 3).max(1));
         loop {
             let now = observe_contact_confirmation_time(continuation.effects, continuation.window).await?;
             if now.ts_ms >= next_send_ms {
@@ -800,7 +807,7 @@ impl InvitationHandler {
                     if !contact_acceptance_retryable(&error, continuation.invitation.sender_id) { return Err(error); }
                     tracing::debug!(%error, "retrying definitely-unsent contact acceptance within original window");
                 }
-                next_send_ms = now.ts_ms.checked_add(CONTACT_ACCEPTANCE_RESEND_MS)
+                next_send_ms = now.ts_ms.checked_add(resend_ms)
                     .unwrap_or(continuation.window.deadline_at_ms())
                     .min(continuation.window.deadline_at_ms());
             }
