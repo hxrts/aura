@@ -6182,8 +6182,17 @@ mod registered_generation_actual_owner_tests {
         ));
         // A second service facade shares the real tracker execution lease.
         let original_service = issuer.invitations().expect("original service");
-        let mut before = issuer.runtime().tasks().active_tasks();
-        before.sort();
+        // Only enrollment tasks matter: facade construction may start unrelated
+        // one-shot work (peer hint restore).
+        let enrollment_tasks = |tasks: Vec<String>| {
+            let mut tasks: Vec<String> = tasks
+                .into_iter()
+                .filter(|task| task.contains("device_enrollment"))
+                .collect();
+            tasks.sort();
+            tasks
+        };
+        let before = enrollment_tasks(issuer.runtime().tasks().active_tasks());
         assert_eq!(
             original_service
                 .start_registered_device_enrollment(&registered)
@@ -6206,8 +6215,7 @@ mod registered_generation_actual_owner_tests {
                 .expect("shared actual owner"),
             crate::handlers::invitation_service::DeviceEnrollmentInitiatorStart::AlreadyRunning
         );
-        let mut after = issuer.runtime().tasks().active_tasks();
-        after.sort();
+        let after = enrollment_tasks(issuer.runtime().tasks().active_tasks());
         assert_eq!(after, before, "no parallel task admission");
         assert!(tracker
             .get(&state.ceremony_id)
