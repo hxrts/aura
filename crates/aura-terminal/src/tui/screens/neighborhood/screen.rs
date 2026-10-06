@@ -334,15 +334,24 @@ fn hop_distance_hint(access_level: AccessLevel) -> &'static str {
     }
 }
 
-fn convert_member(r: &aura_app::ui::types::home::HomeMember) -> HomeMember {
+/// Converts a home member for display, preferring the local contact name
+/// (petname, else suggested nickname) over the projected member name, which
+/// can be a raw authority id for members learned only from membership facts.
+fn convert_member(r: &aura_app::ui::types::home::HomeMember, contacts: &[Contact]) -> HomeMember {
     let role_label = match r.role {
         aura_app::ui::types::home::HomeRole::Member => "Member",
         aura_app::ui::types::home::HomeRole::Moderator => "Member + Moderator",
         aura_app::ui::types::home::HomeRole::Participant => "Participant",
     };
+    let member_id = r.id.to_string();
+    let display_name = contacts
+        .iter()
+        .find(|contact| contact.id == member_id)
+        .map(Contact::display_name)
+        .unwrap_or_else(|| r.name.clone());
     HomeMember {
-        id: r.id.to_string(),
-        name: format!("{} ({role_label})", r.name),
+        id: member_id,
+        name: format!("{display_name} ({role_label})"),
         is_moderator: r.is_moderator(),
         is_self: false,
     }
@@ -471,8 +480,7 @@ pub fn NeighborhoodScreen(
                         .collect(),
                 );
                 if let Some(current_home) = home_state.current_home() {
-                    let members: Vec<HomeMember> =
-                        current_home.members.iter().map(convert_member).collect();
+                    let members = current_home.members.clone();
                     let budget = convert_budget(&current_home.storage, current_home.member_count);
                     reactive_members.set(members);
                     reactive_budget.set(budget);
@@ -512,7 +520,14 @@ pub fn NeighborhoodScreen(
 
     let neighborhood_name = reactive_neighborhood_name.read().clone();
     let mut homes = reactive_homes.read().clone();
-    let members = reactive_members.read().clone();
+    // Resolve member names against contacts at render time so a contact
+    // arriving after the homes snapshot still replaces a raw id.
+    let contacts: Vec<Contact> = reactive_contacts.read().clone();
+    let members: Vec<HomeMember> = reactive_members
+        .read()
+        .iter()
+        .map(|member| convert_member(member, &contacts))
+        .collect();
     // Every tile counts its home's members from the one homes projection.
     let member_counts = reactive_member_counts.read().clone();
     for home in &mut homes {
@@ -661,5 +676,40 @@ pub fn NeighborhoodScreen(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod member_name_tests {
+    use super::*;
+    use aura_app::ui::types::home::{HomeMember as AppHomeMember, HomeRole};
+    use aura_core::types::identifiers::AuthorityId;
+
+    fn participant(id: AuthorityId) -> AppHomeMember {
+        AppHomeMember {
+            id,
+            name: id.to_string(),
+            role: HomeRole::Participant,
+            is_online: false,
+            joined_at: 0,
+            last_seen: None,
+            storage_allocated: 0,
+        }
+    }
+
+    #[test]
+    fn member_row_uses_contact_nickname_instead_of_raw_authority_id() {
+        let id = AuthorityId::new_from_entropy([7; 32]);
+        let contacts = vec![Contact::new(id.to_string(), "Alex")];
+        let row = convert_member(&participant(id), &contacts);
+        assert_eq!(row.name, "Alex (Participant)");
+        assert_eq!(row.id, id.to_string());
+    }
+
+    #[test]
+    fn member_row_without_contact_keeps_projected_name() {
+        let id = AuthorityId::new_from_entropy([8; 32]);
+        let row = convert_member(&participant(id), &[]);
+        assert_eq!(row.name, format!("{id} (Participant)"));
     }
 }

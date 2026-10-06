@@ -868,4 +868,79 @@ mod tests {
             }
         }
     }
+
+    /// Task 47: `/invite` must always settle the frontend's local terminal
+    /// owner. Without a runtime the invitation is refused, and the report must
+    /// carry a failed settlement rather than leaving `invitation_create`
+    /// submitting.
+    #[tokio::test]
+    async fn invite_slash_command_reaches_terminal_settlement_on_refusal() {
+        use crate::views::contacts::{Contact, ContactRelationshipState, ContactsState};
+        use crate::views::{Channel, ChannelType, ChatState};
+        use aura_core::types::identifiers::ChannelId;
+
+        let app_core = crate::testing::default_test_app_core();
+        let bob = AuthorityId::new_from_entropy([0x47; 32]);
+        let channel_id = ChannelId::from_bytes([0x48; 32]);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut()
+                .set_contacts(ContactsState::from_contacts(vec![Contact {
+                    id: bob,
+                    nickname: "bob".to_string(),
+                    nickname_suggestion: None,
+                    is_guardian: false,
+                    is_member: false,
+                    last_interaction: None,
+                    is_online: true,
+                    read_receipt_policy: Default::default(),
+                    relationship_state: ContactRelationshipState::Contact,
+                    invitation_code: None,
+                }]));
+            core.views_mut()
+                .set_chat(ChatState::from_channels(vec![Channel {
+                    id: channel_id,
+                    context_id: None,
+                    name: "lounge".to_string(),
+                    topic: None,
+                    channel_type: ChannelType::Home,
+                    unread_count: 0,
+                    is_dm: false,
+                    member_ids: Vec::new(),
+                    member_count: 0,
+                    last_message: None,
+                    last_message_time: None,
+                    last_activity: 0,
+                    last_finalized_epoch: 0,
+                }]));
+        }
+
+        let channel_hint = channel_id.to_string();
+        let report = prepare_and_execute(
+            &CommandResolver::default(),
+            &app_core,
+            "/invite bob",
+            Some(channel_hint.as_str()),
+            Some(AuthorityId::new_from_entropy([0x49; 32])),
+        )
+        .await;
+
+        let metadata = report.metadata.expect("/invite prepares");
+        assert_eq!(
+            metadata
+                .semantic_operation
+                .as_ref()
+                .map(|operation| operation.operation_id.clone()),
+            Some(OperationId::invitation_create())
+        );
+        assert!(
+            matches!(
+                report.feedback.terminal_settlement,
+                Some(SlashCommandTerminalSettlement::Failed(_))
+            ),
+            "refused /invite must settle failed, got {:?} ({})",
+            report.feedback.terminal_settlement,
+            report.feedback.message
+        );
+    }
 }
