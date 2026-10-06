@@ -614,12 +614,6 @@ use aura_protocol::effects::EffectApiEffects;
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::crypto::single_signer::SingleSignerKeyPackage;
-    use aura_core::effects::secure::{
-        SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-    };
-    use aura_core::effects::CryptoCoreEffects;
-    use aura_core::secrets::SecretExportContext;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

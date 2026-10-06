@@ -114,6 +114,8 @@ mod aura;
 mod choreography;
 mod crypto;
 #[cfg(test)]
+pub(crate) use crypto::EnrollmentGenerationHistoryError;
+#[cfg(test)]
 pub(crate) use crypto::ParticipantEnvelopeBoundsError;
 pub(crate) use crypto::{
     held_registration_error, EnrollmentFinalInventoryError,

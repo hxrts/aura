@@ -4227,7 +4227,9 @@ mod tests {
                 aura_core::ContextId::new_from_entropy([seed + 2; 32]),
                 aura_core::effects::ExecutionMode::Testing,
             );
-            let runtime = crate::runtime::EffectSystemBuilder::testing()
+            let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+                .expect("actual selected profile lease");
+            let runtime = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
                 .with_authority(authority)
                 .with_config(config)
                 .with_physical_time_provider(Arc::new(clock.clone()))
@@ -4521,12 +4523,25 @@ mod tests {
         let first_error = register_original_fixture(&restarted, &id)
             .await
             .expect_err("mutable invitation cannot replace independent original");
-        assert!(matches!(
-            std::error::Error::source(&first_error)
-                .and_then(|source| source
-                    .downcast_ref::<crate::runtime::effects::HeldEnrollmentRegistrationError>()),
-            Some(crate::runtime::effects::HeldEnrollmentRegistrationError::Binding)
-        ));
+        // With selected custody the generation history refuses the contradictory
+        // invitation first; registration binding is the next line of defense.
+        let first_source = std::error::Error::source(&first_error);
+        assert!(
+            matches!(
+                first_source
+                    .and_then(|source| source
+                        .downcast_ref::<crate::runtime::effects::HeldEnrollmentRegistrationError>(
+                    )),
+                Some(crate::runtime::effects::HeldEnrollmentRegistrationError::Binding)
+            ) || matches!(
+                first_source
+                    .and_then(|source| source
+                        .downcast_ref::<crate::runtime::effects::EnrollmentGenerationHistoryError>(
+                    )),
+                Some(crate::runtime::effects::EnrollmentGenerationHistoryError::OriginalBinding)
+            ),
+            "contradictory invitation must be refused by a binding check: {first_error:?}"
+        );
         let mut profile: serde_json::Value =
             serde_json::from_slice(&bytes).expect("original profile schema");
         profile["participants"]
