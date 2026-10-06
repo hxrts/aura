@@ -19,11 +19,13 @@ pub use actions::{
     ban_user, ban_user_resolved, kick_user, kick_user_resolved, mute_user, mute_user_resolved,
     pin_message, unban_user, unban_user_resolved, unmute_user, unmute_user_resolved, unpin_message,
 };
+#[cfg(feature = "signals")]
 pub(crate) use actions::{
     ban_user_in_home, mute_user_in_home, unban_user_in_home, unmute_user_in_home,
 };
 #[cfg(test)]
 pub(crate) use scope::{current_moderation_scope, resolve_scope};
+pub(crate) use support::governance_causal;
 
 /// Actual authoritative moderation decision, not a diagnostic text category.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

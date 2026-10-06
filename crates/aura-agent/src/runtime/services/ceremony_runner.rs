@@ -60,6 +60,27 @@ impl CeremonyRunner {
             .await
     }
 
+    /// Publish a cancelled-notice owner's one sign-and-release result.
+    pub(crate) async fn publish_cancelled_generation_settlement(
+        &self,
+        ceremony: &CeremonyId,
+        result: Result<(), AuraError>,
+    ) {
+        self.tracker
+            .publish_cancelled_generation_settlement(ceremony, result)
+            .await;
+    }
+
+    /// Await the cancelled-notice owner's sign-and-release result.
+    pub(crate) async fn await_cancelled_generation_settlement(
+        &self,
+        ceremony: &CeremonyId,
+    ) -> Result<(), AuraError> {
+        self.tracker
+            .await_cancelled_generation_settlement(ceremony)
+            .await
+    }
+
     /// Register a new ceremony with prestate binding.
     pub async fn start(&self, request: CeremonyInitRequest) -> Result<(), AuraError> {
         self.tracker

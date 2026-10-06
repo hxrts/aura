@@ -643,11 +643,7 @@ impl<'a> InvitationContactHandler<'a> {
                     };
 
                     effects
-                        .commit_generic_fact_bytes(
-                            context_id,
-                            CONTACT_FACT_TYPE_ID.into(),
-                            contact_fact.to_bytes(),
-                        )
+                        .commit_domain_fact(context_id, &contact_fact)
                         .await
                         .map_err(|e| AgentError::effects(e.to_string()))?;
 

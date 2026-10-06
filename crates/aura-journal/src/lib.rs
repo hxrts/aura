@@ -38,6 +38,9 @@ pub mod crdt;
 /// Effect API types for capabilities and intents
 pub mod effect_api;
 
+/// Generic order-independent reduction rules (observed-remove sets, registers).
+pub mod causal_reduction;
+
 /// Causal context for CRDT ordering
 pub mod causal_context;
 

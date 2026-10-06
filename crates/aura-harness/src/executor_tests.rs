@@ -446,6 +446,7 @@ fn semantic_wait_can_require_confirmed_list_items() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
 
     assert!(semantic_wait_matches(&step, &snapshot));
@@ -517,6 +518,7 @@ fn semantic_wait_for_instance_requires_list_count_match() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
 
     assert!(!semantic_wait_matches_for_instance(
@@ -563,6 +565,7 @@ fn semantic_wait_rejects_pending_local_when_confirmed_is_required() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
 
     assert!(!semantic_wait_matches(&step, &snapshot));
@@ -591,6 +594,7 @@ fn semantic_wait_can_require_ready_state() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
 
     assert!(semantic_wait_matches(&step, &snapshot));
@@ -625,6 +629,7 @@ fn semantic_wait_can_require_operation_state() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
 
     assert!(semantic_wait_matches(&step, &snapshot));
@@ -667,6 +672,7 @@ fn semantic_wait_operation_state_uses_recorded_handle_for_instance() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
     let mut context = ScenarioContext::default();
     context.last_operation_handle.insert(
@@ -713,6 +719,7 @@ fn operation_handle_match_requires_matching_instance_and_state() {
         toasts: Vec::new(),
         runtime_events: Vec::new(),
         subscription_health: Vec::new(),
+        supervised_task_failures: Vec::new(),
     };
     let wrong_instance_snapshot = UiSnapshot {
         operations: vec![OperationSnapshot {

@@ -120,6 +120,10 @@ Browser/WASM shell for Aura. Remains thin and delegates shared UI state, routing
   page-owned publication path and pushed caches, but navigation/session
   recovery stays on the explicit `recover_ui_state` path rather than being
   folded into ordinary semantic observation reads.
+- `UiSnapshot.supervised_task_failures` (group, task, cause of dead
+  runtime-supervised tasks from `RuntimeBridge::supervised_task_failures`) is a
+  diagnostic field outside parity, readiness and quiescence. The browser shell
+  currently publishes it empty; only the TUI export populates it.
 - Controller rerender ownership has one owner per surface: the onboarding
   `BootstrappedApp` installs the `UiController` rerender callback only while
   the account is not ready, and the mounted `AuraUiRoot` shell owns it after.

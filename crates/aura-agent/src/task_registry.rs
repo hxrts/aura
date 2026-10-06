@@ -185,6 +185,8 @@ struct TaskMetadata {
 const MAX_SUPERVISED_GROUPS: usize = 1024;
 const MAX_SUPERVISED_TASKS: usize = 4096;
 const MAX_GROUP_DEPTH: usize = 64;
+/// Bound on the retained supervised-task failure record of one runtime tree.
+const MAX_RECORDED_TASK_FAILURES: usize = 64;
 
 struct TaskTreeState {
     next_group_id: u64,
@@ -193,6 +195,9 @@ struct TaskTreeState {
 }
 struct TaskTreeShared {
     state: Mutex<TaskTreeState>,
+    /// Observed record of every task failure or panic in this tree, in order,
+    /// bounded by [`MAX_RECORDED_TASK_FAILURES`] (earliest retained).
+    failures: Mutex<Vec<TaskSupervisionError>>,
 }
 
 /// Observed identity of an actual registered task. Private fields and registry-
@@ -427,6 +432,13 @@ impl TaskSupervisor {
         self.root.terminal_failure()
     }
 
+    /// Observed record of every failed or panicked task anywhere in this
+    /// supervisor's tree (`TaskFailed` / `Panicked`, carrying group, task and
+    /// typed cause), in occurrence order. Observation only.
+    pub fn task_failures(&self) -> Vec<TaskSupervisionError> {
+        self.root.shared.tree.failures.lock().clone()
+    }
+
     pub fn group(&self, name: impl Into<String>) -> TaskGroup {
         self.root.group(name)
     }
@@ -644,6 +656,7 @@ impl TaskGroup {
                 groups: BTreeMap::new(),
                 active_tasks: 0,
             }),
+            failures: Mutex::new(Vec::new()),
         });
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         let group = Self {
@@ -775,6 +788,15 @@ impl TaskGroup {
     }
 
     fn propagate_failure(&self, failure: TaskSupervisionError) {
+        if matches!(
+            failure,
+            TaskSupervisionError::TaskFailed { .. } | TaskSupervisionError::Panicked { .. }
+        ) {
+            let mut failures = self.shared.tree.failures.lock();
+            if failures.len() < MAX_RECORDED_TASK_FAILURES {
+                failures.push(failure.clone());
+            }
+        }
         let mut current = Some(self.shared.clone());
         while let Some(group) = current {
             group
@@ -2193,6 +2215,28 @@ mod descendant_supervision_tests {
             .unwrap();
         assert!(dropped.load(Ordering::Acquire));
         assert!(supervisor.active_tasks().is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_and_panicked_tasks_are_recorded_with_their_cause() {
+        let supervisor = TaskSupervisor::new();
+        let group = supervisor.group("svc");
+        let _failed = group.spawn_try_named("dies", async {
+            Err(aura_core::AuraError::internal("decode schema 2"))
+        });
+        let _panicked = group
+            .group("inner")
+            .spawn_named("boom", async { panic!("boom") });
+        let _ = group.wait_for_idle(Duration::from_secs(5)).await;
+        let failures = supervisor.task_failures();
+        assert_eq!(failures.len(), 2, "{failures:?}");
+        assert!(failures.iter().any(|f| matches!(f,
+            TaskSupervisionError::TaskFailed { group, task, source }
+                if group == "runtime.svc" && task == "dies"
+                    && source.to_string().contains("decode schema 2"))));
+        assert!(failures.iter().any(|f| matches!(f,
+            TaskSupervisionError::Panicked { group, task }
+                if group == "runtime.svc.inner" && task == "boom")));
     }
 
     #[tokio::test]

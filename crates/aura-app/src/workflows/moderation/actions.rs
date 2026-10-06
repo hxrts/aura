@@ -1,6 +1,6 @@
 use super::scope::{current_moderation_scope, moderation_scope_for_home, scope_for_message};
 use super::support::{
-    apply_local_home_projection, commit_and_fanout, moderation_timestamp,
+    apply_local_home_projection, commit_and_fanout, governance_causal, moderation_timestamp,
     require_access_capability, require_capability, resolve_channel_hint, resolve_target_id,
     ModerationCapability,
 };
@@ -17,6 +17,7 @@ use aura_social::moderation::facts::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomePinFact, HomeUnbanFact, HomeUnmuteFact,
     HomeUnpinFact,
 };
+use aura_social::HomeGovernanceKey;
 use std::sync::Arc;
 
 /// Kick a user from the current home.
@@ -50,6 +51,16 @@ pub async fn kick_user_resolved(
     require_access_capability(app_core, &scope, ModerationCapability::Kick).await?;
 
     let runtime = require_runtime(app_core).await?;
+    let causal = governance_causal(
+        &runtime,
+        "kick_user_resolved",
+        scope.context_id,
+        HomeGovernanceKey::Kick {
+            target: target_id,
+            channel: channel_id,
+        },
+    )
+    .await?;
     let fact = HomeKickFact::new_ms(
         scope.context_id,
         channel_id,
@@ -57,6 +68,7 @@ pub async fn kick_user_resolved(
         runtime.authority_id(),
         reason.map_or_else(String::new, str::to_string),
         kicked_at_ms,
+        causal,
     )
     .to_generic();
 
@@ -115,6 +127,16 @@ pub(crate) async fn ban_user_in_home(
     require_access_capability(app_core, &scope, ModerationCapability::Ban).await?;
 
     let runtime = require_runtime(app_core).await?;
+    let causal = governance_causal(
+        &runtime,
+        "ban_user_in_home",
+        scope.context_id,
+        HomeGovernanceKey::Ban {
+            target: target_id,
+            channel: None,
+        },
+    )
+    .await?;
     let fact = HomeBanFact::new_ms(
         scope.context_id,
         None,
@@ -123,6 +145,7 @@ pub(crate) async fn ban_user_in_home(
         reason.map_or_else(String::new, str::to_string),
         banned_at_ms,
         None,
+        causal,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
@@ -166,12 +189,23 @@ pub(crate) async fn unban_user_in_home(
     let runtime = require_runtime(app_core).await?;
     let now_ms =
         moderation_timestamp(&runtime, "unban_user_resolved", "read timestamp for unban").await?;
+    let causal = governance_causal(
+        &runtime,
+        "unban_user_in_home",
+        scope.context_id,
+        HomeGovernanceKey::Unban {
+            target: target_id,
+            channel: None,
+        },
+    )
+    .await?;
     let fact = HomeUnbanFact::new_ms(
         scope.context_id,
         None,
         target_id,
         runtime.authority_id(),
         now_ms,
+        causal,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
@@ -219,6 +253,16 @@ pub(crate) async fn mute_user_in_home(
     let runtime = require_runtime(app_core).await?;
     let expires_at_ms =
         duration_secs.map(|seconds| muted_at_ms.saturating_add(seconds.saturating_mul(1000)));
+    let causal = governance_causal(
+        &runtime,
+        "mute_user_in_home",
+        scope.context_id,
+        HomeGovernanceKey::Mute {
+            target: target_id,
+            channel: None,
+        },
+    )
+    .await?;
     let fact = HomeMuteFact::new_ms(
         scope.context_id,
         None,
@@ -227,6 +271,7 @@ pub(crate) async fn mute_user_in_home(
         duration_secs,
         muted_at_ms,
         expires_at_ms,
+        causal,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
@@ -275,12 +320,23 @@ pub(crate) async fn unmute_user_in_home(
         "read timestamp for unmute",
     )
     .await?;
+    let causal = governance_causal(
+        &runtime,
+        "unmute_user_in_home",
+        scope.context_id,
+        HomeGovernanceKey::Unmute {
+            target: target_id,
+            channel: None,
+        },
+    )
+    .await?;
     let fact = HomeUnmuteFact::new_ms(
         scope.context_id,
         None,
         target_id,
         runtime.authority_id(),
         now_ms,
+        causal,
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;

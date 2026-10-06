@@ -23,7 +23,7 @@ use aura_app::runtime_bridge::{
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui_contract::{
     AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
-    AmpTransitionState, ChannelFactKey,
+    AmpTransitionState, ChannelFactKey, SupervisedTaskFailureSnapshot,
 };
 use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
@@ -40,7 +40,7 @@ use aura_core::effects::{
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
-    time::PhysicalTimeEffects,
+    time::{LogicalClockEffects, PhysicalTimeEffects},
     transport::TransportReceipt,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
     TransportEnvelope,
@@ -72,7 +72,8 @@ use aura_protocol::amp::{
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
-    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
+    home_governance_causal, observed_governance_vector, HomeBanFact, HomeGovernanceKey,
+    HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, TaggedHomeGovernanceEvent,
 };
 
 use std::collections::{BTreeSet, HashMap};
@@ -430,6 +431,38 @@ fn decode_required_name_chat_fact(
     Ok(decoded)
 }
 
+async fn committed_channel_creation_contexts(
+    effects: &crate::runtime::AuraEffectSystem,
+    authority: AuthorityId,
+    channel: ChannelId,
+) -> Result<Vec<ContextId>, RuntimeBridgeError> {
+    let facts = effects
+        .load_committed_facts(authority)
+        .await
+        .map_err(|error| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error)))?;
+    let mut contexts = Vec::new();
+    for fact in facts {
+        let FactContent::Relational(RelationalFact::Generic {
+            context_id,
+            envelope,
+        }) = fact.content
+        else {
+            continue;
+        };
+        if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            continue;
+        }
+        if let ChatFact::ChannelCreated { channel_id, .. } =
+            decode_required_name_chat_fact(context_id, &envelope)?
+        {
+            if channel_id == channel && !contexts.contains(&context_id) {
+                contexts.push(context_id);
+            }
+        }
+    }
+    Ok(contexts)
+}
+
 fn resolve_created_channel_ids_by_name(
     facts_newest_first: impl IntoIterator<Item = ChatFact>,
     normalized: &str,
@@ -633,6 +666,32 @@ where
     make_fut().await
 }
 
+/// Diagnostic projection of one supervised task failure (group, task, cause).
+fn supervised_task_failure_snapshot(
+    failure: &crate::runtime::TaskSupervisionError,
+) -> SupervisedTaskFailureSnapshot {
+    use crate::runtime::TaskSupervisionError as E;
+    let (group, task, cause) = match failure {
+        E::TaskFailed {
+            group,
+            task,
+            source,
+        } => (group, task.clone(), source.to_string()),
+        E::Panicked { group, task } => (group, task.clone(), "panicked".to_string()),
+        E::Cancelled { group, task } => (group, task.clone(), "cancelled".to_string()),
+        E::AdmissionClosed { group, task } => (group, task.clone(), failure.to_string()),
+        E::AdmissionLimit { group, .. }
+        | E::Budget { group, .. }
+        | E::Timeout { group, .. }
+        | E::ForcedAbort { group, .. } => (group, String::new(), failure.to_string()),
+    };
+    SupervisedTaskFailureSnapshot {
+        group: group.clone(),
+        task,
+        cause,
+    }
+}
+
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl RuntimeBridge for AgentRuntimeBridge {
@@ -650,6 +709,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     fn task_spawner(&self) -> OwnedTaskSpawner {
         self.agent.runtime().task_spawner()
+    }
+
+    fn supervised_task_failures(&self) -> Vec<SupervisedTaskFailureSnapshot> {
+        self.agent
+            .supervised_task_failures()
+            .iter()
+            .map(supervised_task_failure_snapshot)
+            .collect()
     }
 
     // =========================================================================
@@ -1115,6 +1182,46 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
+    async fn home_governance_causal(
+        &self,
+        context_id: ContextId,
+        key: HomeGovernanceKey,
+    ) -> Result<aura_core::time::CausalMetadata, IntentError> {
+        let effects = self.agent.runtime().effects();
+        let committed = effects
+            .load_committed_facts(self.agent.authority_id())
+            .await
+            .map_err(|error| bridge_internal("Load committed governance facts failed", error))?;
+        let mut observed = Vec::new();
+        for fact in &committed {
+            let FactContent::Relational(RelationalFact::Generic {
+                context_id: fact_context,
+                envelope,
+            }) = &fact.content
+            else {
+                continue;
+            };
+            if *fact_context != context_id {
+                continue;
+            }
+            if let Some(event) = TaggedHomeGovernanceEvent::try_decode(*fact_context, envelope)
+                .map_err(|error| {
+                    bridge_internal(
+                        "Decode committed governance fact failed",
+                        aura_core::AuraError::from(error),
+                    )
+                })?
+            {
+                observed.push(event);
+            }
+        }
+        let clock = effects
+            .logical_advance(Some(&observed_governance_vector(&observed)))
+            .await
+            .map_err(|error| bridge_internal("Advance logical clock failed", error))?;
+        Ok(home_governance_causal(key, &observed, &clock))
+    }
+
     async fn canonical_channel_creation(
         &self,
         binding: AuthoritativeChannelBinding,
@@ -1159,7 +1266,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let authority = self.agent.authority_id();
 
-        let contexts = self
+        let mut contexts = self
             .agent
             .runtime()
             .contexts()
@@ -1171,6 +1278,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     error,
                 )
             })?;
+        // A joined channel (e.g. an accepted home) may live in a context that
+        // is not registered for this authority; its committed creation fact
+        // names the context. Each candidate is still verified by AMP state.
+        for context in committed_channel_creation_contexts(&effects, authority, channel).await? {
+            if !contexts.contains(&context) {
+                contexts.push(context);
+            }
+        }
 
         for context in contexts {
             match aura_protocol::amp::get_channel_state(&effects, context, channel).await {
@@ -1602,6 +1717,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
+        let causal = self
+            .home_governance_causal(
+                context_id,
+                HomeGovernanceKey::Kick {
+                    target,
+                    channel: channel_id,
+                },
+            )
+            .await?;
         let fact = HomeKickFact::new_ms(
             context_id,
             channel_id,
@@ -1609,6 +1733,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             self.agent.authority_id(),
             reason.unwrap_or_default(),
             now.ts_ms,
+            causal,
         )
         .to_generic();
 
@@ -1625,6 +1750,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
+        let causal = self
+            .home_governance_causal(
+                context_id,
+                HomeGovernanceKey::Ban {
+                    target,
+                    channel: None,
+                },
+            )
+            .await?;
         let fact = HomeBanFact::new_ms(
             context_id,
             None,
@@ -1633,6 +1767,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             reason.unwrap_or_default(),
             now.ts_ms,
             None,
+            causal,
         )
         .to_generic();
 
@@ -1648,12 +1783,22 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
+        let causal = self
+            .home_governance_causal(
+                context_id,
+                HomeGovernanceKey::Unban {
+                    target,
+                    channel: None,
+                },
+            )
+            .await?;
         let fact = HomeUnbanFact::new_ms(
             context_id,
             None,
             target,
             self.agent.authority_id(),
             now.ts_ms,
+            causal,
         )
         .to_generic();
 
@@ -1671,6 +1816,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
         let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
 
+        let causal = self
+            .home_governance_causal(
+                context_id,
+                HomeGovernanceKey::Mute {
+                    target,
+                    channel: None,
+                },
+            )
+            .await?;
         let fact = HomeMuteFact::new_ms(
             context_id,
             None,
@@ -1679,6 +1833,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             duration_secs,
             now.ts_ms,
             expires_at,
+            causal,
         )
         .to_generic();
 
@@ -1694,12 +1849,22 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let effects = self.agent.runtime().effects();
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
+        let causal = self
+            .home_governance_causal(
+                context_id,
+                HomeGovernanceKey::Unmute {
+                    target,
+                    channel: None,
+                },
+            )
+            .await?;
         let fact = HomeUnmuteFact::new_ms(
             context_id,
             None,
             target,
             self.agent.authority_id(),
             now.ts_ms,
+            causal,
         )
         .to_generic();
 
@@ -4162,6 +4327,7 @@ impl AuraAgent {
     /// let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
     /// ```
     pub fn as_runtime_bridge(self: Arc<Self>) -> Arc<dyn RuntimeBridge> {
+        sync::start_periodic_sync(&self);
         Arc::new(AgentRuntimeBridge::new(self))
     }
 }

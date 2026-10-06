@@ -8,6 +8,15 @@ participants where the scenario requires one physical clock; restart tests must
 also retain original durable window evidence. Use real held ownership capabilities
 for persistent enrollment fixtures rather than constructing raw registration state.
 
+Multi-agent runtime tests (several `AgentBuilder` runtimes on one
+`SharedTransport`) share one `aura_testkit::time::QuiescentClock`, injected with
+`AgentBuilder::with_physical_time_provider`, and run under
+`#[tokio::test(start_paused = true)]`. The clock advances in small virtual
+steps only when every task is idle, so runtime timeouts, retries and periodic
+sync fire at the same logical point regardless of host load. Bound waits in
+virtual time and re-check conditions at quiescent points (see
+`crates/aura-agent/tests/support`); never wait on wall-clock sleeps.
+
 ## AMP lifecycle replay
 
 `just ci-test` first runs `just ci-amp-lifecycle-trace`, which regenerates the
@@ -125,6 +134,8 @@ If a migrated parity-critical flow needs both actor and move semantics, the spli
 `UiSnapshot` and render-convergence data are authoritative. Observation surfaces must be side-effect free. Recovery and retries must be explicit and separate from observation.
 
 A failed `OperationSnapshot` carries the owner-reported `failure_code` (a `SemanticFailureCode`, serialized in snake case and omitted when absent). Assert refusals on that code, for example `permission_denied` for a moderation command from an actor without the role or capability, not on toast text.
+
+`UiSnapshot.supervised_task_failures` lists dead runtime-supervised tasks (`group`, `task`, `cause`) from `RuntimeBridge::supervised_task_failures`. It is diagnostic only: excluded from parity comparison, readiness and quiescence, and never a wait condition. The TUI export populates it; the browser publishes it empty. On LAN runs, `deadtasks <inst>` in `scripts/harness/lan/lib.sh` prints it.
 
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.
 

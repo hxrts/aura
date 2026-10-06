@@ -923,6 +923,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             bootstrap_candidates: &shared_discovered_peers_for_commands
                                 .authority_ids(),
                         },
+                        app_ctx_for_commands.app_core.runtime().as_deref(),
                     );
                     if let Err(error) = export_result {
                         tracing::warn!(
@@ -1064,6 +1065,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 chat_messages: &harness_messages,
                 bootstrap_candidates: &shared_discovered_peers.authority_ids(),
             },
+            app_ctx.app_core.runtime().as_deref(),
         ) {
             tracing::warn!(
                 error = %error,

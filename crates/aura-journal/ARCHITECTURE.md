@@ -33,6 +33,9 @@ Fact-based journal semantics using join-semilattice CRDTs for deterministic conf
 - `reduction.rs`: Deterministic state derivation from facts.
 - `commitment_tree/`: Tree state machine, reduction, compaction.
 - `crdt/`: Semilattice handlers (join/meet/operation-based).
+- `causal_reduction.rs`: Shared order-independent rules over `CausalMetadata`
+  (tagged observed-remove set, multi-value register, causal order) and the
+  permutation test harness.
 - `algebra/`: Domain-specific CRDT types (`OpLog`, `AccountState`, `EpochLog`).
 - `extensibility.rs`: `DomainFact` trait, `FactRegistry` for Layer 4/5 facts.
 - `effects.rs`: `JournalHandler` application effect implementation.
@@ -41,6 +44,8 @@ Fact-based journal semantics using join-semilattice CRDTs for deterministic conf
 
 - Monotonic growth: `Journal_{t+1} = Journal_t ⊔ δ` (facts append-only).
 - Deterministic reduction: Same facts → identical state on all replicas.
+- Reversible and overwritable facts reduce through `causal_reduction`, never by
+  arrival order or physical time (docs/105 §4.2.1).
 - Immutability: Facts immutable; metadata updates monotonic.
 - Namespace isolation: Authority and Context journals distinct.
 - Content addressing: Facts identified by hash (CID).

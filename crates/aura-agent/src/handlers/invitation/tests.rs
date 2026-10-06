@@ -2137,8 +2137,18 @@ large_stack_async_test!(
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([207u8; 32]);
-        let grant = HomeGrantModeratorFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
-            .to_generic();
+        let grant = HomeGrantModeratorFact::new_ms(
+            context_id,
+            authority,
+            peer,
+            1_700_000_000_001,
+            aura_social::moderation::governance::test_support::causal(
+                1,
+                aura_social::HomeGovernanceKey::GrantModerator { target: authority },
+                &[],
+            ),
+        )
+        .to_generic();
 
         let payload = aura_core::util::serialization::to_vec(&grant).unwrap();
         let mut metadata = HashMap::new();
@@ -2492,17 +2502,15 @@ large_stack_async_test!(
         // The channel is the sender's own home, so this is a home invitation and
         // the acceptance materializes home membership.
         sender_effects
-            .commit_generic_fact_bytes(
+            .commit_domain_fact(
                 context_id,
-                aura_social::SOCIAL_FACT_TYPE_ID.into(),
-                aura_social::SocialFact::home_created_ms(
+                &aura_social::SocialFact::home_created_ms(
                     aura_social::HomeId::from_bytes(*channel_id.as_bytes()),
                     context_id,
                     1,
                     sender_id,
                     "shared-parity-lab".to_string(),
-                )
-                .to_bytes(),
+                ),
             )
             .await
             .unwrap();
@@ -5967,6 +5975,57 @@ large_stack_async_test!(
             .await
             .expect("imported invitation should remain readable");
         assert_eq!(stored.status, InvitationStatus::Pending);
+    }
+);
+
+large_stack_async_test!(
+    reimport_keeps_an_acknowledged_pending_acceptance,
+    {
+        use super::contact_confirmation::contact_acceptance_digest;
+
+        // Task 95: the invitee imports a pasted code and acknowledges its
+        // acceptance; the inviter's delivered envelope for the same
+        // invitation then arrives at a handler whose in-memory cache does not
+        // hold it. Re-importing must keep the stored acceptance ownership.
+        let pair = contact_pair(140).await;
+        let invitation = pair.create_contact_invitation().await;
+        let code = pair.signed_code(&invitation).await;
+        let imported = pair.import(&code).await;
+        let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
+        let mut stored = InvitationHandler::load_imported_invitation(
+            pair.receiver_effects.as_ref(),
+            pair.receiver_id,
+            &imported.invitation_id,
+            None,
+        )
+        .await
+        .expect("imported invitation should be stored");
+        stored.pending_acceptance_digest = Some(acceptance_digest);
+        InvitationHandler::persist_imported_invitation(
+            pair.receiver_effects.as_ref(),
+            pair.receiver_id,
+            &stored,
+        )
+        .await
+        .unwrap();
+
+        handler_for(AuthorityContext::new_with_device(
+            pair.receiver_id,
+            pair.receiver_effects.device_id(),
+        ))
+        .import_invitation_code(&pair.receiver_effects, &code)
+        .await
+        .expect("re-delivered invitation should import");
+
+        let stored = InvitationHandler::load_imported_invitation(
+            pair.receiver_effects.as_ref(),
+            pair.receiver_id,
+            &imported.invitation_id,
+            None,
+        )
+        .await
+        .expect("imported invitation should stay stored");
+        assert_eq!(stored.pending_acceptance_digest, Some(acceptance_digest));
     }
 );
 

@@ -16,8 +16,8 @@ use aura_app::views::{
     chat::{note_to_self_channel_id, ChatState, Message, MessageDeliveryStatus},
     contacts::{ContactError, ContactRelationshipState, ContactsState},
     home::{
-        BanRecord, HomeCreationWitness, HomeMember, HomeRole, HomeState, HomesState, KickRecord,
-        MuteRecord, PinnedMessageMeta,
+        reduce_home_governance, HomeCreationWitness, HomeGovernanceLog, HomeMember, HomeRole,
+        HomeState, HomesState, PinnedMessageMeta,
     },
     invitations::{InvitationDirection, InvitationStatus},
     recovery::{Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState},
@@ -49,12 +49,7 @@ use aura_relational::{ContactFact, FriendshipFact, CONTACT_FACT_TYPE_ID, FRIENDS
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
-use aura_social::moderation::{
-    HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact,
-    HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
-    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
-};
+use aura_social::moderation::TaggedHomeGovernanceEvent;
 use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
 
 fn required_projection_source(
@@ -66,57 +61,22 @@ fn required_projection_source(
     }
 }
 
-enum RequiredModerationProjection {
-    Ban(HomeBanFact),
-    Unban(HomeUnbanFact),
-    Mute(HomeMuteFact),
-    Unmute(HomeUnmuteFact),
-    Kick(HomeKickFact),
+enum RequiredPinProjection {
     Pin(HomePinFact),
     Unpin(HomeUnpinFact),
-    GrantModerator(HomeGrantModeratorFact),
-    RevokeModerator(HomeRevokeModeratorFact),
 }
 
-fn required_moderation_projection(
+fn required_pin_projection(
     envelope: &aura_core::types::facts::FactEnvelope,
     context: ContextId,
-) -> Result<Option<RequiredModerationProjection>, aura_core::AuraError> {
+) -> Result<Option<RequiredPinProjection>, aura_core::AuraError> {
     Ok(Some(match envelope.type_id.as_str() {
-        HOME_BAN_FACT_TYPE_ID => RequiredModerationProjection::Ban(
-            HomeBanFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_UNBAN_FACT_TYPE_ID => RequiredModerationProjection::Unban(
-            HomeUnbanFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_MUTE_FACT_TYPE_ID => RequiredModerationProjection::Mute(
-            HomeMuteFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_UNMUTE_FACT_TYPE_ID => RequiredModerationProjection::Unmute(
-            HomeUnmuteFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_KICK_FACT_TYPE_ID => RequiredModerationProjection::Kick(
-            HomeKickFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_PIN_FACT_TYPE_ID => RequiredModerationProjection::Pin(
+        HOME_PIN_FACT_TYPE_ID => RequiredPinProjection::Pin(
             HomePinFact::try_from_envelope_in_context(envelope, context)
                 .map_err(aura_core::AuraError::from)?,
         ),
-        HOME_UNPIN_FACT_TYPE_ID => RequiredModerationProjection::Unpin(
+        HOME_UNPIN_FACT_TYPE_ID => RequiredPinProjection::Unpin(
             HomeUnpinFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_GRANT_MODERATOR_FACT_TYPE_ID => RequiredModerationProjection::GrantModerator(
-            HomeGrantModeratorFact::try_from_envelope_in_context(envelope, context)
-                .map_err(aura_core::AuraError::from)?,
-        ),
-        HOME_REVOKE_MODERATOR_FACT_TYPE_ID => RequiredModerationProjection::RevokeModerator(
-            HomeRevokeModeratorFact::try_from_envelope_in_context(envelope, context)
                 .map_err(aura_core::AuraError::from)?,
         ),
         _ => return Ok(None),
@@ -1215,6 +1175,9 @@ pub struct HomeSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     pending_memberships: Mutex<Vec<SocialFact>>,
+    /// Governance facts held per home context; homes are re-reduced from
+    /// the whole set so arrival order cannot change the result.
+    governance: Mutex<HashMap<ContextId, HomeGovernanceLog>>,
 }
 
 impl HomeSignalView {
@@ -1223,6 +1186,7 @@ impl HomeSignalView {
             own_authority,
             reactive,
             pending_memberships: Mutex::new(Vec::new()),
+            governance: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1303,12 +1267,9 @@ impl HomeSignalView {
         });
         Some(true)
     }
-    /// Applies committed home governance facts: access overrides (committed by
-    /// `set_access_override` and sent to the home's members; without this the
-    /// target never saw its override and the setter lost it on restart, run
-    /// 148, work/8.md Task 10 F16) and neighborhood joins (charged against the
-    /// home's neighborhood budget once per neighborhood, so replays are no-ops).
-    fn apply_home_governance(homes: &mut HomesState, social_facts: &[SocialFact]) -> bool {
+    /// Applies committed neighborhood joins (charged against the home's
+    /// neighborhood budget once per neighborhood, so replays are no-ops).
+    fn apply_neighborhood_joins(homes: &mut HomesState, social_facts: &[SocialFact]) -> bool {
         let neighborhood_names: std::collections::HashMap<String, String> = social_facts
             .iter()
             .filter_map(|fact| match fact {
@@ -1325,45 +1286,28 @@ impl HomeSignalView {
             .collect();
         let mut changed = false;
         for fact in social_facts {
-            match fact {
-                SocialFact::AccessOverrideSet {
-                    authority_id,
-                    home_id,
-                    access_level,
-                    ..
-                } => {
-                    let home_id = ChannelId::from_bytes(*home_id.as_bytes());
-                    let Some(home) = homes.home_mut(&home_id) else {
-                        continue;
-                    };
-                    if home.access_overrides.get(authority_id) != Some(access_level) {
-                        home.set_access_override(*authority_id, *access_level);
-                        changed = true;
-                    }
+            let SocialFact::HomeJoinedNeighborhood {
+                home_id,
+                neighborhood_id,
+                ..
+            } = fact
+            else {
+                continue;
+            };
+            let home_id = ChannelId::from_bytes(*home_id.as_bytes());
+            let neighborhood = ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string();
+            let name = neighborhood_names
+                .get(&neighborhood)
+                .cloned()
+                .unwrap_or_else(|| "Neighborhood".to_string());
+            let Some(home) = homes.home_mut(&home_id) else {
+                continue;
+            };
+            match home.join_neighborhood(&neighborhood, &name) {
+                Ok(joined) => changed |= joined,
+                Err(error) => {
+                    tracing::warn!(%home_id, %error, "neighborhood join fact exceeds the home budget");
                 }
-                SocialFact::HomeJoinedNeighborhood {
-                    home_id,
-                    neighborhood_id,
-                    ..
-                } => {
-                    let home_id = ChannelId::from_bytes(*home_id.as_bytes());
-                    let neighborhood =
-                        ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string();
-                    let name = neighborhood_names
-                        .get(&neighborhood)
-                        .cloned()
-                        .unwrap_or_else(|| "Neighborhood".to_string());
-                    let Some(home) = homes.home_mut(&home_id) else {
-                        continue;
-                    };
-                    match home.join_neighborhood(&neighborhood, &name) {
-                        Ok(joined) => changed |= joined,
-                        Err(error) => {
-                            tracing::warn!(%home_id, %error, "neighborhood join fact exceeds the home budget");
-                        }
-                    }
-                }
-                _ => {}
             }
         }
         changed
@@ -1378,7 +1322,9 @@ impl ReactiveView for HomeSignalView {
             // serializes this view's retries while other projection owners
             // may publish to the same signal.
             let mut pending = self.pending_memberships.lock().await;
+            let mut governance_held = self.governance.lock().await;
             loop {
+                let mut governance = governance_held.clone();
                 let current = match owner.snapshot(ProjectionSlot::homes()).await {
                     Ok(current) => current,
                     Err(e) => {
@@ -1407,6 +1353,10 @@ impl ReactiveView for HomeSignalView {
                 // membership before creation in the same batch.
                 for fact in &social_facts {
                     if let Some(witness) = owner.home_created_witness(fact) {
+                        governance
+                            .entry(witness.context_id())
+                            .or_default()
+                            .set_creator(witness.creator_id());
                         changed |= self.materialize_created_home(&mut homes, witness);
                     }
                 }
@@ -1425,8 +1375,13 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
 
-                changed |= Self::apply_home_governance(&mut homes, &social_facts);
+                changed |= Self::apply_neighborhood_joins(&mut homes, &social_facts);
 
+                // Governance facts join their home's fact set (validated even
+                // before the home materializes; missing canonical context is
+                // not a codec exemption). Pins are collected for after the
+                // governance reduction, which decides who may moderate.
+                let mut pins = Vec::new();
                 for fact in facts {
                     let FactContent::Relational(RelationalFact::Generic {
                         context_id,
@@ -1435,85 +1390,37 @@ impl ReactiveView for HomeSignalView {
                     else {
                         continue;
                     };
-
+                    if let Some(event) =
+                        TaggedHomeGovernanceEvent::try_decode(*context_id, envelope)
+                            .map_err(aura_core::AuraError::from)?
+                    {
+                        governance.entry(*context_id).or_default().insert(event);
+                        continue;
+                    }
                     if envelope.type_id.as_str() == SOCIAL_FACT_TYPE_ID {
                         continue;
                     }
-                    // Validate relevant required evidence even before its Home
-                    // has materialized; missing canonical context is not a codec exemption.
-                    let Some(moderation) = required_moderation_projection(envelope, *context_id)?
-                    else {
-                        continue;
-                    };
-                    let Some(home_state) = Self::home_for_context_mut(&mut homes, context_id)
-                    else {
-                        continue;
-                    };
+                    if let Some(pin) = required_pin_projection(envelope, *context_id)? {
+                        pins.push((*context_id, pin));
+                    }
+                }
 
-                    match moderation {
-                        RequiredModerationProjection::Ban(ban)
-                            if !home_state
-                                .actor_may_moderate(&ban.actor_authority, "moderate:ban") => {}
-                        RequiredModerationProjection::Ban(ban) => {
-                            let record = BanRecord {
-                                authority_id: ban.banned_authority,
-                                reason: ban.reason,
-                                actor: ban.actor_authority,
-                                banned_at: ban.banned_at.ts_ms,
-                            };
-                            home_state.add_ban(record);
-                            let _ = home_state.remove_member(&ban.banned_authority);
-                            changed = true;
-                        }
-                        RequiredModerationProjection::Unban(unban)
-                            if !home_state
-                                .actor_may_moderate(&unban.actor_authority, "moderate:ban") => {}
-                        RequiredModerationProjection::Unban(unban) => {
-                            if home_state.remove_ban(&unban.unbanned_authority).is_some() {
-                                changed = true;
-                            }
-                        }
-                        RequiredModerationProjection::Mute(mute)
-                            if !home_state
-                                .actor_may_moderate(&mute.actor_authority, "moderate:mute") => {}
-                        RequiredModerationProjection::Mute(mute) => {
-                            let record = MuteRecord {
-                                authority_id: mute.muted_authority,
-                                duration_secs: mute.duration_secs,
-                                muted_at: mute.muted_at.ts_ms,
-                                expires_at: mute.expires_at.as_ref().map(|t| t.ts_ms),
-                                actor: mute.actor_authority,
-                            };
-                            home_state.add_mute(record);
-                            changed = true;
-                        }
-                        RequiredModerationProjection::Unmute(unmute)
-                            if !home_state
-                                .actor_may_moderate(&unmute.actor_authority, "moderate:mute") => {}
-                        RequiredModerationProjection::Unmute(unmute) => {
-                            if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
-                                changed = true;
-                            }
-                        }
-                        RequiredModerationProjection::Kick(kick)
-                            if !home_state
-                                .actor_may_moderate(&kick.actor_authority, "moderate:kick") => {}
-                        RequiredModerationProjection::Kick(kick) => {
-                            let record = KickRecord {
-                                authority_id: kick.kicked_authority,
-                                channel: kick.channel_id,
-                                reason: kick.reason,
-                                actor: kick.actor_authority,
-                                kicked_at: kick.kicked_at.ts_ms,
-                            };
-                            home_state.add_kick(record);
-                            let _ = home_state.remove_member(&kick.kicked_authority);
-                            changed = true;
-                        }
-                        RequiredModerationProjection::Pin(pin)
+                for (context_id, log) in &mut governance {
+                    if let Some(home) = Self::home_for_context_mut(&mut homes, context_id) {
+                        changed |= reduce_home_governance(home, log, &self.own_authority);
+                    }
+                }
+
+                for (context_id, pin) in pins {
+                    let Some(home_state) = Self::home_for_context_mut(&mut homes, &context_id)
+                    else {
+                        continue;
+                    };
+                    match pin {
+                        RequiredPinProjection::Pin(pin)
                             if !home_state
                                 .actor_may_moderate(&pin.actor_authority, "pin_content") => {}
-                        RequiredModerationProjection::Pin(pin) => {
+                        RequiredPinProjection::Pin(pin) => {
                             home_state.pin_message_with_meta(PinnedMessageMeta {
                                 message_id: pin.message_id,
                                 pinned_by: pin.actor_authority,
@@ -1521,48 +1428,11 @@ impl ReactiveView for HomeSignalView {
                             });
                             changed = true;
                         }
-                        RequiredModerationProjection::Unpin(unpin)
+                        RequiredPinProjection::Unpin(unpin)
                             if !home_state
                                 .actor_may_moderate(&unpin.actor_authority, "pin_content") => {}
-                        RequiredModerationProjection::Unpin(unpin) => {
+                        RequiredPinProjection::Unpin(unpin) => {
                             if home_state.unpin_message(&unpin.message_id) {
-                                changed = true;
-                            }
-                        }
-                        RequiredModerationProjection::GrantModerator(grant)
-                            if !home_state
-                                .actor_may_designate_moderators(&grant.actor_authority) => {}
-                        RequiredModerationProjection::GrantModerator(grant) => {
-                            if let Some(member) = home_state.member_mut(&grant.target_authority) {
-                                if matches!(member.role, HomeRole::Member | HomeRole::Moderator) {
-                                    member.role = HomeRole::Moderator;
-                                    changed = true;
-                                }
-                            }
-                            if grant.target_authority == self.own_authority
-                                && matches!(
-                                    home_state.my_role,
-                                    HomeRole::Member | HomeRole::Moderator
-                                )
-                            {
-                                home_state.my_role = HomeRole::Moderator;
-                                changed = true;
-                            }
-                        }
-                        RequiredModerationProjection::RevokeModerator(revoke)
-                            if !home_state
-                                .actor_may_designate_moderators(&revoke.actor_authority) => {}
-                        RequiredModerationProjection::RevokeModerator(revoke) => {
-                            if let Some(member) = home_state.member_mut(&revoke.target_authority) {
-                                if matches!(member.role, HomeRole::Moderator) {
-                                    member.role = HomeRole::Member;
-                                    changed = true;
-                                }
-                            }
-                            if revoke.target_authority == self.own_authority
-                                && matches!(home_state.my_role, HomeRole::Moderator)
-                            {
-                                home_state.my_role = HomeRole::Member;
                                 changed = true;
                             }
                         }
@@ -1571,6 +1441,7 @@ impl ReactiveView for HomeSignalView {
 
                 if !changed {
                     *pending = unresolved;
+                    *governance_held = governance;
                     return Ok(());
                 }
 
@@ -1580,6 +1451,7 @@ impl ReactiveView for HomeSignalView {
                 {
                     Ok(ConditionalEmit::Published { .. }) => {
                         *pending = unresolved;
+                        *governance_held = governance;
                         return Ok(());
                     }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
@@ -2419,7 +2291,19 @@ mod tests {
             .unwrap()
             .revision;
         for (type_id, view) in views {
-            for schema_version in [1, u16::MAX] {
+            // Social and home governance facts are at schema 3 (causal stamps).
+            let supported: u16 = match type_id {
+                SOCIAL_FACT_TYPE_ID
+                | HOME_BAN_FACT_TYPE_ID
+                | HOME_UNBAN_FACT_TYPE_ID
+                | HOME_MUTE_FACT_TYPE_ID
+                | HOME_UNMUTE_FACT_TYPE_ID
+                | HOME_KICK_FACT_TYPE_ID
+                | HOME_GRANT_MODERATOR_FACT_TYPE_ID
+                | HOME_REVOKE_MODERATOR_FACT_TYPE_ID => 3,
+                _ => 1,
+            };
+            for schema_version in [supported, u16::MAX] {
                 let malformed = fact_from_relational(RelationalFact::Generic {
                     context_id: ContextId::new_from_entropy([0xd9; 32]),
                     envelope: FactEnvelope {
@@ -2436,7 +2320,7 @@ mod tests {
                 let mut cause: Option<&(dyn Error + 'static)> = Some(&failed);
                 let mut native = false;
                 while let Some(source) = cause {
-                    native |= if schema_version == 1 {
+                    native |= if schema_version == supported {
                         source.is::<serde_json::Error>()
                     } else {
                         source.is::<FactError>()
@@ -2513,7 +2397,20 @@ mod tests {
     use aura_social::moderation::facts::{
         HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
     };
-    use aura_social::moderation::HomeBanFact;
+    use aura_social::moderation::{
+        HomeBanFact, HomeMuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID,
+        HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
+        HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
+    };
+
+    /// Causal stamp of one governance write by test device `device`.
+    fn stamp(device: u8) -> aura_core::time::CausalMetadata {
+        aura_social::moderation::governance::test_support::causal(
+            device,
+            aura_social::moderation::HomeGovernanceKey::CapabilityConfig,
+            &[],
+        )
+    }
 
     #[test]
     fn runtime_projection_publications_use_the_versioned_owner() {
@@ -3353,6 +3250,7 @@ mod tests {
             "spamming".to_string(),
             999,
             None,
+            stamp(1),
         )
         .to_generic();
         view.update(&[fact_from_relational(ban)])
@@ -3390,7 +3288,8 @@ mod tests {
 
         let view = HomeSignalView::new(target, reactive.clone());
 
-        let grant = HomeGrantModeratorFact::new_ms(context_id, target, owner, 100).to_generic();
+        let grant_fact = HomeGrantModeratorFact::new_ms(context_id, target, owner, 100, stamp(2));
+        let grant = grant_fact.to_generic();
         view.update(&[fact_from_relational(grant)])
             .await
             .expect("required fixture projection succeeds");
@@ -3407,7 +3306,15 @@ mod tests {
             aura_app::views::home::HomeRole::Moderator
         ));
 
-        let revoke = HomeRevokeModeratorFact::new_ms(context_id, target, owner, 101).to_generic();
+        let revokes_grant = aura_social::moderation::governance::test_support::causal(
+            3,
+            aura_social::moderation::HomeGovernanceKey::RevokeModerator { target },
+            &[aura_social::moderation::governance::test_support::tagged(
+                aura_social::moderation::HomeGovernanceEvent::GrantModerator(grant_fact),
+            )],
+        );
+        let revoke = HomeRevokeModeratorFact::new_ms(context_id, target, owner, 101, revokes_grant)
+            .to_generic();
         view.update(&[fact_from_relational(revoke)])
             .await
             .expect("required fixture projection succeeds");
@@ -3446,6 +3353,7 @@ mod tests {
             Some(60),
             100,
             Some(160_000),
+            stamp(4),
         )
         .to_generic();
         view.update(&[fact_from_relational(mute.clone())])
@@ -4380,8 +4288,17 @@ mod tests {
         reactive.emit(&*HOMES_SIGNAL, homes).await.unwrap();
         let view = HomeSignalView::new(invitee, reactive.clone());
 
-        let ban = HomeBanFact::new_ms(context_id, None, target, creator, "x".to_string(), 5, None)
-            .to_generic();
+        let ban = HomeBanFact::new_ms(
+            context_id,
+            None,
+            target,
+            creator,
+            "x".to_string(),
+            5,
+            None,
+            stamp(5),
+        )
+        .to_generic();
         view.update(&[fact_from_relational(ban.clone())])
             .await
             .unwrap();
@@ -4439,11 +4356,21 @@ mod tests {
         }
         let view = HomeSignalView::new(member, reactive.clone());
 
-        let ban = HomeBanFact::new_ms(context_id, None, target, member, "x".to_string(), 999, None)
-            .to_generic();
+        let ban = HomeBanFact::new_ms(
+            context_id,
+            None,
+            target,
+            member,
+            "x".to_string(),
+            999,
+            None,
+            stamp(6),
+        )
+        .to_generic();
         let unknown_actor = AuthorityId::new_from_entropy([8u8; 32]);
         let grant =
-            HomeGrantModeratorFact::new_ms(context_id, member, unknown_actor, 100).to_generic();
+            HomeGrantModeratorFact::new_ms(context_id, member, unknown_actor, 100, stamp(7))
+                .to_generic();
         view.update(&[fact_from_relational(ban), fact_from_relational(grant)])
             .await
             .unwrap();
@@ -4473,7 +4400,9 @@ mod tests {
                     home_id,
                     context,
                     aura_social::AccessLevel::Partial,
+                    owner,
                     70,
+                    stamp(8),
                 )
                 .to_generic(),
             )

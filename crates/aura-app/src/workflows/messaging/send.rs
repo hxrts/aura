@@ -633,7 +633,6 @@ async fn send_message_ref_owned(
         }
     };
 
-    let mut channel_context: Option<ContextId> = None;
     let mut epoch_hint: Option<u32> = None;
     let (sender_id, message_id) = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
@@ -643,7 +642,6 @@ async fn send_message_ref_owned(
         if is_note_to_self {
             let context_id = note_to_self_context_id(sender_id);
             let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
-            channel_context = Some(context_id);
             let fact = ChatFact::message_sent_sealed_ms(
                 context_id,
                 channel_id,
@@ -776,7 +774,6 @@ async fn send_message_ref_owned(
                 )
                 .await;
             }
-            channel_context = Some(context_id);
 
             let send_params = ChannelSendParams {
                 context: context_id,
@@ -974,23 +971,11 @@ async fn send_message_ref_owned(
         (sender_id, message_id)
     };
 
-    if let Some(context_id) = channel_context {
-        reduce_chat_fact_observed(
-            app_core,
-            &ChatFact::message_sent_sealed_ms(
-                context_id,
-                channel_id,
-                message_id.clone(),
-                sender_id,
-                "You".to_string(),
-                content.as_bytes().to_vec(),
-                timestamp_ms,
-                None,
-                epoch_hint,
-            ),
-        )
-        .await?;
-    } else {
+    // Local echo of our own send. The sealed-fact reducer discards the
+    // payload (it renders `<sealed message>`, not ours), so the sender's
+    // plaintext copy is applied directly; the runtime view's later copy of
+    // the same message id does not replace readable content.
+    {
         update_chat_projection_observed(app_core, |chat_state| {
             chat_state.apply_message(
                 channel_id,

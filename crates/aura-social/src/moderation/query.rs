@@ -1,32 +1,45 @@
 #![allow(clippy::clone_on_copy)]
 
-//! Query functions for deriving moderation state from journal facts
+//! Query functions for deriving moderation state from journal facts.
+//!
+//! Bans and mutes are tagged observed-remove sets and kicks are ordered
+//! causally (`super::governance`), so every result is a function of the fact
+//! set, independent of journal or arrival order.
 
 use super::facts::{
-    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
+    HOME_BAN_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
     HOME_UNMUTE_FACT_TYPE_ID,
 };
+use super::governance::{
+    live_ban_tags, live_mute_tags, sort_causally, HomeGovernanceEvent, TaggedHomeGovernanceEvent,
+};
 use super::types::{BanStatus, KickRecord, ModerationScopeKey, MuteStatus};
+use aura_core::time::CausalTag;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-fn moderation_fact<T: DomainFact>(
-    fact: &Fact,
+/// Governance facts of `context_id`, skipping undecodable ones (lenient
+/// queries; required callers use `try_is_user_banned_and_muted`).
+fn lenient_governance_events(
+    facts: &[Fact],
     context_id: &ContextId,
-    type_id: &'static str,
-) -> Option<T> {
-    match &fact.content {
-        FactContent::Relational(RelationalFact::Generic {
-            context_id: fact_context,
-            envelope,
-        }) if fact_context == context_id && envelope.type_id.as_str() == type_id => {
-            T::from_envelope(envelope)
-        }
-        _ => None,
-    }
+) -> Vec<TaggedHomeGovernanceEvent> {
+    facts
+        .iter()
+        .filter_map(|fact| match &fact.content {
+            FactContent::Relational(RelationalFact::Generic {
+                context_id: fact_context,
+                envelope,
+            }) if fact_context == context_id => {
+                TaggedHomeGovernanceEvent::try_decode(*fact_context, envelope)
+                    .ok()
+                    .flatten()
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 fn moderation_scope_key(
@@ -36,19 +49,54 @@ fn moderation_scope_key(
     (authority, channel_id)
 }
 
-fn remove_if_newer<T>(
-    active: &mut HashMap<ModerationScopeKey, T>,
-    authority: AuthorityId,
-    channel_id: Option<ChannelId>,
-    reversal_at_ms: u64,
-    active_at_ms: impl Fn(&T) -> u64,
-) {
-    let key = moderation_scope_key(authority, channel_id);
-    if let Some(status) = active.get(&key) {
-        if reversal_at_ms >= active_at_ms(status) {
-            active.remove(&key);
+/// Live statuses per scope; when several live adds share a scope, the latest
+/// in causal order represents it.
+fn live_statuses<T>(
+    events: &[TaggedHomeGovernanceEvent],
+    live: &BTreeSet<CausalTag>,
+    status: impl Fn(&HomeGovernanceEvent) -> Option<T>,
+    key: impl Fn(&T) -> ModerationScopeKey,
+) -> HashMap<ModerationScopeKey, T> {
+    let mut ordered: Vec<_> = events
+        .iter()
+        .filter(|event| live.contains(&event.tag))
+        .collect();
+    sort_causally(&mut ordered);
+    let mut statuses = HashMap::new();
+    for event in ordered {
+        if let Some(status) = status(&event.event) {
+            statuses.insert(key(&status), status);
         }
     }
+    statuses
+}
+
+fn ban_status(event: &HomeGovernanceEvent) -> Option<BanStatus> {
+    match event {
+        HomeGovernanceEvent::Ban(fact) => Some(BanStatus::from_fact(fact)),
+        _ => None,
+    }
+}
+
+fn mute_status(event: &HomeGovernanceEvent) -> Option<MuteStatus> {
+    match event {
+        HomeGovernanceEvent::Mute(fact) => Some(MuteStatus::from_fact(fact)),
+        _ => None,
+    }
+}
+
+fn bans_of(events: &[TaggedHomeGovernanceEvent]) -> HashMap<ModerationScopeKey, BanStatus> {
+    let refs: Vec<_> = events.iter().collect();
+    live_statuses(events, &live_ban_tags(&refs), ban_status, |ban| {
+        moderation_scope_key(ban.banned_authority, ban.channel_id)
+    })
+}
+
+fn mutes_of(events: &[TaggedHomeGovernanceEvent]) -> HashMap<ModerationScopeKey, MuteStatus> {
+    let refs: Vec<_> = events.iter().collect();
+    live_statuses(events, &live_mute_tags(&refs), mute_status, |mute| {
+        moderation_scope_key(mute.muted_authority, mute.channel_id)
+    })
 }
 
 fn remove_orphaned_channel_statuses<T>(
@@ -76,11 +124,12 @@ fn status_applies_to_channel<T>(
 
 /// Query current bans in a context
 ///
-/// Processes HomeBan and HomeUnban facts in order to derive the current set
-/// of banned users. Unbans remove bans if they happened after the ban.
+/// Bans form a tagged observed-remove set: an unban removes the bans its
+/// writer observed (legacy unbans: bans at or before its time). The result
+/// does not depend on the order of `facts`.
 ///
 /// # Arguments
-/// * `facts` - Ordered list of facts from the journal
+/// * `facts` - Facts from the journal, in any order
 /// * `context_id` - Context (home) to query
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
@@ -92,35 +141,8 @@ pub fn query_current_bans(
     context_id: &ContextId,
     current_time_ms: u64,
 ) -> HashMap<ModerationScopeKey, BanStatus> {
-    let mut bans: HashMap<ModerationScopeKey, BanStatus> = HashMap::new();
-
-    for fact in facts {
-        if let Some(home_ban) =
-            moderation_fact::<HomeBanFact>(fact, context_id, HOME_BAN_FACT_TYPE_ID)
-        {
-            let ban = BanStatus::from_fact(&home_ban);
-            bans.insert(
-                moderation_scope_key(ban.banned_authority, ban.channel_id),
-                ban,
-            );
-            continue;
-        }
-
-        if let Some(home_unban) =
-            moderation_fact::<HomeUnbanFact>(fact, context_id, HOME_UNBAN_FACT_TYPE_ID)
-        {
-            remove_if_newer(
-                &mut bans,
-                home_unban.unbanned_authority,
-                home_unban.channel_id,
-                home_unban.unbanned_at_ms(),
-                |ban| ban.banned_at_ms,
-            );
-        }
-    }
-
+    let mut bans = bans_of(&lenient_governance_events(facts, context_id));
     bans.retain(|_, ban| !ban.is_expired(current_time_ms));
-
     bans
 }
 
@@ -139,12 +161,12 @@ pub fn query_current_bans_in_live_channels(
 
 /// Query current mutes in a context
 ///
-/// Processes HomeMute and HomeUnmute facts in order to derive the current set
-/// of muted users. Unmutes remove mutes if they happened after the mute.
-/// Also filters out expired mutes based on current time.
+/// Mutes form a tagged observed-remove set like bans; expired mutes are
+/// filtered by `current_time_ms`. The result does not depend on the order of
+/// `facts`.
 ///
 /// # Arguments
-/// * `facts` - Ordered list of facts from the journal
+/// * `facts` - Facts from the journal, in any order
 /// * `context_id` - Context (home) to query
 /// * `current_time_ms` - Current time for expiration checking (ms since epoch)
 ///
@@ -156,35 +178,8 @@ pub fn query_current_mutes(
     context_id: &ContextId,
     current_time_ms: u64,
 ) -> HashMap<ModerationScopeKey, MuteStatus> {
-    let mut mutes: HashMap<ModerationScopeKey, MuteStatus> = HashMap::new();
-
-    for fact in facts {
-        if let Some(home_mute) =
-            moderation_fact::<HomeMuteFact>(fact, context_id, HOME_MUTE_FACT_TYPE_ID)
-        {
-            let mute = MuteStatus::from_fact(&home_mute);
-            mutes.insert(
-                moderation_scope_key(mute.muted_authority, mute.channel_id),
-                mute,
-            );
-            continue;
-        }
-
-        if let Some(home_unmute) =
-            moderation_fact::<HomeUnmuteFact>(fact, context_id, HOME_UNMUTE_FACT_TYPE_ID)
-        {
-            remove_if_newer(
-                &mut mutes,
-                home_unmute.unmuted_authority,
-                home_unmute.channel_id,
-                home_unmute.unmuted_at_ms(),
-                |mute| mute.muted_at_ms,
-            );
-        }
-    }
-
+    let mut mutes = mutes_of(&lenient_governance_events(facts, context_id));
     mutes.retain(|_, mute| !mute.is_expired(current_time_ms));
-
     mutes
 }
 
@@ -203,27 +198,29 @@ pub fn query_current_mutes_in_live_channels(
 
 /// Query kick history (audit log) for a context
 ///
-/// Returns all HomeKick facts in chronological order. Kicks are immutable
-/// audit log entries and are never removed.
+/// Returns all HomeKick facts in causal order (legacy kicks first, by their
+/// recorded time). Kicks are immutable audit log entries and are never removed.
 ///
 /// # Arguments
-/// * `facts` - Ordered list of facts from the journal
+/// * `facts` - Facts from the journal, in any order
 /// * `context_id` - Context (home) to query
 ///
 /// # Returns
-/// Vector of KickRecord in chronological order
+/// Vector of KickRecord in causal order
 pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRecord> {
-    let mut kicks = Vec::new();
-
-    for fact in facts {
-        if let Some(home_kick) =
-            moderation_fact::<HomeKickFact>(fact, context_id, HOME_KICK_FACT_TYPE_ID)
-        {
-            kicks.push(KickRecord::from_fact(&home_kick));
-        }
-    }
-
+    let events = lenient_governance_events(facts, context_id);
+    let mut kicks: Vec<_> = events
+        .iter()
+        .filter(|event| matches!(event.event, HomeGovernanceEvent::Kick(_)))
+        .collect();
+    sort_causally(&mut kicks);
     kicks
+        .into_iter()
+        .filter_map(|event| match &event.event {
+            HomeGovernanceEvent::Kick(kick) => Some(KickRecord::from_fact(kick)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Check if a user is currently banned in a context
@@ -317,13 +314,6 @@ pub enum ModerationQueryBound {
     PayloadBytes,
 }
 
-enum ModerationRecordKind {
-    Ban,
-    Unban,
-    Mute,
-    Unmute,
-}
-
 impl From<RequiredModerationQueryError> for aura_core::AuraError {
     fn from(error: RequiredModerationQueryError) -> Self {
         let message = error.to_string();
@@ -347,6 +337,7 @@ pub(crate) fn decode_required_moderation_fact<T: DomainFact + serde::de::Deseria
     envelope: &aura_core::types::facts::FactEnvelope,
     outer: ContextId,
     expected_type: &str,
+    schema_version: u16,
 ) -> Result<T, RequiredModerationQueryError> {
     use aura_core::types::facts::{
         FactEncoding, FactError, FactSchemaCompatibility, MAX_FACT_PAYLOAD_BYTES,
@@ -358,7 +349,8 @@ pub(crate) fn decode_required_moderation_fact<T: DomainFact + serde::de::Deseria
         }
         .into());
     }
-    FactSchemaCompatibility::range(1, 1).ensure_supported(envelope.schema_version)?;
+    FactSchemaCompatibility::range(schema_version, schema_version)
+        .ensure_supported(envelope.schema_version)?;
     if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
         return Err(FactError::PayloadTooLarge {
             size: envelope.payload.len() as u64,
@@ -381,11 +373,11 @@ pub(crate) fn decode_required_moderation_fact<T: DomainFact + serde::de::Deseria
     }
     Ok(fact)
 }
-
 /// Derive required ban/mute decisions after validating all relevant moderation
 /// evidence, including reversals, without converting corrupt facts into absence.
 /// This validates decoding and scoping; journal commit/authentication provenance
-/// remains owned by the runtime caller that supplies the facts.
+/// remains owned by the runtime caller that supplies the facts. The decision
+/// is a function of the fact set (observed-remove semantics), not its order.
 ///
 /// # Errors
 /// Fails on bounds, unsupported schema, declared-codec failure, or context mismatch.
@@ -406,8 +398,7 @@ pub fn try_is_user_banned_and_muted(
         });
     }
     let mut bytes = 0usize;
-    let mut bans: HashMap<ModerationScopeKey, BanStatus> = HashMap::new();
-    let mut mutes: HashMap<ModerationScopeKey, MuteStatus> = HashMap::new();
+    let mut events = Vec::new();
     for fact in facts {
         let FactContent::Relational(RelationalFact::Generic {
             context_id,
@@ -416,13 +407,15 @@ pub fn try_is_user_banned_and_muted(
         else {
             continue;
         };
-        let kind = match envelope.type_id.as_str() {
-            HOME_BAN_FACT_TYPE_ID => ModerationRecordKind::Ban,
-            HOME_UNBAN_FACT_TYPE_ID => ModerationRecordKind::Unban,
-            HOME_MUTE_FACT_TYPE_ID => ModerationRecordKind::Mute,
-            HOME_UNMUTE_FACT_TYPE_ID => ModerationRecordKind::Unmute,
-            _ => continue,
-        };
+        if !matches!(
+            envelope.type_id.as_str(),
+            HOME_BAN_FACT_TYPE_ID
+                | HOME_UNBAN_FACT_TYPE_ID
+                | HOME_MUTE_FACT_TYPE_ID
+                | HOME_UNMUTE_FACT_TYPE_ID
+        ) {
+            continue;
+        }
         bytes = bytes.checked_add(envelope.payload.len()).ok_or(
             RequiredModerationQueryError::Bound {
                 kind: ModerationQueryBound::PayloadBytes,
@@ -437,53 +430,13 @@ pub fn try_is_user_banned_and_muted(
                 maximum: MAX_BYTES,
             });
         }
-        match kind {
-            ModerationRecordKind::Ban => {
-                let decoded = HomeBanFact::try_from_envelope_in_context(envelope, *context_id)?;
-                if context_id == context {
-                    let status = BanStatus::from_fact(&decoded);
-                    bans.insert(
-                        moderation_scope_key(status.banned_authority, status.channel_id),
-                        status,
-                    );
-                }
-            }
-            ModerationRecordKind::Unban => {
-                let decoded = HomeUnbanFact::try_from_envelope_in_context(envelope, *context_id)?;
-                if context_id == context {
-                    remove_if_newer(
-                        &mut bans,
-                        decoded.unbanned_authority,
-                        decoded.channel_id,
-                        decoded.unbanned_at_ms(),
-                        |status| status.banned_at_ms,
-                    );
-                }
-            }
-            ModerationRecordKind::Mute => {
-                let decoded = HomeMuteFact::try_from_envelope_in_context(envelope, *context_id)?;
-                if context_id == context {
-                    let status = MuteStatus::from_fact(&decoded);
-                    mutes.insert(
-                        moderation_scope_key(status.muted_authority, status.channel_id),
-                        status,
-                    );
-                }
-            }
-            ModerationRecordKind::Unmute => {
-                let decoded = HomeUnmuteFact::try_from_envelope_in_context(envelope, *context_id)?;
-                if context_id == context {
-                    remove_if_newer(
-                        &mut mutes,
-                        decoded.unmuted_authority,
-                        decoded.channel_id,
-                        decoded.unmuted_at_ms(),
-                        |status| status.muted_at_ms,
-                    );
-                }
-            }
+        let decoded = TaggedHomeGovernanceEvent::try_decode(*context_id, envelope)?;
+        if context_id == context {
+            events.extend(decoded);
         }
     }
+    let mut bans = bans_of(&events);
+    let mut mutes = mutes_of(&events);
     bans.retain(|_, status| !status.is_expired(time_ms));
     mutes.retain(|_, status| !status.is_expired(time_ms));
     Ok((
@@ -495,9 +448,38 @@ pub fn try_is_user_banned_and_muted(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
+    use crate::moderation::facts::{
+        HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
+        HOME_KICK_FACT_TYPE_ID,
+    };
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
+
+    /// Causal metadata of the `n`th write by one writer: writes are causally
+    /// ordered by `n`.
+    fn c(n: u8) -> aura_core::time::CausalMetadata {
+        aura_core::time::CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: u64::from(n),
+                vector: vec![(
+                    aura_core::types::identifiers::DeviceId(uuid::Uuid::from_bytes([1; 16])),
+                    u64::from(n),
+                )],
+            },
+        }
+    }
+
+    fn revoking(n: u8, revoked: HomeGovernanceEvent) -> aura_core::time::CausalMetadata {
+        let revoked = TaggedHomeGovernanceEvent::from_event(revoked).expect("governance fact");
+        aura_core::time::CausalMetadata {
+            revokes: vec![revoked.tag],
+            ..c(n)
+        }
+    }
 
     fn create_test_fact(content: RelationalFact, order_index: u64) -> Fact {
         Fact::new(
@@ -514,6 +496,7 @@ mod tests {
         let context = ContextId::new_from_entropy([231; 32]);
         let subject = AuthorityId::new_from_entropy([232; 32]);
         let ban = HomeBanFact {
+            causal: c(1),
             context_id: context,
             channel_id: None,
             banned_authority: subject,
@@ -564,7 +547,7 @@ mod tests {
             assert!(error.source().unwrap().is::<serde_json::Error>());
         }
         let mut schema = original.clone();
-        schema.schema_version = 2;
+        schema.schema_version = 1;
         assert!(matches!(
             try_is_user_banned_and_muted(&[wrap(schema)], &context, &subject, 101, None),
             Err(RequiredModerationQueryError::Envelope(_))
@@ -618,6 +601,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
+            causal: c(2),
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -642,6 +626,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
+            causal: c(3),
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -651,6 +636,7 @@ mod tests {
             expires_at: None,
         };
         let unban_fact = HomeUnbanFact {
+            causal: revoking(4, HomeGovernanceEvent::Ban(ban_fact.clone())),
             context_id: context.clone(),
             channel_id: None,
             unbanned_authority: user1.clone(),
@@ -665,6 +651,11 @@ mod tests {
 
         let bans = query_current_bans(&facts, &context, 3000);
         assert_eq!(bans.len(), 0, "User should be unbanned");
+        let reversed: Vec<_> = facts.iter().rev().cloned().collect();
+        assert!(
+            query_current_bans(&reversed, &context, 3000).is_empty(),
+            "unban arriving before its ban still removes it"
+        );
     }
 
     #[test]
@@ -674,6 +665,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
+            causal: c(5),
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -701,6 +693,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
+            causal: c(6),
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -728,6 +721,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
+            causal: c(7),
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -737,6 +731,7 @@ mod tests {
             expires_at: None,
         };
         let unmute_fact = HomeUnmuteFact {
+            causal: revoking(8, HomeGovernanceEvent::Mute(mute_fact.clone())),
             context_id: context.clone(),
             channel_id: None,
             unmuted_authority: user1.clone(),
@@ -762,6 +757,7 @@ mod tests {
         let channel = test_channel(1);
 
         let kick_fact1 = HomeKickFact {
+            causal: c(9),
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user1.clone(),
@@ -770,6 +766,7 @@ mod tests {
             kicked_at: pt(1000),
         };
         let kick_fact2 = HomeKickFact {
+            causal: c(10),
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user2.clone(),
@@ -789,6 +786,16 @@ mod tests {
         assert_eq!(kicks[1].kicked_authority, user2);
         assert_eq!(kicks[0].reason, "first kick");
         assert_eq!(kicks[1].reason, "second kick");
+        let reversed: Vec<_> = facts.iter().rev().cloned().collect();
+        let reordered: Vec<_> = query_kick_history(&reversed, &context)
+            .into_iter()
+            .map(|kick| kick.kicked_authority)
+            .collect();
+        assert_eq!(
+            reordered,
+            vec![user1, user2],
+            "history is causal, not arrival order"
+        );
     }
 
     #[test]
@@ -798,6 +805,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
+            causal: c(11),
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
@@ -822,6 +830,7 @@ mod tests {
         let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
+            causal: c(12),
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
@@ -848,6 +857,7 @@ mod tests {
         let channel2 = test_channel(2);
 
         let ban_fact = HomeBanFact {
+            causal: c(13),
             context_id: context.clone(),
             channel_id: Some(channel1.clone()),
             banned_authority: user1.clone(),
@@ -889,6 +899,7 @@ mod tests {
         let facts = vec![
             create_test_fact(
                 HomeBanFact {
+                    causal: c(14),
                     context_id: context,
                     channel_id: Some(channel1),
                     banned_authority: user,
@@ -902,6 +913,7 @@ mod tests {
             ),
             create_test_fact(
                 HomeBanFact {
+                    causal: c(15),
                     context_id: context,
                     channel_id: Some(channel2),
                     banned_authority: user,
@@ -947,6 +959,7 @@ mod tests {
         let facts = vec![
             create_test_fact(
                 HomeBanFact {
+                    causal: c(16),
                     context_id: context,
                     channel_id: Some(live_channel),
                     banned_authority: user,
@@ -960,6 +973,7 @@ mod tests {
             ),
             create_test_fact(
                 HomeBanFact {
+                    causal: c(17),
                     context_id: context,
                     channel_id: Some(deleted_channel),
                     banned_authority: user,

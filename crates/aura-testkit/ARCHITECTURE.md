@@ -147,6 +147,8 @@ The mock runtime bridge implements the native identity/settings `RuntimeBridgeEr
 
 `ManualPhysicalClock` is a shared injected physical-time provider for real runtime/ceremony fixtures. Sleep remains pending until the test explicitly publishes an observation that reaches the original sleep deadline. Tests can publish rollback without masking it. The provider does not advance time during sleep, avoiding background-service loops that silently consume ceremony budgets. Enrollment fixtures must obtain actual setup pins and held generation reservations; test clock control does not authorize registration or activation.
 
+`QuiescentClock` drives one shared `ManualPhysicalClock` for multi-agent runtime tests: a driver task advances it in fixed steps, each gated on a tokio sleep, so under a paused tokio clock virtual time moves only when all runtimes are idle.
+
 MockEffects keeps secure records in a distinct typed-location map rather than a forgeable ordinary-key prefix. Initial mutable publication is atomic; immutable publication seals an existing original and rejects replacement, deletion, and key generation. Test fixture reset clears this test-owned state explicitly and does not model a production retirement capability.
 
 ### Compile-fail lock custody

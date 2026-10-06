@@ -7,6 +7,7 @@
 //! - Kick audit log history
 
 pub mod facts;
+pub mod governance;
 pub mod query;
 pub mod types;
 
@@ -15,6 +16,11 @@ pub use facts::{
     HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
     HOME_GRANT_MODERATOR_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID,
     HOME_REVOKE_MODERATOR_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
+};
+pub use governance::{
+    causal_order, home_governance_causal, live_ban_tags, live_moderator_grant_tags, live_mute_tags,
+    observed_governance_vector, resolved_access_overrides, resolved_capability_config,
+    sort_causally, HomeGovernanceEvent, HomeGovernanceKey, TaggedHomeGovernanceEvent,
 };
 pub use query::{
     is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,

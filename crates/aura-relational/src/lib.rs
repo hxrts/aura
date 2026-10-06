@@ -139,7 +139,7 @@ pub struct RelationalContext {
     ///
     /// This is an in-memory mirror of the journal CRDT structure; production
     /// runtimes persist typed facts via Layer 6 (`aura-agent`) using
-    /// `AuraEffectSystem::{commit_relational_facts, commit_generic_fact_bytes}`.
+    /// `AuraEffectSystem::{commit_relational_facts, commit_domain_fact}`.
     journal: RwLock<Journal>,
 }
 

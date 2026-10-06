@@ -37,6 +37,8 @@ Single source of truth for domain types and effect trait definitions. Provides f
 
 ## Invariants
 
+- `time::causal` (`CausalTag`, `CausalClock`, `CausalMetadata`) is wire data for
+  order-independent fact families; the reduction rules live in `aura-journal`.
 - `FrostPublicCommitment` is public protocol data, not signing authority.
   The public-package effect accepts these entries rather than serialized
   secret nonce bundles. Bound-message signing requires independently supplied

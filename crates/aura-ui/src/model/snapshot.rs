@@ -210,6 +210,7 @@ impl UiModel {
             toasts,
             runtime_events: self.runtime_events.clone(),
             subscription_health: self.subscription_health.clone(),
+            supervised_task_failures: Vec::new(),
         }
     }
 }

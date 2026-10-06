@@ -194,7 +194,7 @@ pub use runtime::{
     EffectRegistryExt, EffectSystemBuilder, EffectType, FlowBudgetManager, LifecycleManager,
     LinkFault, OperationSessionId, ReceiptManager, RuntimeChoreographySessionId, RuntimeService,
     RuntimeServiceContext, ServiceError, ServiceErrorKind, ServiceHealth, SharedTransport,
-    TaskSupervisor,
+    TaskSupervisionError, TaskSupervisor,
 };
 
 // Protocol adapter for choreography execution (used by tests)

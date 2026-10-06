@@ -25,6 +25,7 @@ contacts() { st "$1" '[.lists[]|select(.id=="contacts")|.items[].id]'; }
 lastcode() { st "$1" '[.runtime_events[]|select(.fact.kind=="'"${2:-invitation_code_ready}"'")][-1].fact.code' | tr -d '"'; }
 ops()  { st "$1" '[.operations[]|"\(.id)=\(.state)"]'; }
 toasts() { st "$1" '[.toasts[]|.message[0:200]]'; }
+deadtasks() { st "$1" '(.supervised_task_failures // [])[]|"\(.group)/\(.task): \(.cause)"' | jq -r .; } # dead runtime-supervised tasks
 sel() { st "$1" ".selections[]|select(.list==\"$2\")|.item_id" | tr -d '"'; }
 restart_ok() { # restart <inst> and report whether the account came back
   req "$1" restart "" 300 >/dev/null; sleep 4

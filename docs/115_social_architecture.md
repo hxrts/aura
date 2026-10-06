@@ -97,6 +97,21 @@ Joining a home follows a defined sequence. The authority requests capability. Ho
 
 Moderators are designated via governance decisions in the home. A moderator must also be a member. Moderator capability bundles include moderation, pin and unpin operations, and governance facilitation. Moderator designation is auditable because capability issuance is visible via relational facts.
 
+### 3.4 Order-Independent Governance Reduction
+
+Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides and the capability configuration. They follow the causal fact model of docs/105 §4.2.1 (schema 3). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::home_governance_causal`), which advances its logical clock past every governance fact it holds for the home.
+
+- Bans and mutes are tagged observed-remove sets keyed by target and channel scope. An unban or unmute revokes the bans or mutes of that key its writer observed. A concurrent ban the writer did not observe stays in force.
+- Moderator designations are a tagged observed-remove set keyed by target. The creator is a permanent moderator. Roles are derived from the whole set, so a grant that arrives before the member joins takes effect when the member joins.
+- Access overrides are a multi-value register per target. Concurrent surviving overrides resolve to the most restrictive level, then the later in causal order. The capability configuration is a multi-value register per home; concurrent survivors combine by per-level intersection.
+- Kicks are history entries shown in causal order. A kick removes its member once; scoping kicks to a membership epoch is separate work.
+- Authorization is evaluated against the moderator set and access state reduced from the whole fact set, not the state at arrival. A ban by a newly designated moderator holds in every delivery order. Override and capability-configuration writes name their actor, which must be a moderator holding `grant_moderator`; because access state and moderator designations depend on each other, reduction is stratified: moderators under default access, then the authorized access registers, then moderators under that access state.
+- Without the `HomeCreated` fact the creator is unknown, so only targets of authorized designations have derived roles; other materialized roles are kept until creation is reduced. Home-context sync serves `HomeCreated` with the governance facts.
+- The home view lists home-wide bans and mutes only. Channel-scoped bans and mutes are enforced per channel by the runtime moderation query.
+- Banned members leave the visible roster and return when the ban is lifted.
+
+The pure reducer is `aura_app::views::home::reduce_home_governance`. The home signal view keeps each home's governance fact set and reduces it after every batch.
+
 ## 4. Neighborhood Architecture
 
 ### 4.1 Neighborhood Structure

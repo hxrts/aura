@@ -21,6 +21,9 @@ const RUNTIME_BRIDGE_SYNC_CEREMONY_PROCESSING_CAPABILITY: &str =
     "runtime_bridge_sync_ceremony_processing";
 const RUNTIME_BRIDGE_SYNC_WITH_PEER_CAPABILITY: &str = "runtime_bridge_sync_with_peer";
 const RUNTIME_BRIDGE_SYNC_PEER_CHANNEL_CAPABILITY: &str = "runtime_bridge_sync_peer_channel";
+/// Period of the runtime-owned sync trigger. Per-peer and per-home-context
+/// pacing in the sync manager bounds the actual traffic.
+const PERIODIC_SYNC_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 /// How long a verified transport observation keeps a peer counted as connected.
 const REACHABLE_PEER_WINDOW_MS: u64 = 60_000;
 
@@ -530,6 +533,53 @@ async fn sync_home_contexts(
                     "home context sync request not sent"
                 );
             }
+        }
+    }
+}
+
+/// Start the runtime-owned periodic sync trigger (once per agent).
+///
+/// Context sync (peer journals, sibling facts, home-context governance pulls)
+/// must not depend on a frontend calling `trigger_sync`. The task lives in the
+/// runtime task registry, is cancelled with the runtime, sleeps on the
+/// runtime's `PhysicalTimeEffects` (simulation time drives it), and holds only
+/// a weak agent reference so it ends once the agent is dropped.
+pub(super) fn start_periodic_sync(agent: &std::sync::Arc<crate::AuraAgent>) {
+    if !agent.claim_periodic_sync_start() {
+        return;
+    }
+    let tasks = agent.runtime().tasks();
+    let time_effects: std::sync::Arc<dyn PhysicalTimeEffects + Send + Sync> =
+        std::sync::Arc::new(agent.runtime().effects().time_effects().clone());
+    let weak = std::sync::Arc::downgrade(agent);
+    let tick = move || {
+        let weak = weak.clone();
+        async move {
+            let Some(agent) = weak.upgrade() else {
+                return false;
+            };
+            let bridge = AgentRuntimeBridge::new(agent);
+            if let Err(error) = trigger_sync(&bridge).await {
+                tracing::debug!(error = %error, "periodic sync round did not complete");
+            }
+            true
+        }
+    };
+    cfg_if::cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let _task_handle = tasks.spawn_local_interval_until_named(
+                "runtime_bridge.periodic_sync",
+                time_effects,
+                PERIODIC_SYNC_INTERVAL,
+                tick,
+            );
+        } else {
+            let _task_handle = tasks.spawn_interval_until_named(
+                "runtime_bridge.periodic_sync",
+                time_effects,
+                PERIODIC_SYNC_INTERVAL,
+                tick,
+            );
         }
     }
 }

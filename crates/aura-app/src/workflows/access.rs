@@ -2,6 +2,7 @@
 //!
 //! This module owns runtime-backed writes for per-home capability configuration.
 
+use crate::workflows::moderation::governance_causal;
 use crate::workflows::observed_projection::update_homes_projection_observed;
 use crate::workflows::runtime::{
     converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
@@ -12,7 +13,7 @@ use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
 use aura_core::{AuraError, RetryRunError};
 use aura_journal::{fact::RelationalFact, DomainFact};
-use aura_social::{AccessLevel, AccessLevelCapabilityConfig, SocialFact};
+use aura_social::{AccessLevel, AccessLevelCapabilityConfig, HomeGovernanceKey, SocialFact};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -172,6 +173,13 @@ pub async fn configure_home_capabilities_resolved(
     .await
     .map_err(|e| map_runtime_error("Capability config timestamp", e))?
     .map_err(|e| map_runtime_error("Capability config timestamp", e))?;
+    let causal = governance_causal(
+        &runtime,
+        "configure_home_capabilities_resolved",
+        scope.context_id,
+        HomeGovernanceKey::CapabilityConfig,
+    )
+    .await?;
     let actor = runtime.authority_id();
     let fact = SocialFact::access_level_capabilities_configured_ms(
         HomeId::from_bytes(*scope.home_id.as_bytes()),
@@ -179,7 +187,9 @@ pub async fn configure_home_capabilities_resolved(
         full_caps.into_iter().collect(),
         partial_caps.into_iter().collect(),
         limited_caps.into_iter().collect(),
+        actor,
         now_ms,
+        causal,
     )
     .to_generic();
 
@@ -301,13 +311,24 @@ pub async fn set_access_override_resolved(
     .await
     .map_err(|e| map_runtime_error("Access override timestamp", e))?
     .map_err(|e| map_runtime_error("Access override timestamp", e))?;
+    let causal = governance_causal(
+        &runtime,
+        "set_access_override_resolved",
+        scope.context_id,
+        HomeGovernanceKey::AccessOverride {
+            target: authority_id,
+        },
+    )
+    .await?;
     let actor = runtime.authority_id();
     let fact = SocialFact::access_override_set_ms(
         authority_id,
         HomeId::from_bytes(*scope.home_id.as_bytes()),
         scope.context_id,
         access_level,
+        actor,
         now_ms,
+        causal,
     )
     .to_generic();
 

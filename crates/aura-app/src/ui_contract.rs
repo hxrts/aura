@@ -79,6 +79,6 @@ pub use snapshots::{
     HarnessShellStructureSnapshot, ListItemSnapshot, ListSnapshot, MessageSnapshot,
     OperationSnapshot, ProjectionRevision, QuiescenceSnapshot, QuiescenceState, RenderHeartbeat,
     RuntimeEventKind, RuntimeEventSnapshot, RuntimeFact, SelectionSnapshot,
-    SubscriptionFailureCode, SubscriptionHealthSnapshot, SubscriptionHealthState, ToastSnapshot,
-    UiSnapshot,
+    SubscriptionFailureCode, SubscriptionHealthSnapshot, SubscriptionHealthState,
+    SupervisedTaskFailureSnapshot, ToastSnapshot, UiSnapshot,
 };

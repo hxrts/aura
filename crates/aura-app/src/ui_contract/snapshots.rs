@@ -56,6 +56,17 @@ pub struct SubscriptionHealthSnapshot {
     pub state: SubscriptionHealthState,
 }
 
+/// Diagnostic record of one failed or panicked runtime-supervised task.
+///
+/// Observation only: not parity-critical, excluded from web/TUI parity
+/// comparison, readiness and quiescence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SupervisedTaskFailureSnapshot {
+    pub group: String,
+    pub task: String,
+    pub cause: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionFailureCode {
@@ -744,6 +755,9 @@ pub struct UiSnapshot {
     pub runtime_events: Vec<RuntimeEventSnapshot>,
     #[serde(default)]
     pub subscription_health: Vec<SubscriptionHealthSnapshot>,
+    /// Diagnostic-only list of dead runtime-supervised tasks.
+    #[serde(default)]
+    pub supervised_task_failures: Vec<SupervisedTaskFailureSnapshot>,
 }
 
 impl UiSnapshot {
@@ -770,6 +784,7 @@ impl UiSnapshot {
             toasts: Vec::new(),
             runtime_events: Vec::new(),
             subscription_health: Vec::new(),
+            supervised_task_failures: Vec::new(),
         }
     }
 
@@ -944,6 +959,37 @@ impl UiSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervised_task_failures_serialize_and_default_when_absent() {
+        let mut snapshot = UiSnapshot::loading(ScreenId::Neighborhood);
+        snapshot
+            .supervised_task_failures
+            .push(SupervisedTaskFailureSnapshot {
+                group: "runtime.sync".to_string(),
+                task: "peer_round".to_string(),
+                cause: "decode schema 2".to_string(),
+            });
+        let encoded = serde_json::to_value(&snapshot).expect("encode snapshot");
+        assert_eq!(
+            encoded["supervised_task_failures"],
+            serde_json::json!([{
+                "group": "runtime.sync",
+                "task": "peer_round",
+                "cause": "decode schema 2"
+            }])
+        );
+        let decoded: UiSnapshot = serde_json::from_value(encoded.clone()).expect("decode");
+        assert_eq!(decoded, snapshot);
+
+        let mut legacy = encoded;
+        legacy
+            .as_object_mut()
+            .expect("snapshot object")
+            .remove("supervised_task_failures");
+        let decoded: UiSnapshot = serde_json::from_value(legacy).expect("decode legacy");
+        assert!(decoded.supervised_task_failures.is_empty());
+    }
 
     #[test]
     fn operation_snapshot_round_trips_stable_failure_domain_and_code() {

@@ -28,7 +28,7 @@
 //! ```
 
 use aura_core::service::NeighborhoodReentryHint;
-use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::time::{CausalMetadata, PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::{
@@ -898,7 +898,7 @@ pub struct SocialFactKey {
 /// These facts represent social-related state changes in the journal,
 /// including blocks, members, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "social", schema_version = 1, context = "context_id")]
+#[domain_fact(type_id = "social", schema_version = 3, context = "context_id")]
 pub enum SocialFact {
     /// Home created
     HomeCreated {
@@ -990,8 +990,13 @@ pub enum SocialFact {
         context_id: ContextId,
         /// Override level.
         access_level: AccessLevel,
+        /// Moderator who set the override; authorized during reduction.
+        actor_id: AuthorityId,
         /// When the override was set.
         set_at: PhysicalTime,
+        /// Register metadata (schema v3): write tag, superseded observed
+        /// override tags, logical clock.
+        causal: CausalMetadata,
     },
     /// Per-home capability mapping for full/partial/limited access.
     AccessLevelCapabilitiesConfigured {
@@ -1005,8 +1010,13 @@ pub enum SocialFact {
         partial_caps: Vec<String>,
         /// Capabilities granted to limited access.
         limited_caps: Vec<String>,
+        /// Moderator who configured the mapping; authorized during reduction.
+        actor_id: AuthorityId,
         /// When the capability mapping was configured.
         configured_at: PhysicalTime,
+        /// Register metadata (schema v3): write tag, superseded observed
+        /// configuration tags, logical clock.
+        causal: CausalMetadata,
     },
     /// Home storage updated
     StorageUpdated {
@@ -1078,8 +1088,8 @@ impl SocialFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(SOCIAL_FACT_TYPE_ID),
-            1,
-            1,
+            3,
+            3,
             envelope,
         )
     }
@@ -1334,14 +1344,18 @@ impl SocialFact {
         home_id: HomeId,
         context_id: ContextId,
         access_level: AccessLevel,
+        actor_id: AuthorityId,
         set_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::AccessOverrideSet {
             authority_id,
             home_id,
             context_id,
             access_level,
+            actor_id,
             set_at: Self::physical_time(set_at_ms),
+            causal,
         }
     }
 
@@ -1352,7 +1366,9 @@ impl SocialFact {
         full_caps: Vec<String>,
         partial_caps: Vec<String>,
         limited_caps: Vec<String>,
+        actor_id: AuthorityId,
         configured_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::AccessLevelCapabilitiesConfigured {
             home_id,
@@ -1360,7 +1376,9 @@ impl SocialFact {
             full_caps,
             partial_caps,
             limited_caps,
+            actor_id,
             configured_at: Self::physical_time(configured_at_ms),
+            causal,
         }
     }
 

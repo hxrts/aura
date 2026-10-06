@@ -47,6 +47,17 @@ pub fn claimed_moderation_actor(
         HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
             HomeRevokeModeratorFact::from_envelope(envelope).map(|f| f.actor_authority)
         }
+        crate::facts::SOCIAL_FACT_TYPE_ID => {
+            match crate::facts::SocialFact::from_envelope(envelope) {
+                Some(
+                    crate::facts::SocialFact::AccessOverrideSet { actor_id, .. }
+                    | crate::facts::SocialFact::AccessLevelCapabilitiesConfigured {
+                        actor_id, ..
+                    },
+                ) => Some(actor_id),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -67,6 +78,14 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    fn stamp(device: u8) -> aura_core::time::CausalMetadata {
+        crate::moderation::governance::test_support::causal(
+            device,
+            crate::moderation::governance::HomeGovernanceKey::CapabilityConfig,
+            &[],
+        )
+    }
+
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
             ts_ms,
@@ -85,6 +104,7 @@ mod tests {
             "spam".to_string(),
             1,
             None,
+            stamp(1),
         );
         assert_eq!(claimed_moderation_actor(&ban.to_envelope()), Some(actor));
 
@@ -105,6 +125,7 @@ mod tests {
 
         let context_id = test_context_id();
         let home_mute = HomeMuteFact {
+            causal: stamp(2),
             context_id,
             channel_id: None,
             muted_authority: test_authority_id(1),
@@ -123,6 +144,7 @@ mod tests {
         assert_eq!(binding.data, home_mute.to_bytes());
 
         let home_unmute = HomeUnmuteFact {
+            causal: stamp(3),
             context_id,
             channel_id: None,
             unmuted_authority: home_mute.muted_authority,

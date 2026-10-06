@@ -85,6 +85,21 @@ fn enrollment_attempt_failed_to_close(error: &AgentError) -> bool {
     false
 }
 
+/// Whether the original enrollment ended in a durable cancellation.
+async fn enrollment_cancelled(
+    runner: &crate::runtime::services::ceremony_runner::CeremonyRunner,
+    ceremony: &aura_core::CeremonyId,
+) -> bool {
+    matches!(
+        runner.terminal_outcome(ceremony).await,
+        Ok(Some(
+            aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+            )
+        ))
+    )
+}
+
 /// The session slot belongs to the caller outside the timed attempt future.
 /// Selecting timeout may drop the borrowed operation, but cannot drop this
 /// handle before required asynchronous teardown has been attempted.
@@ -274,16 +289,8 @@ impl InvitationDeviceEnrollmentHandler {
                 // refused by the attempt; the cancellation still owns the
                 // terminal path, so the signed notice must be sent.
                 futures::future::Either::Left((Err(error), cancellation)) => {
-                    let cancelled = matches!(
-                        ceremony_runner
-                            .terminal_outcome(&retained.manifest().ceremony)
-                            .await,
-                        Ok(Some(
-                            aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
-                                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
-                            )
-                        ))
-                    );
+                    let cancelled =
+                        enrollment_cancelled(&ceremony_runner, &retained.manifest().ceremony).await;
                     if cancelled {
                         cancellation.await.map(Some).map_err(AgentError::from)
                     } else {
@@ -295,24 +302,50 @@ impl InvitationDeviceEnrollmentHandler {
                 }
             }
         };
-        let outcome = finish_enrollment_vm_slot(outcome, slot.take()).await?;
+        let outcome = match finish_enrollment_vm_slot(outcome, slot.take()).await {
+            Ok(outcome) => outcome,
+            // A cancel waiting on this owner's settlement must observe the
+            // failure rather than wait for a settlement that never comes.
+            Err(error) => {
+                if enrollment_cancelled(&ceremony_runner, &retained.manifest().ceremony).await {
+                    return super::enrollment_terminal_notice::publish_cancelled_settlement(
+                        &ceremony_runner,
+                        &retained.manifest().ceremony,
+                        Err(error),
+                    )
+                    .await;
+                }
+                return Err(error);
+            }
+        };
         let Some(cancelled) = outcome else {
             return Ok(());
         };
         // Sign while the cancelled generation is held, then release it so a
         // new enrollment is not refused while an unanswered notice retries.
-        let notice = super::enrollment_terminal_notice::sign_cancelled_notice(
-            &effects,
-            &retained,
+        // The cancel call awaits this settlement before it returns.
+        let settled = async {
+            let notice = super::enrollment_terminal_notice::sign_cancelled_notice(
+                &effects,
+                &retained,
+                &ceremony_runner,
+                &cancelled,
+                &budget,
+            )
+            .await?;
+            ceremony_runner
+                .retire_failed_enrollment_generation(&retained.manifest().ceremony)
+                .await
+                .map_err(AgentError::from)?;
+            Ok::<_, AgentError>(notice)
+        }
+        .await;
+        let notice = super::enrollment_terminal_notice::publish_cancelled_settlement(
             &ceremony_runner,
-            &cancelled,
-            &budget,
+            &retained.manifest().ceremony,
+            settled,
         )
         .await?;
-        ceremony_runner
-            .retire_failed_enrollment_generation(&retained.manifest().ceremony)
-            .await
-            .map_err(AgentError::from)?;
         loop {
             let attempt = budget
                 .execute(effects.as_ref(), || {

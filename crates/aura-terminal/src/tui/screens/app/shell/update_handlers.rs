@@ -909,6 +909,7 @@ pub(super) async fn process_ui_update_match(
                     chat_messages: &harness_messages,
                     bootstrap_candidates: &shared_discovered_peers_for_updates.authority_ids(),
                 },
+                app_ctx_for_updates.app_core.runtime().as_deref(),
             ) {
                 tracing::warn!(
                     error = %error,

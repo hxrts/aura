@@ -136,6 +136,17 @@ The reduction pipeline maintains strict determinism:
 
 These properties are verified by `test_reduction_determinism()` which confirms all fact permutations produce identical state.
 
+### 4.2.1 Reversible and Overwritable Facts
+
+Facts that a later fact can reverse or overwrite (bans, grants, overrides) reach replicas late and out of order through sync, so their reduction must not depend on arrival order or on physical timestamps. Such a fact family carries `aura_core::time::CausalMetadata`, stamped by the writer before commit:
+
+- The fact's tag (its identity) is not carried: every reader derives it as the hash of the fact's type id and canonical re-encoding, which names the author and includes the clock. A peer cannot claim another fact's tag to revoke or shadow it, and distinct content never shares a tag.
+- `clock`: the writer's logical clock (`LogicalClockEffects::logical_advance`) after observing every fact of the family it holds.
+- `revokes`: for a reversal, the tags of the adds of the same key the writer observed.
+- `supersedes`: for a register write, the tags of the writes of the same key the writer observed.
+
+`aura-journal::causal_reduction` defines the shared rules. A tagged observed-remove set keeps every add whose tag no reversal of the same key revokes; a concurrent add the reversal's writer did not observe survives. A multi-value register keeps every write that no observing write supersedes and that is not causally before another write; the family resolves the remaining concurrent writes by an explicit policy, then by causal order. Causal order (`causal_cmp`) is happens-before, then `TimeStamp::sort_compare` with `OrderingPolicy::DeterministicTieBreak`, then causal depth, Lamport scalar and tag; it orders history for display. `assert_permutation_invariant` is the test harness: a reducer must produce identical state for every permutation of a small fact set. Physical time remains for user-visible timestamps and expiry only. Home governance (docs/115 §3.4) is the first family on this model.
+
 ### 4.3 Canonical Entity Materialization
 
 A channel, home, invitation, or contact exists in a projection only after its

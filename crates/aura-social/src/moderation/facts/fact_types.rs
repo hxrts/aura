@@ -1,12 +1,12 @@
 //! Moderation fact type definitions
 
-use aura_core::time::PhysicalTime;
+use aura_core::time::{CausalMetadata, PhysicalTime};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 macro_rules! required_moderation_decoder {
-    ($fact:ty, $type_id:ident) => {
+    ($fact:ty, $type_id:ident, $schema:expr) => {
         impl $fact {
             /// Decode the exact moderation domain and validate its committed wrapper context.
             ///
@@ -20,21 +20,26 @@ macro_rules! required_moderation_decoder {
                     envelope,
                     outer,
                     super::$type_id,
+                    $schema,
                 )
             }
         }
     };
 }
 
-required_moderation_decoder!(HomeBanFact, HOME_BAN_FACT_TYPE_ID);
-required_moderation_decoder!(HomeUnbanFact, HOME_UNBAN_FACT_TYPE_ID);
-required_moderation_decoder!(HomeMuteFact, HOME_MUTE_FACT_TYPE_ID);
-required_moderation_decoder!(HomeUnmuteFact, HOME_UNMUTE_FACT_TYPE_ID);
-required_moderation_decoder!(HomeKickFact, HOME_KICK_FACT_TYPE_ID);
-required_moderation_decoder!(HomePinFact, HOME_PIN_FACT_TYPE_ID);
-required_moderation_decoder!(HomeUnpinFact, HOME_UNPIN_FACT_TYPE_ID);
-required_moderation_decoder!(HomeGrantModeratorFact, HOME_GRANT_MODERATOR_FACT_TYPE_ID);
-required_moderation_decoder!(HomeRevokeModeratorFact, HOME_REVOKE_MODERATOR_FACT_TYPE_ID);
+required_moderation_decoder!(HomeBanFact, HOME_BAN_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomeUnbanFact, HOME_UNBAN_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomeMuteFact, HOME_MUTE_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomeUnmuteFact, HOME_UNMUTE_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomeKickFact, HOME_KICK_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomePinFact, HOME_PIN_FACT_TYPE_ID, 1);
+required_moderation_decoder!(HomeUnpinFact, HOME_UNPIN_FACT_TYPE_ID, 1);
+required_moderation_decoder!(HomeGrantModeratorFact, HOME_GRANT_MODERATOR_FACT_TYPE_ID, 3);
+required_moderation_decoder!(
+    HomeRevokeModeratorFact,
+    HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
+    3
+);
 
 fn physical_time(ts_ms: u64) -> PhysicalTime {
     PhysicalTime {
@@ -51,7 +56,7 @@ fn optional_physical_time(ts_ms: Option<u64>) -> Option<PhysicalTime> {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-mute",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeMuteFact {
@@ -69,6 +74,8 @@ pub struct HomeMuteFact {
     pub muted_at: PhysicalTime,
     /// When the mute expires (None = permanent)
     pub expires_at: Option<PhysicalTime>,
+    /// Causal metadata (schema v3): logical clock; the tag derives from content.
+    pub causal: CausalMetadata,
 }
 
 impl HomeMuteFact {
@@ -91,6 +98,7 @@ impl HomeMuteFact {
         duration_secs: Option<u64>,
         muted_at_ms: u64,
         expires_at_ms: Option<u64>,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
@@ -100,6 +108,7 @@ impl HomeMuteFact {
             duration_secs,
             muted_at: physical_time(muted_at_ms),
             expires_at: optional_physical_time(expires_at_ms),
+            causal,
         }
     }
 }
@@ -108,7 +117,7 @@ impl HomeMuteFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-unmute",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeUnmuteFact {
@@ -122,6 +131,8 @@ pub struct HomeUnmuteFact {
     pub actor_authority: AuthorityId,
     /// When the unmute was applied
     pub unmuted_at: PhysicalTime,
+    /// Causal metadata (schema v3): observed mute tags revoked, logical clock.
+    pub causal: CausalMetadata,
 }
 
 impl HomeUnmuteFact {
@@ -137,6 +148,7 @@ impl HomeUnmuteFact {
         unmuted_authority: AuthorityId,
         actor_authority: AuthorityId,
         unmuted_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
@@ -144,6 +156,7 @@ impl HomeUnmuteFact {
             unmuted_authority,
             actor_authority,
             unmuted_at: physical_time(unmuted_at_ms),
+            causal,
         }
     }
 }
@@ -152,7 +165,7 @@ impl HomeUnmuteFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-ban",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeBanFact {
@@ -170,6 +183,8 @@ pub struct HomeBanFact {
     pub banned_at: PhysicalTime,
     /// When the ban expires (None = permanent)
     pub expires_at: Option<PhysicalTime>,
+    /// Causal metadata (schema v3): logical clock; the tag derives from content.
+    pub causal: CausalMetadata,
 }
 
 impl HomeBanFact {
@@ -192,6 +207,7 @@ impl HomeBanFact {
         reason: String,
         banned_at_ms: u64,
         expires_at_ms: Option<u64>,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
@@ -201,6 +217,7 @@ impl HomeBanFact {
             reason,
             banned_at: physical_time(banned_at_ms),
             expires_at: optional_physical_time(expires_at_ms),
+            causal,
         }
     }
 }
@@ -209,7 +226,7 @@ impl HomeBanFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-unban",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeUnbanFact {
@@ -223,6 +240,8 @@ pub struct HomeUnbanFact {
     pub actor_authority: AuthorityId,
     /// When the unban was applied
     pub unbanned_at: PhysicalTime,
+    /// Causal metadata (schema v3): observed ban tags revoked, logical clock.
+    pub causal: CausalMetadata,
 }
 
 impl HomeUnbanFact {
@@ -238,6 +257,7 @@ impl HomeUnbanFact {
         unbanned_authority: AuthorityId,
         actor_authority: AuthorityId,
         unbanned_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
@@ -245,6 +265,7 @@ impl HomeUnbanFact {
             unbanned_authority,
             actor_authority,
             unbanned_at: physical_time(unbanned_at_ms),
+            causal,
         }
     }
 }
@@ -253,7 +274,7 @@ impl HomeUnbanFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-kick",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeKickFact {
@@ -269,6 +290,8 @@ pub struct HomeKickFact {
     pub reason: String,
     /// When the kick occurred
     pub kicked_at: PhysicalTime,
+    /// Causal metadata (schema v3): logical clock for causal history order.
+    pub causal: CausalMetadata,
 }
 
 impl HomeKickFact {
@@ -285,6 +308,7 @@ impl HomeKickFact {
         actor_authority: AuthorityId,
         reason: String,
         kicked_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
@@ -293,6 +317,7 @@ impl HomeKickFact {
             actor_authority,
             reason,
             kicked_at: physical_time(kicked_at_ms),
+            causal,
         }
     }
 }
@@ -379,7 +404,7 @@ impl HomeUnpinFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-grant-moderator",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeGrantModeratorFact {
@@ -391,6 +416,8 @@ pub struct HomeGrantModeratorFact {
     pub actor_authority: AuthorityId,
     /// When moderator was granted
     pub granted_at: PhysicalTime,
+    /// Causal metadata (schema v3): logical clock; the tag derives from content.
+    pub causal: CausalMetadata,
 }
 
 impl HomeGrantModeratorFact {
@@ -405,12 +432,14 @@ impl HomeGrantModeratorFact {
         target_authority: AuthorityId,
         actor_authority: AuthorityId,
         granted_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
             target_authority,
             actor_authority,
             granted_at: physical_time(granted_at_ms),
+            causal,
         }
     }
 }
@@ -419,7 +448,7 @@ impl HomeGrantModeratorFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-revoke-moderator",
-    schema_version = 1,
+    schema_version = 3,
     context = "context_id"
 )]
 pub struct HomeRevokeModeratorFact {
@@ -431,6 +460,8 @@ pub struct HomeRevokeModeratorFact {
     pub actor_authority: AuthorityId,
     /// When moderator was revoked
     pub revoked_at: PhysicalTime,
+    /// Causal metadata (schema v3): observed grant tags revoked, logical clock.
+    pub causal: CausalMetadata,
 }
 
 impl HomeRevokeModeratorFact {
@@ -445,12 +476,14 @@ impl HomeRevokeModeratorFact {
         target_authority: AuthorityId,
         actor_authority: AuthorityId,
         revoked_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self {
             context_id,
             target_authority,
             actor_authority,
             revoked_at: physical_time(revoked_at_ms),
+            causal,
         }
     }
 }

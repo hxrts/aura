@@ -143,7 +143,9 @@ impl AuthorizedInvitationCancellationCapability {
 }
 
 mod enrollment_terminal_notice;
-pub(crate) use enrollment_terminal_notice::execute_recovered_cancelled_notice;
+pub(crate) use enrollment_terminal_notice::{
+    deliver_settled_cancelled_notice, settle_cancelled_notice,
+};
 pub(crate) mod enrollment_trust;
 mod enrollment_vm_admission;
 pub(super) use enrollment_vm_admission::retain_quorum_initial_request;
@@ -1657,14 +1659,8 @@ impl InvitationHandler {
         context_id: ContextId,
         fact: &ContactFact,
     ) -> AgentResult<()> {
-        let bytes = aura_core::util::serialization::to_vec(fact).map_err(|source| {
-            AgentError::Aura(aura_core::AuraError::Serialization {
-                message: "encode required contact fact".into(),
-                source: Some(Arc::new(source)),
-            })
-        })?;
         effects
-            .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID.into(), bytes)
+            .commit_domain_fact(context_id, fact)
             .await
             .map_err(|source| {
                 AgentError::Aura(aura_core::AuraError::Internal {
@@ -1832,11 +1828,7 @@ impl InvitationHandler {
         ));
         for fact in facts {
             effects
-                .commit_generic_fact_bytes(
-                    invite.context_id,
-                    aura_social::SOCIAL_FACT_TYPE_ID.into(),
-                    fact.to_bytes(),
-                )
+                .commit_domain_fact(invite.context_id, &fact)
                 .await
                 .map_err(|error| AgentError::effects(format!("commit home membership: {error}")))?;
         }
@@ -2154,11 +2146,26 @@ impl InvitationHandler {
             .await?;
 
         // Persist the imported invitation with local status so later
-        // storage-backed reads do not downgrade accepted/declined state.
-        let mut stored = StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust);
-        stored.sender_proof_key = sender_proof.as_ref().map(|proof| proof.public_key.clone());
-        Self::persist_imported_invitation(effects, self.context.authority.authority_id(), &stored)
-            .await?;
+        // storage-backed reads do not downgrade accepted/declined state. A
+        // record imported earlier (a pasted code, then the sender's delivered
+        // envelope) keeps its decision and any acknowledged in-flight
+        // acceptance: re-importing must not reset it to Pending.
+        {
+            let lease = effects.acquire_imported_invitation_decision().await;
+            if Self::load_imported_invitation(effects, own_id, &invitation_id, None)
+                .await
+                .is_none()
+            {
+                let mut stored =
+                    StoredImportedInvitation::pending(shareable.clone(), now_ms, sender_trust);
+                stored.sender_proof_key =
+                    sender_proof.as_ref().map(|proof| proof.public_key.clone());
+                InvitationCacheHandler::persist_imported_invitation_with_decision_lease(
+                    effects, own_id, &stored, &lease,
+                )
+                .await?;
+            }
+        }
         if let Some(addr) = sender_hint_addr.as_deref() {
             self.cache_verified_peer_descriptor_for_peer(
                 effects,
@@ -3269,12 +3276,11 @@ async fn execute_journal_append(
     // projection rejects a payload context that differs from the journal
     // context, and that rejection stops the reactive pipeline. Context-free
     // facts stay in the local default context where their readers look.
-    HandlerUtilities::append_generic_fact(
+    HandlerUtilities::append_domain_fact(
         authority,
         effects,
         fact.context_id_opt().unwrap_or(local_context_id),
-        INVITATION_FACT_TYPE_ID.into(),
-        &fact.to_bytes(),
+        &fact,
     )
     .await
 }

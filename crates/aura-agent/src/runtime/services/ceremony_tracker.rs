@@ -493,6 +493,10 @@ struct CeremonyTrackerShared {
     clock_checkpoint_fault: Mutex<Option<AuraError>>,
     enrollment_decision_gate: Mutex<()>,
     terminal_changed: tokio::sync::Notify,
+    /// Each cancelled-notice owner publishes whether it signed and released
+    /// the cancelled pending generation. Retained, so cancel retries observe it.
+    cancelled_generation_settlements: Mutex<HashMap<CeremonyId, Result<(), AuraError>>>,
+    cancelled_generation_settled: tokio::sync::Notify,
 }
 
 #[derive(Debug, Default)]
@@ -1033,6 +1037,44 @@ impl CeremonyTracker {
         .await
     }
 
+    /// Publish a cancelled-notice owner's one sign-and-release result.
+    pub(crate) async fn publish_cancelled_generation_settlement(
+        &self,
+        ceremony: &CeremonyId,
+        result: Result<(), AuraError>,
+    ) {
+        self.shared
+            .cancelled_generation_settlements
+            .lock()
+            .await
+            .insert(ceremony.clone(), result);
+        self.shared.cancelled_generation_settled.notify_waiters();
+    }
+
+    /// Await the cancelled-notice owner's sign-and-release result.
+    pub(crate) async fn await_cancelled_generation_settlement(
+        &self,
+        ceremony: &CeremonyId,
+    ) -> Result<(), AuraError> {
+        loop {
+            let changed = self.shared.cancelled_generation_settled.notified();
+            tokio::pin!(changed);
+            // Register before checking, so a settlement in between is not lost.
+            changed.as_mut().enable();
+            if let Some(result) = self
+                .shared
+                .cancelled_generation_settlements
+                .lock()
+                .await
+                .get(ceremony)
+                .cloned()
+            {
+                return result;
+            }
+            changed.await;
+        }
+    }
+
     pub(crate) async fn retire_failed_enrollment_generation(
         &self,
         ceremony: &CeremonyId,
@@ -1172,6 +1214,8 @@ impl CeremonyTracker {
                 clock_checkpoint_fault: Mutex::new(None),
                 enrollment_decision_gate: Mutex::new(()),
                 terminal_changed: tokio::sync::Notify::new(),
+                cancelled_generation_settlements: Mutex::new(HashMap::new()),
+                cancelled_generation_settled: tokio::sync::Notify::new(),
             }),
         }
     }

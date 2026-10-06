@@ -650,6 +650,35 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Typed Fact Commit (Override default)
     // =========================================================================
 
+    async fn home_governance_causal(
+        &self,
+        context_id: ContextId,
+        key: aura_social::HomeGovernanceKey,
+    ) -> Result<aura_core::time::CausalMetadata, IntentError> {
+        // The mock writes as one fixed device whose clock follows the
+        // governance facts it has committed for the home.
+        let observed: Vec<_> = self
+            .facts
+            .read()
+            .await
+            .iter()
+            .filter_map(|fact| match fact {
+                RelationalFact::Generic {
+                    context_id: fact_context,
+                    envelope,
+                } if *fact_context == context_id => {
+                    aura_social::TaggedHomeGovernanceEvent::try_decode(*fact_context, envelope)
+                        .ok()
+                        .flatten()
+                }
+                _ => None,
+            })
+            .collect();
+        Ok(aura_social::moderation::governance::test_support::causal(
+            0x4d, key, &observed,
+        ))
+    }
+
     async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError> {
         // Store all facts
         {

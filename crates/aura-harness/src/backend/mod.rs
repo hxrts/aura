@@ -810,6 +810,7 @@ mod tests {
                 toasts: Vec::new(),
                 runtime_events: Vec::new(),
                 subscription_health: Vec::new(),
+                supervised_task_failures: Vec::new(),
             }
         }
     }

@@ -9,7 +9,7 @@ use super::{
     RuntimeStatus, SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
-use crate::ui_contract::AmpChannelTransitionSnapshot;
+use crate::ui_contract::{AmpChannelTransitionSnapshot, SupervisedTaskFailureSnapshot};
 use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_chat::view::CanonicalChannelCreation;
@@ -54,6 +54,13 @@ pub trait RuntimeBridge: Send + Sync {
     /// Runtime cancellation token for background work.
     fn cancellation_token(&self) -> OwnedShutdownToken {
         self.task_spawner().shutdown_token().clone()
+    }
+
+    /// Diagnostic observation of every failed or panicked runtime-supervised
+    /// task, in occurrence order. Not parity-critical; runtimes without a
+    /// task supervisor (offline, mocks) report none.
+    fn supervised_task_failures(&self) -> Vec<SupervisedTaskFailureSnapshot> {
+        Vec::new()
     }
 
     /// Query the explicit runtime authentication status.
@@ -317,6 +324,21 @@ pub trait RuntimeBridge: Send + Sync {
         channel_id: ChannelId,
         message_id: String,
     ) -> Result<(), IntentError>;
+
+    /// Causal metadata for a new home governance fact about `key` in the home
+    /// `context_id`: the runtime advances its logical clock past every
+    /// governance fact it holds for that home and records which of them the
+    /// new fact revokes or supersedes (docs/115 §3.4).
+    async fn home_governance_causal(
+        &self,
+        context_id: ContextId,
+        key: aura_social::HomeGovernanceKey,
+    ) -> Result<aura_core::time::CausalMetadata, IntentError> {
+        let _ = (context_id, key);
+        Err(IntentError::no_agent(
+            "Home governance facts cannot be authored in offline mode",
+        ))
+    }
 
     /// Return authoritative moderation status for an authority within a
     /// home-scoped context.

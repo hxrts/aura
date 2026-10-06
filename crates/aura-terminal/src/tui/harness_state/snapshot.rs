@@ -11,6 +11,7 @@ use super::socket::authoritative_harness_snapshot_readiness;
 use crate::tui::screens::Screen;
 use crate::tui::state::modal_queue::QueuedModal;
 use crate::tui::TuiState;
+use aura_app::runtime_bridge::RuntimeBridge;
 use aura_app::ui::contract::{
     screen_item_id, ConfirmationState, ControlId, ListId, ListItemSnapshot, MessageSnapshot,
     ScreenId, ToastId, ToastSnapshot, UiReadiness, UiSnapshot,
@@ -468,6 +469,7 @@ fn build_authoritative_ui_snapshot(
             health.sort_by(|left, right| left.signal.cmp(&right.signal));
             health
         },
+        supervised_task_failures: Vec::new(),
     };
     snapshot.validate_invariants()?;
     Ok(snapshot)
@@ -569,12 +571,17 @@ pub fn publish_loading_ui_snapshot(state: &TuiState) -> Result<(), String> {
 pub fn maybe_export_ui_snapshot(
     state: &TuiState,
     semantic_inputs: TuiSemanticInputs<'_>,
+    runtime: Option<&dyn RuntimeBridge>,
 ) -> Result<(), String> {
     // Build a canonical snapshot with a stable placeholder revision so identical
     // semantic state deduplicates cleanly instead of generating a fresh revision
     // and flooding the harness bridge on every render.
-    let snapshot =
+    let mut snapshot =
         build_authoritative_ui_snapshot(state, semantic_inputs, next_projection_revision(None))?;
+    // Diagnostic only: dead runtime-supervised tasks, not parity-critical.
+    snapshot.supervised_task_failures = runtime
+        .map(RuntimeBridge::supervised_task_failures)
+        .unwrap_or_default();
     publish_snapshot(&snapshot)
 }
 

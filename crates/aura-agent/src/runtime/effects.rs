@@ -2238,19 +2238,24 @@ impl AuraEffectSystem {
         Ok(committed)
     }
 
-    /// Commit a single generic domain fact (binding_type + bytes) into the canonical fact store.
-    pub async fn commit_generic_fact_bytes(
+    /// Commit a domain fact under its own envelope, keeping its declared
+    /// type id, schema version and encoding.
+    pub async fn commit_domain_fact<F: aura_journal::DomainFact>(
         &self,
         context_id: ContextId,
-        binding_type: aura_core::types::facts::FactTypeId,
-        binding_data: Vec<u8>,
+        fact: &F,
     ) -> Result<TypedFact, AuraError> {
-        let envelope = aura_core::types::facts::FactEnvelope {
-            type_id: binding_type,
-            schema_version: 1,
-            encoding: aura_core::types::facts::FactEncoding::DagCbor,
-            payload: binding_data,
-        };
+        self.commit_generic_envelope(context_id, fact.to_envelope())
+            .await
+    }
+
+    /// Commit a caller-built envelope. The caller owns its type id, schema
+    /// version and encoding; domain facts go through [`Self::commit_domain_fact`].
+    pub(crate) async fn commit_generic_envelope(
+        &self,
+        context_id: ContextId,
+        envelope: aura_core::types::facts::FactEnvelope,
+    ) -> Result<TypedFact, AuraError> {
         let rel = RelationalFact::Generic {
             context_id,
             envelope,
@@ -3689,6 +3694,52 @@ mod tests {
         )
         .expect("simulation root key should parse");
         assert_eq!(simulation.mode, AuthorizationRuntimeMode::Simulation);
+    }
+
+    #[tokio::test]
+    async fn commit_domain_fact_stores_the_fact_schema_version_and_decodes() {
+        use aura_journal::DomainFact;
+        let authority_id = AuthorityId::new_from_entropy([0xD1; 32]);
+        let context = ContextId::new_from_entropy([0xD2; 32]);
+        let effects = AuraEffectSystem::simulation_for_test_for_authority(
+            &AgentConfig::default(),
+            authority_id,
+        )
+        .expect("effect system should build");
+        let fact = aura_social::SocialFact::home_created_ms(
+            aura_social::HomeId::from_bytes([0xD3; 32]),
+            context,
+            1,
+            authority_id,
+            "schema-home".to_string(),
+        );
+        let declared = fact.to_envelope().schema_version;
+        assert!(declared > 1, "fixture must sit above schema 1");
+
+        effects
+            .commit_domain_fact(context, &fact)
+            .await
+            .expect("domain fact commits");
+
+        let stored = effects
+            .load_committed_facts(authority_id)
+            .await
+            .expect("load committed facts");
+        let envelope = stored
+            .iter()
+            .find_map(|typed| match &typed.content {
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id,
+                    envelope,
+                }) if *context_id == context => Some(envelope.clone()),
+                _ => None,
+            })
+            .expect("committed generic fact is stored");
+        assert_eq!(envelope.schema_version, declared);
+        assert_eq!(
+            aura_social::SocialFact::from_envelope(&envelope),
+            Some(fact)
+        );
     }
 
     #[tokio::test]

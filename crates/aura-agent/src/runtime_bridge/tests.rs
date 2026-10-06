@@ -2351,28 +2351,39 @@ fn enrollment_cancelled_generation_deletion_failure_restarts_and_reissues() {
             issuer.context().default_context_id(),
             ExecutionMode::Testing,
         );
-        AgentRuntimeBridge::new(issuer.clone())
-            .cancel_key_rotation_ceremony(&start.ceremony_id)
-            .await
-            .expect("genuine cancellation publishes before shutting down its sink");
-        issuer
-            .runtime()
-            .tasks()
-            .shutdown_with_timeout(std::time::Duration::from_secs(2))
-            .await
-            .unwrap();
+        // Cancel releases the generation before it returns, so the
+        // deletion fault must be armed first. The cancellation itself is
+        // committed; the failed cleanup is a recorded supervised failure
+        // that a restart retries.
         issuer
             .runtime()
             .effects()
             .fail_next_enrollment_retirement_for_test(start.pending_epoch.value());
         let bridge = AgentRuntimeBridge::new(issuer.clone());
-        let error = issuer
-            .runtime()
-            .ceremony_tracker()
-            .retire_failed_enrollment_generation(&start.ceremony_id)
+        bridge
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
             .await
-            .expect_err("required secure deletion must fail");
-        assert!(std::error::Error::source(&error).is_some());
+            .expect("committed cancellation succeeds although cleanup failed");
+        let failures = issuer.supervised_task_failures();
+        assert!(
+            failures
+                .iter()
+                .any(|failure| std::error::Error::source(failure).is_some()),
+            "failed generation cleanup is recorded with its cause: {failures:?}"
+        );
+        // Shutdown reports the recorded cleanup failure; it must not carry a
+        // second, contradictory terminal publication.
+        if let Err(error) = issuer
+            .runtime()
+            .tasks()
+            .shutdown_with_timeout(std::time::Duration::from_secs(2))
+            .await
+        {
+            assert!(
+                !format!("{error:?}").contains("contradictory"),
+                "cleanup failure must not publish a second terminal: {error:?}"
+            );
+        }
         let original = issuer
             .runtime()
             .ceremony_runner()
@@ -2473,27 +2484,21 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
             .cancel_key_rotation_ceremony(&first.ceremony_id)
             .await
             .expect("genuine cancellation publishes before shutting down its sink");
-        // The notice owner signs, then releases the cancelled generation
-        // (Task 80); let it do so before draining tasks.
+        // Cancel signs the notice and releases the cancelled generation before
+        // it returns (Task 80); only delivery retries remain in the background.
         let first_profile = crate::runtime::effects::enrollment_generation_profile_location(
             &issuer.authority_id(),
             first.pending_epoch.value(),
         );
-        let mut release_attempts_left = 200_u32;
-        while issuer
-            .runtime()
-            .effects()
-            .secure_exists(&first_profile)
-            .await
-            .unwrap()
-        {
-            release_attempts_left = release_attempts_left.saturating_sub(1);
-            assert!(
-                release_attempts_left > 0,
-                "cancelled generation is released shortly after cancel"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
+        assert!(
+            !issuer
+                .runtime()
+                .effects()
+                .secure_exists(&first_profile)
+                .await
+                .unwrap(),
+            "cancel releases the cancelled generation before returning"
+        );
         issuer
             .runtime()
             .tasks()
@@ -2646,6 +2651,14 @@ async fn required_moderation_rejects_corrupt_committed_ban_with_native_codec_sou
     );
     let bridge = AgentRuntimeBridge::new(agent);
     let mut envelope = aura_social::HomeBanFact {
+        causal: aura_social::moderation::governance::test_support::causal(
+            1,
+            aura_social::HomeGovernanceKey::Ban {
+                target: authority,
+                channel: Some(channel),
+            },
+            &[],
+        ),
         context_id: context,
         channel_id: Some(channel),
         banned_authority: authority,
@@ -2980,4 +2993,39 @@ fn runtime_enrollment_closed_sink_retains_native_cause_after_cancelled_decision(
             "publication failure does not overwrite the first real decision"
         );
     });
+}
+
+#[tokio::test]
+async fn bridge_reports_supervised_task_failures_with_group_task_and_cause() {
+    let authority = AuthorityId::new_from_entropy([0x6a; 32]);
+    let build_context = EffectContext::new(
+        authority,
+        ContextId::new_from_entropy([0x6b; 32]),
+        ExecutionMode::Testing,
+    );
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_authority(authority)
+            .build_testing_async(&build_context)
+            .await
+            .expect("build testing agent"),
+    );
+    let bridge = AgentRuntimeBridge::new(agent.clone());
+    assert!(bridge.supervised_task_failures().is_empty());
+
+    let group = agent.runtime().tasks().group("probe");
+    let _failed = group.spawn_try_named("dies", async {
+        Err(aura_core::AuraError::internal("decode schema 2"))
+    });
+    let _panicked = group.spawn_named("boom", async { panic!("boom") });
+    let _ = group.wait_for_idle(std::time::Duration::from_secs(5)).await;
+
+    let failures = bridge.supervised_task_failures();
+    assert_eq!(failures.len(), 2, "{failures:?}");
+    assert!(failures.iter().any(|f| f.group == "runtime.probe"
+        && f.task == "dies"
+        && f.cause.contains("decode schema 2")));
+    assert!(failures
+        .iter()
+        .any(|f| f.group == "runtime.probe" && f.task == "boom" && f.cause == "panicked"));
 }

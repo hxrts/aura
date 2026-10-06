@@ -113,6 +113,10 @@ pub use availability::{HomeAvailability, NeighborhoodAvailability};
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use home::Home;
+pub use moderation::governance::{
+    home_governance_causal, observed_governance_vector, HomeGovernanceEvent, HomeGovernanceKey,
+    TaggedHomeGovernanceEvent,
+};
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,
     query_current_mutes, query_current_mutes_in_live_channels, query_kick_history,

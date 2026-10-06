@@ -68,7 +68,7 @@ fn map_amp_finalize_error(error: impl Display) -> AgentError {
 /// Chat service API for the agent layer.
 ///
 /// The service commits chat facts into the agent's canonical fact store
-/// (`AuraEffectSystem::commit_generic_fact_bytes`) so reactive views and sync
+/// (`AuraEffectSystem::commit_domain_fact`) so reactive views and sync
 /// pipelines can observe them.
 #[derive(Clone)]
 pub struct ChatServiceApi {

@@ -337,28 +337,93 @@ async fn send_signed_cancelled_notice(
     }
 }
 
+/// A cancelled notice signed once under the original cancelled window, whose
+/// pending generation is already released. Only delivery retries remain.
+pub(crate) struct SettledCancelledNotice {
+    issued: RetainedEnrollmentVmControl,
+    window: crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
+    bytes: Vec<u8>,
+}
+
+/// Admit the original cancelled notice window, sign the notice while the
+/// cancelled provisional generation is still held, then release it at once:
+/// a peer that never answers must not keep later enrollments refused for the
+/// whole notice window (Task 80). `None` means eligibility already ended, the
+/// generation is released and nothing is sent.
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "CancelledEnrollmentNoticeWindowCapability",
+    capability = "RegisteredCancelledNoticeCapability",
     family = "runtime_helper"
 )]
-pub(crate) async fn execute_recovered_cancelled_notice(
-    effects: Arc<AuraEffectSystem>,
+pub(crate) async fn settle_cancelled_notice(
+    effects: &Arc<AuraEffectSystem>,
     issued: RetainedEnrollmentVmControl,
-    runner: CeremonyRunner,
-    window: crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
-) -> AgentResult<()> {
+    runner: &CeremonyRunner,
+    registered: crate::runtime::services::ceremony_tracker::RegisteredCancelledNoticeCapability,
+) -> AgentResult<Option<SettledCancelledNotice>> {
+    let ceremony = issued.manifest().ceremony.clone();
+    let settled = settle_cancelled_notice_once(effects, issued, runner, registered).await;
+    publish_cancelled_settlement(runner, &ceremony, settled).await
+}
+
+/// Publish one cancelled-notice owner's sign-and-release result so a live
+/// cancel (or its retry) that found the notice already owned can await it.
+pub(super) async fn publish_cancelled_settlement<T>(
+    runner: &CeremonyRunner,
+    ceremony: &aura_core::CeremonyId,
+    settled: AgentResult<T>,
+) -> AgentResult<T> {
+    let (published, settled) = match settled {
+        Ok(value) => (Ok(()), Ok(value)),
+        Err(error) => {
+            let source: Arc<dyn std::error::Error + Send + Sync> = Arc::new(error);
+            let cause = aura_core::AuraError::Internal {
+                message: "cancelled enrollment notice settlement".into(),
+                source: Some(source),
+            };
+            (Err(cause.clone()), Err(AgentError::from(cause)))
+        }
+    };
+    runner
+        .publish_cancelled_generation_settlement(ceremony, published)
+        .await;
+    settled
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "RegisteredCancelledNoticeCapability",
+    family = "runtime_helper"
+)]
+async fn settle_cancelled_notice_once(
+    effects: &Arc<AuraEffectSystem>,
+    issued: RetainedEnrollmentVmControl,
+    runner: &CeremonyRunner,
+    registered: crate::runtime::services::ceremony_tracker::RegisteredCancelledNoticeCapability,
+) -> AgentResult<Option<SettledCancelledNotice>> {
+    use crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission;
+    let window = match runner
+        .cancelled_notice_window(registered, effects.as_ref())
+        .await
+        .map_err(AgentError::from)?
+    {
+        CancelledNoticeWindowAdmission::Eligible(window) => window,
+        CancelledNoticeWindowAdmission::EligibilityEnded { cause } => {
+            tracing::debug!(error = %cause, "cancelled enrollment notice eligibility ended; no send");
+            runner
+                .retire_failed_enrollment_generation(&issued.manifest().ceremony)
+                .await
+                .map_err(AgentError::from)?;
+            return Ok(None);
+        }
+    };
     window
         .require_issued_owner(&issued, effects.as_ref())
         .map_err(AgentError::from)?;
-    // Sign while the cancelled provisional generation is still held, then
-    // release it at once: a peer that never answers must not keep later
-    // enrollments refused for the whole notice window (Task 80). Retries only
-    // resend the already signed notice.
     let bytes = sign_cancelled_notice_bytes(
-        &effects,
+        effects,
         &issued,
-        &runner,
+        runner,
         window.cancelled(),
         &IssuedNoticeWindowCapability::Cancelled(&window),
     )
@@ -367,6 +432,30 @@ pub(crate) async fn execute_recovered_cancelled_notice(
         .retire_failed_enrollment_generation(&issued.manifest().ceremony)
         .await
         .map_err(AgentError::from)?;
+    Ok(Some(SettledCancelledNotice {
+        issued,
+        window,
+        bytes,
+    }))
+}
+
+/// Resend the already signed cancelled notice until delivered or the original
+/// cancelled window ends.
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "SettledCancelledNotice",
+    capability_type = SettledCancelledNotice,
+    family = "runtime_helper"
+)]
+pub(crate) async fn deliver_settled_cancelled_notice(
+    effects: Arc<AuraEffectSystem>,
+    notice: SettledCancelledNotice,
+) -> AgentResult<()> {
+    let SettledCancelledNotice {
+        issued,
+        window,
+        bytes,
+    } = notice;
     let mut slot = None;
     loop {
         let attempt = window

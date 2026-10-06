@@ -14,6 +14,7 @@ pub struct AgentBuilder {
     sync_config: Option<SyncManagerConfig>,
     rendezvous_config: Option<RendezvousManagerConfig>,
     profile_owner: Option<std::sync::Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+    physical_time_provider: Option<std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>>,
 }
 
 impl AgentBuilder {
@@ -25,6 +26,7 @@ impl AgentBuilder {
             sync_config: None,
             rendezvous_config: None,
             profile_owner: None,
+            physical_time_provider: None,
         }
     }
 
@@ -35,6 +37,27 @@ impl AgentBuilder {
     ) -> Self {
         self.profile_owner = Some(owner);
         self
+    }
+
+    /// Bind every runtime physical-time owner (timeouts, retries, periodic
+    /// sync, windows) to `provider`, such as one virtual clock shared by all
+    /// runtimes of a multi-agent test. Only the async testing and simulation
+    /// builders accept it; production and sync builders refuse it.
+    pub fn with_physical_time_provider(
+        mut self,
+        provider: std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Self {
+        self.physical_time_provider = Some(provider);
+        self
+    }
+
+    fn reject_injected_clock(&self, builder: &str) -> AgentResult<()> {
+        if self.physical_time_provider.is_some() {
+            return Err(AgentError::config(format!(
+                "{builder} does not accept an injected physical time provider"
+            )));
+        }
+        Ok(())
     }
 
     fn reject_profile_in_nonproduction(&self) -> AgentResult<()> {
@@ -89,6 +112,7 @@ impl AgentBuilder {
 
     /// Build a production agent
     pub async fn build_production(self, _ctx: &EffectContext) -> AgentResult<AuraAgent> {
+        self.reject_injected_clock("production assembly")?;
         let sync_config = self.sync_config.clone().unwrap_or_default();
         let rendezvous_config = self.rendezvous_config.clone().unwrap_or_default();
         let authority_id = self
@@ -125,6 +149,7 @@ impl AgentBuilder {
     /// Build a testing agent
     pub fn build_testing(self) -> AgentResult<AuraAgent> {
         self.reject_profile_in_nonproduction()?;
+        self.reject_injected_clock("synchronous testing assembly")?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -151,6 +176,7 @@ impl AgentBuilder {
         self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
+        let clock = self.physical_time_provider.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -165,6 +191,9 @@ impl AgentBuilder {
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }
+        if let Some(provider) = clock {
+            builder = builder.with_physical_time_provider(provider);
+        }
         let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -173,6 +202,7 @@ impl AgentBuilder {
     /// Build a simulation agent
     pub fn build_simulation(self, seed: u64) -> AgentResult<AuraAgent> {
         self.reject_profile_in_nonproduction()?;
+        self.reject_injected_clock("synchronous simulation assembly")?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
@@ -202,6 +232,7 @@ impl AgentBuilder {
         self.reject_profile_in_nonproduction()?;
         let sync_config = self.sync_config.clone();
         let rendezvous_config = self.rendezvous_config.clone();
+        let clock = self.physical_time_provider.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -215,6 +246,9 @@ impl AgentBuilder {
         }
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
+        }
+        if let Some(provider) = clock {
+            builder = builder.with_physical_time_provider(provider);
         }
         let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 
@@ -233,10 +267,11 @@ impl AgentBuilder {
     ) -> AgentResult<AuraAgent> {
         self.reject_profile_in_nonproduction()?;
         // Multi-agent simulation runs the production sync service, as
-        // `build_production` does; its timers use the runtime's (simulated)
-        // time effects.
+        // `build_production` does; its timers use the runtime's physical time
+        // effects (a shared virtual clock when one is injected).
         let sync_config = self.sync_config.clone().unwrap_or_default();
         let rendezvous_config = self.rendezvous_config.clone();
+        let clock = self.physical_time_provider.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -249,6 +284,9 @@ impl AgentBuilder {
             .with_sync_config(sync_config);
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
+        }
+        if let Some(provider) = clock {
+            builder = builder.with_physical_time_provider(provider);
         }
         let runtime = builder.build(ctx).await.map_err(AgentError::from)?;
 

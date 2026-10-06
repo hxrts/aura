@@ -6,6 +6,7 @@
 #[cfg(test)]
 use crate::workflows::home_scope::best_home_for_context_by;
 use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
+use crate::workflows::moderation::governance_causal;
 use crate::workflows::observed_projection::{
     homes_signal_snapshot, try_update_homes_projection_observed,
 };
@@ -19,6 +20,7 @@ use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::{AuraError, RetryRunError};
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};
+use aura_social::HomeGovernanceKey;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -316,8 +318,15 @@ pub async fn grant_moderator_resolved(
     .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?
     .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
     let actor = runtime.authority_id();
-    let fact =
-        HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
+    let causal = governance_causal(
+        &runtime,
+        "grant_moderator_resolved",
+        scope.context_id,
+        HomeGovernanceKey::GrantModerator { target: target_id },
+    )
+    .await?;
+    let fact = HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
+        .to_generic();
 
     timeout_runtime_call(
         &runtime,
@@ -413,8 +422,15 @@ pub async fn revoke_moderator_resolved(
     .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?
     .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
     let actor = runtime.authority_id();
-    let fact =
-        HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms).to_generic();
+    let causal = governance_causal(
+        &runtime,
+        "revoke_moderator_resolved",
+        scope.context_id,
+        HomeGovernanceKey::RevokeModerator { target: target_id },
+    )
+    .await?;
+    let fact = HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
+        .to_generic();
 
     timeout_runtime_call(
         &runtime,

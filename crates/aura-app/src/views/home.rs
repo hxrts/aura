@@ -3,11 +3,13 @@
 //! This module contains home state types including moderation functionality
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
+mod governance;
 mod members;
 mod moderation;
 mod serde_support;
 mod state;
 
+pub use governance::{reduce_home_governance, HomeGovernanceLog};
 pub use members::{HomeMember, HomeRole};
 pub use moderation::{BanRecord, KickRecord, MuteRecord, PinnedMessageMeta};
 pub use state::{AddHomeResult, HomeCreationWitness, HomeState, HomesState, RemoveHomeResult};

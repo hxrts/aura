@@ -53,6 +53,12 @@ startup, navigation, and `ui_state` convergence; they do not yet inject stream
 closure or runtime rebootstrap. The recovery smoke in `work/8.md` Task S14
 must add those fault-injection cases to the PR lane.
 
+The TUI export also carries diagnostic `UiSnapshot.supervised_task_failures`
+(group, task, cause of dead runtime-supervised tasks). It is not
+parity-classified, gates no readiness or quiescence, and the browser publishes
+it empty. Coverage is the `aura-app` serialization test and the `aura-agent`
+bridge accessor test; LAN runs read it with `deadtasks <inst>`.
+
 ## Projection source revisions
 
 `UiSnapshot.projection_source_revisions` reports the graph revision last copied

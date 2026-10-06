@@ -42,6 +42,15 @@ impl ManualPhysicalClock {
         *self.state.sleep_failure.lock().await = Some(cause);
         self.state.changed.notify_waiters();
     }
+    /// Current manual observation in milliseconds.
+    pub fn now_ms(&self) -> u64 {
+        self.state.now.load(Ordering::SeqCst)
+    }
+    /// Move time forward by `by_ms`, waking sleeps whose deadline it reaches.
+    pub fn advance(&self, by_ms: u64) {
+        self.state.now.fetch_add(by_ms, Ordering::SeqCst);
+        self.state.changed.notify_waiters();
+    }
     /// Publish an actual physical observation, including deliberate rollback.
     pub fn set_time(&self, now: u64) {
         self.state.now.store(now, Ordering::SeqCst);

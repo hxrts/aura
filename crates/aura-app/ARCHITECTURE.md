@@ -45,6 +45,11 @@ The crate uses explicit concern-owned submodules.
 
 - **Pure logic**: no runtime dependencies or impure I/O.
 - **Dependency inversion**: `aura-agent` depends on `aura-app`, never vice versa.
+- **Home governance projection**: `views::home::reduce_home_governance` derives
+  overrides, capability configuration, moderator roles, bans, mutes and kick
+  history from a home's whole governance fact set. Writers obtain causal
+  stamps through `RuntimeBridge::home_governance_causal`; offline bridges
+  cannot author governance facts.
 - **Enrollment setup export**: `RuntimeBridge` exports the runtime-owned setup
   code with `EnrollmentSetupExportError` preserved across the inversion boundary.
   Unavailable exporters fail explicitly; callers cannot assemble the device/key

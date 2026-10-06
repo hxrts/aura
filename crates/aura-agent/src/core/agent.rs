@@ -27,6 +27,9 @@ pub struct AuraAgent {
 
     /// Cached service instances
     services: ServiceRegistry,
+
+    /// Set once the runtime-owned periodic sync task has been started.
+    periodic_sync_started: std::sync::atomic::AtomicBool,
 }
 
 impl AuraAgent {
@@ -45,7 +48,15 @@ impl AuraAgent {
             runtime,
             services,
             context,
+            periodic_sync_started: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Claim the one-time start of the runtime-owned periodic sync task.
+    pub(crate) fn claim_periodic_sync_start(&self) -> bool {
+        !self
+            .periodic_sync_started
+            .swap(true, std::sync::atomic::Ordering::AcqRel)
     }
 
     /// Get the authority ID for this agent
@@ -61,6 +72,12 @@ impl AuraAgent {
     /// Access the runtime system (for advanced operations)
     pub fn runtime(&self) -> &RuntimeSystem {
         &self.runtime
+    }
+
+    /// Observed record of supervised runtime tasks that failed or panicked
+    /// (group, task and typed cause), for diagnostics and tests.
+    pub fn supervised_task_failures(&self) -> Vec<crate::runtime::TaskSupervisionError> {
+        self.runtime.tasks().task_failures()
     }
 
     /// Get the session management service

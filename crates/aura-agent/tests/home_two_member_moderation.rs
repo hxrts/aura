@@ -7,121 +7,27 @@
 
 #![allow(missing_docs)]
 
+mod support;
+
 use anyhow::{anyhow, Result};
 use async_lock::RwLock;
-use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, LinkFault, SharedTransport};
-use aura_app::core::{AppConfig, AppCore};
-use aura_app::ui::signals::{CONTACTS_SIGNAL, HOMES_SIGNAL};
-use aura_app::ui::workflows::{access, context, invitation, messaging, strong_command as sc};
-use aura_core::context::EffectContext;
+use aura_agent::{LinkFault, SharedTransport};
+use aura_app::core::AppCore;
+use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
+use aura_app::ui::workflows::{access, context, messaging, strong_command as sc};
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::ExecutionMode;
-use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
-use aura_core::AuraError;
+use aura_core::types::identifiers::{AuthorityId, ChannelId};
 use std::sync::Arc;
-use std::time::Duration;
+use support::{home_view, join_home, link_contacts, strong, wait_until, SimNet};
 
-const WAIT: Duration = Duration::from_secs(20);
-
-struct Peer {
-    _temp: tempfile::TempDir,
-    _agent: Arc<AuraAgent>,
-    app: Arc<RwLock<AppCore>>,
-    id: AuthorityId,
-}
-
-async fn peer(seed: u8, transport: SharedTransport) -> Result<Peer> {
-    let id = AuthorityId::new_from_entropy([seed; 32]);
-    let ctx = EffectContext::new(
-        id,
-        ContextId::new_from_entropy([seed.wrapping_add(1); 32]),
-        ExecutionMode::Testing,
-    );
-    let temp = tempfile::tempdir()?;
-    let mut config = AgentConfig {
-        device_id: DeviceId::new_from_entropy([seed.wrapping_add(2); 32]),
-        ..AgentConfig::default()
-    };
-    config.storage.base_path = temp.path().join("aura");
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(id)
-            .with_config(config)
-            .build_simulation_async_with_shared_transport(u64::from(seed), &ctx, transport)
-            .await?,
-    );
-    let app = Arc::new(RwLock::new(AppCore::with_runtime(
-        AppConfig::default(),
-        agent.clone().as_runtime_bridge(),
-    )?));
-    AppCore::init_signals_with_hooks(&app).await?;
-    app.read()
-        .await
-        .bootstrap_signing_keys()
-        .await
-        .map_err(|e| anyhow!("bootstrap: {e}"))?;
-    Ok(Peer {
-        _temp: temp,
-        _agent: agent,
-        app,
-        id,
-    })
-}
-
-async fn wait_until<F, Fut>(what: &str, mut check: F) -> Result<()>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while tokio::time::Instant::now() < deadline {
-        if check().await {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    Err(anyhow!("timed out waiting for {what}"))
-}
-
-async fn is_contact(app: &Arc<RwLock<AppCore>>, target: AuthorityId) -> bool {
-    let state = app.read().await.read(&*CONTACTS_SIGNAL).await;
-    state.is_ok_and(|s| s.all_contacts().any(|c| c.id == target))
-}
-
-async fn home_view(
-    app: &Arc<RwLock<AppCore>>,
-    home: ChannelId,
-) -> Option<aura_app::views::home::HomeState> {
-    let homes = app.read().await.read(&*HOMES_SIGNAL).await.ok()?;
-    homes.home_state(&home).cloned()
-}
-
-async fn strong(
-    app: &Arc<RwLock<AppCore>>,
-    actor: AuthorityId,
-    channel: ChannelId,
-    parsed: sc::ParsedCommand,
-) -> Result<sc::CommandExecutionResult, AuraError> {
-    let resolver = sc::CommandResolver::default();
-    let snapshot = resolver.capture_snapshot(app).await;
-    let resolved = resolver
-        .resolve(parsed, &snapshot)
-        .map_err(|e| AuraError::invalid(format!("resolve: {e}")))?;
-    let hint = channel.to_string();
-    let plan = resolver
-        .plan(resolved, &snapshot, Some(hint.as_str()), Some(actor))
-        .map_err(|e| AuraError::invalid(format!("plan: {e}")))?;
-    sc::execute_planned(app, plan).await
-}
-
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn limited_then_banned_member_is_refused_on_own_client() -> Result<()> {
     moderation_reaches_member(None).await
 }
 
 /// The override and ban fanout is delayed past the moderation workflow's
 /// completion (held on the Alex<->Barbara link, then released).
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn moderation_reaches_member_after_delayed_fanout() -> Result<()> {
     moderation_reaches_member(Some(LinkFault::Hold)).await
 }
@@ -129,16 +35,9 @@ async fn moderation_reaches_member_after_delayed_fanout() -> Result<()> {
 /// The override and ban fanout is lost on the Alex<->Barbara link (a
 /// partition the sender cannot observe); after the link heals, Alex's
 /// home-context journal sync pulls the missed facts.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn moderation_reaches_member_after_lost_fanout() -> Result<()> {
     moderation_reaches_member(Some(LinkFault::Drop)).await
-}
-
-/// After a lost fanout, Alex's home-context journal sync pulls the facts.
-async fn resync(alex: &Arc<RwLock<AppCore>>, fault: Option<LinkFault>) {
-    if matches!(fault, Some(LinkFault::Drop)) {
-        let _ = aura_app::ui::workflows::sync::force_sync(alex).await;
-    }
 }
 
 /// Run `action` with the Alex<->Barbara link faulted, then heal it.
@@ -158,53 +57,16 @@ async fn faulted<T, Fut: std::future::Future<Output = T>>(
 }
 
 async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
-    let transport = SharedTransport::new();
-    let barbara = peer(91, transport.clone()).await?;
-    let alex = peer(95, transport.clone()).await?;
+    let net = SimNet::new();
+    let barbara = net.peer(91).await?;
+    let alex = net.peer(95).await?;
+    link_contacts(&barbara, &alex).await?;
 
-    // Contacts first.
-    let invite = invitation::create_contact_invitation(
-        &barbara.app,
-        alex.id,
-        None,
-        None,
-        Some("contact".to_string()),
-        None,
-    )
-    .await?;
-    let code = invitation::export_invitation(&barbara.app, invite.invitation_id()).await?;
-    let imported = invitation::import_invitation_details(&alex.app, &code).await?;
-    invitation::accept_invitation(&alex.app, imported).await?;
-    wait_until("Barbara sees Alex as contact", || {
-        is_contact(&barbara.app, alex.id)
-    })
-    .await?;
-    wait_until("Alex sees Barbara as contact", || {
-        is_contact(&alex.app, barbara.id)
-    })
-    .await?;
-
-    // Home + home invitation (the `/homeinvite` path) + acceptance.
+    // Home + home invitation (the `/homeinvite` path) + acceptance. A lost
+    // fanout reaches Alex through the runtime-owned periodic sync, driven
+    // by virtual time; the test issues no manual sync.
     let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
-    strong(
-        &barbara.app,
-        barbara.id,
-        home,
-        sc::ParsedCommand::HomeInvite {
-            target: alex.id.to_string(),
-        },
-    )
-    .await?;
-    wait_until("Alex accepts the home invitation", || async {
-        invitation::accept_pending_channel_invitation(&alex.app)
-            .await
-            .is_ok()
-    })
-    .await?;
-    wait_until("Alex materializes the home", || async {
-        home_view(&alex.app, home).await.is_some()
-    })
-    .await?;
+    join_home(&barbara, &alex, home).await?;
     let alex_home = home_view(&alex.app, home)
         .await
         .ok_or_else(|| anyhow!("Alex home view missing"))?;
@@ -219,11 +81,37 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
             .collect::<Vec<_>>()
     );
     messaging::send_message(&alex.app, home, "hello from alex", 1_700_000_000_100).await?;
+    messaging::send_message_now_with_instance(&alex.app, home, "second from alex", None).await?;
+    // Task 96: Alex reads his own sent home-channel messages as plaintext,
+    // authored by himself, and every send appears.
+    wait_until("Alex sees both own messages", || async {
+        let chat = alex.app.read().await.read(&*CHAT_SIGNAL).await;
+        chat.is_ok_and(|c| {
+            let own: Vec<_> = c
+                .messages_for_channel(&home)
+                .iter()
+                .filter(|m| m.sender_id == alex.id)
+                .collect();
+            eprintln!(
+                "[own] {:?}",
+                own.iter()
+                    .map(|m| (m.content.clone(), m.sender_name.clone(), m.is_own))
+                    .collect::<Vec<_>>()
+            );
+            own.len() == 2
+                && own.iter().all(|m| {
+                    m.is_own
+                        && (m.content == "hello from alex" || m.content == "second from alex")
+                        && !m.sender_name.starts_with("authority")
+                })
+        })
+    })
+    .await?;
 
     // Limited override (BarbHome is still the selected home): it must reach
     // Alex's view and his own client must refuse his send.
     faulted(
-        &transport,
+        &net.transport,
         alex.id,
         barbara.id,
         fault,
@@ -236,7 +124,6 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     )
     .await?;
     wait_until("Alex sees his Limited override", || async {
-        resync(&alex.app, fault).await;
         home_view(&alex.app, home)
             .await
             .is_some_and(|h| h.access_override(&alex.id) == Some(aura_social::AccessLevel::Limited))
@@ -250,6 +137,7 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
             .is_err_and(|e| e.to_string().contains("access level")),
         "Alex's send at Limited must be refused: {limited_send:?}"
     );
+    assert_tui_sends_refused(&alex.app, home, "access level").await;
 
     // Barbara owns a second home (as in the live run) that is now the
     // selected home, while she types `/ban` in BarbHome's channel.
@@ -269,7 +157,7 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     );
 
     let ban = faulted(
-        &transport,
+        &net.transport,
         alex.id,
         barbara.id,
         fault,
@@ -300,7 +188,6 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         "the ban targets the planned home, not the selected one"
     );
     wait_until("Alex sees his ban", || async {
-        resync(&alex.app, fault).await;
         home_view(&alex.app, home)
             .await
             .is_some_and(|h| h.ban_list.contains_key(&alex.id))
@@ -314,5 +201,38 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
             .is_err_and(|e| e.to_string().contains("banned")),
         "Alex's send after the ban must be refused: {banned_send:?}"
     );
-    Ok(())
+    assert_tui_sends_refused(&alex.app, home, "banned").await;
+    net.finish().await
+}
+
+/// The TUI submits through the `*_now_with_instance` APIs (by channel id, or
+/// by name when the input does not parse as an id). Both must hit the same
+/// sender gate as `send_message`.
+async fn assert_tui_sends_refused(app: &Arc<RwLock<AppCore>>, home: ChannelId, reason: &str) {
+    let by_id = messaging::send_message_now_with_instance(app, home, "tui send by id", None).await;
+    assert!(
+        by_id
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains(reason)),
+        "TUI send by id must be refused ({reason}): {by_id:?}"
+    );
+    // By name, using the name Alex's own chat view shows for the channel.
+    let name = app
+        .read()
+        .await
+        .read(&*CHAT_SIGNAL)
+        .await
+        .ok()
+        .and_then(|c| c.channel(&home).map(|ch| ch.name.clone()))
+        .unwrap_or_default();
+    eprintln!("[by-name] alex channel name for home: {name:?}");
+    let by_name =
+        messaging::send_message_by_name_now_with_instance(app, &name, "tui send by name", None)
+            .await;
+    assert!(
+        by_name
+            .as_ref()
+            .is_err_and(|e| e.to_string().contains(reason)),
+        "TUI send by name must be refused ({reason}): {by_name:?}"
+    );
 }

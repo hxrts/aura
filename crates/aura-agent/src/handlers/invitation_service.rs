@@ -438,10 +438,18 @@ async fn settle_required_enrollment_initiator_failure(
     } else {
         aura_app::runtime_bridge::CeremonyFailureReason::ChoreographyFailed
     };
-    let terminal_publication = runner
-        .fail_with_reason(ceremony, reason, Some(execution.to_string()))
-        .await
-        .err();
+    // A committed cancellation is already this ceremony's terminal outcome;
+    // a later execution failure (e.g. cancelled-generation cleanup) must not
+    // publish a contradictory second terminal.
+    let already_terminal = matches!(runner.terminal_outcome(ceremony).await, Ok(Some(_)));
+    let terminal_publication = if already_terminal {
+        None
+    } else {
+        runner
+            .fail_with_reason(ceremony, reason, Some(execution.to_string()))
+            .await
+            .err()
+    };
     let failure = EnrollmentInitiatorTaskFailure {
         execution,
         terminal_publication,
@@ -863,6 +871,8 @@ impl InvitationServiceApi {
         }))
     }
 
+    /// Restart recovery: one owned task signs, releases the cancelled pending
+    /// generation and then retries delivery of the signed bytes.
     #[aura_macros::capability_boundary(
         category = "capability_gated",
         capability = "CancelledEnrollmentNoticeRecoveryCapability",
@@ -882,41 +892,72 @@ impl InvitationServiceApi {
             issued,
             registered,
         } = capability;
-        let ceremony = issued.manifest().ceremony.clone();
-        let retirement = self.ceremony_runner.clone();
+        let invitation = issued.manifest().invitation.clone();
         let runner = self.ceremony_runner.clone();
-        let tasks = self.tasks.group(format!(
-            "invitation_service.cancelled_notice.{}",
-            issued.manifest().invitation,
-        ));
-        let fut = Box::pin(async move {
-            let window = match runner.cancelled_notice_window(registered, effects.as_ref()).await? {
-                crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::Eligible(window) => window,
-                crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::EligibilityEnded { cause } => {
-                    tracing::debug!(error = %cause, "cancelled enrollment notice eligibility ended; no send");
-                    // No notice can be sent; release the pending generation now.
-                    return retirement.retire_failed_enrollment_generation(&ceremony).await;
-                }
+        self.spawn_cancelled_notice_task(&invitation, async move {
+            let settled =
+                super::invitation::settle_cancelled_notice(&effects, issued, &runner, registered)
+                    .await;
+            let Some(notice) = required_cancelled_notice(settled)?.flatten() else {
+                return Ok(());
             };
-            super::invitation::execute_recovered_cancelled_notice(
-                effects, issued, runner, window,
-            ).await.or_else(|cause| {
-                if crate::runtime::services::enrollment_window::cancelled_notice_eligibility_ended(&cause) {
-                    tracing::debug!(error = %cause, "cancelled enrollment notice original eligibility ended; no send");
-                    Ok(())
-                } else {
-                    Err(cause)
-                }
-            }).map_err(|source| match source {
-                AgentError::Aura(cause) => cause,
-                source => aura_core::AuraError::Internal {
-                    message: "required cancelled enrollment notice execution".into(),
-                    source: Some(Arc::new(source)),
-                },
-            })
-            // The notice owner signs first and then releases the cancelled
-            // pending generation before any send retry (Task 80).
-        });
+            required_cancelled_notice(
+                super::invitation::deliver_settled_cancelled_notice(effects, notice).await,
+            )
+            .map(|_| ())
+        })
+    }
+
+    /// Live cancellation: sign the notice and release the cancelled pending
+    /// generation before returning, so an immediate new enrollment is admitted.
+    /// Only delivery retries of the signed bytes run in the background.
+    #[aura_macros::capability_boundary(
+        category = "capability_gated",
+        capability = "CancelledEnrollmentNoticeRecoveryCapability",
+        family = "runtime_helper"
+    )]
+    async fn settle_cancelled_enrollment_notice(
+        &self,
+        capability: CancelledEnrollmentNoticeRecoveryCapability,
+    ) -> AgentResult<()> {
+        if !Arc::ptr_eq(&capability.effects, &self.effects) {
+            return Err(
+                super::invitation::enrollment_trust::EnrollmentVerifierError::RuntimeOwner.into(),
+            );
+        }
+        let CancelledEnrollmentNoticeRecoveryCapability {
+            effects,
+            issued,
+            registered,
+        } = capability;
+        let invitation = issued.manifest().invitation.clone();
+        let settled = super::invitation::settle_cancelled_notice(
+            &effects,
+            issued,
+            &self.ceremony_runner,
+            registered,
+        )
+        .await;
+        let Some(notice) = required_cancelled_notice(settled)?.flatten() else {
+            return Ok(());
+        };
+        self.spawn_cancelled_notice_task(&invitation, async move {
+            required_cancelled_notice(
+                super::invitation::deliver_settled_cancelled_notice(effects, notice).await,
+            )
+            .map(|_| ())
+        })
+    }
+
+    fn spawn_cancelled_notice_task(
+        &self,
+        invitation: &InvitationId,
+        fut: impl std::future::Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+    ) -> AgentResult<()> {
+        let tasks = self
+            .tasks
+            .group(format!("invitation_service.cancelled_notice.{invitation}"));
+        let fut = Box::pin(fut);
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
                 let _task = tasks.spawn_local_try_named("cancelled_enrollment_notice_recovery", fut);
@@ -1873,10 +1914,17 @@ impl InvitationServiceApi {
         }?;
         // Required negative publication completes before notice admission. A
         // retained original execution owner already sending the notice is the
-        // only admission fault treated as a normal duplicate disposition.
+        // only admission fault treated as a normal duplicate disposition; that
+        // owner signs and releases the generation, and cancel awaits it. Either
+        // way the pending generation is released before cancel returns.
+        let ceremony = issued.manifest().ceremony.clone();
         let notice = match self.prepare_cancelled_notice_from_issued(issued).await {
-            Ok(Some(capability)) => self.start_cancelled_enrollment_notice_recovery(capability),
-            Ok(None) => Ok(()),
+            Ok(Some(capability)) => self.settle_cancelled_enrollment_notice(capability).await,
+            Ok(None) => self
+                .ceremony_runner
+                .await_cancelled_generation_settlement(&ceremony)
+                .await
+                .map_err(AgentError::from),
             Err(source) => Err(source),
         };
         if let Err(source) = notice {
@@ -2357,6 +2405,27 @@ fn sender_hint_from_addrs(tcp: Option<&str>, websocket: Option<&str>) -> Option<
         .chain(websocket)
         .collect();
     (!hints.is_empty()).then(|| hints.join(","))
+}
+
+/// An ended original notice eligibility is a normal no-send disposition; every
+/// other cancelled-notice failure keeps its concrete cause.
+fn required_cancelled_notice<T>(result: AgentResult<T>) -> Result<Option<T>, aura_core::AuraError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(cause)
+            if crate::runtime::services::enrollment_window::cancelled_notice_eligibility_ended(
+                &cause,
+            ) =>
+        {
+            tracing::debug!(error = %cause, "cancelled enrollment notice original eligibility ended; no send");
+            Ok(None)
+        }
+        Err(AgentError::Aura(cause)) => Err(cause),
+        Err(source) => Err(aura_core::AuraError::Internal {
+            message: "required cancelled enrollment notice execution".into(),
+            source: Some(Arc::new(source)),
+        }),
+    }
 }
 
 #[cfg(test)]

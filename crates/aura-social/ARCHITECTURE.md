@@ -35,6 +35,11 @@ Neighborhood-plane topology and moderation layer providing home management, neig
 - Facts must be reduced under their matching `ContextId`.
 - Membership and moderatorship changes should follow approved workflows.
 - Home relationships define trust boundaries.
+- Home governance facts (bans, mutes, kicks, moderator grants and revocations,
+  access overrides, capability configuration; schema 2) carry writer-stamped
+  `CausalMetadata`. `moderation::governance` reduces them independently of
+  arrival order: observed-remove sets for bans, mutes and grants, multi-value
+  registers for overrides and configuration (docs/115 §3.4).
 
 ### InvariantSocialBoundaryScopedMembership
 

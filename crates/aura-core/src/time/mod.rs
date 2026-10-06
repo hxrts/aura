@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
+pub mod causal;
 mod ordering;
 pub mod pure;
 pub mod timeout;
@@ -17,6 +18,7 @@ use crate::{
     crypto::Ed25519Signature,
     types::identifiers::{AuthorityId, DeviceId},
 };
+pub use causal::{CausalClock, CausalMetadata, CausalTag};
 
 /// Physical clock representation with optional uncertainty.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

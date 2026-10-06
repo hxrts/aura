@@ -31,65 +31,29 @@ pub(crate) fn sign_flow_receipt(
     Ok(())
 }
 
-/// Deterministic test modes skip receipt signing. Give an unsigned envelope a
-/// placeholder signature, keeping the charged epoch and generation so the
-/// receiver's flow window sees distinct sends; an envelope that was never
-/// charged gets a fresh generation, so repeated test sends are not replays.
+/// Deterministic test modes skip receipt signing. Give an unsigned charged
+/// envelope a placeholder signature, keeping its charged epoch and generation
+/// so the receiver's flow window sees distinct sends. An envelope that was
+/// never charged stays receipt-less: deterministic modes send and admit it
+/// without a receipt, and inventing a generation for it would collide with
+/// the charged generations of the same (context, sender) direction, so the
+/// receiver's window would drop real sends as stale or replayed (Task 94).
 pub(crate) fn attach_test_transport_receipt_if_needed(
     is_testing: bool,
     envelope: &mut TransportEnvelope,
 ) {
-    // A short synchronous critical section that never crosses an `.await`
-    // (clippy.toml: allowed in aura-agent/src/runtime).
-    #[allow(clippy::disallowed_types)]
-    type Generations = std::sync::Mutex<
-        std::collections::HashMap<
-            (
-                aura_core::ContextId,
-                aura_core::AuthorityId,
-                aura_core::AuthorityId,
-            ),
-            u64,
-        >,
-    >;
-    static NEXT_TEST_GENERATION: std::sync::OnceLock<Generations> = std::sync::OnceLock::new();
-    let next_generation = |envelope: &TransportEnvelope| {
-        let mut generations = NEXT_TEST_GENERATION
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let next = generations
-            .entry((envelope.context, envelope.source, envelope.destination))
-            .or_insert(0);
-        *next += 1;
-        *next
-    };
-
-    if !is_testing
-        || envelope
-            .receipt
-            .as_ref()
-            .is_some_and(|receipt| !receipt.sig.is_empty())
-    {
+    if !is_testing {
         return;
     }
-    let receipt = envelope.receipt.take().unwrap_or_else(|| TransportReceipt {
-        context: envelope.context,
-        src: envelope.source,
-        dst: envelope.destination,
-        epoch: 0,
-        cost: 1,
-        nonce: next_generation(envelope),
-        prev: [0u8; 32],
-        sig: Vec::new(),
-    });
-    envelope.receipt = Some(TransportReceipt {
-        context: envelope.context,
-        src: envelope.source,
-        dst: envelope.destination,
-        sig: vec![1u8],
-        ..receipt
-    });
+    let Some(receipt) = envelope.receipt.as_mut() else {
+        return;
+    };
+    if receipt.sig.is_empty() {
+        receipt.context = envelope.context;
+        receipt.src = envelope.source;
+        receipt.dst = envelope.destination;
+        receipt.sig = vec![1u8];
+    }
 }
 
 #[cfg(test)]

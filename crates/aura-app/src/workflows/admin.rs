@@ -27,15 +27,10 @@ pub async fn replace_admin<E: JournalEffects>(
     // Create a context ID from the authority for the relational fact
     let context_id = ContextId::new_from_entropy(hash::hash(&device_authority.to_bytes()));
 
-    // Serialize the MaintenanceFact and wrap in a Generic relational fact
-    let payload = serde_json::to_vec(&replacement).map_err(super::error::fact_encoding)?;
-
-    let envelope = aura_core::types::facts::FactEnvelope {
-        type_id: aura_core::types::facts::FactTypeId::from("admin-replacement"),
-        schema_version: 1,
-        encoding: aura_core::types::facts::FactEncoding::Json,
-        payload,
-    };
+    // Wrap the MaintenanceFact under its own type id and schema version.
+    let envelope = replacement
+        .to_envelope()
+        .map_err(super::error::fact_encoding)?;
 
     let fact_content = FactContent::Relational(RelationalFact::Generic {
         context_id,

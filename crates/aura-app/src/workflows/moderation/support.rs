@@ -128,6 +128,28 @@ pub(super) async fn moderation_timestamp(
     .map_err(|e| super::super::error::runtime_call(stage, e))?)
 }
 
+/// Causal metadata for a new home governance fact (docs/115 §3.4): the
+/// runtime advances its logical clock past the home's governance facts and
+/// records what the new fact revokes or supersedes.
+pub(crate) async fn governance_causal(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    operation: &'static str,
+    context_id: aura_core::types::identifiers::ContextId,
+    key: aura_social::HomeGovernanceKey,
+) -> Result<aura_core::time::CausalMetadata, AuraError> {
+    let stage = "stamp home governance fact";
+    Ok(timeout_runtime_call(
+        runtime,
+        operation,
+        "home_governance_causal",
+        super::MODERATION_RUNTIME_TIMEOUT,
+        || runtime.home_governance_causal(context_id, key),
+    )
+    .await
+    .map_err(|e| super::super::error::runtime_call(stage, e))?
+    .map_err(|e| super::super::error::runtime_call(stage, e))?)
+}
+
 pub(super) async fn send_moderation_fact_with_retry(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     peer: AuthorityId,

@@ -49,7 +49,7 @@ pub struct HomeState {
 impl HomeState {
     pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
     pub const MEMBER_ALLOCATION: u64 = 200 * 1024;
-    const MAX_KICK_LOG: usize = 200;
+    pub(crate) const MAX_KICK_LOG: usize = 200;
 
     /// Record that this home joined `neighborhood_id`, charging the home's
     /// neighborhood budget (at most `MAX_NEIGHBORHOODS`, docs/115). Joining a
@@ -335,6 +335,18 @@ impl HomeCreationWitness {
     #[must_use]
     pub fn id(&self) -> ChannelId {
         self.id
+    }
+
+    /// The context of the created home.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.context_id
+    }
+
+    /// The authority that created the home.
+    #[must_use]
+    pub fn creator_id(&self) -> AuthorityId {
+        self.creator_id
     }
 
     pub(crate) fn from_created_fact(fact: &SocialFact) -> Option<Self> {

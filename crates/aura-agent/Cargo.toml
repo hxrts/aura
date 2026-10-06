@@ -121,6 +121,8 @@ wasm-bindgen-test = "0.3"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { workspace = true }
 loom = "0.7"
+# Paused tokio time: QuiescentClock advances virtual time only when idle.
+tokio = { workspace = true, features = ["test-util"] }
 
 [[bench]]
 name = "telltale_machine_backends"

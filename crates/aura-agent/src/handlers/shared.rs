@@ -43,6 +43,11 @@ impl HandlerContext {
     }
 }
 
+/// Schema version of the agent-local JSON records journaled by
+/// [`HandlerUtilities::append_relational_fact`] (session, auth and recovery
+/// records). These are not `DomainFact`s; bump on a breaking payload change.
+pub(crate) const AGENT_RECORD_SCHEMA_VERSION: u16 = 1;
+
 /// Shared handler utilities
 pub struct HandlerUtilities;
 
@@ -62,27 +67,30 @@ impl HandlerUtilities {
                 source: Some(std::sync::Arc::new(source)),
             })
         })?;
+        let envelope = FactEnvelope {
+            type_id: binding_type,
+            schema_version: AGENT_RECORD_SCHEMA_VERSION,
+            encoding: aura_core::types::facts::FactEncoding::Json,
+            payload: binding_data,
+        };
         effects
-            .commit_generic_fact_bytes(context_id, binding_type, binding_data)
+            .commit_generic_envelope(context_id, envelope)
             .await
             .map(|_| ())
             .map_err(crate::core::AgentError::from)
     }
 
-    /// Append a generic fact (raw bytes) into the authority-scoped journal.
-    ///
-    /// This is used for domain facts like `InvitationFact` that serialize to bytes
-    /// via their own serialization (e.g., `DomainFact::to_bytes()`).
-    pub async fn append_generic_fact(
+    /// Append a domain fact (e.g. `InvitationFact`) into the authority-scoped
+    /// journal under its own type id and schema version.
+    pub async fn append_domain_fact<F: aura_journal::DomainFact>(
         authority: &AuthorityContext,
         effects: &AuraEffectSystem,
         context_id: ContextId,
-        binding_type: FactTypeId,
-        binding_data: &[u8],
+        fact: &F,
     ) -> AgentResult<()> {
         let _ = authority; // Authority is implied by the effect system's configured identity.
         effects
-            .commit_generic_fact_bytes(context_id, binding_type, binding_data.to_vec())
+            .commit_domain_fact(context_id, fact)
             .await
             .map(|_| ())
             .map_err(crate::core::AgentError::from)

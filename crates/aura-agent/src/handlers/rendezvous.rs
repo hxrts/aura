@@ -25,7 +25,6 @@ use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
-use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::TreeEffects;
@@ -34,7 +33,7 @@ use aura_rendezvous::capabilities::{
 };
 use aura_rendezvous::{
     EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
-    RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
+    RendezvousFact, RendezvousService, TransportHint,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -498,14 +497,8 @@ impl RendezvousHandler {
             .create_channel_established_fact(context_id, peer, channel_id, epoch);
 
         // Journal the fact
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            context_id,
-            RENDEZVOUS_FACT_TYPE_ID.into(),
-            &fact.to_bytes(),
-        )
-        .await?;
+        HandlerUtilities::append_domain_fact(&self.context.authority, effects, context_id, &fact)
+            .await?;
 
         Ok(ChannelResult {
             success: true,
@@ -935,14 +928,7 @@ async fn execute_journal_append(
             .map_err(|e| AgentError::effects(format!("Commit rendezvous consensus fact: {e}")))?;
     }
 
-    HandlerUtilities::append_generic_fact(
-        authority,
-        effects,
-        context_id,
-        RENDEZVOUS_FACT_TYPE_ID.into(),
-        &fact.to_bytes(),
-    )
-    .await
+    HandlerUtilities::append_domain_fact(authority, effects, context_id, &fact).await
 }
 
 async fn execute_charge_flow_budget(
