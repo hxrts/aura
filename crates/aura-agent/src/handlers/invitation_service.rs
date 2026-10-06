@@ -428,6 +428,29 @@ impl std::error::Error for EnrollmentInitiatorTaskFailure {
         Some(&self.execution)
     }
 }
+/// Future run by a cancelled-notice task: `Send` on native runtimes, local on
+/// wasm where browser futures are not `Send`.
+#[cfg(not(target_arch = "wasm32"))]
+trait CancelledNoticeFuture:
+    std::future::Future<Output = Result<(), aura_core::AuraError>> + Send + 'static
+{
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T> CancelledNoticeFuture for T where
+    T: std::future::Future<Output = Result<(), aura_core::AuraError>> + Send + 'static
+{
+}
+#[cfg(target_arch = "wasm32")]
+trait CancelledNoticeFuture:
+    std::future::Future<Output = Result<(), aura_core::AuraError>> + 'static
+{
+}
+#[cfg(target_arch = "wasm32")]
+impl<T> CancelledNoticeFuture for T where
+    T: std::future::Future<Output = Result<(), aura_core::AuraError>> + 'static
+{
+}
+
 async fn settle_required_enrollment_initiator_failure(
     runner: &CeremonyRunner,
     ceremony: &CeremonyId,
@@ -913,7 +936,7 @@ impl InvitationServiceApi {
     fn spawn_cancelled_notice_task(
         &self,
         invitation: &InvitationId,
-        fut: impl std::future::Future<Output = Result<(), aura_core::AuraError>> + Send + 'static,
+        fut: impl CancelledNoticeFuture,
     ) -> AgentResult<()> {
         let tasks = self
             .tasks
