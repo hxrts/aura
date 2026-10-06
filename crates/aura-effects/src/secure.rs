@@ -631,6 +631,19 @@ impl ProductionSecureStorageHandler {
             target_os = "openbsd"
         ))]
         if let Self::Platform(handler) = &mut self {
+            // Test builds keep platform credentials in the file-backed test store,
+            // not a machine-wide OS namespace: scope the service to the selected
+            // profile so independent test runtimes (and a developer's running
+            // `aura`) never contend for one shared namespace lease.
+            #[cfg(all(any(test, feature = "test-keyring"), not(target_arch = "wasm32")))]
+            {
+                use aura_core::effects::profile_storage::ProfileStorageLease;
+                handler.service = format!(
+                    "{}#test-profile-{}",
+                    handler.service,
+                    hex::encode(aura_core::hash::hash(owner.profile_identity().as_bytes()))
+                );
+            }
             // Preserve the original service/key addresses, while separately
             // excluding every cooperating profile using that shared OS namespace.
             handler.namespace_owner = Some(

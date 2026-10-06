@@ -19,7 +19,6 @@ use aura_core::effects::{
     JournalEffects, ReactiveEffects, ThresholdSigningEffects, TransportEffects,
 };
 use aura_core::hash::hash;
-use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::{Ed25519SigningKey, Hash32};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -100,7 +99,11 @@ fn lan_test_receipt(
     transcript.push(TRANSPORT_SCOPE);
     transcript.extend_from_slice(b":payload:");
     transcript.extend_from_slice(Hash32::from_bytes(&envelope.payload).as_bytes());
-    for key in ["content-type", "wire-format-version"] {
+    for key in [
+        "content-type",
+        "wire-format-version",
+        "aura-source-device-id",
+    ] {
         transcript.extend_from_slice(key.as_bytes());
         match envelope.metadata.get(key) {
             Some(value) => {
@@ -152,13 +155,13 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 }
 
 async fn bootstrap_agent(agent: &AuraAgent, authority_id: AuthorityId) -> TestResult {
-    let effects = agent.runtime().effects();
-    effects.bootstrap_authority(&authority_id).await?;
-    let participants = vec![ParticipantIdentity::guardian(authority_id)];
-    let (epoch, _, _) = effects
-        .rotate_keys(&authority_id, 1, 1, &participants)
+    // Bootstrap as a real account does: the device roster and signing policy
+    // must agree, or descriptor publication refuses the identity context.
+    agent
+        .runtime()
+        .threshold_signing()
+        .bootstrap_authority(&authority_id)
         .await?;
-    effects.commit_key_rotation(&authority_id, epoch).await?;
     Ok(())
 }
 
@@ -1435,13 +1438,25 @@ async fn test_lan_sync_roundtrip() -> TestResult {
         sync_a.sync_with_peers(&*effects_a, vec![peer_device_id]),
         sync_b.sync_with_peers(&*effects_b, vec![peer_device_id_b]),
     );
-    res_a.map_err(anyhow::Error::msg)?;
-    res_b.map_err(anyhow::Error::msg)?;
-
     // These are Testing-mode agents without a shared transport, so network sends
-    // are mocked and no digest is exchanged; a completed exchange is asserted by
-    // `concurrent_anti_entropy_between_device_addressed_peers_completes` (shared
-    // transport) and by the cross-machine runs. Here both services must be up.
+    // are mocked and no digest is exchanged. A requested peer that did not
+    // synchronize must be reported as a failure, never a silent success
+    // (explicit sync convergence claims, task S11). A completed exchange is
+    // asserted by `concurrent_anti_entropy_between_device_addressed_peers_completes`
+    // (shared transport) and by the cross-machine runs. Both services stay up.
+    for result in [res_a, res_b] {
+        let Err(error) = result else {
+            return Err(anyhow!(
+                "an unexchanged requested peer cannot report success"
+            ));
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("required requested-peer sync failed"),
+            "unexpected sync failure: {error}"
+        );
+    }
     assert!(sync_a.sync_service_health().await.is_some());
     assert!(sync_b.sync_service_health().await.is_some());
 
