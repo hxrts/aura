@@ -420,8 +420,23 @@ impl MockRuntimeBridge {
         let _ = self.reactive_handler.emit(&*CONTACTS_SIGNAL, state).await;
     }
 
-    /// Process a ContactFact from envelope and update internal contacts list
-    /// Returns true if contacts were changed
+    /// Committed contact facts, tagged.
+    async fn tagged_contact_facts(&self) -> Vec<aura_relational::TaggedContactFact> {
+        self.facts
+            .read()
+            .await
+            .iter()
+            .filter_map(|fact| match fact {
+                RelationalFact::Generic { envelope, .. } => ContactFact::from_envelope(envelope)
+                    .map(aura_relational::TaggedContactFact::new),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Re-reduce the contact a committed ContactFact is about from the whole
+    /// committed contact fact set (docs/105 §4.2.1) and update the contacts
+    /// list. Returns true if contacts were changed.
     async fn process_contact_fact_envelope(
         &self,
         envelope: &aura_core::types::facts::FactEnvelope,
@@ -429,73 +444,45 @@ impl MockRuntimeBridge {
         let Some(fact) = ContactFact::from_envelope(envelope) else {
             return false;
         };
-
-        match fact {
-            ContactFact::Renamed {
-                contact_id,
-                new_nickname,
-                ..
-            } => {
-                let mut contacts = self.contacts.write().await;
+        let contact_id = fact.contact_id();
+        let tagged = self.tagged_contact_facts().await;
+        let record = aura_relational::reduce_contacts(
+            tagged
+                .iter()
+                .filter(|fact| fact.fact().contact_id() == contact_id),
+        )
+        .into_values()
+        .next();
+        let mut contacts = self.contacts.write().await;
+        let before = contacts.clone();
+        match record {
+            None => contacts.retain(|c| c.id != contact_id),
+            Some(record) => {
+                let added_nickname = match &record.latest_add {
+                    ContactFact::Added { nickname, .. } => nickname.clone(),
+                    _ => String::new(),
+                };
+                let nickname = record.nickname.clone().unwrap_or(added_nickname);
                 if let Some(contact) = contacts.iter_mut().find(|c| c.id == contact_id) {
-                    contact.nickname = new_nickname;
+                    contact.nickname = nickname;
+                    contact.read_receipt_policy = record.read_receipt_policy;
                 } else {
                     contacts.push(Contact {
                         id: contact_id,
-                        nickname: new_nickname,
+                        nickname,
                         nickname_suggestion: None,
                         is_guardian: false,
                         is_member: false,
                         last_interaction: Some(self.now_ms()),
                         is_online: false,
-                        read_receipt_policy: ReadReceiptPolicy::default(),
+                        read_receipt_policy: record.read_receipt_policy,
                         relationship_state: ContactRelationshipState::Contact,
                         invitation_code: None,
                     });
                 }
-                true
-            }
-            ContactFact::Removed { contact_id, .. } => {
-                let mut contacts = self.contacts.write().await;
-                let len_before = contacts.len();
-                contacts.retain(|c| c.id != contact_id);
-                contacts.len() != len_before
-            }
-            ContactFact::Added {
-                contact_id,
-                nickname,
-                ..
-            } => {
-                let mut contacts = self.contacts.write().await;
-                if contacts.iter().any(|c| c.id == contact_id) {
-                    return false;
-                }
-                contacts.push(Contact {
-                    id: contact_id,
-                    nickname,
-                    nickname_suggestion: None,
-                    is_guardian: false,
-                    is_member: false,
-                    last_interaction: Some(self.now_ms()),
-                    is_online: false,
-                    read_receipt_policy: ReadReceiptPolicy::default(),
-                    relationship_state: ContactRelationshipState::Contact,
-                    invitation_code: None,
-                });
-                true
-            }
-            ContactFact::ReadReceiptPolicyUpdated {
-                contact_id, policy, ..
-            } => {
-                let mut contacts = self.contacts.write().await;
-                if let Some(contact) = contacts.iter_mut().find(|c| c.id == contact_id) {
-                    contact.read_receipt_policy = policy;
-                    true
-                } else {
-                    false
-                }
             }
         }
+        *contacts != before
     }
 
     /// Get committed facts for test assertions
@@ -650,13 +637,23 @@ impl RuntimeBridge for MockRuntimeBridge {
     // Typed Fact Commit (Override default)
     // =========================================================================
 
-    async fn home_governance_causal(
+    async fn causal_stamp(
         &self,
-        context_id: ContextId,
-        key: aura_social::HomeGovernanceKey,
+        key: aura_app::runtime_bridge::CausalStampKey,
     ) -> Result<aura_core::time::CausalMetadata, IntentError> {
-        // The mock writes as one fixed device whose clock follows the
-        // governance facts it has committed for the home.
+        // The mock writes as one fixed device whose clock follows the facts
+        // of the family it has committed.
+        let (context_id, key) = match key {
+            aura_app::runtime_bridge::CausalStampKey::HomeGovernance { context_id, key } => {
+                (context_id, key)
+            }
+            aura_app::runtime_bridge::CausalStampKey::Contact(key) => {
+                let observed = self.tagged_contact_facts().await;
+                return Ok(aura_relational::contacts::test_support::causal(
+                    0x4d, key, &observed,
+                ));
+            }
+        };
         let observed: Vec<_> = self
             .facts
             .read()

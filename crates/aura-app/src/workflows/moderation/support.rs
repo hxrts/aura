@@ -137,17 +137,14 @@ pub(crate) async fn governance_causal(
     context_id: aura_core::types::identifiers::ContextId,
     key: aura_social::HomeGovernanceKey,
 ) -> Result<aura_core::time::CausalMetadata, AuraError> {
-    let stage = "stamp home governance fact";
-    Ok(timeout_runtime_call(
+    crate::workflows::runtime::runtime_causal_stamp(
         runtime,
         operation,
-        "home_governance_causal",
+        "stamp home governance fact",
         super::MODERATION_RUNTIME_TIMEOUT,
-        || runtime.home_governance_causal(context_id, key),
+        crate::runtime_bridge::CausalStampKey::HomeGovernance { context_id, key },
     )
     .await
-    .map_err(|e| super::super::error::runtime_call(stage, e))?
-    .map_err(|e| super::super::error::runtime_call(stage, e))?)
 }
 
 pub(super) async fn send_moderation_fact_with_retry(

@@ -638,45 +638,6 @@ impl InvitationServiceApi {
         })
     }
 
-    fn spawn_channel_invitation_exchange(&self, invitation: &Invitation) {
-        if invitation.receiver_id == invitation.sender_id {
-            return;
-        }
-
-        let invitation = invitation.clone();
-        let handler = self.handler.clone();
-        let effects = self.effects.clone();
-        let tasks = self.tasks.group(format!(
-            "invitation_service.channel_exchange.{}",
-            invitation.invitation_id
-        ));
-        let invitation_id = invitation.invitation_id.clone();
-        let sender_id = invitation.sender_id;
-        let receiver_id = invitation.receiver_id;
-        let fut = async move {
-            if let Err(error) = handler
-                .execute_channel_invitation_exchange_sender(effects, &invitation)
-                .await
-            {
-                tracing::error!(
-                    invitation_id = %invitation_id,
-                    sender_id = %sender_id,
-                    receiver_id = %receiver_id,
-                    error = %error,
-                    "channel invitation exchange sender failed"
-                );
-            }
-        };
-
-        cfg_if::cfg_if! {
-            if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = tasks.spawn_local_named("sender_exchange", fut);
-            } else {
-                let _task_handle = tasks.spawn_named("sender_exchange", fut);
-            }
-        }
-    }
-
     fn spawn_guardian_invitation_principal(&self, invitation: &Invitation) {
         let invitation = invitation.clone();
         let handler = self.handler.clone();
@@ -1324,7 +1285,6 @@ impl InvitationServiceApi {
             self.spawn_deferred_invitation_delivery(&invitation, deferred_network_effects);
         }
         self.spawn_invitation_ceremony_registration(&invitation);
-        self.spawn_channel_invitation_exchange(&invitation);
         Ok(invitation)
     }
 

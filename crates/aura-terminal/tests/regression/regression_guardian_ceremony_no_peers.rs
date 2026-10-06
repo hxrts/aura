@@ -108,20 +108,22 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
     let carol_id = ids::authority_id(&format!("demo:{}:Carol:authority", seed + 1));
 
     let contact_facts = vec![
-        ContactFact::added_with_timestamp_ms(
+        ContactFact::added_ms(
             ContextId::new_from_entropy([2u8; 32]),
             authority_id,
             alice_id,
             "Alice".to_string(),
             1,
+            aura_relational::contacts::test_support::fresh(1),
         )
         .to_generic(),
-        ContactFact::added_with_timestamp_ms(
+        ContactFact::added_ms(
             ContextId::new_from_entropy([2u8; 32]),
             authority_id,
             carol_id,
             "Carol".to_string(),
             2,
+            aura_relational::contacts::test_support::fresh(1),
         )
         .to_generic(),
     ];
@@ -246,20 +248,22 @@ async fn control_guardian_ceremony_works_with_demo_peers_body() {
     let carol_id = simulator.carol_authority();
 
     let contact_facts = vec![
-        ContactFact::added_with_timestamp_ms(
+        ContactFact::added_ms(
             ContextId::new_from_entropy([2u8; 32]),
             bob_authority,
             alice_id,
             "Alice".to_string(),
             1,
+            aura_relational::contacts::test_support::fresh(1),
         )
         .to_generic(),
-        ContactFact::added_with_timestamp_ms(
+        ContactFact::added_ms(
             ContextId::new_from_entropy([2u8; 32]),
             bob_authority,
             carol_id,
             "Carol".to_string(),
             2,
+            aura_relational::contacts::test_support::fresh(1),
         )
         .to_generic(),
     ];

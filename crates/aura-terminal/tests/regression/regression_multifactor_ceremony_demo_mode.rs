@@ -119,12 +119,13 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
     // === Phase 1: Add mobile device as contact (mimicking TUI "add device" flow) ===
     // In the TUI, user would see the mobile device and add it as a contact
     // But the mobile device doesn't have shared transport set up
-    let contact_facts = vec![ContactFact::added_with_timestamp_ms(
+    let contact_facts = vec![ContactFact::added_ms(
         ContextId::new_from_entropy([3u8; 32]),
         bob_authority,
         mobile_authority,
         "Bob's Mobile".to_string(),
         1,
+        aura_relational::contacts::test_support::fresh(1),
     )
     .to_generic()];
 
@@ -354,12 +355,13 @@ async fn control_multifactor_ceremony_works_with_shared_transport_body() {
     let _mobile_agent = Arc::new(mobile_agent);
 
     // Add mobile device as a contact so Bob can communicate with it
-    let contact_facts = vec![ContactFact::added_with_timestamp_ms(
+    let contact_facts = vec![ContactFact::added_ms(
         ContextId::new_from_entropy([4u8; 32]),
         bob_authority,
         mobile_authority,
         "Bob's Mobile".to_string(),
         1,
+        aura_relational::contacts::test_support::fresh(1),
     )
     .to_generic()];
 

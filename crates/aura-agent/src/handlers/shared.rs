@@ -190,3 +190,62 @@ pub fn context_commitment_from_journal(
     }
     Ok(Hash32(hasher.finalize()))
 }
+
+fn stamping_failure(
+    message: &'static str,
+    source: impl std::error::Error + Send + Sync + 'static,
+) -> crate::core::AgentError {
+    crate::core::AgentError::Aura(aura_core::AuraError::Internal {
+        message: message.into(),
+        source: Some(std::sync::Arc::new(source)),
+    })
+}
+
+/// Advance the runtime's logical clock past `observed` facts of one
+/// order-independent family: the shared stamping step for causal metadata
+/// (docs/105_journal.md §4.2.1).
+pub async fn advance_clock_past<F: aura_journal::causal_reduction::CausalFact>(
+    effects: &AuraEffectSystem,
+    observed: &[F],
+) -> AgentResult<aura_core::time::LogicalTime> {
+    use aura_core::effects::time::LogicalClockEffects;
+    let vector = aura_journal::causal_reduction::merged_vector(
+        observed.iter().map(|fact| &fact.causal_metadata().clock),
+    );
+    effects
+        .logical_advance(Some(&vector))
+        .await
+        .map_err(|source| stamping_failure("advance logical clock", source))
+}
+
+/// Every committed contact fact of `authority`, tagged.
+pub async fn load_tagged_contact_facts(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+) -> AgentResult<Vec<aura_relational::TaggedContactFact>> {
+    load_relational_fact_envelopes_by_type(
+        effects,
+        authority,
+        aura_relational::CONTACT_FACT_TYPE_ID,
+    )
+    .await?
+    .iter()
+    .map(|envelope| {
+        aura_relational::ContactFact::try_from_envelope(envelope)
+            .map(aura_relational::TaggedContactFact::new)
+            .map_err(|source| stamping_failure("decode committed contact fact", source))
+    })
+    .collect()
+}
+
+/// Causal metadata for a new contact fact about `key` in `authority`'s
+/// contact list, observing every committed contact fact.
+pub async fn stamp_contact_causal(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    key: aura_relational::ContactCausalKey,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    let observed = load_tagged_contact_facts(effects, authority).await?;
+    let clock = advance_clock_past(effects, &observed).await?;
+    Ok(aura_relational::contact_causal(key, &observed, &clock))
+}

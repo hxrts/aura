@@ -4,11 +4,12 @@
 //! all frontends via the RuntimeBridge abstraction.
 
 use super::error::runtime_call;
+use crate::runtime_bridge::{CausalStampKey, RuntimeBridge};
 use crate::views::contacts::ReadReceiptPolicy;
 use crate::workflows::context::default_relational_context;
 use crate::workflows::observed_snapshot::observed_contacts_snapshot;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::{require_runtime, timeout_runtime_call};
+use crate::workflows::runtime::{require_runtime, runtime_causal_stamp, timeout_runtime_call};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_chat::ChatFact;
@@ -18,11 +19,27 @@ use aura_core::types::identifiers::ChannelId;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_journal::DomainFact;
-use aura_relational::{ContactFact, FriendshipFact};
+use aura_relational::{ContactCausalKey, ContactFact, FriendshipFact};
 use std::sync::Arc;
 use std::time::Duration;
 
 const CONTACTS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
+
+/// Causal metadata for a new contact fact about `key` (docs/105 §4.2.1).
+async fn contact_causal(
+    runtime: &Arc<dyn RuntimeBridge>,
+    operation: &'static str,
+    key: ContactCausalKey,
+) -> Result<aura_core::time::CausalMetadata, AuraError> {
+    runtime_causal_stamp(
+        runtime,
+        operation,
+        "stamp contact fact",
+        CONTACTS_RUNTIME_TIMEOUT,
+        CausalStampKey::Contact(key),
+    )
+    .await
+}
 
 fn friendship_context(local: AuthorityId, peer: AuthorityId) -> ContextId {
     let mut left = local.to_bytes();
@@ -63,13 +80,23 @@ pub async fn add_contact(
     }
 
     let owner_id = runtime.authority_id();
+    let causal = contact_causal(
+        &runtime,
+        "add_contact",
+        ContactCausalKey::Add {
+            owner: owner_id,
+            contact: target,
+        },
+    )
+    .await?;
 
-    let fact = ContactFact::added_with_timestamp_ms(
+    let fact = ContactFact::added_ms(
         default_relational_context(),
         owner_id,
         target,
         trimmed.to_string(),
         timestamp_ms,
+        causal,
     )
     .to_generic();
     let facts = vec![fact];
@@ -114,12 +141,22 @@ pub async fn add_contacts_batch(
             )));
         }
 
-        let fact = ContactFact::added_with_timestamp_ms(
+        let causal = contact_causal(
+            &runtime,
+            "add_contacts_batch",
+            ContactCausalKey::Add {
+                owner: owner_id,
+                contact: target,
+            },
+        )
+        .await?;
+        let fact = ContactFact::added_ms(
             default_relational_context(),
             owner_id,
             target,
             trimmed.to_string(),
             *timestamp_ms,
+            causal,
         )
         .to_generic();
         facts.push(fact);
@@ -161,12 +198,22 @@ pub async fn update_contact_nickname(
 
     // Contacts are currently modeled as generic relational facts; use a stable
     // default context so they don't depend on "current home/chat" context.
-    let fact = ContactFact::renamed_with_timestamp_ms(
+    let causal = contact_causal(
+        &runtime,
+        "update_contact_nickname",
+        ContactCausalKey::Rename {
+            owner: owner_id,
+            contact: target,
+        },
+    )
+    .await?;
+    let fact = ContactFact::renamed_ms(
         default_relational_context(),
         owner_id,
         target,
         trimmed.to_string(),
         timestamp_ms,
+        causal,
     )
     .to_generic();
     let facts = vec![fact];
@@ -198,11 +245,21 @@ pub async fn remove_contact(
 
     // Contacts are currently modeled as generic relational facts; use a stable
     // default context so they don't depend on "current home/chat" context.
-    let fact = ContactFact::removed_with_timestamp_ms(
+    let causal = contact_causal(
+        &runtime,
+        "remove_contact",
+        ContactCausalKey::Remove {
+            owner: owner_id,
+            contact: target,
+        },
+    )
+    .await?;
+    let fact = ContactFact::removed_ms(
         default_relational_context(),
         owner_id,
         target,
         timestamp_ms,
+        causal,
     )
     .to_generic();
     let facts = vec![fact];
@@ -415,12 +472,22 @@ pub async fn set_read_receipt_policy(
     let owner_id = runtime.authority_id();
 
     // ReadReceiptPolicy is re-exported from aura_relational, so we can use it directly
+    let causal = contact_causal(
+        &runtime,
+        "set_read_receipt_policy",
+        ContactCausalKey::ReadReceiptPolicy {
+            owner: owner_id,
+            contact: target,
+        },
+    )
+    .await?;
     let fact = ContactFact::read_receipt_policy_updated_ms(
         default_relational_context(),
         owner_id,
         target,
         policy,
         timestamp_ms,
+        causal,
     )
     .to_generic();
     let facts = vec![fact];

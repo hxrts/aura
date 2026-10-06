@@ -65,6 +65,7 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
         nickname: "Alice".to_string(),
         added_at: t(1),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::fresh(1),
     };
     let renamed = ContactFact::Renamed {
         context_id: ctx,
@@ -72,6 +73,14 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
         contact_id: alice,
         new_nickname: "Alice Cooper".to_string(),
         renamed_at: t(2),
+        causal: aura_relational::contacts::test_support::causal_after(
+            1,
+            aura_relational::ContactCausalKey::Rename {
+                owner: own_authority,
+                contact: alice,
+            },
+            &[&added],
+        ),
     };
 
     let mut updates = pipeline.subscribe();
@@ -130,6 +139,7 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
         nickname: "Alice".to_string(),
         added_at: t(1),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::fresh(1),
     };
     let updated_added = ContactFact::Added {
         context_id: ctx,
@@ -138,6 +148,14 @@ async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_f
         nickname: "Alice-Maple".to_string(),
         added_at: t(2),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::causal_after(
+            1,
+            aura_relational::ContactCausalKey::Add {
+                owner: own_authority,
+                contact: alice,
+            },
+            &[&initial_added],
+        ),
     };
 
     let mut updates = pipeline.subscribe();
@@ -199,6 +217,7 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
         nickname: "Alice-Maple".to_string(),
         added_at: t(1),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::fresh(1),
     };
     let fallback_named = ContactFact::Added {
         context_id: ctx,
@@ -207,6 +226,14 @@ async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_ident
         nickname: contact_id.to_string(),
         added_at: t(2),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::causal_after(
+            1,
+            aura_relational::ContactCausalKey::Add {
+                owner: own_authority,
+                contact: contact_id,
+            },
+            &[&human_named],
+        ),
     };
 
     let mut updates = pipeline.subscribe();
@@ -268,6 +295,7 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
         nickname: "Guardian".to_string(),
         added_at: t(1),
         invitation_code: None,
+        causal: aura_relational::contacts::test_support::fresh(1),
     };
 
     let binding = RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::GuardianBinding {
@@ -305,7 +333,11 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
 }
 
 #[tokio::test]
-async fn malformed_domain_fact_bytes_emit_error_signal() {
+/// A matching-domain codec fault on a required view is terminal for the
+/// scheduler (required reactive publication ownership): it never completes a
+/// Batch or degrades to a soft ERROR_SIGNAL. The retained native codec cause
+/// is asserted by `required_signal_views_matching_domain_codec_faults_are_terminal`.
+async fn malformed_required_domain_fact_bytes_are_terminal() {
     let reactive = ReactiveHandler::new();
     register_app_signals(&reactive).await.unwrap();
 
@@ -330,7 +362,9 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
         context_id: ctx,
         envelope: aura_core::types::facts::FactEnvelope {
             type_id: aura_core::types::facts::FactTypeId::from(CONTACT_FACT_TYPE_ID),
-            schema_version: 1,
+            // The current ContactFact schema (aura-relational facts.rs domain_fact),
+            // so decoding reaches the malformed payload.
+            schema_version: 2,
             encoding: aura_core::types::facts::FactEncoding::DagCbor,
             payload: vec![0xff, 0x00, 0x01],
         },
@@ -338,25 +372,25 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
 
     let mut updates = pipeline.subscribe();
     pipeline
-        .publish_journal_facts(vec![fact(1, FactContent::Relational(bad))])
+        .publish_journal_facts(vec![fact(1, FactContent::Relational(bad.clone()))])
         .await
         .unwrap_or_else(|error| panic!("reactive facts published: {error}"));
 
-    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
-        Ok(Ok(update)) => update,
-        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
-        Err(_) => panic!("expected scheduler batch"),
-    };
-    assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
-
-    let err = reactive.read(&*ERROR_SIGNAL).await.unwrap();
-
-    let msg = match err {
-        Some(msg) => msg,
-        None => panic!("expected Some(AppError)"),
-    };
+    match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {}
+        Ok(Ok(update)) => panic!("malformed required fact cannot complete a batch: {update:?}"),
+        Ok(Err(err)) => panic!("expected terminal scheduler close, got recv error: {err}"),
+        Err(_) => panic!("expected terminal scheduler close"),
+    }
     assert!(
-        msg.to_string().contains("decode ContactFact"),
-        "error should mention ContactFact decode failure, got: {msg}"
+        reactive.read(&*ERROR_SIGNAL).await.unwrap().is_none(),
+        "terminal failure is not downgraded to a soft error signal"
+    );
+    assert!(
+        pipeline
+            .publish_journal_facts(vec![fact(2, FactContent::Relational(bad))])
+            .await
+            .is_err(),
+        "a terminated scheduler does not keep accepting facts"
     );
 }

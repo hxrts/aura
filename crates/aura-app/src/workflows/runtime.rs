@@ -275,6 +275,26 @@ where
     }
 }
 
+/// Causal metadata for a new order-independent fact (docs/105 §4.2.1): the
+/// runtime advances its logical clock past the facts of `key`'s family and
+/// records what the new fact revokes or supersedes.
+pub(crate) async fn runtime_causal_stamp(
+    runtime: &Arc<dyn RuntimeBridge>,
+    operation: &'static str,
+    stage: &'static str,
+    duration: Duration,
+    key: crate::runtime_bridge::CausalStampKey,
+) -> Result<aura_core::time::CausalMetadata, AuraError> {
+    Ok(
+        timeout_runtime_call(runtime, operation, "causal_stamp", duration, || {
+            runtime.causal_stamp(key)
+        })
+        .await
+        .map_err(|e| crate::workflows::error::runtime_call(stage, e))?
+        .map_err(|e| crate::workflows::error::runtime_call(stage, e))?,
+    )
+}
+
 /// Build a runtime-backed retry policy scaled for the active workflow lane.
 /// Build a runtime-backed retry policy scaled for the active workflow lane.
 pub fn workflow_retry_policy(

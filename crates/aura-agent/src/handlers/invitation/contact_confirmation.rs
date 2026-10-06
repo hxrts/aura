@@ -603,6 +603,15 @@ async fn publish_verified_contact_response(
         };
         let contact_id = verified.stored.shareable.sender_id;
         let context_id = handler.context.effect_context.context_id();
+        let causal = crate::handlers::shared::stamp_contact_causal(
+            effects,
+            own_id,
+            aura_relational::ContactCausalKey::Add {
+                owner: own_id,
+                contact: contact_id,
+            },
+        )
+        .await?;
         let fact = ContactFact::Added {
             context_id,
             owner_id: own_id,
@@ -610,6 +619,7 @@ async fn publish_verified_contact_response(
             nickname: nickname.clone().unwrap_or_else(|| contact_id.to_string()),
             added_at: now,
             invitation_code: None,
+            causal,
         };
         handler
             .commit_contact_fact_and_record_observation(effects, context_id, &fact)

@@ -462,22 +462,36 @@ async fn establish_contact_exchange(
 
     let left_timestamp = left.runtime().effects().current_timestamp_ms().await;
     let right_timestamp = right.runtime().effects().current_timestamp_ms().await;
+    let stamp = |agent: &Arc<AuraAgent>, owner, contact| {
+        let bridge = agent.clone().as_runtime_bridge();
+        async move {
+            bridge
+                .causal_stamp(aura_app::runtime_bridge::CausalStampKey::Contact(
+                    aura_relational::ContactCausalKey::Add { owner, contact },
+                ))
+                .await
+        }
+    };
+    let left_causal = stamp(left, left.authority_id(), right.authority_id()).await?;
+    let right_causal = stamp(right, right.authority_id(), left.authority_id()).await?;
 
-    let left_contact = ContactFact::added_with_timestamp_ms(
+    let left_contact = ContactFact::added_ms(
         relational_context,
         left.authority_id(),
         right.authority_id(),
         right_name.to_string(),
         left_timestamp,
+        left_causal,
     )
     .to_generic();
 
-    let right_contact = ContactFact::added_with_timestamp_ms(
+    let right_contact = ContactFact::added_ms(
         relational_context,
         right.authority_id(),
         left.authority_id(),
         left_name.to_string(),
         right_timestamp,
+        right_causal,
     )
     .to_generic();
 

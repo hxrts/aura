@@ -627,6 +627,15 @@ impl<'a> InvitationContactHandler<'a> {
                     )
                     .await?;
 
+                    let causal = crate::handlers::shared::stamp_contact_causal(
+                        effects.as_ref(),
+                        self.handler.context.authority.authority_id(),
+                        aura_relational::ContactCausalKey::Add {
+                            owner: self.handler.context.authority.authority_id(),
+                            contact: acceptance.acceptor_id,
+                        },
+                    )
+                    .await?;
                     let contact_fact = ContactFact::Added {
                         context_id,
                         owner_id: self.handler.context.authority.authority_id(),
@@ -640,6 +649,7 @@ impl<'a> InvitationContactHandler<'a> {
                             uncertainty: None,
                         },
                         invitation_code: None,
+                        causal,
                     };
 
                     effects

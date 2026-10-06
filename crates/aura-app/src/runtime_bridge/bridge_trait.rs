@@ -26,6 +26,21 @@ use aura_core::{DeviceId, OwnedShutdownToken, OwnedTaskSpawner};
 use aura_journal::fact::{FactOptions, RelationalFact};
 use std::sync::Arc;
 
+/// Which fact family and key a causally stamped fact belongs to
+/// (`RuntimeBridge::causal_stamp`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CausalStampKey {
+    /// A home governance fact in the home `context_id` (docs/115 §3.4).
+    HomeGovernance {
+        /// Home context.
+        context_id: ContextId,
+        /// Governance key.
+        key: aura_social::HomeGovernanceKey,
+    },
+    /// A contact fact of the runtime authority's contact list.
+    Contact(aura_relational::ContactCausalKey),
+}
+
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[allow(missing_docs)] // Trait method docs evolving with API
@@ -325,18 +340,17 @@ pub trait RuntimeBridge: Send + Sync {
         message_id: String,
     ) -> Result<(), IntentError>;
 
-    /// Causal metadata for a new home governance fact about `key` in the home
-    /// `context_id`: the runtime advances its logical clock past every
-    /// governance fact it holds for that home and records which of them the
-    /// new fact revokes or supersedes (docs/115 §3.4).
-    async fn home_governance_causal(
+    /// Causal metadata for a new order-independent fact (docs/105 §4.2.1):
+    /// the runtime advances its logical clock past every fact of the family
+    /// it holds for `key` and records which of them the new fact revokes or
+    /// supersedes.
+    async fn causal_stamp(
         &self,
-        context_id: ContextId,
-        key: aura_social::HomeGovernanceKey,
+        key: CausalStampKey,
     ) -> Result<aura_core::time::CausalMetadata, IntentError> {
-        let _ = (context_id, key);
+        let _ = key;
         Err(IntentError::no_agent(
-            "Home governance facts cannot be authored in offline mode",
+            "Causally stamped facts cannot be authored in offline mode",
         ))
     }
 

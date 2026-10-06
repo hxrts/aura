@@ -206,8 +206,14 @@ Summary:
 - Runtime home projection creates a canonical home only from a `HomeCreationWitness` derived through `ProjectionOwner` from `SocialFact::HomeCreated`. The invitee first verifies its AMP checkpoint and local join, commits the creation fact, then binds that fact to opaque joined-home evidence before projecting. Accepted invitation evidence on the inviter only enriches an existing home; `MemberJoined` and moderation facts cannot create one. The home reducer buffers early membership, binds joins to both home ID and context, deduplicates replay, and counts only materialized members; a remote creator is not the local online member. The witness proves fact shape; journal ingestion and the invitation workflow own commitment/authenticity upstream.
 - The home view keeps each home's governance fact set and re-reduces it with
   `reduce_home_governance` after every batch; governance facts are never
-  applied in arrival order. `home_governance_causal` advances the runtime
-  logical clock past the home's committed governance facts before a write.
+  applied in arrival order. `causal_stamp` advances the runtime logical
+  clock past the family's committed facts before a write (home governance
+  facts of the home, or the authority's contact facts through
+  `handlers::shared::stamp_contact_causal`, which invitation handlers also
+  use).
+- The contacts view keeps the contact fact set (`ContactFactLog`) and
+  re-reduces the affected contact with `aura_relational::reduce_contacts`;
+  contact facts are never applied in arrival order.
 - Runtime invitation projection creates rows only from `InvitationCreationWitness` supplied by a validated imported cache record or `InvitationFact::Sent`; status-only facts update existing rows but cannot fabricate one. Runtime contact projection creates rows only from `ContactAddedWitness` supplied by `ContactFact::Added`; friendship and guardian facts enrich established contacts, with early friendship state buffered until creation arrives.
 - Runtime-owned service declarations should prefer the `#[actor_owned(...)]` layer where a service exposes a stable long-lived command/ingress boundary; changed-files ratchets in `just ci-ownership-policy` enforce this incrementally.
 - Task-supervision service roots that do not expose a stable command-ingress surface should use `#[actor_root(...)]` instead of forcing the store-style `#[actor_owned(...)]` command-enum pattern.

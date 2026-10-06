@@ -32,7 +32,9 @@ pub use account::{
 };
 pub use chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
 pub use collection::DomainCollection;
-pub use contacts::{Contact, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};
+pub use contacts::{
+    Contact, ContactFactLog, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy,
+};
 pub use display::{
     format_network_status, format_network_status_with_severity, format_relative_time,
     format_relative_time_from, format_relative_time_ms, format_timestamp, format_timestamp_full,

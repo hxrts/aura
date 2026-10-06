@@ -16,9 +16,10 @@ use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
-    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
-    DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo, InvitationMutationOutcome,
-    RendezvousStatus, RuntimeBridge, RuntimeBridgeError, SettingsBridgeState, SyncStatus,
+    BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CausalStampKey,
+    CeremonyProcessingOutcome, DiscoveryTriggerOutcome, InvitationBridgeStatus, InvitationInfo,
+    InvitationMutationOutcome, RendezvousStatus, RuntimeBridge, RuntimeBridgeError,
+    SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui_contract::{
@@ -40,7 +41,7 @@ use aura_core::effects::{
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
-    time::{LogicalClockEffects, PhysicalTimeEffects},
+    time::PhysicalTimeEffects,
     transport::TransportReceipt,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
     TransportEnvelope,
@@ -72,8 +73,8 @@ use aura_protocol::amp::{
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
-    home_governance_causal, observed_governance_vector, HomeBanFact, HomeGovernanceKey,
-    HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, TaggedHomeGovernanceEvent,
+    home_governance_causal, HomeBanFact, HomeGovernanceKey, HomeKickFact, HomeMuteFact,
+    HomeUnbanFact, HomeUnmuteFact, TaggedHomeGovernanceEvent,
 };
 
 use std::collections::{BTreeSet, HashMap};
@@ -1182,12 +1183,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
         })
     }
 
-    async fn home_governance_causal(
+    async fn causal_stamp(
         &self,
-        context_id: ContextId,
-        key: HomeGovernanceKey,
+        key: CausalStampKey,
     ) -> Result<aura_core::time::CausalMetadata, IntentError> {
         let effects = self.agent.runtime().effects();
+        let (context_id, key) = match key {
+            CausalStampKey::HomeGovernance { context_id, key } => (context_id, key),
+            CausalStampKey::Contact(key) => {
+                return crate::handlers::shared::stamp_contact_causal(
+                    &effects,
+                    self.agent.authority_id(),
+                    key,
+                )
+                .await
+                .map_err(|error| bridge_internal("Stamp contact fact failed", error));
+            }
+        };
         let committed = effects
             .load_committed_facts(self.agent.authority_id())
             .await
@@ -1215,8 +1227,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 observed.push(event);
             }
         }
-        let clock = effects
-            .logical_advance(Some(&observed_governance_vector(&observed)))
+        let clock = crate::handlers::shared::advance_clock_past(&effects, &observed)
             .await
             .map_err(|error| bridge_internal("Advance logical clock failed", error))?;
         Ok(home_governance_causal(key, &observed, &clock))
@@ -1718,13 +1729,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let causal = self
-            .home_governance_causal(
+            .causal_stamp(CausalStampKey::HomeGovernance {
                 context_id,
-                HomeGovernanceKey::Kick {
+                key: HomeGovernanceKey::Kick {
                     target,
                     channel: channel_id,
                 },
-            )
+            })
             .await?;
         let fact = HomeKickFact::new_ms(
             context_id,
@@ -1751,13 +1762,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let causal = self
-            .home_governance_causal(
+            .causal_stamp(CausalStampKey::HomeGovernance {
                 context_id,
-                HomeGovernanceKey::Ban {
+                key: HomeGovernanceKey::Ban {
                     target,
                     channel: None,
                 },
-            )
+            })
             .await?;
         let fact = HomeBanFact::new_ms(
             context_id,
@@ -1784,13 +1795,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let causal = self
-            .home_governance_causal(
+            .causal_stamp(CausalStampKey::HomeGovernance {
                 context_id,
-                HomeGovernanceKey::Unban {
+                key: HomeGovernanceKey::Unban {
                     target,
                     channel: None,
                 },
-            )
+            })
             .await?;
         let fact = HomeUnbanFact::new_ms(
             context_id,
@@ -1817,13 +1828,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let expires_at = duration_secs.map(|s| now.ts_ms.saturating_add(s.saturating_mul(1000)));
 
         let causal = self
-            .home_governance_causal(
+            .causal_stamp(CausalStampKey::HomeGovernance {
                 context_id,
-                HomeGovernanceKey::Mute {
+                key: HomeGovernanceKey::Mute {
                     target,
                     channel: None,
                 },
-            )
+            })
             .await?;
         let fact = HomeMuteFact::new_ms(
             context_id,
@@ -1850,13 +1861,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let now = effects.physical_time().await.map_err(map_time_read_error)?;
 
         let causal = self
-            .home_governance_causal(
+            .causal_stamp(CausalStampKey::HomeGovernance {
                 context_id,
-                HomeGovernanceKey::Unmute {
+                key: HomeGovernanceKey::Unmute {
                     target,
                     channel: None,
                 },
-            )
+            })
             .await?;
         let fact = HomeUnmuteFact::new_ms(
             context_id,

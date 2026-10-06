@@ -82,6 +82,7 @@ use aura_journal::DomainFact;
 use std::collections::BTreeSet;
 use std::sync::RwLock;
 
+pub mod contacts;
 pub mod facts;
 pub mod guardian;
 pub mod guardian_request;
@@ -106,10 +107,14 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 // Export domain fact types
+pub use contacts::{
+    contact_causal, observed_contact_vector, reduce_contacts, ContactCausalKey,
+    ContactExistenceIndex, ContactPair, ContactRecord, TaggedContactFact,
+};
 pub use facts::{
-    ContactExistenceIndex, ContactFact, ContactFactReducer, GuardianBindingDetailsFact,
-    GuardianBindingDetailsFactReducer, ReadReceiptPolicy, RecoveryGrantDetailsFact,
-    RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
+    ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
+    ReadReceiptPolicy, RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer,
+    CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
     RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 

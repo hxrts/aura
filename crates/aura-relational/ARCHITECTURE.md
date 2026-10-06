@@ -21,6 +21,7 @@ Relational-context domain logic for cross-authority relationships including unil
 | Incoming | aura-consensus | Cross-authority agreement |
 | Incoming | aura-macros | Domain fact derive macros |
 | Outgoing | — | `ContactFact`, `ContactFactReducer` for contact relationship facts |
+| Outgoing | — | `reduce_contacts`, `contact_causal`, `ContactExistenceIndex` for order-independent contact reduction |
 | Outgoing | — | `FriendshipFact`, `TrustIntroductionFact`, `WebOfTrustIndex` for web-of-trust evidence |
 | Outgoing | — | `GuardianRequest`, `GuardianRequestState` for guardian binding requests |
 | Outgoing | — | `GuardianService` for guardian relationship management |
@@ -31,6 +32,7 @@ Relational-context domain logic for cross-authority relationships including unil
 - Facts must be reduced under their matching `ContextId`.
 - Cross-authority relationships are established through explicit consensus flows.
 - Guardian bindings require mutual agreement.
+- Contact state is a deterministic function of the contact fact set (docs/105 §4.2.1): existence per `(owner, contact)` is a tagged observed-remove set, nickname and read receipt policy are multi-value registers (`Removed` clears both). Concurrent nicknames resolve to the latest in causal order; concurrent policies resolve to `Disabled` unless every survivor enables. Physical time orders nothing.
 
 ### InvariantRelationalMutualAgreement
 
@@ -92,6 +94,7 @@ cargo test -p aura-relational
 | Guardian binding reduces under wrong context | `src/facts.rs` `test_guardian_binding_reducer_rejects_context_mismatch` | Covered |
 | Contact fact serialization lossy | `src/facts.rs` `test_contact_fact_serialization` | Covered |
 | Reducer non-idempotent | `src/facts.rs` `test_contact_reducer_idempotence` | Covered |
+| Contact state depends on arrival order | `src/contacts.rs` permutation tests (remove-before-add, re-add, rename and policy races) | Covered |
 | Guardian binding details roundtrip lossy | `src/facts.rs` `guardian_binding_details_roundtrip` | Covered |
 | Guardian binding builder wrong | `src/guardian.rs` `test_guardian_binding_builder` | Covered |
 | Emergency op not distinguished | `src/guardian.rs` `test_recovery_op_emergency` | Covered |
@@ -108,7 +111,7 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Relational Contexts](../../docs/114_relational_contexts.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
 
-Required Contact and Friendship envelope decoders use the shared pure core
-validator for the declared domain and schema-1 policy. Structural and native
+Required Contact (schema 2, causal metadata) and Friendship (schema 1) envelope
+decoders use the shared pure core validator for the declared domain and schema. Structural and native
 JSON/DAG-CBOR failures remain explicit; successful decoding alone establishes
 neither journal commitment nor relationship agreement.

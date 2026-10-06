@@ -48,8 +48,12 @@ The crate uses explicit concern-owned submodules.
 - **Home governance projection**: `views::home::reduce_home_governance` derives
   overrides, capability configuration, moderator roles, bans, mutes and kick
   history from a home's whole governance fact set. Writers obtain causal
-  stamps through `RuntimeBridge::home_governance_causal`; offline bridges
-  cannot author governance facts.
+  stamps through `RuntimeBridge::causal_stamp`; offline bridges cannot
+  author governance or contact facts.
+- **Contacts projection**: contact workflows stamp every `ContactFact` through
+  `RuntimeBridge::causal_stamp`; `ContactFactLog` and
+  `ContactsState::apply_reduced_contact` materialize contacts from the whole
+  contact fact set.
 - **Enrollment setup export**: `RuntimeBridge` exports the runtime-owned setup
   code with `EnrollmentSetupExportError` preserved across the inversion boundary.
   Unavailable exporters fail explicitly; callers cannot assemble the device/key

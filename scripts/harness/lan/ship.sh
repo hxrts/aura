@@ -33,6 +33,11 @@ if [ "$build" = 1 ]; then
   AURA_EXPECT_COMMIT="$commit" nix develop -c just e2e-build-harness-live
 fi
 
+# Agents may edit the tree while a long build runs; refuse to ship a mixed build.
+[ -z "$(git status --porcelain --untracked-files=no)" ] && [ "$(git rev-parse HEAD)" = "$commit" ] || {
+  echo "ship: checkout changed during the build; rebuild from a clean commit" >&2; exit 1;
+}
+
 web_public="target/dx/aura-web/release/web/public"
 tailwind="crates/aura-web/public/assets/tailwind.css"
 for f in bin/aura target/release/tool_repl "$web_public/index.html" "$tailwind"; do

@@ -114,7 +114,19 @@ impl SimNet {
     pub async fn finish(&self) -> Result<()> {
         quiesce().await;
         check_runtimes_alive().await?;
-        for (seed, _, app) in live_runtimes() {
+        for (seed, agent, app) in live_runtimes() {
+            // One-shot invitation work must settle; a task still running
+            // here is waiting on a peer step that will not arrive.
+            let lingering: Vec<String> = agent
+                .active_supervised_tasks()
+                .into_iter()
+                .filter(|task| task.starts_with("invitation_service."))
+                .collect();
+            if !lingering.is_empty() {
+                return Err(anyhow!(
+                    "peer {seed}: invitation tasks still running: {lingering:?}"
+                ));
+            }
             let updates = app.read().await.refresh_hook_update_failures().await;
             if !updates.is_empty() {
                 return Err(anyhow!(

@@ -482,6 +482,38 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
+    async fn causal_stamp(
+        &self,
+        key: crate::runtime_bridge::CausalStampKey,
+    ) -> Result<aura_core::time::CausalMetadata, IntentError> {
+        // Recording test bridges stamp contact facts as one fixed device
+        // whose clock follows the contact facts it has recorded.
+        #[cfg(test)]
+        if let (Some(recorded), crate::runtime_bridge::CausalStampKey::Contact(contact_key)) =
+            (self.recorded_relational_facts.lock().await.as_ref(), key)
+        {
+            let observed: Vec<_> = recorded
+                .iter()
+                .filter_map(|fact| match fact {
+                    RelationalFact::Generic { envelope, .. } => {
+                        aura_relational::ContactFact::from_envelope(envelope)
+                            .map(aura_relational::TaggedContactFact::new)
+                    }
+                    _ => None,
+                })
+                .collect();
+            return Ok(aura_relational::contacts::test_support::causal(
+                0x0f,
+                contact_key,
+                &observed,
+            ));
+        }
+        let _ = key;
+        Err(IntentError::no_agent(
+            "Causally stamped facts cannot be authored in offline mode",
+        ))
+    }
+
     async fn amp_create_channel(
         &self,
         _params: ChannelCreateParams,

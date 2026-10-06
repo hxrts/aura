@@ -7,8 +7,10 @@ use std::collections::HashMap;
 use super::naming::{truncate_id_for_display, EffectiveName};
 
 // Re-export ReadReceiptPolicy from aura-relational for convenience
-use aura_relational::ContactFact;
+use aura_core::time::CausalTag;
 pub use aura_relational::ReadReceiptPolicy;
+use aura_relational::{reduce_contacts, ContactFact, ContactRecord, TaggedContactFact};
+use std::collections::BTreeMap;
 
 /// Journal evidence required to add a canonical contact to an observed view.
 /// Only `ContactFact::Added` can produce this witness.
@@ -46,6 +48,34 @@ impl ContactAddedWitness {
                 invitation_code: invitation_code.clone(),
             },
         })
+    }
+}
+
+/// The contact facts held by a projection. Contacts are reduced from this
+/// whole set (docs/105 §4.2.1), never from arrival order.
+#[derive(Debug, Clone, Default)]
+pub struct ContactFactLog {
+    facts: BTreeMap<CausalTag, TaggedContactFact>,
+}
+
+impl ContactFactLog {
+    /// Add a contact fact; returns false for a fact already held.
+    pub fn insert(&mut self, fact: TaggedContactFact) -> bool {
+        self.facts.insert(fact.tag(), fact).is_none()
+    }
+
+    /// The live relationship with `contact_id`, preferring `own`'s contact
+    /// list over another owner's.
+    #[must_use]
+    pub fn record_for(&self, own: AuthorityId, contact_id: AuthorityId) -> Option<ContactRecord> {
+        let mut records = reduce_contacts(
+            self.facts
+                .values()
+                .filter(|fact| fact.fact().contact_id() == contact_id),
+        );
+        records
+            .remove(&(own, contact_id))
+            .or_else(|| records.into_values().next())
     }
 }
 
@@ -347,6 +377,36 @@ impl ContactsState {
     pub fn apply_contact(&mut self, witness: ContactAddedWitness) {
         let contact = witness.contact;
         self.contacts.insert(contact.id, contact);
+    }
+
+    /// Materialize the reduced relationship with `contact_id`: remove the
+    /// contact when no relationship is live, otherwise create it from the
+    /// live add's creation witness (when absent) and set its reduced fields.
+    /// Observed enrichment (guardian, membership, presence, relationship)
+    /// is kept.
+    pub fn apply_reduced_contact(
+        &mut self,
+        contact_id: AuthorityId,
+        record: Option<&ContactRecord>,
+        witness: impl FnOnce(&ContactFact) -> Option<ContactAddedWitness>,
+    ) {
+        let Some(record) = record else {
+            self.contacts.remove(&contact_id);
+            return;
+        };
+        if !self.contacts.contains_key(&contact_id) {
+            let Some(witness) = witness(&record.latest_add) else {
+                return;
+            };
+            self.apply_contact(witness);
+        }
+        self.update_contact(&contact_id, |contact| {
+            contact.nickname = record.nickname.clone().unwrap_or_default();
+            contact.nickname_suggestion = record.nickname_suggestion.clone();
+            contact.invitation_code = record.invitation_code.clone();
+            contact.read_receipt_policy = record.read_receipt_policy;
+            contact.last_interaction = Some(record.last_interaction_ms);
+        });
     }
 
     /// Remove a contact.

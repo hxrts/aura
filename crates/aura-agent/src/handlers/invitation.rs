@@ -19,14 +19,10 @@ use execution::{
     timeout_prepare_invitation_stage,
 };
 use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
-use crate::reactive::app_signal_views;
 use crate::runtime::services::InvitationManager;
-#[cfg(feature = "choreo-backend-telltale-machine")]
-use crate::runtime::{open_owned_manifest_vm_session_admitted, AuraEffectSystem};
+use crate::runtime::AuraEffectSystem;
 #[cfg(feature = "choreo-backend-telltale-machine")]
 use crate::runtime::vm_host_bridge::AuraVmHostWaitStatus;
-#[cfg(not(feature = "choreo-backend-telltale-machine"))]
-use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use device_enrollment::InvitationDeviceEnrollmentHandler;
 use guardian::InvitationGuardianHandler;
@@ -63,11 +59,6 @@ use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 use aura_invitation::shareable::ValidatedImportedInvitation;
 #[cfg(not(feature = "choreo-backend-telltale-machine"))]
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
-use aura_invitation::protocol::exchange::telltale_session_types_invitation::message_wrappers::{
-    InvitationAck as ExchangeInvitationAck,
-    InvitationOffer as ExchangeInvitationOffer,
-    InvitationResponse as ExchangeInvitationResponse,
-};
 use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
     GuardianAccept as GuardianInvitationAccept, GuardianConfirm as GuardianInvitationConfirm,
     GuardianRequest as GuardianInvitationRequest,
@@ -77,7 +68,7 @@ use aura_invitation::protocol::device_enrollment::telltale_session_types_invitat
 };
 use aura_invitation::{
     DeviceEnrollmentResponse, GuardianAccept, GuardianConfirm, GuardianRequest,
-    InvitationAck, InvitationOffer, InvitationOperation,
+    InvitationOperation,
 };
 #[cfg(test)]
 use aura_invitation::DeviceEnrollmentAccept;
@@ -94,7 +85,7 @@ use aura_protocol::effects::{ChoreographicRole, RoleIndex};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use aura_signature::{threshold_signing_context_transcript_bytes, SecurityTranscript};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::future::Future;
 #[cfg(test)]
 use std::str::FromStr;
@@ -1387,6 +1378,15 @@ impl InvitationHandler {
             let should_emit_contact_fact = !sender_contact_exists;
             let should_update_code = sender_contact_exists;
             if should_emit_contact_fact || should_update_code {
+                let causal = crate::handlers::shared::stamp_contact_causal(
+                    effects.as_ref(),
+                    self.context.authority.authority_id(),
+                    aura_relational::ContactCausalKey::Add {
+                        owner: invitation.sender_id,
+                        contact: invitation.receiver_id,
+                    },
+                )
+                .await?;
                 let contact_fact = ContactFact::Added {
                     context_id: invitation.context_id,
                     owner_id: invitation.sender_id,
@@ -1397,6 +1397,7 @@ impl InvitationHandler {
                         uncertainty: None,
                     },
                     invitation_code: None,
+                    causal,
                 };
 
                 timeout_prepare_invitation_stage(
@@ -1685,6 +1686,16 @@ impl InvitationHandler {
             .await?
         {
             let context_id = self.context.effect_context.context_id();
+            let owner_id = self.context.authority.authority_id();
+            let causal = crate::handlers::shared::stamp_contact_causal(
+                effects,
+                owner_id,
+                aura_relational::ContactCausalKey::Add {
+                    owner: owner_id,
+                    contact: contact_id,
+                },
+            )
+            .await?;
             let fact = ContactFact::Added {
                 context_id,
                 owner_id: self.context.authority.authority_id(),
@@ -1695,6 +1706,7 @@ impl InvitationHandler {
                     uncertainty: None,
                 },
                 invitation_code,
+                causal,
             };
 
             tracing::debug!(

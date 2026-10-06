@@ -14,7 +14,7 @@ use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 pub(crate) use aura_app::views::invitations::InvitationCreationWitness;
 use aura_app::views::{
     chat::{note_to_self_channel_id, ChatState, Message, MessageDeliveryStatus},
-    contacts::{ContactError, ContactRelationshipState, ContactsState},
+    contacts::{ContactError, ContactFactLog, ContactRelationshipState, ContactsState},
     home::{
         reduce_home_governance, HomeCreationWitness, HomeGovernanceLog, HomeMember, HomeRole,
         HomeState, HomesState, PinnedMessageMeta,
@@ -45,7 +45,9 @@ use aura_invitation::{
     InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
-use aura_relational::{ContactFact, FriendshipFact, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID};
+use aura_relational::{
+    ContactFact, FriendshipFact, TaggedContactFact, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
+};
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
@@ -228,18 +230,6 @@ impl AcceptedHomeEvidence {
     ) -> Result<Self, String> {
         if invitation.status != DomainInvitationStatus::Accepted {
             return Err("home materialization requires an accepted invitation".into());
-        }
-        Self::from_invitation(invitation, name, now_ms)
-    }
-
-    pub(crate) fn from_exchange_response(
-        invitation: &CachedInvitation,
-        response: &aura_invitation::protocol::InvitationResponse,
-        name: &str,
-        now_ms: u64,
-    ) -> Result<Self, String> {
-        if !response.accepted || response.invitation_id != invitation.invitation_id {
-            return Err("home materialization requires a matching acceptance response".into());
         }
         Self::from_invitation(invitation, name, now_ms)
     }
@@ -755,6 +745,7 @@ pub struct ContactsSignalView {
     reactive: ReactiveHandler,
     state: Mutex<ContactsState>,
     pending_relationships: Mutex<HashMap<AuthorityId, ContactRelationshipState>>,
+    contact_log: Mutex<ContactFactLog>,
 }
 
 impl ContactsSignalView {
@@ -764,6 +755,7 @@ impl ContactsSignalView {
             reactive,
             state: Mutex::new(ContactsState::default()),
             pending_relationships: Mutex::new(HashMap::new()),
+            contact_log: Mutex::new(ContactFactLog::default()),
         }
     }
 
@@ -806,6 +798,7 @@ impl ReactiveView for ContactsSignalView {
                 };
                 let mut state = self.state.lock().await;
                 let mut pending = self.pending_relationships.lock().await;
+                let mut contact_log = self.contact_log.lock().await;
                 *state = current.value;
                 let mut changed = false;
 
@@ -817,88 +810,22 @@ impl ReactiveView for ContactsSignalView {
                             let contact_fact = ContactFact::try_from_envelope(envelope)
                                 .map_err(required_projection_fact_source)?;
 
-                            let creation_witness = owner.contact_added_witness(&contact_fact);
-                            match contact_fact {
-                                ContactFact::Added {
-                                    contact_id,
-                                    nickname,
-                                    added_at,
-                                    invitation_code,
-                                    ..
-                                } => {
-                                    tracing::info!(
-                                        contact_id = %contact_id,
-                                        nickname = %nickname,
-                                        added_at = added_at.ts_ms,
-                                        "ContactsSignalView: Processing ContactFact::Added"
-                                    );
-
-                                    let suggested_name = if nickname.trim().is_empty()
-                                        || nickname == contact_id.to_string()
-                                    {
-                                        None
-                                    } else {
-                                        Some(nickname.clone())
-                                    };
-
-                                    if let Some(contact) = state.contact_mut(&contact_id) {
-                                        // Preserve user-set local nickname and keep any existing
-                                        // human-friendly suggestion when incoming facts only carry
-                                        // fallback identity strings.
-                                        if let Some(suggested_name) = suggested_name {
-                                            contact.nickname_suggestion = Some(suggested_name);
-                                        }
-                                        contact.last_interaction = Some(added_at.ts_ms);
-                                        // Only overwrite the invitation code if the incoming
-                                        // fact carries one — later plain contact updates (e.g.
-                                        // nickname changes) should preserve the code that was
-                                        // recorded at establishment time.
-                                        if invitation_code.is_some() {
-                                            contact.invitation_code = invitation_code;
-                                        }
-                                    } else {
-                                        // Contact invitations carry an optional nickname, which we treat as
-                                        // a nickname_suggestion. The user's nickname is a separate local label.
-                                        tracing::info!(
-                                            contact_id = %contact_id,
-                                            "ContactsSignalView: Creating new contact entry"
-                                        );
-                                        state.apply_contact(
-                                            creation_witness.expect("matched ContactFact::Added"),
-                                        );
-                                    }
-                                    if let Some(relationship_state) = pending.remove(&contact_id) {
-                                        state
-                                            .set_relationship_state(contact_id, relationship_state);
-                                    }
-                                    changed = true;
-                                }
-                                ContactFact::Removed { contact_id, .. } => {
-                                    state.remove_contact(&contact_id);
-                                    pending.remove(&contact_id);
-                                    changed = true;
-                                }
-                                ContactFact::Renamed {
-                                    contact_id,
-                                    new_nickname,
-                                    renamed_at,
-                                    ..
-                                } => {
-                                    state.set_nickname(contact_id, new_nickname);
-                                    if let Some(contact) = state.contact_mut(&contact_id) {
-                                        contact.last_interaction = Some(renamed_at.ts_ms);
-                                    }
-                                    changed = true;
-                                }
-                                ContactFact::ReadReceiptPolicyUpdated {
-                                    contact_id,
-                                    policy,
-                                    ..
-                                } => {
-                                    state.set_read_receipt_policy(&contact_id, policy);
-                                    changed = true;
-                                }
+                            // Contacts reduce from the whole contact fact
+                            // set (docs/105 §4.2.1), not from arrival order.
+                            let contact_id = contact_fact.contact_id();
+                            // Re-reduce even for a held fact: a retried
+                            // snapshot must still materialize it.
+                            contact_log.insert(TaggedContactFact::new(contact_fact));
+                            let record = contact_log.record_for(self.own_authority, contact_id);
+                            state.apply_reduced_contact(contact_id, record.as_ref(), |added| {
+                                owner.contact_added_witness(added)
+                            });
+                            if record.is_none() {
+                                pending.remove(&contact_id);
+                            } else if let Some(relationship_state) = pending.remove(&contact_id) {
+                                state.set_relationship_state(contact_id, relationship_state);
                             }
+                            changed = true;
                         }
                         FactContent::Relational(RelationalFact::Generic { envelope, .. })
                             if envelope.type_id.as_str() == FRIENDSHIP_FACT_TYPE_ID =>
@@ -2291,8 +2218,10 @@ mod tests {
             .unwrap()
             .revision;
         for (type_id, view) in views {
-            // Social and home governance facts are at schema 3 (causal stamps).
+            // Social and home governance facts are at schema 3 and contact
+            // facts at schema 2 (causal stamps).
             let supported: u16 = match type_id {
+                CONTACT_FACT_TYPE_ID => 2,
                 SOCIAL_FACT_TYPE_ID
                 | HOME_BAN_FACT_TYPE_ID
                 | HOME_UNBAN_FACT_TYPE_ID
@@ -3809,7 +3738,11 @@ mod tests {
 
         // New contact established with an invitation code: the code must
         // land on the Contact view.
-        let contact_added = ContactFact::Added {
+        let peer_key = aura_relational::ContactCausalKey::Add {
+            owner: own_authority,
+            contact: peer,
+        };
+        let initial = ContactFact::Added {
             context_id: contact_context,
             owner_id: own_authority,
             contact_id: peer,
@@ -3819,9 +3752,9 @@ mod tests {
                 uncertainty: None,
             },
             invitation_code: Some("aura:v1:INITIAL".to_string()),
-        }
-        .to_generic();
-        view.update(&[fact_from_relational(contact_added)])
+            causal: aura_relational::contacts::test_support::fresh(1),
+        };
+        view.update(&[fact_from_relational(initial.to_generic())])
             .await
             .expect("required fixture projection succeeds");
 
@@ -3845,9 +3778,9 @@ mod tests {
                 uncertainty: None,
             },
             invitation_code: Some("aura:v1:REISSUED".to_string()),
-        }
-        .to_generic();
-        view.update(&[fact_from_relational(reissued)])
+            causal: aura_relational::contacts::test_support::causal_after(1, peer_key, &[&initial]),
+        };
+        view.update(&[fact_from_relational(reissued.to_generic())])
             .await
             .expect("required fixture projection succeeds");
 
@@ -3871,9 +3804,13 @@ mod tests {
                 uncertainty: None,
             },
             invitation_code: None,
-        }
-        .to_generic();
-        view.update(&[fact_from_relational(no_code)])
+            causal: aura_relational::contacts::test_support::causal_after(
+                1,
+                peer_key,
+                &[&initial, &reissued],
+            ),
+        };
+        view.update(&[fact_from_relational(no_code.to_generic())])
             .await
             .expect("required fixture projection succeeds");
 
@@ -3897,22 +3834,21 @@ mod tests {
         let view = ContactsSignalView::new(own_authority, reactive.clone());
         let owner = ProjectionOwner::new(reactive.clone());
 
-        view.update(&[fact_from_relational(
-            ContactFact::Added {
-                context_id,
-                owner_id: own_authority,
-                contact_id: peer,
-                nickname: "Peer".to_string(),
-                added_at: PhysicalTime {
-                    ts_ms: 1,
-                    uncertainty: None,
-                },
-                invitation_code: None,
-            }
-            .to_generic(),
-        )])
-        .await
-        .expect("required fixture projection succeeds");
+        let added = ContactFact::Added {
+            context_id,
+            owner_id: own_authority,
+            contact_id: peer,
+            nickname: "Peer".to_string(),
+            added_at: PhysicalTime {
+                ts_ms: 1,
+                uncertainty: None,
+            },
+            invitation_code: None,
+            causal: aura_relational::contacts::test_support::fresh(1),
+        };
+        view.update(&[fact_from_relational(added.to_generic())])
+            .await
+            .expect("required fixture projection succeeds");
 
         owner
             .update(ProjectionSlot::contacts(), |contacts| {
@@ -3936,6 +3872,14 @@ mod tests {
                     ts_ms: 2,
                     uncertainty: None,
                 },
+                causal: aura_relational::contacts::test_support::causal_after(
+                    1,
+                    aura_relational::ContactCausalKey::Remove {
+                        owner: own_authority,
+                        contact: peer,
+                    },
+                    &[&added],
+                ),
             }
             .to_generic(),
         )])
@@ -3976,6 +3920,7 @@ mod tests {
                 uncertainty: None,
             },
             invitation_code: None,
+            causal: aura_relational::contacts::test_support::fresh(1),
         }
         .to_generic();
         view.update(&[fact_from_relational(contact_added)])
@@ -4104,6 +4049,7 @@ mod tests {
                 uncertainty: None,
             },
             invitation_code: None,
+            causal: aura_relational::contacts::test_support::fresh(1),
         }
         .to_generic();
         view.update(&[fact_from_relational(inbound_added)])
@@ -4145,6 +4091,7 @@ mod tests {
                 nickname: "Peer".to_string(),
                 added_at: at,
                 invitation_code: None,
+                causal: aura_relational::contacts::test_support::fresh(1),
             }
             .to_generic(),
         );

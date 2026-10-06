@@ -80,6 +80,12 @@ impl AuraAgent {
         self.runtime.tasks().task_failures()
     }
 
+    /// Observed names (`group::task`) of supervised runtime tasks still
+    /// running, for diagnostics and tests.
+    pub fn active_supervised_tasks(&self) -> Vec<String> {
+        self.runtime.tasks().active_tasks()
+    }
+
     /// Get the session management service
     ///
     /// Provides access to session creation, management, and lifecycle operations.

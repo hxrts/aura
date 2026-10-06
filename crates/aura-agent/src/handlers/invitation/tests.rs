@@ -4824,12 +4824,13 @@ async fn production_import_rejects_self_certified_key_for_known_sender() {
     let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
     handler
         .invitation_cache
-        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+        .record_contact_fact(&ContactFact::added_ms(
             default_context_id_for_authority(sender_id),
             receiver.authority_id(),
             sender_id,
             "Known sender".to_string(),
             1,
+            aura_relational::contacts::test_support::fresh(1),
         ))
         .await;
 
@@ -4888,12 +4889,13 @@ async fn production_import_rejects_stale_self_certified_sender_key_for_known_con
         .unwrap();
     handler
         .invitation_cache
-        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+        .record_contact_fact(&ContactFact::added_ms(
             default_context_id_for_authority(sender_id),
             receiver.authority_id(),
             sender_id,
             "Rotated sender".to_string(),
             1,
+            aura_relational::contacts::test_support::fresh(1),
         ))
         .await;
 
@@ -4948,12 +4950,13 @@ async fn production_import_accepts_known_sender_with_trusted_device_key() {
         .unwrap();
     handler
         .invitation_cache
-        .record_contact_fact(&ContactFact::added_with_timestamp_ms(
+        .record_contact_fact(&ContactFact::added_ms(
             default_context_id_for_authority(sender_id),
             receiver.authority_id(),
             sender_id,
             "Trusted sender".to_string(),
             1,
+            aura_relational::contacts::test_support::fresh(1),
         ))
         .await;
 
@@ -5978,56 +5981,53 @@ large_stack_async_test!(
     }
 );
 
-large_stack_async_test!(
-    reimport_keeps_an_acknowledged_pending_acceptance,
-    {
-        use super::contact_confirmation::contact_acceptance_digest;
+large_stack_async_test!(reimport_keeps_an_acknowledged_pending_acceptance, {
+    use super::contact_confirmation::contact_acceptance_digest;
 
-        // Task 95: the invitee imports a pasted code and acknowledges its
-        // acceptance; the inviter's delivered envelope for the same
-        // invitation then arrives at a handler whose in-memory cache does not
-        // hold it. Re-importing must keep the stored acceptance ownership.
-        let pair = contact_pair(140).await;
-        let invitation = pair.create_contact_invitation().await;
-        let code = pair.signed_code(&invitation).await;
-        let imported = pair.import(&code).await;
-        let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
-        let mut stored = InvitationHandler::load_imported_invitation(
-            pair.receiver_effects.as_ref(),
-            pair.receiver_id,
-            &imported.invitation_id,
-            None,
-        )
-        .await
-        .expect("imported invitation should be stored");
-        stored.pending_acceptance_digest = Some(acceptance_digest);
-        InvitationHandler::persist_imported_invitation(
-            pair.receiver_effects.as_ref(),
-            pair.receiver_id,
-            &stored,
-        )
-        .await
-        .unwrap();
+    // Task 95: the invitee imports a pasted code and acknowledges its
+    // acceptance; the inviter's delivered envelope for the same
+    // invitation then arrives at a handler whose in-memory cache does not
+    // hold it. Re-importing must keep the stored acceptance ownership.
+    let pair = contact_pair(140).await;
+    let invitation = pair.create_contact_invitation().await;
+    let code = pair.signed_code(&invitation).await;
+    let imported = pair.import(&code).await;
+    let acceptance_digest = contact_acceptance_digest(b"the acceptance we sent");
+    let mut stored = InvitationHandler::load_imported_invitation(
+        pair.receiver_effects.as_ref(),
+        pair.receiver_id,
+        &imported.invitation_id,
+        None,
+    )
+    .await
+    .expect("imported invitation should be stored");
+    stored.pending_acceptance_digest = Some(acceptance_digest);
+    InvitationHandler::persist_imported_invitation(
+        pair.receiver_effects.as_ref(),
+        pair.receiver_id,
+        &stored,
+    )
+    .await
+    .unwrap();
 
-        handler_for(AuthorityContext::new_with_device(
-            pair.receiver_id,
-            pair.receiver_effects.device_id(),
-        ))
-        .import_invitation_code(&pair.receiver_effects, &code)
-        .await
-        .expect("re-delivered invitation should import");
+    handler_for(AuthorityContext::new_with_device(
+        pair.receiver_id,
+        pair.receiver_effects.device_id(),
+    ))
+    .import_invitation_code(&pair.receiver_effects, &code)
+    .await
+    .expect("re-delivered invitation should import");
 
-        let stored = InvitationHandler::load_imported_invitation(
-            pair.receiver_effects.as_ref(),
-            pair.receiver_id,
-            &imported.invitation_id,
-            None,
-        )
-        .await
-        .expect("imported invitation should stay stored");
-        assert_eq!(stored.pending_acceptance_digest, Some(acceptance_digest));
-    }
-);
+    let stored = InvitationHandler::load_imported_invitation(
+        pair.receiver_effects.as_ref(),
+        pair.receiver_id,
+        &imported.invitation_id,
+        None,
+    )
+    .await
+    .expect("imported invitation should stay stored");
+    assert_eq!(stored.pending_acceptance_digest, Some(acceptance_digest));
+});
 
 large_stack_async_test!(
     invitee_applies_only_authentic_responses_to_its_pending_acceptance,
@@ -7551,8 +7551,8 @@ async fn interrupted_signed_issuance_resumes_actual_original_registration_owner(
                     .expect("actual isolated selected profile custody"),
             )
             .with_authority(authority)
-                .with_config(config)
-                .with_shared_transport(transport.clone());
+            .with_config(config)
+            .with_shared_transport(transport.clone());
             let clock: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>> = None;
             let builder = match &clock {
                 Some(clock) => builder.with_physical_time_provider(clock.clone()),
@@ -7659,52 +7659,58 @@ async fn interrupted_signed_issuance_resumes_actual_original_registration_owner(
 
 // Run 119: the inviter's first response never reached the invitee. The
 // invitee's acceptance resend must draw a second, deliverable response.
-large_stack_async_test!(contact_acceptance_completes_when_the_first_response_is_lost, {
-    use super::contact_confirmation::CONTACT_INVITATION_RESPONSE_CONTENT_TYPE;
-    use std::sync::atomic::{AtomicBool, Ordering};
+large_stack_async_test!(
+    contact_acceptance_completes_when_the_first_response_is_lost,
+    {
+        use super::contact_confirmation::CONTACT_INVITATION_RESPONSE_CONTENT_TYPE;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
-    let pair = contact_pair(58).await;
-    let invitation = pair.create_contact_invitation().await;
-    let imported = pair.import(&pair.signed_code(&invitation).await).await;
+        let pair = contact_pair(58).await;
+        let invitation = pair.create_contact_invitation().await;
+        let imported = pair.import(&pair.signed_code(&invitation).await).await;
 
-    let dropped = AtomicBool::new(false);
-    let respond_and_drop_first = async {
-        loop {
-            let _ = pair
-                .sender_handler
-                .process_contact_invitation_acceptances(pair.sender_effects.clone())
-                .await;
-            if !dropped.load(Ordering::Relaxed)
-                && pair
-                    .receiver_effects
-                    .take_inbound_envelope(|env| {
-                        env.metadata.get("content-type").map(String::as_str)
-                            == Some(CONTACT_INVITATION_RESPONSE_CONTENT_TYPE)
-                    })
-                    .is_ok()
-            {
-                dropped.store(true, Ordering::Relaxed);
+        let dropped = AtomicBool::new(false);
+        let respond_and_drop_first = async {
+            loop {
+                let _ = pair
+                    .sender_handler
+                    .process_contact_invitation_acceptances(pair.sender_effects.clone())
+                    .await;
+                if !dropped.load(Ordering::Relaxed)
+                    && pair
+                        .receiver_effects
+                        .take_inbound_envelope(|env| {
+                            env.metadata.get("content-type").map(String::as_str)
+                                == Some(CONTACT_INVITATION_RESPONSE_CONTENT_TYPE)
+                        })
+                        .is_ok()
+                {
+                    dropped.store(true, Ordering::Relaxed);
+                }
+                sleep(Duration::from_millis(20)).await;
             }
-            sleep(Duration::from_millis(20)).await;
+        };
+        let accept = timeout(
+            Duration::from_secs(60),
+            Box::pin(
+                pair.receiver_handler
+                    .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
+            ),
+        );
+        let result = tokio::select! {
+            result = accept => result,
+            () = respond_and_drop_first => unreachable!("the inviter loop never ends"),
         }
-    };
-    let accept = timeout(
-        Duration::from_secs(60),
-        Box::pin(
-            pair.receiver_handler
-                .accept_invitation(pair.receiver_effects.clone(), &imported.invitation_id),
-        ),
-    );
-    let result = tokio::select! {
-        result = accept => result,
-        () = respond_and_drop_first => unreachable!("the inviter loop never ends"),
-    }
-    .expect("the resend must complete within the confirmation wait")
-    .expect("a resent acceptance draws a deliverable response");
+        .expect("the resend must complete within the confirmation wait")
+        .expect("a resent acceptance draws a deliverable response");
 
-    assert!(dropped.load(Ordering::Relaxed), "the first response was lost");
-    assert_eq!(result.new_status, InvitationStatus::Accepted);
-});
+        assert!(
+            dropped.load(Ordering::Relaxed),
+            "the first response was lost"
+        );
+        assert_eq!(result.new_status, InvitationStatus::Accepted);
+    }
+);
 
 #[tokio::test]
 async fn verified_peer_descriptors_survive_a_runtime_restart() {
@@ -7728,11 +7734,19 @@ async fn verified_peer_descriptors_survive_a_runtime_restart() {
     // A restart: a fresh rendezvous manager has no descriptors in memory.
     let _second = attach_test_rendezvous_manager(effects.as_ref(), own).await;
     let manager = effects.rendezvous_manager().unwrap();
-    assert!(manager.get_any_descriptor_for_authority(peer).await.is_none());
+    assert!(manager
+        .get_any_descriptor_for_authority(peer)
+        .await
+        .is_none());
 
-    handler.restore_verified_peer_descriptors(effects.as_ref()).await;
+    handler
+        .restore_verified_peer_descriptors(effects.as_ref())
+        .await;
     assert!(
-        manager.get_any_descriptor_for_authority(peer).await.is_some(),
+        manager
+            .get_any_descriptor_for_authority(peer)
+            .await
+            .is_some(),
         "the persisted verified hint is re-cached"
     );
 }

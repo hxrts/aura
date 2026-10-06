@@ -23,7 +23,9 @@
 //!     owner_id,
 //!     contact_id,
 //!     nickname: "Alice".to_string(),
-//!     added_at_ms: 1234567890,
+//!     added_at,
+//!     invitation_code: None,
+//!     causal, // stamped by the writer; see `contacts::contact_causal`
 //! };
 //!
 //! // Convert to generic for storage
@@ -35,7 +37,7 @@
 
 use crate::reducer_support::{hashed_generic_binding, physical_time_ms, reduce_typed_envelope};
 use aura_core::relational::{GuardianBinding, RecoveryGrant};
-use aura_core::time::PhysicalTime;
+use aura_core::time::{CausalMetadata, PhysicalTime};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::{hash, Hash32};
 use aura_journal::{
@@ -44,7 +46,6 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 /// Type identifier for contact facts
 pub const CONTACT_FACT_TYPE_ID: &str = "contact";
@@ -53,48 +54,6 @@ pub const CONTACT_FACT_TYPE_ID: &str = "contact";
 pub struct ContactFactKey {
     pub sub_type: &'static str,
     pub data: Vec<u8>,
-}
-
-/// Pure contact-presence index derived from `ContactFact` events.
-///
-/// The index keeps only the active owner/contact pairs so runtime code can make
-/// O(1) existence checks after an initial replay.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ContactExistenceIndex {
-    active_contacts: BTreeSet<(AuthorityId, AuthorityId)>,
-}
-
-impl ContactExistenceIndex {
-    /// Create an empty contact-presence index.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Apply a contact fact to the index.
-    pub fn apply_fact(&mut self, fact: &ContactFact) {
-        match fact {
-            ContactFact::Added {
-                owner_id,
-                contact_id,
-                ..
-            } => {
-                self.active_contacts.insert((*owner_id, *contact_id));
-            }
-            ContactFact::Removed {
-                owner_id,
-                contact_id,
-                ..
-            } => {
-                self.active_contacts.remove(&(*owner_id, *contact_id));
-            }
-            ContactFact::Renamed { .. } | ContactFact::ReadReceiptPolicyUpdated { .. } => {}
-        }
-    }
-
-    /// Return whether `owner_id` currently has `contact_id` as an active contact.
-    pub fn contains(&self, owner_id: AuthorityId, contact_id: AuthorityId) -> bool {
-        self.active_contacts.contains(&(owner_id, contact_id))
-    }
 }
 
 /// Read receipt policy for a contact
@@ -115,7 +74,7 @@ pub enum ReadReceiptPolicy {
 /// These facts represent contact-related state changes in the journal.
 /// They are stored as `RelationalFact::Generic` and reduced by `ContactFactReducer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "contact", schema_version = 1, context = "context_id")]
+#[domain_fact(type_id = "contact", schema_version = 2, context = "context_id")]
 pub enum ContactFact {
     /// Contact added to authority's contact list
     Added {
@@ -136,6 +95,8 @@ pub enum ContactFact {
         /// paths.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         invitation_code: Option<String>,
+        /// Causal metadata (docs/105 §4.2.1): an add of the contact OR-set.
+        causal: CausalMetadata,
     },
     /// Contact removed from authority's contact list
     Removed {
@@ -147,6 +108,9 @@ pub enum ContactFact {
         contact_id: AuthorityId,
         /// Timestamp when contact was removed (uses unified time system)
         removed_at: PhysicalTime,
+        /// Causal metadata: revokes the observed adds and supersedes the
+        /// observed nickname and policy writes of the same pair.
+        causal: CausalMetadata,
     },
     /// Contact nickname updated
     Renamed {
@@ -160,6 +124,8 @@ pub enum ContactFact {
         new_nickname: String,
         /// Timestamp when contact was renamed (uses unified time system)
         renamed_at: PhysicalTime,
+        /// Causal metadata: a nickname register write.
+        causal: CausalMetadata,
     },
     /// Read receipt policy updated for a contact
     ReadReceiptPolicyUpdated {
@@ -173,6 +139,8 @@ pub enum ContactFact {
         policy: ReadReceiptPolicy,
         /// Timestamp when policy was updated (uses unified time system)
         updated_at: PhysicalTime,
+        /// Causal metadata: a read receipt policy register write.
+        causal: CausalMetadata,
     },
 }
 
@@ -186,8 +154,8 @@ impl ContactFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(CONTACT_FACT_TYPE_ID),
-            1,
-            1,
+            2,
+            2,
             envelope,
         )
     }
@@ -212,23 +180,24 @@ impl ContactFact {
         }
     }
 
-    /// Get the timestamp in milliseconds (backward compatibility)
-    pub fn timestamp_ms(&self) -> u64 {
+    /// Get the causal metadata from any variant
+    pub fn causal(&self) -> &CausalMetadata {
         match self {
-            ContactFact::Added { added_at, .. } => added_at.ts_ms,
-            ContactFact::Removed { removed_at, .. } => removed_at.ts_ms,
-            ContactFact::Renamed { renamed_at, .. } => renamed_at.ts_ms,
-            ContactFact::ReadReceiptPolicyUpdated { updated_at, .. } => updated_at.ts_ms,
+            ContactFact::Added { causal, .. }
+            | ContactFact::Removed { causal, .. }
+            | ContactFact::Renamed { causal, .. }
+            | ContactFact::ReadReceiptPolicyUpdated { causal, .. } => causal,
         }
     }
 
-    /// Create an Added fact with millisecond timestamp (backward compatibility)
-    pub fn added_with_timestamp_ms(
+    /// Create an Added fact at `added_at_ms`, stamped with `causal`.
+    pub fn added_ms(
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
         nickname: String,
         added_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Added {
             context_id,
@@ -237,31 +206,35 @@ impl ContactFact {
             nickname,
             added_at: physical_time_ms(added_at_ms),
             invitation_code: None,
+            causal,
         }
     }
 
-    /// Create a Removed fact with millisecond timestamp (backward compatibility)
-    pub fn removed_with_timestamp_ms(
+    /// Create a Removed fact at `removed_at_ms`, stamped with `causal`.
+    pub fn removed_ms(
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
         removed_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Removed {
             context_id,
             owner_id,
             contact_id,
             removed_at: physical_time_ms(removed_at_ms),
+            causal,
         }
     }
 
-    /// Create a Renamed fact with millisecond timestamp (backward compatibility)
-    pub fn renamed_with_timestamp_ms(
+    /// Create a Renamed fact at `renamed_at_ms`, stamped with `causal`.
+    pub fn renamed_ms(
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
         new_nickname: String,
         renamed_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Renamed {
             context_id,
@@ -269,16 +242,18 @@ impl ContactFact {
             contact_id,
             new_nickname,
             renamed_at: physical_time_ms(renamed_at_ms),
+            causal,
         }
     }
 
-    /// Create a ReadReceiptPolicyUpdated fact with millisecond timestamp
+    /// Create a ReadReceiptPolicyUpdated fact at `updated_at_ms`, stamped with `causal`.
     pub fn read_receipt_policy_updated_ms(
         context_id: ContextId,
         owner_id: AuthorityId,
         contact_id: AuthorityId,
         policy: ReadReceiptPolicy,
         updated_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::ReadReceiptPolicyUpdated {
             context_id,
@@ -286,6 +261,7 @@ impl ContactFact {
             contact_id,
             policy,
             updated_at: physical_time_ms(updated_at_ms),
+            causal,
         }
     }
 }
@@ -484,15 +460,27 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    fn stamp() -> CausalMetadata {
+        CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: 1,
+                vector: Vec::new(),
+            },
+        }
+    }
+
     /// ContactFact survives to_bytes/from_bytes roundtrip without loss.
     #[test]
     fn test_contact_fact_serialization() {
-        let fact = ContactFact::added_with_timestamp_ms(
+        let fact = ContactFact::added_ms(
             test_context_id(),
             test_authority_id(1),
             test_authority_id(2),
             "Alice".to_string(),
             1234567890,
+            stamp(),
         );
 
         let bytes = fact.to_bytes();
@@ -503,12 +491,13 @@ mod tests {
 
     #[test]
     fn test_contact_fact_to_generic() {
-        let fact = ContactFact::renamed_with_timestamp_ms(
+        let fact = ContactFact::renamed_ms(
             test_context_id(),
             test_authority_id(1),
             test_authority_id(2),
             "Bob".to_string(),
             1234567899,
+            stamp(),
         );
 
         let generic = fact.to_generic();
@@ -531,6 +520,7 @@ mod tests {
             nickname: "Alice".to_string(),
             added_at: physical_time_ms(1234567890),
             invitation_code: Some("aura:v1:ABC123".to_string()),
+            causal: stamp(),
         };
 
         let envelope = fact.to_envelope();
@@ -550,18 +540,14 @@ mod tests {
     }
 
     #[test]
-    fn contact_added_without_code_is_none_and_backward_compatible() {
-        // Using the legacy helper (no invitation_code parameter) yields
-        // None. Also verifies that the envelope encoding of a fact with
-        // invitation_code=None matches — important for ensuring that
-        // pre-existing journal data stays loadable after the field was
-        // added.
-        let fact = ContactFact::added_with_timestamp_ms(
+    fn contact_added_without_code_is_none() {
+        let fact = ContactFact::added_ms(
             test_context_id(),
             test_authority_id(1),
             test_authority_id(2),
             "Alice".to_string(),
             1234567890,
+            stamp(),
         );
         match &fact {
             ContactFact::Added {
@@ -577,18 +563,36 @@ mod tests {
         assert_eq!(fact, restored);
     }
 
+    /// Schema 2 added causal metadata; schema 1 contact facts are rejected.
+    #[test]
+    fn contact_fact_rejects_schema_one() {
+        let fact = ContactFact::added_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Alice".to_string(),
+            1,
+            stamp(),
+        );
+        let mut envelope = fact.to_envelope();
+        assert!(ContactFact::try_from_envelope(&envelope).is_ok());
+        envelope.schema_version = 1;
+        assert!(ContactFact::try_from_envelope(&envelope).is_err());
+    }
+
     /// Reducing the same fact twice produces identical bindings — needed
     /// for replay-safe journal reduction.
     #[test]
     fn test_contact_reducer_idempotence() {
         let reducer = ContactFactReducer;
         let context_id = test_context_id();
-        let fact = ContactFact::added_with_timestamp_ms(
+        let fact = ContactFact::added_ms(
             context_id,
             test_authority_id(1),
             test_authority_id(2),
             "Alice".to_string(),
             1234567890,
+            stamp(),
         );
 
         let envelope = fact.to_envelope();
@@ -608,12 +612,13 @@ mod tests {
         let reducer = ContactFactReducer;
         assert_eq!(reducer.handles_type(), CONTACT_FACT_TYPE_ID);
 
-        let fact = ContactFact::added_with_timestamp_ms(
+        let fact = ContactFact::added_ms(
             test_context_id(),
             test_authority_id(1),
             test_authority_id(2),
             "Test".to_string(),
             0,
+            stamp(),
         );
 
         let envelope = fact.to_envelope();
@@ -632,25 +637,22 @@ mod tests {
         let contact = test_authority_id(99);
 
         let facts = vec![
-            ContactFact::added_with_timestamp_ms(
+            ContactFact::added_ms(
                 test_context_id(),
                 test_authority_id(1),
                 contact,
                 "Alice".to_string(),
                 0,
+                stamp(),
             ),
-            ContactFact::removed_with_timestamp_ms(
-                test_context_id(),
-                test_authority_id(1),
-                contact,
-                0,
-            ),
-            ContactFact::renamed_with_timestamp_ms(
+            ContactFact::removed_ms(test_context_id(), test_authority_id(1), contact, 0, stamp()),
+            ContactFact::renamed_ms(
                 test_context_id(),
                 test_authority_id(1),
                 contact,
                 "Bob".to_string(),
                 0,
+                stamp(),
             ),
         ];
 
@@ -662,25 +664,28 @@ mod tests {
     #[test]
     fn test_type_id_consistency() {
         let facts: Vec<ContactFact> = vec![
-            ContactFact::added_with_timestamp_ms(
+            ContactFact::added_ms(
                 test_context_id(),
                 test_authority_id(1),
                 test_authority_id(2),
                 "x".to_string(),
                 0,
+                stamp(),
             ),
-            ContactFact::removed_with_timestamp_ms(
+            ContactFact::removed_ms(
                 test_context_id(),
                 test_authority_id(1),
                 test_authority_id(2),
                 0,
+                stamp(),
             ),
-            ContactFact::renamed_with_timestamp_ms(
+            ContactFact::renamed_ms(
                 test_context_id(),
                 test_authority_id(1),
                 test_authority_id(2),
                 "y".to_string(),
                 0,
+                stamp(),
             ),
         ];
 
@@ -695,12 +700,13 @@ mod tests {
     #[test]
     fn test_contact_reducer_rejects_context_mismatch() {
         let reducer = ContactFactReducer;
-        let fact = ContactFact::added_with_timestamp_ms(
+        let fact = ContactFact::added_ms(
             test_context_id(),
             test_authority_id(1),
             test_authority_id(2),
             "Alice".to_string(),
             0,
+            stamp(),
         );
 
         let other_context = ContextId::new_from_entropy([99u8; 32]);
@@ -735,39 +741,6 @@ mod tests {
             result.is_none(),
             "Guardian binding fact with mismatched context must be rejected"
         );
-    }
-
-    #[test]
-    fn contact_existence_index_tracks_add_and_remove() {
-        let owner = test_authority_id(1);
-        let contact = test_authority_id(2);
-        let mut index = ContactExistenceIndex::new();
-
-        index.apply_fact(&ContactFact::added_with_timestamp_ms(
-            test_context_id(),
-            owner,
-            contact,
-            "Alice".to_string(),
-            1,
-        ));
-        assert!(index.contains(owner, contact));
-
-        index.apply_fact(&ContactFact::renamed_with_timestamp_ms(
-            test_context_id(),
-            owner,
-            contact,
-            "Bob".to_string(),
-            2,
-        ));
-        assert!(index.contains(owner, contact));
-
-        index.apply_fact(&ContactFact::removed_with_timestamp_ms(
-            test_context_id(),
-            owner,
-            contact,
-            3,
-        ));
-        assert!(!index.contains(owner, contact));
     }
 
     /// GuardianBindingDetailsFact survives serialization roundtrip with all
