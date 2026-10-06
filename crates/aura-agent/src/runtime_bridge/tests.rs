@@ -2473,6 +2473,26 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
             .cancel_key_rotation_ceremony(&first.ceremony_id)
             .await
             .expect("genuine cancellation publishes before shutting down its sink");
+        // The notice owner signs, then releases the cancelled generation
+        // (Task 80); let it do so before draining tasks.
+        let first_profile = crate::runtime::effects::enrollment_generation_profile_location(
+            &issuer.authority_id(),
+            first.pending_epoch.value(),
+        );
+        let released_by = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while issuer
+            .runtime()
+            .effects()
+            .secure_exists(&first_profile)
+            .await
+            .unwrap()
+        {
+            assert!(
+                std::time::Instant::now() < released_by,
+                "cancelled generation is released shortly after cancel"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
         issuer
             .runtime()
             .tasks()
@@ -2539,6 +2559,8 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
         let profile =
             crate::runtime::effects::enrollment_generation_profile_location(&authority, epoch);
         assert!(effects.secure_exists(&profile).await.unwrap());
+        drop(reserved);
+        drop(setup);
         drop(effects);
         drop(service);
         drop(app);
@@ -2696,26 +2718,150 @@ fn runtime_enrollment_cancellation_uses_original_issued_owner_and_window() {
             after.timeout_budget.deadline_at_ms(),
             before.timeout_budget.deadline_at_ms()
         );
-        assert!(
-            issuer
-                .runtime()
-                .effects()
-                .secure_exists(
-                    &crate::runtime::effects::enrollment_generation_profile_location(
-                        &issuer.authority_id(),
-                        start.pending_epoch.value(),
-                    ),
-                )
-                .await
-                .expect("required pending signing profile"),
-            "cancellation does not delete the signer before signed terminal notification"
-        );
+        // The notice owner signs the terminal notice before it releases the
+        // cancelled generation; the release itself is covered by
+        // `runtime_enrollment_cancel_then_reissue_without_restart`.
         issuer
             .invitations()
             .expect("original invitation owner")
             .cancel(&invitation.invitation_id)
             .await
             .expect("same genuine cancellation is idempotent");
+    });
+}
+
+/// Task 80: after "Cancel" with an invitee that never answers, a new
+/// enrollment starts without restart within a short bounded time, while the
+/// cancelled notice keeps retrying with its already signed bytes.
+#[test]
+fn runtime_enrollment_cancel_then_reissue_without_restart() {
+    run_async_test_on_large_stack(async move {
+        let (issuer, invitee, _invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "cancel-then-reissue",
+            )
+            .await;
+        let bridge = AgentRuntimeBridge::new(issuer.clone());
+        bridge
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect("genuine cancellation");
+        let setup_code = AgentRuntimeBridge::new(invitee.clone())
+            .export_device_enrollment_setup_request()
+            .await
+            .expect("fresh invitee setup");
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+            )
+            .unwrap(),
+        ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let replacement = loop {
+            let setup =
+                aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
+                    &app,
+                    setup_code.clone(),
+                )
+                .await
+                .expect("pin fresh setup");
+            match bridge
+                .initiate_device_enrollment_ceremony("Replacement".to_string(), setup)
+                .await
+            {
+                Ok(started) => break started,
+                Err(error) if std::time::Instant::now() < deadline => {
+                    eprintln!("replacement enrollment not yet admitted: {error}");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Err(error) => panic!(
+                    "a cancelled enrollment must release its generation without restart: {error}"
+                ),
+            }
+        };
+        assert_ne!(replacement.ceremony_id, start.ceremony_id);
+        assert_eq!(replacement.pending_epoch, start.pending_epoch);
+        assert_eq!(
+            issuer
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .unwrap(),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled,
+            ))
+        );
+    });
+}
+
+/// Task 8: an acceptance the initiator refused (here: cancelled) never ends
+/// as invitee success; both sides publish a typed non-success terminal.
+#[test]
+fn runtime_enrollment_refused_acceptance_is_terminal_on_both_sides() {
+    run_async_test_on_large_stack(async move {
+        use aura_app::ui_contract::{OperationId, SemanticOperationPhase};
+        let (issuer, invitee, invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "refused-acceptance",
+            )
+            .await;
+        AgentRuntimeBridge::new(issuer.clone())
+            .cancel_key_rotation_ceremony(&start.ceremony_id)
+            .await
+            .expect("genuine cancellation");
+        let invitee_bridge = Arc::new(AgentRuntimeBridge::new(invitee.clone()));
+        let info = invitee_bridge
+            .try_list_pending_invitations()
+            .await
+            .expect("invitee pending invitations")
+            .into_iter()
+            .find(|info| info.invitation_id == invitation.invitation_id)
+            .expect("imported enrollment invitation");
+        let invitee_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(aura_app::AppConfig::default(), invitee_bridge)
+                .unwrap(),
+        ));
+        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
+            &invitee_app,
+            &info,
+        )
+        .await
+        .expect_err("a refused acceptance cannot report success");
+        let failed = {
+            let core = invitee_app.read().await;
+            core.authoritative_semantic_facts().iter().any(|fact| {
+                matches!(fact,
+                    aura_app::ui_contract::AuthoritativeSemanticFact::OperationStatus {
+                        operation_id, status, ..
+                    } if operation_id == &OperationId::device_enrollment()
+                        && status.phase == SemanticOperationPhase::Failed
+                        && status.error.is_some())
+            })
+        };
+        assert!(failed, "invitee publishes Failed with a failure code");
+        let issuer_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+            )
+            .unwrap(),
+        ));
+        let observed =
+            aura_app::ui::workflows::ceremonies::observe_device_enrollment_completion_with_terminal_status(
+                &issuer_app,
+                &start.ceremony_id,
+                aura_app::ui_contract::OperationInstanceId("refused-acceptance".into()),
+            )
+            .await;
+        observed.result.expect("initiator observation");
+        let terminal = observed.terminal.expect("initiator typed terminal");
+        assert_ne!(terminal.status.phase, SemanticOperationPhase::Succeeded);
+        assert!(matches!(
+            terminal.status.phase,
+            SemanticOperationPhase::Cancelled | SemanticOperationPhase::Failed
+        ));
     });
 }
 

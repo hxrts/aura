@@ -913,13 +913,9 @@ impl InvitationServiceApi {
                     message: "required cancelled enrollment notice execution".into(),
                     source: Some(Arc::new(source)),
                 },
-            })?;
-            // The signed terminal notice is handled; only now release the
-            // cancelled pending generation (and its provisional signer), so a
-            // later enrollment is not refused until restart.
-            retirement
-                .retire_failed_enrollment_generation(&ceremony)
-                .await
+            })
+            // The notice owner signs first and then releases the cancelled
+            // pending generation before any send retry (Task 80).
         });
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
@@ -2875,6 +2871,73 @@ mod required_enrollment_task_tests {
             &record,
         ).await.expect("original independently bound issuer control");
         (issuer, clock, issued, start)
+    }
+
+    /// Task 35: an invitee that never accepts ends the initiator's tracked
+    /// completion as TimedOut at the original window, and the app-owned
+    /// completion operation publishes a typed Failed outcome.
+    #[tokio::test]
+    async fn unaccepted_enrollment_completion_times_out_with_typed_failure() {
+        use aura_app::runtime_bridge::{CeremonyFailureReason, CeremonyTerminalOutcome};
+        use aura_app::ui_contract::{
+            OperationInstanceId, SemanticFailureCode, SemanticOperationPhase,
+        };
+        let (issuer, clock, issued, start) =
+            Box::pin(cancellation_fixture("completion-times-out")).await;
+        let runner = issuer.ceremony_runner().await;
+        assert_eq!(
+            runner.terminal_outcome(&start.ceremony_id).await.unwrap(),
+            None,
+            "starting the enrollment is not its completion"
+        );
+        let deadline = issuer
+            .ceremony_tracker()
+            .await
+            .get(&start.ceremony_id)
+            .await
+            .expect("original registration")
+            .timeout_budget
+            .deadline_at_ms()
+            .min(issued.manifest().expires_at_ms);
+        let wall = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let outcome = loop {
+            clock.set_time(deadline + 1);
+            if let Some(outcome) = runner.terminal_outcome(&start.ceremony_id).await.unwrap() {
+                break outcome;
+            }
+            assert!(
+                std::time::Instant::now() < wall,
+                "initiator owner must terminate the tracked ceremony at its window"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        };
+        assert_eq!(
+            outcome,
+            CeremonyTerminalOutcome::Failed(CeremonyFailureReason::TimedOut)
+        );
+        let app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(crate::runtime_bridge::AgentRuntimeBridge::new(
+                    issuer.clone(),
+                )),
+            )
+            .expect("issuer app owner"),
+        ));
+        let observed =
+            aura_app::ui::workflows::ceremonies::observe_device_enrollment_completion_with_terminal_status(
+                &app,
+                &start.ceremony_id,
+                OperationInstanceId("completion-times-out".into()),
+            )
+            .await;
+        assert_eq!(observed.result.expect("observation"), Some(outcome));
+        let terminal = observed.terminal.expect("typed terminal publication");
+        assert_eq!(terminal.status.phase, SemanticOperationPhase::Failed);
+        assert_eq!(
+            terminal.status.error.map(|error| error.code),
+            Some(SemanticFailureCode::OperationTimedOut)
+        );
     }
 
     #[tokio::test]

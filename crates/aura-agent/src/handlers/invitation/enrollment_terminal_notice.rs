@@ -151,17 +151,49 @@ async fn open_notice_session(
     .map_err(stage)
 }
 
+/// A terminal notice signed for one original cancelled issuance. Only the
+/// signing helpers below construct it; retries resend the same bytes.
+pub(super) struct SignedCancelledNotice {
+    bytes: Vec<u8>,
+}
+
+/// Sign the live issuer's cancellation notice once, while the cancelled
+/// provisional generation is still held, so it can be released before any
+/// send retry (Task 80).
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "issued_original_window_terminal_notice",
     capability_type = VerifiedEnrollmentCancellationCapability,
     family = "runtime_helper"
 )]
-pub(super) async fn send_cancelled_notice(
-    effects: Arc<AuraEffectSystem>,
+pub(super) async fn sign_cancelled_notice(
+    effects: &Arc<AuraEffectSystem>,
     issued: &RetainedEnrollmentVmControl,
     runner: &CeremonyRunner,
     cancelled: &crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
+    window: &EnrollmentWindowCapability,
+) -> AgentResult<SignedCancelledNotice> {
+    let bytes = sign_cancelled_notice_bytes(
+        effects,
+        issued,
+        runner,
+        cancelled,
+        &IssuedNoticeWindowCapability::Active(window),
+    )
+    .await?;
+    Ok(SignedCancelledNotice { bytes })
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "issued_original_window_terminal_notice",
+    capability_type = SignedCancelledNotice,
+    family = "runtime_helper"
+)]
+pub(super) async fn send_cancelled_notice(
+    effects: Arc<AuraEffectSystem>,
+    issued: &RetainedEnrollmentVmControl,
+    notice: &SignedCancelledNotice,
     window: &EnrollmentWindowCapability,
     slot: &mut Option<OwnedVmSession>,
 ) -> AgentResult<()> {
@@ -171,12 +203,11 @@ pub(super) async fn send_cancelled_notice(
         .map_err(AgentError::from)?;
     validity
         .execute(effects.as_ref(), || {
-            Box::pin(send_cancelled_notice_within_validity(
+            Box::pin(send_signed_cancelled_notice(
                 effects.clone(),
                 issued,
-                runner,
-                cancelled,
                 IssuedNoticeWindowCapability::Active(&validity),
+                notice.bytes.clone(),
                 slot,
             ))
         })
@@ -184,21 +215,23 @@ pub(super) async fn send_cancelled_notice(
         .map_err(|source| validity.map_run_error("signed enrollment notice validity", source))
 }
 
+/// Sign the terminal notice for the original cancelled issuance. The control
+/// transcript is deterministic, so a notice signed once while the provisional
+/// generation is still held stays valid for every later send retry.
 #[aura_macros::capability_boundary(
     category = "capability_gated",
     capability = "IssuedNoticeWindowCapability",
     family = "runtime_helper"
 )]
-async fn send_cancelled_notice_within_validity(
-    effects: Arc<AuraEffectSystem>,
+async fn sign_cancelled_notice_bytes(
+    effects: &Arc<AuraEffectSystem>,
     issued: &RetainedEnrollmentVmControl,
     runner: &CeremonyRunner,
     cancelled: &crate::runtime::services::ceremony_tracker::VerifiedEnrollmentCancellationCapability,
-    window: IssuedNoticeWindowCapability<'_>,
-    slot: &mut Option<OwnedVmSession>,
-) -> AgentResult<()> {
+    window: &IssuedNoticeWindowCapability<'_>,
+) -> AgentResult<Vec<u8>> {
     cancelled
-        .require_runtime_owner(&effects)
+        .require_runtime_owner(effects)
         .map_err(AgentError::from)?;
     if cancelled.invitation() != &issued.manifest().invitation
         || cancelled.ceremony() != &issued.manifest().ceremony
@@ -228,6 +261,25 @@ async fn send_cancelled_notice_within_validity(
             "signed terminal notice exceeds wire bound",
         ));
     }
+    Ok(bytes)
+}
+
+#[aura_macros::capability_boundary(
+    category = "capability_gated",
+    capability = "IssuedNoticeWindowCapability",
+    family = "runtime_helper"
+)]
+async fn send_signed_cancelled_notice(
+    effects: Arc<AuraEffectSystem>,
+    issued: &RetainedEnrollmentVmControl,
+    window: IssuedNoticeWindowCapability<'_>,
+    bytes: Vec<u8>,
+    slot: &mut Option<OwnedVmSession>,
+) -> AgentResult<()> {
+    window.require_owner(issued, effects.as_ref())?;
+    issued
+        .require_runtime_owner(effects.as_ref())
+        .map_err(AgentError::from)?;
     let session = slot.insert(
         open_notice_session(
             effects.clone(),
@@ -299,6 +351,22 @@ pub(crate) async fn execute_recovered_cancelled_notice(
     window
         .require_issued_owner(&issued, effects.as_ref())
         .map_err(AgentError::from)?;
+    // Sign while the cancelled provisional generation is still held, then
+    // release it at once: a peer that never answers must not keep later
+    // enrollments refused for the whole notice window (Task 80). Retries only
+    // resend the already signed notice.
+    let bytes = sign_cancelled_notice_bytes(
+        &effects,
+        &issued,
+        &runner,
+        window.cancelled(),
+        &IssuedNoticeWindowCapability::Cancelled(&window),
+    )
+    .await?;
+    runner
+        .retire_failed_enrollment_generation(&issued.manifest().ceremony)
+        .await
+        .map_err(AgentError::from)?;
     let mut slot = None;
     loop {
         let attempt = window
@@ -306,8 +374,8 @@ pub(crate) async fn execute_recovered_cancelled_notice(
                 Box::pin(send_recovered_cancelled_notice(
                     effects.clone(),
                     &issued,
-                    &runner,
                     &window,
+                    bytes.clone(),
                     &mut slot,
                 ))
             })
@@ -341,22 +409,21 @@ pub(crate) async fn execute_recovered_cancelled_notice(
     capability = "CancelledEnrollmentNoticeWindowCapability",
     family = "runtime_helper"
 )]
-pub(super) async fn send_recovered_cancelled_notice(
+async fn send_recovered_cancelled_notice(
     effects: Arc<AuraEffectSystem>,
     issued: &RetainedEnrollmentVmControl,
-    runner: &CeremonyRunner,
     window: &crate::runtime::services::enrollment_window::CancelledEnrollmentNoticeWindowCapability,
+    bytes: Vec<u8>,
     slot: &mut Option<OwnedVmSession>,
 ) -> AgentResult<()> {
     window
         .require_issued_owner(issued, effects.as_ref())
         .map_err(AgentError::from)?;
-    send_cancelled_notice_within_validity(
+    send_signed_cancelled_notice(
         effects,
         issued,
-        runner,
-        window.cancelled(),
         IssuedNoticeWindowCapability::Cancelled(window),
+        bytes,
         slot,
     )
     .await

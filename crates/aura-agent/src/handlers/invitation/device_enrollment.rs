@@ -279,14 +279,27 @@ impl InvitationDeviceEnrollmentHandler {
         let Some(cancelled) = outcome else {
             return Ok(());
         };
+        // Sign while the cancelled generation is held, then release it so a
+        // new enrollment is not refused while an unanswered notice retries.
+        let notice = super::enrollment_terminal_notice::sign_cancelled_notice(
+            &effects,
+            &retained,
+            &ceremony_runner,
+            &cancelled,
+            &budget,
+        )
+        .await?;
+        ceremony_runner
+            .retire_failed_enrollment_generation(&retained.manifest().ceremony)
+            .await
+            .map_err(AgentError::from)?;
         loop {
             let attempt = budget
                 .execute(effects.as_ref(), || {
                     Box::pin(super::enrollment_terminal_notice::send_cancelled_notice(
                         effects.clone(),
                         &retained,
-                        &ceremony_runner,
-                        &cancelled,
+                        &notice,
                         &budget,
                         &mut slot,
                     ))
