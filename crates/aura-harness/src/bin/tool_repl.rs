@@ -193,8 +193,12 @@ fn main() -> Result<()> {
                     (envelope.id, response)
                 }
             }
+            // Echo the caller's id when the line is JSON at all, so a driver
+            // waiting on that id sees the error instead of timing out.
             Err(error) => (
-                None,
+                serde_json::from_str::<serde_json::Value>(trimmed)
+                    .ok()
+                    .and_then(|value| value.get("id").cloned()),
                 ToolResponse::Error {
                     message: format!("invalid ToolRequest JSON: {error}"),
                 },
