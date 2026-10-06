@@ -90,7 +90,8 @@ async fn test_refresh_authoritative_channel_membership_readiness_recreates_fact_
     let channel_id = ChannelId::from_bytes(hash(b"recreated-membership-ready"));
     let context_id = ContextId::new_from_entropy([64u8; 32]);
     runtime.set_amp_channel_context(channel_id, context_id);
-    runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
+    // Readiness carries the exact full native participant count (local included).
+    runtime.set_amp_channel_participants(context_id, channel_id, vec![local]);
     runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
     update_chat_projection_observed(&app_core, |chat| {
@@ -131,8 +132,10 @@ async fn test_refresh_authoritative_channel_membership_readiness_recreates_fact_
 }
 
 #[tokio::test]
-async fn test_refresh_authoritative_channel_membership_readiness_does_not_require_participant_lookup(
+async fn test_refresh_authoritative_channel_membership_readiness_requires_authoritative_participant_lookup(
 ) {
+    // Readiness carries the exact native participant count; a failed required
+    // participant read fails with its cause and publishes no readiness fact.
     let config = AppConfig::default();
     let local = AuthorityId::new_from_entropy([65u8; 32]);
     let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
@@ -167,19 +170,26 @@ async fn test_refresh_authoritative_channel_membership_readiness_does_not_requir
     .await
     .unwrap();
 
-    refresh_authoritative_channel_membership_readiness(&app_core)
+    let error = refresh_authoritative_channel_membership_readiness(&app_core)
         .await
-        .unwrap();
+        .expect_err("required participant lookup must fail closed");
+    assert!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::workflows::error::WorkflowError>())
+            .is_some_and(|source| matches!(
+                source,
+                crate::workflows::error::WorkflowError::AuthoritativeParticipantsLookup { .. }
+            )),
+        "participant lookup cause must be retained: {error:?}"
+    );
 
     let channel_id_string = channel_id.to_string();
     let facts = read_signal_or_default(&app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL).await;
-    assert!(facts.iter().any(|fact| {
+    assert!(!facts.iter().any(|fact| {
         matches!(
             fact,
-            AuthoritativeSemanticFact::ChannelMembershipReady { channel, member_count }
+            AuthoritativeSemanticFact::ChannelMembershipReady { channel, .. }
                 if channel.id.as_deref() == Some(channel_id_string.as_str())
-                    && channel.name.as_deref() == Some("shared-parity-lab")
-                    && *member_count == 1
         )
     }));
 }
@@ -199,7 +209,8 @@ async fn test_refresh_authoritative_channel_membership_readiness_revalidates_exi
     let channel_id = ChannelId::from_bytes(hash(b"membership-ready-authoritative"));
     let context_id = ContextId::new_from_entropy([112u8; 32]);
     runtime.set_amp_channel_context(channel_id, context_id);
-    runtime.set_amp_channel_participants(context_id, channel_id, Vec::new());
+    // Readiness carries the exact full native participant count (local included).
+    runtime.set_amp_channel_participants(context_id, channel_id, vec![local]);
     runtime.set_amp_channel_state_exists(context_id, channel_id, true);
 
     publish_authoritative_channel_membership_ready(
@@ -2453,10 +2464,14 @@ async fn test_enforce_home_moderation_blocks_muted_sender_with_empty_members() {
 // OWNERSHIP: test-only-helper
 #[tokio::test]
 async fn test_enforce_home_join_blocks_banned_sender_when_context_mismatched() {
-    let config = AppConfig::default();
-    let core = AppCore::new(config).unwrap();
-    let app_core = Arc::new(RwLock::new(core));
-    AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+        AuthorityId::new_from_entropy([6u8; 32]),
+    ));
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
 
     let banned = AuthorityId::new_from_entropy([3u8; 32]);
     let actor = AuthorityId::new_from_entropy([4u8; 32]);
@@ -2489,9 +2504,28 @@ async fn test_enforce_home_join_blocks_banned_sender_when_context_mismatched() {
         core.views_mut().set_homes(homes);
     }
 
-    let result = enforce_home_join_allowed(&app_core, mismatched_context, home_id, banned).await;
-    let error = result.expect_err("authoritative moderation now requires runtime");
+    // The runtime owns the authoritative ban; the observed homes are not consulted.
+    let (ctx, chan, who) = (mismatched_context, home_id, banned);
+    runtime.set_moderation_status(
+        ctx,
+        chan,
+        who,
+        crate::runtime_bridge::AuthoritativeModerationStatus {
+            is_banned: true,
+            is_muted: false,
+            roster_known: true,
+            is_member: false,
+        },
+    );
+    let error = enforce_home_join_allowed(&app_core, ctx, chan, who)
+        .await
+        .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()),
+        Some(crate::workflows::moderation::ModerationDenial::Banned { .. })
+    ));
 }
 
 // OWNERSHIP: test-only-helper
@@ -2557,10 +2591,14 @@ async fn test_enforce_home_moderation_blocks_muted_sender_across_context_homes()
 // OWNERSHIP: test-only-helper
 #[tokio::test]
 async fn test_enforce_home_join_blocks_banned_sender_across_context_homes() {
-    let config = AppConfig::default();
-    let core = AppCore::new(config).unwrap();
-    let app_core = Arc::new(RwLock::new(core));
-    AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
+        AuthorityId::new_from_entropy([6u8; 32]),
+    ));
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
 
     let banned = AuthorityId::new_from_entropy([31u8; 32]);
     let actor = AuthorityId::new_from_entropy([4u8; 32]);
@@ -2602,9 +2640,28 @@ async fn test_enforce_home_join_blocks_banned_sender_across_context_homes() {
         core.views_mut().set_homes(homes);
     }
 
-    let result = enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
-    let error = result.expect_err("authoritative moderation now requires runtime");
+    // The runtime owns the authoritative ban; the observed homes are not consulted.
+    let (ctx, chan, who) = (context_id, channel_home_id, banned);
+    runtime.set_moderation_status(
+        ctx,
+        chan,
+        who,
+        crate::runtime_bridge::AuthoritativeModerationStatus {
+            is_banned: true,
+            is_muted: false,
+            roster_known: true,
+            is_member: false,
+        },
+    );
+    let error = enforce_home_join_allowed(&app_core, ctx, chan, who)
+        .await
+        .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
+    assert!(matches!(
+        std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()),
+        Some(crate::workflows::moderation::ModerationDenial::Banned { .. })
+    ));
 }
 
 // OWNERSHIP: test-only-helper

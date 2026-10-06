@@ -68,6 +68,10 @@ pub enum WorkflowError {
         source: AuraError,
     },
 
+    /// No authoritative recipient peer resolved within the retry budget.
+    #[error("No recipient peers resolved for {channel} after {attempts} attempts")]
+    DeliveryRecipientsUnresolved { channel: String, attempts: usize },
+
     /// Delivery prerequisites never converged within the retry budget.
     #[error(
         "Delivery prerequisites never converged for {peer} after {attempts} attempts: {detail}"
@@ -83,7 +87,7 @@ pub enum WorkflowError {
     DeliveryFanoutUnavailable {
         peer: String,
         attempts: usize,
-        recipients: Vec<String>,
+        recipients: Vec<(aura_core::types::identifiers::AuthorityId, String)>,
     },
 
     /// A precondition was not met.

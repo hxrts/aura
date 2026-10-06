@@ -698,21 +698,28 @@ pub(super) async fn process_ui_update_match(
             instance_id,
             causality,
         } => {
+            let is_failed_or_cancelled = matches!(
+                status.phase,
+                aura_app::ui_contract::SemanticOperationPhase::Failed
+                    | aura_app::ui_contract::SemanticOperationPhase::Cancelled
+            );
+            // Readiness refreshes keep re-publishing terminal statuses; claim
+            // the report before recording the status so the log, toast and
+            // pending-submission rejection fire once per operation instance.
+            let first_terminal_report = is_failed_or_cancelled
+                && tui.with_mut(|state| {
+                    state.claim_operation_terminal_report(&operation_id, instance_id.as_ref())
+                });
             if let Some(instance_id) = instance_id.clone() {
                 let pending_instance_id = instance_id.clone();
                 let is_join_channel = status.kind == SemanticOperationKind::JoinChannel
                     && operation_id == aura_app::ui_contract::OperationId::join_channel();
-                let is_failed_or_cancelled = matches!(
-                    status.phase,
-                    aura_app::ui_contract::SemanticOperationPhase::Failed
-                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
-                );
                 let is_succeeded = matches!(
                     status.phase,
                     aura_app::ui_contract::SemanticOperationPhase::Succeeded
                 );
                 if is_join_channel {
-                    if is_failed_or_cancelled {
+                    if first_terminal_report {
                         ready_join_channel_instances_for_updates
                             .lock()
                             .unwrap()
@@ -755,12 +762,7 @@ pub(super) async fn process_ui_update_match(
                     == aura_app::ui_contract::OperationId::create_channel()
                     || operation_id == aura_app::ui_contract::OperationId::join_channel()
                     || operation_id == aura_app::ui_contract::OperationId::invitation_create();
-                if matches!(
-                    status.phase,
-                    aura_app::ui_contract::SemanticOperationPhase::Failed
-                        | aura_app::ui_contract::SemanticOperationPhase::Cancelled
-                ) && tracks_pending_semantic_value
-                {
+                if first_terminal_report && tracks_pending_semantic_value {
                     let reason = status
                         .error
                         .as_ref()
@@ -776,11 +778,7 @@ pub(super) async fn process_ui_update_match(
                     }
                 }
             }
-            let failure_message = if matches!(
-                status.phase,
-                aura_app::ui_contract::SemanticOperationPhase::Failed
-                    | aura_app::ui_contract::SemanticOperationPhase::Cancelled
-            ) {
+            let failure_message = if first_terminal_report {
                 status.error.as_ref().map(|error| {
                     let detail = error
                         .detail
@@ -805,11 +803,6 @@ pub(super) async fn process_ui_update_match(
             } else {
                 None
             };
-            // Terminal failures are re-published by readiness refreshes; toast
-            // only the first time this instance is seen as failed.
-            let failure_already_reported = tui
-                .read_clone()
-                .operation_already_failed(&operation_id, instance_id.as_ref());
             let enrollment_completion =
                 status.kind == SemanticOperationKind::CompleteDeviceEnrollment;
             let completion_terminal_already_seen = enrollment_completion
@@ -836,7 +829,7 @@ pub(super) async fn process_ui_update_match(
                     &status,
                 );
             });
-            if let Some(message) = failure_message.filter(|_| !failure_already_reported) {
+            if let Some(message) = failure_message {
                 tui.with_mut(|state| {
                     state.toast_queue.clear();
                 });

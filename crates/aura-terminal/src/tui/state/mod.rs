@@ -285,14 +285,16 @@ impl TuiState {
         );
     }
 
+    /// Returns `true` only the first time a terminal status is reported for
+    /// this operation instance; see `OperationTracker::claim_terminal_report`.
     #[must_use]
-    pub fn operation_already_failed(
-        &self,
+    pub fn claim_operation_terminal_report(
+        &mut self,
         operation_id: &OperationId,
         instance_id: Option<&OperationInstanceId>,
     ) -> bool {
         self.operation_states
-            .already_failed(operation_id, instance_id)
+            .claim_terminal_report(operation_id, instance_id)
     }
 
     #[must_use]

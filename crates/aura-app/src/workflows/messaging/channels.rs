@@ -116,10 +116,10 @@ pub async fn create_channel_with_authoritative_binding(
             ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
         let mut channel_context: Option<ContextId> = None;
         if backend == MessagingBackend::Runtime {
-            if let Err(_error) = crate::workflows::system::refresh_account(app_core).await {
-                messaging_warn!(
+            if let Err(error) = crate::workflows::system::refresh_account(app_core).await {
+                tracing::warn!(
                     "best-effort refresh_account before create_channel failed: {}",
-                    _error
+                    error
                 );
             }
             let runtime = require_runtime(app_core).await?;
@@ -209,7 +209,7 @@ pub async fn create_channel_with_authoritative_binding(
                 }
             }
             if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-                messaging_warn!(
+                tracing::warn!(
                     "Channel create fanout unavailable for all recipients on {channel_id}: {}",
                     failed_fanout.join("; ")
                 );
@@ -322,7 +322,7 @@ pub async fn create_channel_with_authoritative_binding(
                 {
                     Ok(invitation) => invitation,
                     Err(error) if is_invitation_capability_missing(&error) => {
-                        if let Err(_join_error) = timeout_runtime_call(
+                        if let Err(join_error) = timeout_runtime_call(
                             &runtime,
                             "create_channel_with_authoritative_binding",
                             "amp_join_channel_receiver_fallback",
@@ -337,23 +337,23 @@ pub async fn create_channel_with_authoritative_binding(
                         )
                         .await
                         {
-                            messaging_warn!(
+                            tracing::warn!(
                                 "Channel invitation capability fallback failed for {} on {}: {}",
                                 receiver,
                                 channel_id,
-                                _join_error
+                                join_error
                             );
                         }
                         continue;
                     }
-                    Err(_error) => {
-                        messaging_warn!(
+                    Err(error) => {
+                        tracing::warn!(
                             "Channel invitation failed for {} on {} ({}); attempting direct join fallback",
                             receiver,
                             channel_id,
-                            _error
+                            error
                         );
-                        if let Err(_join_error) = timeout_runtime_call(
+                        if let Err(join_error) = timeout_runtime_call(
                             &runtime,
                             "create_channel_with_authoritative_binding",
                             "amp_join_channel_receiver_fallback",
@@ -368,12 +368,12 @@ pub async fn create_channel_with_authoritative_binding(
                         )
                         .await
                         {
-                            messaging_warn!(
+                            tracing::warn!(
                                 "Channel invitation join fallback failed for {} on {} ({}): {}",
                                 receiver,
                                 channel_id,
-                                _error,
-                                _join_error
+                                error,
+                                join_error
                             );
                         }
                         continue;

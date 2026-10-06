@@ -811,7 +811,7 @@ mod tests {
                 runtime_events: Vec::new(),
                 subscription_health: Vec::new(),
                 supervised_task_failures: Vec::new(),
-                inbound_message_drops: Vec::new(),
+                message_drops: Vec::new(),
             }
         }
     }

@@ -42,8 +42,8 @@ pub(crate) mod state;
 
 // Re-export main types for convenience
 pub use app_signal_views::{
-    AcceptedHomeEvidence, ChatSignalView, ContactsSignalView, HomeSignalView, InboundMessageDrop,
-    InboundMessageDropLog, InboundMessageDropReason, InvitationsSignalView, JoinedHomeEvidence,
+    AcceptedHomeEvidence, ChatSignalView, ContactsSignalView, HomeSignalView,
+    InvitationsSignalView, JoinedHomeEvidence, MessageDrop, MessageDropLog, MessageDropReason,
     RecoverySignalView,
 };
 pub use frp::Dynamic;

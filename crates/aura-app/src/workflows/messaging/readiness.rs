@@ -512,24 +512,25 @@ pub(in crate::workflows) async fn refresh_authoritative_channel_membership_readi
                         true
                     }
                     Ok(false) if state.had_membership_fact => {
-                        messaging_warn!(
+                        tracing::warn!(
                             "Retaining ChannelMembershipReady for {} after transient runtime-state miss; authoritative leave/close owns revocation",
                             state.channel_id
                         );
                         true
                     }
                     Ok(false) => false,
-                    Err(_error) if state.had_membership_fact => {
-                        messaging_warn!(
-                            "Retaining ChannelMembershipReady for {} after runtime-state probe error; authoritative leave/close owns revocation",
-                            state.channel_id
+                    Err(error) if state.had_membership_fact => {
+                        tracing::warn!(
+                            "Retaining ChannelMembershipReady for {} after runtime-state probe error ({}); authoritative leave/close owns revocation",
+                            state.channel_id,
+                            error
                         );
                         true
                     }
                     Err(error) => return Err(error),
                 }
             } else {
-                messaging_warn!(
+                tracing::warn!(
                     "Retaining ChannelMembershipReady for {} without a re-resolved authoritative context; see docs/122_ownership_model.md",
                     state.channel_id
                 );

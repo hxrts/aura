@@ -172,11 +172,11 @@ async fn stabilize_authoritative_join_readiness(
     let channel_id = authoritative_channel.channel_id();
 
     converge_runtime(&runtime).await;
-    if let Err(_error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
-        messaging_warn!(
+    if let Err(error) = ensure_runtime_peer_connectivity(&runtime, "join_channel_by_name").await {
+        tracing::warn!(
             "Channel {} joined before connectivity fully warmed: {}",
             channel_id,
-            _error
+            error
         );
     }
 

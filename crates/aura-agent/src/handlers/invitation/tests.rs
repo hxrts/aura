@@ -7761,6 +7761,19 @@ async fn send_peer_relational_fact(
     fact: &RelationalFact,
     nonce: u64,
 ) {
+    let payload = aura_core::util::serialization::to_vec(fact).unwrap();
+    send_peer_chat_payload(effects, authority, peer, context_id, payload, nonce).await;
+}
+
+/// Deliver raw `payload` from `peer` as an inbound chat-fact envelope.
+async fn send_peer_chat_payload(
+    effects: &Arc<AuraEffectSystem>,
+    authority: AuthorityId,
+    peer: AuthorityId,
+    context_id: ContextId,
+    payload: Vec<u8>,
+    nonce: u64,
+) {
     let mut metadata = HashMap::new();
     metadata.insert(
         "content-type".to_string(),
@@ -7770,7 +7783,7 @@ async fn send_peer_relational_fact(
         destination: authority,
         source: peer,
         context: context_id,
-        payload: aura_core::util::serialization::to_vec(fact).unwrap(),
+        payload,
         metadata,
         receipt: None,
     };
@@ -7838,6 +7851,15 @@ large_stack_async_test!(unsupported_schema_peer_facts_are_rejected_at_ingress, {
             .await
             .unwrap();
         assert_eq!(effects.rejected_peer_fact_count(), rejected);
+        let (drops, total) = effects.message_drops();
+        assert_eq!(total, rejected);
+        let drop = drops.last().unwrap();
+        assert_eq!(drop.peer_id, Some(peer));
+        assert_eq!(drop.context_id, Some(context_id));
+        assert!(matches!(
+            drop.reason,
+            crate::reactive::MessageDropReason::PeerFactRejected { .. }
+        ));
     }
 
     let valid = grant(1_700_000_000_003);
@@ -7865,4 +7887,72 @@ large_stack_async_test!(unsupported_schema_peer_facts_are_rejected_at_ingress, {
     assert!(!committed.contains(&old_contact));
     assert!(!committed.contains(&old_governance));
     assert!(committed.contains(&valid));
+});
+
+// Task 125: chat intake refusals (undecodable payload, a moderation fact
+// whose actor is not its sender) are recorded in the shared dropped-message
+// log with the sender, context and typed reason, and are not committed.
+large_stack_async_test!(chat_intake_rejections_are_recorded_as_message_drops, {
+    use crate::reactive::MessageDropReason;
+    let authority = AuthorityId::new_from_entropy([212u8; 32]);
+    let peer = AuthorityId::new_from_entropy([213u8; 32]);
+    let impostor = AuthorityId::new_from_entropy([214u8; 32]);
+    let config = AgentConfig::default();
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+    let _pipeline = start_test_reactive_pipeline(&effects).await;
+    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+    let context_id = ContextId::new_from_entropy([215u8; 32]);
+
+    send_peer_chat_payload(&effects, authority, peer, context_id, vec![0xff, 0x00], 1).await;
+    handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+
+    // `peer` delivers a grant claiming `impostor` as its actor.
+    let forged = HomeGrantModeratorFact::new_ms(
+        context_id,
+        authority,
+        impostor,
+        1_700_000_000_001,
+        aura_social::moderation::governance::test_support::causal(
+            1,
+            aura_social::HomeGovernanceKey::GrantModerator { target: authority },
+            &[],
+        ),
+    )
+    .to_generic();
+    send_peer_relational_fact(&effects, authority, peer, context_id, &forged, 2).await;
+    let processed = handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+    assert_eq!(processed, 0, "the forged fact is not processed");
+
+    let (drops, total) = effects.message_drops();
+    assert_eq!(total, 2);
+    for drop in &drops {
+        assert_eq!(drop.peer_id, Some(peer));
+        assert_eq!(drop.context_id, Some(context_id));
+        assert_eq!(
+            drop.reason.direction(),
+            aura_app::ui_contract::MessageDropDirection::Inbound
+        );
+    }
+    assert!(matches!(
+        drops[0].reason,
+        MessageDropReason::InvalidPayload { .. }
+    ));
+    assert_eq!(
+        drops[1].reason,
+        MessageDropReason::ModerationActorMismatch {
+            claimed_actor: impostor
+        }
+    );
+    let committed = effects.load_committed_facts(authority).await.unwrap();
+    assert!(!committed.iter().any(|fact| matches!(
+        &fact.content,
+        FactContent::Relational(relational) if *relational == forged
+    )));
 });

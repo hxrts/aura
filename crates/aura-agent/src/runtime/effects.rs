@@ -16,7 +16,7 @@ use crate::core::config::{default_storage_path, SecureStorageBackend};
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
-use crate::reactive::{InboundMessageDrop, InboundMessageDropLog};
+use crate::reactive::{MessageDrop, MessageDropLog};
 use crate::runtime::services::{
     LanTransportService, LogicalClockManager, MoveManager, RendezvousManager,
 };
@@ -297,9 +297,9 @@ pub struct AuraEffectSystem {
     /// Facts received from peers and rejected at ingress (see
     /// [`AuraEffectSystem::admit_peer_fact`]).
     rejected_peer_facts: std::sync::atomic::AtomicU64,
-    /// Inbound chat messages refused by the receive gate (see
-    /// [`AuraEffectSystem::record_inbound_message_drop`]).
-    inbound_message_drops: std::sync::Mutex<InboundMessageDropLog>,
+    /// Dropped chat messages, inbound and outbound (see
+    /// [`AuraEffectSystem::record_message_drop`]).
+    message_drops: std::sync::Mutex<MessageDropLog>,
     #[cfg(all(test, not(target_arch = "wasm32")))]
     enrollment_retirement_fault: std::sync::Mutex<Option<u64>>,
     /// Network transport subsystem
@@ -1195,7 +1195,7 @@ impl AuraEffectSystem {
             crypto,
             enrollment_generation_gate: tokio::sync::Mutex::new(()),
             rejected_peer_facts: std::sync::atomic::AtomicU64::new(0),
-            inbound_message_drops: std::sync::Mutex::new(InboundMessageDropLog::default()),
+            message_drops: std::sync::Mutex::new(MessageDropLog::default()),
             #[cfg(all(test, not(target_arch = "wasm32")))]
             enrollment_retirement_fault: std::sync::Mutex::new(None),
             transport,
@@ -2331,29 +2331,31 @@ impl AuraEffectSystem {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Record an inbound chat message the receive gate refused: logged at
-    /// warn with its typed reason, counted, and kept (bounded, newest last)
-    /// for diagnostics. Observation only; never parity-critical.
-    pub(crate) fn record_inbound_message_drop(&self, drop: InboundMessageDrop) {
+    /// Record a dropped chat message (an inbound intake or receive-gate
+    /// refusal, or an outbound delivery failure): logged at warn with its
+    /// typed reason, counted, and kept (bounded, newest last) for
+    /// diagnostics. Observation only; never parity-critical.
+    pub(crate) fn record_message_drop(&self, drop: MessageDrop) {
         tracing::warn!(
-            context_id = %drop.context_id,
-            channel_id = %drop.channel_id,
-            sender_id = %drop.sender_id,
-            message_id = %drop.message_id,
+            direction = ?drop.reason.direction(),
+            context_id = ?drop.context_id,
+            channel_id = ?drop.channel_id,
+            peer_id = ?drop.peer_id,
+            message_id = ?drop.message_id,
             reason = %drop.reason,
-            "inbound chat message refused by receive gate"
+            "chat message dropped"
         );
-        self.inbound_message_drops
+        self.message_drops
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(drop);
     }
 
-    /// Recent inbound chat messages refused by the receive gate (newest
-    /// last) and the total refused since startup.
-    pub fn inbound_message_drops(&self) -> (Vec<InboundMessageDrop>, u64) {
+    /// Recent dropped chat messages, both directions (newest last), and the
+    /// total dropped since startup.
+    pub fn message_drops(&self) -> (Vec<MessageDrop>, u64) {
         let log = self
-            .inbound_message_drops
+            .message_drops
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         (log.recent.iter().cloned().collect(), log.total)

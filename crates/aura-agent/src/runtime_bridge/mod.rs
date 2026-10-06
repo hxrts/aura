@@ -24,7 +24,7 @@ use aura_app::runtime_bridge::{
 use aura_app::signal_defs::{HOMES_SIGNAL, INVITATIONS_SIGNAL};
 use aura_app::ui_contract::{
     AmpAccusationDiagnostic, AmpChannelTransitionSnapshot, AmpTransitionPolicySnapshot,
-    AmpTransitionState, ChannelFactKey, InboundMessageDropSnapshot, SupervisedTaskFailureSnapshot,
+    AmpTransitionState, ChannelFactKey, MessageDropSnapshot, SupervisedTaskFailureSnapshot,
 };
 use aura_app::views::home::{HomeState, HomesState};
 use aura_app::views::invitations::InvitationStatus;
@@ -720,18 +720,29 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .collect()
     }
 
-    fn inbound_message_drops(&self) -> Vec<InboundMessageDropSnapshot> {
-        let (drops, _) = self.agent.runtime().effects().inbound_message_drops();
+    fn message_drops(&self) -> Vec<MessageDropSnapshot> {
+        let (drops, _) = self.agent.runtime().effects().message_drops();
         drops
             .into_iter()
-            .map(|drop| InboundMessageDropSnapshot {
-                context_id: drop.context_id.to_string(),
-                channel_id: drop.channel_id.to_string(),
-                sender_id: drop.sender_id.to_string(),
+            .map(|drop| MessageDropSnapshot {
+                direction: drop.reason.direction(),
+                context_id: drop.context_id.map(|id| id.to_string()),
+                channel_id: drop.channel_id.map(|id| id.to_string()),
+                peer_id: drop.peer_id.map(|id| id.to_string()),
                 message_id: drop.message_id,
                 reason: drop.reason.to_string(),
             })
             .collect()
+    }
+
+    fn record_outbound_message_delivery_failure(
+        &self,
+        failure: aura_app::runtime_bridge::OutboundMessageDeliveryFailure,
+    ) {
+        self.agent
+            .runtime()
+            .effects()
+            .record_message_drop(crate::reactive::MessageDrop::outbound(failure));
     }
 
     // =========================================================================

@@ -470,7 +470,7 @@ fn build_authoritative_ui_snapshot(
             health
         },
         supervised_task_failures: Vec::new(),
-        inbound_message_drops: Vec::new(),
+        message_drops: Vec::new(),
     };
     snapshot.validate_invariants()?;
     Ok(snapshot)
@@ -584,8 +584,8 @@ pub fn maybe_export_ui_snapshot(
     snapshot.supervised_task_failures = runtime
         .map(RuntimeBridge::supervised_task_failures)
         .unwrap_or_default();
-    snapshot.inbound_message_drops = runtime
-        .map(RuntimeBridge::inbound_message_drops)
+    snapshot.message_drops = runtime
+        .map(RuntimeBridge::message_drops)
         .unwrap_or_default();
     publish_snapshot(&snapshot)
 }

@@ -1,6 +1,7 @@
 //! Runtime bridge DTOs and offline-support state aliases.
 
 mod ceremony;
+mod delivery;
 mod invitation;
 mod offline_state;
 mod settings;
@@ -11,6 +12,7 @@ pub use ceremony::{
     CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart,
     EnrollmentManifestTransferCodes, KeyRotationCeremonyStatus, PreparedDeviceEnrollmentSigning,
 };
+pub use delivery::{OutboundDeliveryFailureCause, OutboundMessageDeliveryFailure};
 pub use invitation::{
     AuthoritativeChannelBinding, AuthoritativeModerationStatus, InvitationBridgeStatus,
     InvitationBridgeType, InvitationInfo, InvitationMutationOutcome,

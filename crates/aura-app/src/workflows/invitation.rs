@@ -2025,7 +2025,7 @@ mod tests {
 
     #[cfg(feature = "signals")]
     #[tokio::test]
-    async fn accept_pending_channel_invitation_succeeds_when_participant_lookup_is_unavailable() {
+    async fn accept_pending_channel_invitation_succeeds_with_authoritative_participants() {
         let our_authority = AuthorityId::new_from_entropy([120u8; 32]);
         let sender_id = AuthorityId::new_from_entropy([121u8; 32]);
         let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(
@@ -2067,6 +2067,9 @@ mod tests {
             sender_id,
         ));
         runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+        // Readiness requires the authoritative AMP participant read (4f52e70c);
+        // a failed lookup is a typed error, covered by the messaging tests.
+        runtime.set_amp_channel_participants(context_id, channel_id, vec![our_authority]);
 
         let app_core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),

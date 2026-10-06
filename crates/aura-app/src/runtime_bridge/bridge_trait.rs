@@ -5,12 +5,13 @@ use super::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
     CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, DiscoveryTriggerOutcome,
-    InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus, RendezvousStatus,
-    RuntimeStatus, SettingsBridgeState, SyncStatus,
+    InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus,
+    OutboundMessageDeliveryFailure, RendezvousStatus, RuntimeStatus, SettingsBridgeState,
+    SyncStatus,
 };
 use crate::core::IntentError;
 use crate::ui_contract::{
-    AmpChannelTransitionSnapshot, InboundMessageDropSnapshot, SupervisedTaskFailureSnapshot,
+    AmpChannelTransitionSnapshot, MessageDropSnapshot, SupervisedTaskFailureSnapshot,
 };
 use crate::ReactiveHandler;
 use async_trait::async_trait;
@@ -80,11 +81,19 @@ pub trait RuntimeBridge: Send + Sync {
         Vec::new()
     }
 
-    /// Diagnostic observation of recent inbound chat messages the receive
-    /// gate refused, newest last, with typed reasons. Not parity-critical;
-    /// runtimes without a chat receive gate report none.
-    fn inbound_message_drops(&self) -> Vec<InboundMessageDropSnapshot> {
+    /// Diagnostic observation of recent dropped chat messages, newest last,
+    /// with typed reasons: inbound intake/receive-gate refusals and outbound
+    /// delivery failures. Not parity-critical; runtimes without a diagnostics
+    /// log report none.
+    fn message_drops(&self) -> Vec<MessageDropSnapshot> {
         Vec::new()
+    }
+
+    /// Record an outbound chat message delivery failure in the runtime's
+    /// dropped-message diagnostics. Observation only; runtimes without a
+    /// diagnostics log ignore it.
+    fn record_outbound_message_delivery_failure(&self, failure: OutboundMessageDeliveryFailure) {
+        let _ = failure;
     }
 
     /// Query the explicit runtime authentication status.

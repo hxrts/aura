@@ -12618,6 +12618,13 @@ library used by the other higher-level Hickory DNS crates.
             packageId = "tempfile";
           }
           {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            target = { target, features }: (!("wasm32" == target."arch" or null));
+            features = [ "io-util" "macros" "rt" "sync" "time" "test-util" ];
+          }
+          {
             name = "tracing-subscriber";
             packageId = "tracing-subscriber";
             usesDefaultFeatures = false;
@@ -13013,7 +13020,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "tracing";
             packageId = "tracing";
-            optional = true;
           }
           {
             name = "uniffi";
@@ -13087,7 +13093,6 @@ library used by the other higher-level Hickory DNS crates.
         features = {
           "android" = [ "uniffi" "mobile" ];
           "host" = [ "dep:anyhow" ];
-          "instrumented" = [ "dep:tracing" ];
           "ios" = [ "uniffi" "mobile" ];
           "mobile" = [ "uniffi" "callbacks" ];
           "native" = [ "signals" ];
@@ -28526,7 +28531,7 @@ backed applications.
           "tracing" = [ "dep:tracing" ];
           "windows-sys" = [ "dep:windows-sys" ];
         };
-        resolvedDefaultFeatures = [ "bytes" "default" "fs" "full" "io-std" "io-util" "libc" "macros" "mio" "net" "parking_lot" "process" "rt" "rt-multi-thread" "signal" "signal-hook-registry" "socket2" "sync" "time" "tokio-macros" "windows-sys" ];
+        resolvedDefaultFeatures = [ "bytes" "default" "fs" "full" "io-std" "io-util" "libc" "macros" "mio" "net" "parking_lot" "process" "rt" "rt-multi-thread" "signal" "signal-hook-registry" "socket2" "sync" "test-util" "time" "tokio-macros" "windows-sys" ];
       };
       "tokio-macros" = rec {
         crateName = "tokio-macros";

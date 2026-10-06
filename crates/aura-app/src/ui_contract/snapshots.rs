@@ -67,16 +67,28 @@ pub struct SupervisedTaskFailureSnapshot {
     pub cause: String,
 }
 
-/// Diagnostic record of one inbound chat message the receive gate refused,
-/// with the typed refusal reason. Observation only: not parity-critical,
-/// excluded from web/TUI parity comparison, readiness and quiescence.
+/// Diagnostic record of one dropped chat message: an inbound message the
+/// intake or receive gate refused, or an outbound message that could not be
+/// delivered, with its typed reason rendered. `peer_id` is the sender for
+/// inbound drops and the recipient for outbound ones. Observation only: not
+/// parity-critical, excluded from web/TUI parity comparison, readiness and
+/// quiescence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InboundMessageDropSnapshot {
-    pub context_id: String,
-    pub channel_id: String,
-    pub sender_id: String,
-    pub message_id: String,
+pub struct MessageDropSnapshot {
+    pub direction: MessageDropDirection,
+    pub context_id: Option<String>,
+    pub channel_id: Option<String>,
+    pub peer_id: Option<String>,
+    pub message_id: Option<String>,
     pub reason: String,
+}
+
+/// Which way a dropped chat message was travelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageDropDirection {
+    Inbound,
+    Outbound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -770,10 +782,10 @@ pub struct UiSnapshot {
     /// Diagnostic-only list of dead runtime-supervised tasks.
     #[serde(default)]
     pub supervised_task_failures: Vec<SupervisedTaskFailureSnapshot>,
-    /// Diagnostic-only list of recent inbound chat messages refused by the
-    /// receive gate.
+    /// Diagnostic-only list of recent chat messages dropped in either
+    /// direction: inbound refusals and outbound delivery failures.
     #[serde(default)]
-    pub inbound_message_drops: Vec<InboundMessageDropSnapshot>,
+    pub message_drops: Vec<MessageDropSnapshot>,
 }
 
 impl UiSnapshot {
@@ -801,7 +813,7 @@ impl UiSnapshot {
             runtime_events: Vec::new(),
             subscription_health: Vec::new(),
             supervised_task_failures: Vec::new(),
-            inbound_message_drops: Vec::new(),
+            message_drops: Vec::new(),
         }
     }
 

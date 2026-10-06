@@ -212,7 +212,7 @@ pub(super) async fn mark_message_delivery_failed(
     // update would be replaced on its next emission.
     if let Ok(runtime) = require_runtime(app_core).await {
         let generic = failed.to_generic();
-        let _ = timeout_runtime_call(
+        let committed = timeout_runtime_call(
             &runtime,
             "mark_message_delivery_failed",
             "commit_relational_facts",
@@ -220,16 +220,85 @@ pub(super) async fn mark_message_delivery_failed(
             || runtime.commit_relational_facts(std::slice::from_ref(&generic)),
         )
         .await;
+        match committed {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => tracing::warn!(
+                message_id,
+                error = %error,
+                "failed delivery status not committed; it may not survive the next chat emission"
+            ),
+            Err(error) => tracing::warn!(
+                message_id,
+                error = %error,
+                "failed delivery status commit timed out; it may not survive the next chat emission"
+            ),
+        }
     }
     reduce_chat_fact_observed(app_core, &failed).await?;
 
-    #[cfg(feature = "instrumented")]
     tracing::warn!(
         message_id,
         "marked message delivery as failed after remote fanout exhaustion"
     );
 
     Ok(())
+}
+
+/// Typed diagnostic records for a failed remote delivery: one per
+/// unreachable recipient, or one channel-level record otherwise.
+fn outbound_delivery_failures(
+    error: &AuraError,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    message_id: &str,
+) -> Vec<crate::runtime_bridge::OutboundMessageDeliveryFailure> {
+    use super::super::error::WorkflowError as W;
+    use crate::runtime_bridge::{
+        OutboundDeliveryFailureCause as Cause, OutboundMessageDeliveryFailure,
+    };
+    let record = |recipient, cause| OutboundMessageDeliveryFailure {
+        context_id,
+        channel_id,
+        message_id: message_id.to_string(),
+        recipient,
+        cause,
+    };
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(current) = source {
+        match current.downcast_ref::<W>() {
+            Some(W::DeliveryFanoutUnavailable { recipients, .. }) if !recipients.is_empty() => {
+                return recipients
+                    .iter()
+                    .map(|(peer, detail)| {
+                        record(
+                            Some(*peer),
+                            Cause::RecipientUnreachable {
+                                detail: detail.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+            }
+            Some(W::DeliveryPrerequisitesNeverConverged { detail, .. }) => {
+                return vec![record(
+                    None,
+                    Cause::PrerequisitesNeverConverged {
+                        detail: detail.clone(),
+                    },
+                )];
+            }
+            Some(W::DeliveryRecipientsUnresolved { .. }) => {
+                return vec![record(None, Cause::NoRecipients)]
+            }
+            _ => source = current.source(),
+        }
+    }
+    vec![record(
+        None,
+        Cause::Other {
+            detail: error.to_string(),
+        },
+    )]
 }
 
 async fn deliver_message_fact_remotely(
@@ -301,7 +370,7 @@ async fn deliver_message_fact_remotely(
             attempted_fanout = attempted_fanout.saturating_add(1);
             attempted_fanout_total = attempted_fanout_total.saturating_add(1);
             if let Err(error) = send_chat_fact_with_retry(runtime, peer, context_id, fact).await {
-                failed_fanout.push(format!("{peer}: {error}"));
+                failed_fanout.push((peer, error.to_string()));
             }
         }
 
@@ -327,12 +396,13 @@ async fn deliver_message_fact_remotely(
 
     if !delivered_remote {
         if recipients.is_empty() {
-            return Err(super::super::error::WorkflowError::DeliveryFailed {
-                peer: channel_id.to_string(),
-                attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                source: AuraError::agent("no recipient peers resolved after extended retries"),
-            }
-            .into());
+            return Err(
+                super::super::error::WorkflowError::DeliveryRecipientsUnresolved {
+                    channel: channel_id.to_string(),
+                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
+                }
+                .into(),
+            );
         }
         if attempted_fanout_total == 0 {
             return Err(
@@ -1061,13 +1131,21 @@ async fn send_message_ref_owned(
                     )
                     .await
                     {
-                        messaging_warn!(
+                        tracing::warn!(
                             error = %error,
                             channel_id = %channel_id,
                             message_id = %followup_message_id,
                             "post-terminal remote message delivery failed"
                         );
-                        if let Err(_mark_error) = mark_message_delivery_failed(
+                        for failure in outbound_delivery_failures(
+                            &error,
+                            context_id,
+                            channel_id,
+                            &followup_message_id,
+                        ) {
+                            runtime.record_outbound_message_delivery_failure(failure);
+                        }
+                        if let Err(mark_error) = mark_message_delivery_failed(
                             &app_core,
                             context_id,
                             channel_id,
@@ -1076,9 +1154,9 @@ async fn send_message_ref_owned(
                         )
                         .await
                         {
-                            messaging_warn!(
+                            tracing::warn!(
                                 delivery_error = %error,
-                                mark_error = %_mark_error,
+                                mark_error = %mark_error,
                                 message_id = %followup_message_id,
                                 "post-terminal remote message delivery failed and mark-failed also failed"
                             );
@@ -1604,5 +1682,71 @@ mod source_tests {
                 SemanticFailureCode::InvalidArgument
             );
         }
+    }
+
+    // Task 125: failed remote deliveries become typed diagnostic records,
+    // one per unreachable recipient, found through wrapped error chains.
+    #[test]
+    fn outbound_delivery_failures_are_typed_per_recipient() {
+        use crate::runtime_bridge::OutboundDeliveryFailureCause as Cause;
+        use crate::workflows::error::WorkflowError as W;
+        let context = ContextId::new_from_entropy([241u8; 32]);
+        let channel = ChannelId::from_bytes([242u8; 32]);
+        let (a, b) = (
+            AuthorityId::new_from_entropy([243u8; 32]),
+            AuthorityId::new_from_entropy([244u8; 32]),
+        );
+        let fanout: AuraError = W::DeliveryFanoutUnavailable {
+            peer: channel.to_string(),
+            attempts: 3,
+            recipients: vec![(a, "reset".to_string()), (b, "timeout".to_string())],
+        }
+        .into();
+        let wrapped = AuraError::Internal {
+            message: "followup".to_string(),
+            source: Some(Arc::new(fanout)),
+        };
+        let records = outbound_delivery_failures(&wrapped, context, channel, "m1");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].recipient, Some(a));
+        assert_eq!(records[1].recipient, Some(b));
+        assert_eq!(
+            records[1].cause,
+            Cause::RecipientUnreachable {
+                detail: "timeout".to_string()
+            }
+        );
+        assert!(records
+            .iter()
+            .all(|r| r.message_id == "m1" && r.channel_id == channel && r.context_id == context));
+
+        let unresolved: AuraError = W::DeliveryRecipientsUnresolved {
+            channel: channel.to_string(),
+            attempts: 3,
+        }
+        .into();
+        let records = outbound_delivery_failures(&unresolved, context, channel, "m2");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].recipient, None);
+        assert_eq!(records[0].cause, Cause::NoRecipients);
+
+        let never: AuraError = W::DeliveryPrerequisitesNeverConverged {
+            peer: channel.to_string(),
+            attempts: 3,
+            detail: "no peer channel".to_string(),
+        }
+        .into();
+        assert_eq!(
+            outbound_delivery_failures(&never, context, channel, "m3")[0].cause,
+            Cause::PrerequisitesNeverConverged {
+                detail: "no peer channel".to_string()
+            }
+        );
+
+        let other = AuraError::agent("journal unavailable");
+        assert!(matches!(
+            outbound_delivery_failures(&other, context, channel, "m4")[0].cause,
+            Cause::Other { .. }
+        ));
     }
 }

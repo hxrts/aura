@@ -1,6 +1,9 @@
 use aura_app::ui::contract::{OperationId, OperationInstanceId, OperationSnapshot, OperationState};
 use aura_app::ui_contract::{SemanticOperationCausality, SemanticOperationError};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+/// Bound on remembered terminal-report keys; the oldest age out first.
+const REPORTED_TERMINAL_CAPACITY: usize = 512;
 
 #[derive(Clone, Debug)]
 struct TrackedOperation {
@@ -14,6 +17,8 @@ struct TrackedOperation {
 pub(super) struct OperationTracker {
     next_instance_nonce: u64,
     entries: HashMap<OperationId, TrackedOperation>,
+    reported_terminal: HashSet<(OperationId, OperationInstanceId)>,
+    reported_terminal_order: VecDeque<(OperationId, OperationInstanceId)>,
 }
 
 impl OperationTracker {
@@ -160,17 +165,36 @@ impl OperationTracker {
         }
     }
 
-    /// Whether this operation instance is already recorded as failed, so a
-    /// re-published terminal status is not surfaced to the user again.
-    pub(super) fn already_failed(
-        &self,
+    /// Claim the one-time report of a terminal (failed/cancelled) status for
+    /// this operation instance. Returns `true` only the first time, so logs,
+    /// toasts and pending-submission rejections fire once even though
+    /// readiness refreshes keep re-publishing the terminal status, including
+    /// for an older instance the tracker no longer holds as current. Without
+    /// an instance id, falls back to the current entry already being terminal.
+    pub(super) fn claim_terminal_report(
+        &mut self,
         operation_id: &OperationId,
         instance_id: Option<&OperationInstanceId>,
     ) -> bool {
-        self.entries.get(operation_id).is_some_and(|entry| {
-            entry.state == OperationState::Failed
-                && instance_id.map_or(true, |instance| *instance == entry.instance_id)
-        })
+        let Some(instance_id) = instance_id else {
+            return !self.entries.get(operation_id).is_some_and(|entry| {
+                matches!(
+                    entry.state,
+                    OperationState::Failed | OperationState::Cancelled
+                )
+            });
+        };
+        let key = (operation_id.clone(), instance_id.clone());
+        if !self.reported_terminal.insert(key.clone()) {
+            return false;
+        }
+        self.reported_terminal_order.push_back(key);
+        if self.reported_terminal_order.len() > REPORTED_TERMINAL_CAPACITY {
+            if let Some(evicted) = self.reported_terminal_order.pop_front() {
+                self.reported_terminal.remove(&evicted);
+            }
+        }
+        true
     }
 
     pub(super) fn state(&self, operation_id: &OperationId) -> Option<OperationState> {
@@ -274,24 +298,40 @@ mod failure_snapshot_tests {
 mod tests {
     use super::*;
 
-    /// Regression (work/8.md task 13): a re-published terminal failure for the
-    /// same instance must be recognisable so it is not toasted again.
+    /// Regression (work/8.md tasks 13, 124): repeated publication of the same
+    /// terminal failure is reported once per instance, including an older
+    /// instance re-published after a newer one became current.
     #[test]
-    fn already_failed_tracks_instance_failures() {
+    fn terminal_report_claimed_once_per_instance() {
         let mut tracker = OperationTracker::default();
         let op = OperationId::send_message();
         let first = OperationInstanceId("tui-op-send_message-1".to_string());
         let second = OperationInstanceId("tui-op-send_message-2".to_string());
 
-        assert!(!tracker.already_failed(&op, Some(&first)));
-        tracker.set_authoritative_state(
-            op.clone(),
-            Some(first.clone()),
-            None,
-            OperationState::Failed,
-        );
-        assert!(tracker.already_failed(&op, Some(&first)));
+        let mut reports = 0;
+        for instance in [&first, &second] {
+            tracker.set_authoritative_state(
+                op.clone(),
+                Some(instance.clone()),
+                None,
+                OperationState::Failed,
+            );
+            reports += usize::from(tracker.claim_terminal_report(&op, Some(instance)));
+        }
+        for _ in 0..100 {
+            for instance in [&first, &second] {
+                tracker.set_authoritative_state(
+                    op.clone(),
+                    Some(instance.clone()),
+                    None,
+                    OperationState::Failed,
+                );
+                reports += usize::from(tracker.claim_terminal_report(&op, Some(instance)));
+            }
+        }
+        assert_eq!(reports, 2);
         // A new attempt is a new instance and must still be reported.
-        assert!(!tracker.already_failed(&op, Some(&second)));
+        let third = OperationInstanceId("tui-op-send_message-3".to_string());
+        assert!(tracker.claim_terminal_report(&op, Some(&third)));
     }
 }

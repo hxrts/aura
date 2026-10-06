@@ -3,6 +3,7 @@ use super::contact_confirmation::{
     CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
 };
 use super::*;
+use crate::reactive::{MessageDrop, MessageDropReason};
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::{
@@ -1027,10 +1028,16 @@ impl<'a> InvitationContactHandler<'a> {
                     {
                         Some(Ok(fact)) => fact,
                         Some(Err(error)) => {
-                            tracing::warn!(
-                                error = %error,
-                                "Invalid chat fact payload envelope"
-                            );
+                            if let Some(envelope) = in_flight_envelope.as_ref() {
+                                effects.record_message_drop(MessageDrop::inbound_intake(
+                                    envelope.source,
+                                    envelope.context,
+                                    None,
+                                    MessageDropReason::InvalidPayload {
+                                        detail: error.to_string(),
+                                    },
+                                ));
+                            }
                             in_flight_envelope = None;
                             continue;
                         }
@@ -1044,10 +1051,16 @@ impl<'a> InvitationContactHandler<'a> {
                     ) {
                         Ok(fact) => fact,
                         Err(error) => {
-                            tracing::warn!(
-                                error = %error,
-                                "Rejected unverified inbound chat fact"
-                            );
+                            if let Some(envelope) = in_flight_envelope.as_ref() {
+                                effects.record_message_drop(MessageDrop::inbound_intake(
+                                    envelope.source,
+                                    envelope.context,
+                                    None,
+                                    MessageDropReason::UnverifiedEnvelope {
+                                        detail: error.to_string(),
+                                    },
+                                ));
+                            }
                             in_flight_envelope = None;
                             continue;
                         }
@@ -1055,29 +1068,37 @@ impl<'a> InvitationContactHandler<'a> {
                     let fact = fact.payload();
                     // A fact the required views cannot decode (e.g. an older
                     // peer's schema) is rejected here, never committed.
-                    let sender = in_flight_envelope
+                    let (sender, context) = in_flight_envelope
                         .as_ref()
-                        .map(|envelope| envelope.source)
+                        .map(|envelope| (envelope.source, envelope.context))
                         .expect("in-flight envelope exists while processing chat fact");
-                    if effects.admit_peer_fact(sender, fact).is_err() {
+                    if let Err(rejection) = effects.admit_peer_fact(sender, fact) {
+                        effects.record_message_drop(MessageDrop::inbound_intake(
+                            sender,
+                            context,
+                            Some(fact),
+                            MessageDropReason::PeerFactRejected {
+                                detail: rejection.to_string(),
+                            },
+                        ));
                         in_flight_envelope = None;
                         continue;
                     }
                     // The receipt binds the envelope source to the sender, so a
                     // moderation fact must name that sender as its actor.
                     if let RelationalFact::Generic { envelope: inner, .. } = fact {
-                        let source = in_flight_envelope
-                            .as_ref()
-                            .map(|envelope| envelope.source);
                         if let Some(actor) =
                             aura_social::moderation::facts::claimed_moderation_actor(inner)
                         {
-                            if Some(actor) != source {
-                                tracing::warn!(
-                                    claimed_actor = %actor,
-                                    source = ?source,
-                                    "Rejected inbound moderation fact whose actor is not its sender"
-                                );
+                            if actor != sender {
+                                effects.record_message_drop(MessageDrop::inbound_intake(
+                                    sender,
+                                    context,
+                                    Some(fact),
+                                    MessageDropReason::ModerationActorMismatch {
+                                        claimed_actor: actor,
+                                    },
+                                ));
                                 in_flight_envelope = None;
                                 continue;
                             }

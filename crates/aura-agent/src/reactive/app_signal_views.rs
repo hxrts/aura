@@ -1439,9 +1439,10 @@ impl ReactiveView for HomeSignalView {
 // Chat
 // =============================================================================
 
-/// Why the inbound chat gate refused a peer message. Observation only.
+/// Why a chat message was dropped: refused at inbound intake or by the
+/// receive gate, or not delivered outbound. Observation only.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InboundMessageDropReason {
+pub enum MessageDropReason {
     /// The sender's departure from the channel was observed.
     DepartedChannel,
     /// The homes projection could not be read (fail closed).
@@ -1469,9 +1470,30 @@ pub enum InboundMessageDropReason {
     /// No home for the context and the sender is neither a known channel
     /// member nor invited.
     NoHomeNotChannelMember,
+    /// Intake: the chat fact payload did not decode.
+    InvalidPayload { detail: String },
+    /// Intake: the envelope failed signature/receipt verification.
+    UnverifiedEnvelope { detail: String },
+    /// Intake: the fact failed the peer-fact ingress check.
+    PeerFactRejected { detail: String },
+    /// Intake: a moderation fact names an actor other than its sender.
+    ModerationActorMismatch { claimed_actor: AuthorityId },
+    /// Outbound: the message could not be delivered to the peer.
+    OutboundDelivery(aura_app::runtime_bridge::OutboundDeliveryFailureCause),
 }
 
-impl std::fmt::Display for InboundMessageDropReason {
+impl MessageDropReason {
+    /// Whether this drop refused an inbound message or failed an outbound one.
+    #[must_use]
+    pub fn direction(&self) -> aura_app::ui_contract::MessageDropDirection {
+        match self {
+            Self::OutboundDelivery(_) => aura_app::ui_contract::MessageDropDirection::Outbound,
+            _ => aura_app::ui_contract::MessageDropDirection::Inbound,
+        }
+    }
+}
+
+impl std::fmt::Display for MessageDropReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::DepartedChannel => write!(f, "departed_channel"),
@@ -1507,32 +1529,85 @@ impl std::fmt::Display for InboundMessageDropReason {
                 )
             }
             Self::NoHomeNotChannelMember => write!(f, "no_home_not_channel_member"),
+            Self::InvalidPayload { detail } => write!(f, "invalid_payload: {detail}"),
+            Self::UnverifiedEnvelope { detail } => write!(f, "unverified_envelope: {detail}"),
+            Self::PeerFactRejected { detail } => write!(f, "peer_fact_rejected: {detail}"),
+            Self::ModerationActorMismatch { claimed_actor } => {
+                write!(f, "moderation_actor_mismatch claimed_actor={claimed_actor}")
+            }
+            Self::OutboundDelivery(cause) => write!(f, "{cause}"),
         }
     }
 }
 
-/// One inbound message the chat gate refused, with where it came from.
+/// One dropped chat message with what is known about it. `peer_id` is the
+/// sender for inbound drops and the recipient for outbound ones; fields
+/// are `None` when the drop happened before they could be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InboundMessageDrop {
-    pub context_id: ContextId,
-    pub channel_id: ChannelId,
-    pub sender_id: AuthorityId,
-    pub message_id: String,
-    pub reason: InboundMessageDropReason,
+pub struct MessageDrop {
+    pub context_id: Option<ContextId>,
+    pub channel_id: Option<ChannelId>,
+    pub peer_id: Option<AuthorityId>,
+    pub message_id: Option<String>,
+    pub reason: MessageDropReason,
 }
 
-/// Bounded record of refused inbound messages: the newest
+impl MessageDrop {
+    /// An inbound chat fact refused at intake, before the receive gate. The
+    /// channel and message id are read from `fact` when it is a chat message.
+    #[must_use]
+    pub fn inbound_intake(
+        sender: AuthorityId,
+        context_id: ContextId,
+        fact: Option<&RelationalFact>,
+        reason: MessageDropReason,
+    ) -> Self {
+        let message = fact.and_then(|fact| match fact {
+            RelationalFact::Generic { envelope, .. } => ChatFact::try_from_envelope(envelope).ok(),
+            _ => None,
+        });
+        let (channel_id, message_id) = match message {
+            Some(ChatFact::MessageSentSealed {
+                channel_id,
+                message_id,
+                ..
+            }) => (Some(channel_id), Some(message_id)),
+            _ => (None, None),
+        };
+        Self {
+            context_id: Some(context_id),
+            channel_id,
+            peer_id: Some(sender),
+            message_id,
+            reason,
+        }
+    }
+
+    /// An outbound message the runtime could not deliver.
+    #[must_use]
+    pub fn outbound(failure: aura_app::runtime_bridge::OutboundMessageDeliveryFailure) -> Self {
+        Self {
+            context_id: Some(failure.context_id),
+            channel_id: Some(failure.channel_id),
+            peer_id: failure.recipient,
+            message_id: Some(failure.message_id),
+            reason: MessageDropReason::OutboundDelivery(failure.cause),
+        }
+    }
+}
+
+/// Bounded record of dropped chat messages (both directions): the newest
 /// [`Self::CAPACITY`] drops and the total since startup.
 #[derive(Debug, Default)]
-pub struct InboundMessageDropLog {
-    pub(crate) recent: std::collections::VecDeque<InboundMessageDrop>,
+pub struct MessageDropLog {
+    pub(crate) recent: std::collections::VecDeque<MessageDrop>,
     pub(crate) total: u64,
 }
 
-impl InboundMessageDropLog {
+impl MessageDropLog {
     pub const CAPACITY: usize = 64;
 
-    pub(crate) fn push(&mut self, drop: InboundMessageDrop) {
+    pub(crate) fn push(&mut self, drop: MessageDrop) {
         if self.recent.len() == Self::CAPACITY {
             self.recent.pop_front();
         }
@@ -1717,8 +1792,8 @@ impl ChatSignalView {
         sent_at_ms: u64,
         // Sender is a recorded member of the channel (e.g. its creator).
         known_channel_member: bool,
-    ) -> Result<(), InboundMessageDropReason> {
-        use InboundMessageDropReason as Drop;
+    ) -> Result<(), MessageDropReason> {
+        use MessageDropReason as Drop;
         if self
             .membership
             .lock()
@@ -1981,15 +2056,13 @@ impl ReactiveView for ChatSignalView {
                                         )
                                         .await
                                     {
-                                        self.effects.record_inbound_message_drop(
-                                            InboundMessageDrop {
-                                                context_id: context,
-                                                channel_id,
-                                                sender_id,
-                                                message_id: message_id.clone(),
-                                                reason,
-                                            },
-                                        );
+                                        self.effects.record_message_drop(MessageDrop {
+                                            context_id: Some(context),
+                                            channel_id: Some(channel_id),
+                                            peer_id: Some(sender_id),
+                                            message_id: Some(message_id.clone()),
+                                            reason,
+                                        });
                                         state = self.state.lock().await;
                                         continue;
                                     }
@@ -3267,7 +3340,7 @@ mod tests {
 
         assert!(
             allowed
-                == Err(InboundMessageDropReason::NotHomeMember {
+                == Err(MessageDropReason::NotHomeMember {
                     homes_considered: 2
                 }),
             "ambiguous moderation context must fail closed for inbound sender gating"
@@ -3666,7 +3739,7 @@ mod tests {
             assert!(
                 view.sender_allowed_for_context(context, channel, peer, 100, true)
                     .await
-                    == Err(InboundMessageDropReason::DepartedChannel),
+                    == Err(MessageDropReason::DepartedChannel),
                 "known-membership and invitation fallback cannot override observed departure"
             );
             view.update(&[left.clone(), join.clone(), hint.clone()])
@@ -3766,7 +3839,7 @@ mod tests {
         assert!(
             view.sender_allowed_for_context(context, channel, own, 100, true)
                 .await
-                == Err(InboundMessageDropReason::DepartedChannel)
+                == Err(MessageDropReason::DepartedChannel)
         );
     }
 
@@ -4332,7 +4405,7 @@ mod tests {
             matches!(
                 view.sender_allowed_for_context(context_id, home_id, sender_id, 2, false)
                     .await,
-                Err(InboundMessageDropReason::AccessLevel { .. })
+                Err(MessageDropReason::AccessLevel { .. })
             ),
             "a Limited override removes send_message"
         );
@@ -4646,5 +4719,68 @@ mod tests {
             "a fifth neighborhood is refused by the home budget"
         );
         assert!(home.join_neighborhood("one-more", "Block 99").is_err());
+    }
+
+    // Task 125: one drop record covers inbound intake refusals (with the
+    // chat message identity when the fact decodes) and outbound failures.
+    #[test]
+    fn message_drop_records_cover_intake_and_outbound_delivery() {
+        use aura_app::runtime_bridge::{
+            OutboundDeliveryFailureCause as Cause, OutboundMessageDeliveryFailure,
+        };
+        use aura_app::ui_contract::MessageDropDirection;
+        let sender = AuthorityId::new_from_entropy([231u8; 32]);
+        let context = ContextId::new_from_entropy([232u8; 32]);
+        let channel = ChannelId::from_bytes([233u8; 32]);
+        let fact = ChatFact::message_sent_sealed_ms(
+            context,
+            channel,
+            "msg-1".to_string(),
+            sender,
+            "peer".to_string(),
+            vec![1, 2, 3],
+            1_000,
+            None,
+            None,
+        )
+        .to_generic();
+        let inbound = MessageDrop::inbound_intake(
+            sender,
+            context,
+            Some(&fact),
+            MessageDropReason::PeerFactRejected {
+                detail: "schema".to_string(),
+            },
+        );
+        assert_eq!(inbound.channel_id, Some(channel));
+        assert_eq!(inbound.message_id.as_deref(), Some("msg-1"));
+        assert_eq!(inbound.reason.direction(), MessageDropDirection::Inbound);
+
+        let recipient = AuthorityId::new_from_entropy([234u8; 32]);
+        let outbound = MessageDrop::outbound(OutboundMessageDeliveryFailure {
+            context_id: context,
+            channel_id: channel,
+            message_id: "msg-2".to_string(),
+            recipient: Some(recipient),
+            cause: Cause::RecipientUnreachable {
+                detail: "timeout".to_string(),
+            },
+        });
+        assert_eq!(outbound.peer_id, Some(recipient));
+        assert_eq!(outbound.message_id.as_deref(), Some("msg-2"));
+        assert_eq!(outbound.reason.direction(), MessageDropDirection::Outbound);
+        assert_eq!(
+            outbound.reason.to_string(),
+            "recipient_unreachable: timeout"
+        );
+
+        let mut log = MessageDropLog::default();
+        for _ in 0..=MessageDropLog::CAPACITY {
+            log.push(outbound.clone());
+        }
+        log.push(inbound.clone());
+        assert_eq!(log.recent.len(), MessageDropLog::CAPACITY);
+        assert_eq!(log.total, MessageDropLog::CAPACITY as u64 + 2);
+        assert_eq!(log.recent.back(), Some(&inbound));
     }
 }

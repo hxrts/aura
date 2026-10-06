@@ -26,7 +26,7 @@ lastcode() { st "$1" '[.runtime_events[]|select(.fact.kind=="'"${2:-invitation_c
 ops()  { st "$1" '[.operations[]|"\(.id)=\(.state)"]'; }
 toasts() { st "$1" '[.toasts[]|.message[0:200]]'; }
 deadtasks() { st "$1" '(.supervised_task_failures // [])[]|"\(.group)/\(.task): \(.cause)"' | jq -r .; } # dead runtime-supervised tasks
-drops() { st "$1" '(.inbound_message_drops // [])[]|"\(.sender_id) -> \(.channel_id) msg=\(.message_id): \(.reason)"' | jq -r .; } # inbound chat messages refused by the receive gate
+drops() { st "$1" '(.message_drops // [])[]|"\(.direction) \(.peer_id // "-") \(.channel_id // "-") msg=\(.message_id // "-"): \(.reason)"' | jq -r .; } # chat messages dropped: inbound intake/receive-gate refusals and outbound delivery failures (peer = sender or recipient)
 sel() { st "$1" ".selections[]|select(.list==\"$2\")|.item_id" | tr -d '"'; }
 restart_ok() { # restart <inst> and report whether the account came back
   req "$1" restart "" 300 >/dev/null; sleep 4

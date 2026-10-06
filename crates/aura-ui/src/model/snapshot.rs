@@ -211,7 +211,7 @@ impl UiModel {
             runtime_events: self.runtime_events.clone(),
             subscription_health: self.subscription_health.clone(),
             supervised_task_failures: Vec::new(),
-            inbound_message_drops: Vec::new(),
+            message_drops: Vec::new(),
         }
     }
 }

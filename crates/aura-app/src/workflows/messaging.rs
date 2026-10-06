@@ -89,18 +89,6 @@ const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 15_000;
 const MESSAGING_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
 const MESSAGING_RUNTIME_OPERATION_TIMEOUT: Duration = Duration::from_millis(30_000);
 
-#[cfg(feature = "instrumented")]
-macro_rules! messaging_warn {
-    ($($arg:tt)*) => {
-        tracing::warn!($($arg)*)
-    };
-}
-
-#[cfg(not(feature = "instrumented"))]
-macro_rules! messaging_warn {
-    ($($arg:tt)*) => {};
-}
-
 mod channel_refs;
 mod channels;
 mod followups;
