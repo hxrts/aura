@@ -17,8 +17,7 @@
 //! 3) Enroll device C via Settings → Add device
 //! 4) Assert device B receives/stores the new-epoch key package and acks the ceremony
 
-#[path = "../support/enrollment.rs"]
-mod enrollment_support;
+use super::enrollment_support;
 
 use async_lock::RwLock;
 use std::sync::Arc;

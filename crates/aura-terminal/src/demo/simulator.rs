@@ -903,6 +903,8 @@ async fn process_peer_transport_messages(
                                 Vec::new(),
                                 0,
                             ),
+                            // No admitted manifest: this acceptance cannot authorize enrollment.
+                            manifest_digest: None,
                         };
 
                         // Serialize response

@@ -12,10 +12,10 @@
 //! Validates that Settings → Remove device starts a real device removal ceremony,
 //! commits the rotation + RemoveLeaf tree op, and updates SETTINGS_SIGNAL.
 
-#[path = "../support/enrollment.rs"]
-mod enrollment_support;
+use super::enrollment_support;
 
 use async_lock::RwLock;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 

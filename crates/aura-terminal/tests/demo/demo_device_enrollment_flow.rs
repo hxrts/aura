@@ -13,8 +13,7 @@
 //! and that accepting the enrollment code on a second simulated device commits
 //! the ceremony and updates SETTINGS_SIGNAL device list.
 
-#[path = "../support/enrollment.rs"]
-mod enrollment_support;
+use super::enrollment_support;
 
 use async_lock::RwLock;
 use std::sync::Arc;

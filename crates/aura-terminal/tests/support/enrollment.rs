@@ -1,4 +1,5 @@
 //! Real provisional invitee setup shared by enrollment integration tests.
+#![allow(clippy::expect_used)] // fixtures fail loudly on setup errors
 
 use std::path::Path;
 use std::sync::Arc;
