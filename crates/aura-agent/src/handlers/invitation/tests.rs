@@ -5780,19 +5780,29 @@ large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
     )
     .await;
     let invited = invitation.receiver_id;
-    // Recreate the importing handler under the subject context on the same
-    // actual device/storage. Original admitted provisional identity remains
-    // the authoritative receiver; no raw code can supply replacement trust.
+    let effects = invitee.runtime().effects();
+    // A recreated handler on the same device/storage reimports the code; the
+    // original admitted provisional identity remains the receiver.
     let handler = handler_for(AuthorityContext::new_with_device(
-        invitation.sender_id,
+        invitee.authority_id(),
         invitee.context().device_id(),
     ));
     let imported = handler
-        .import_invitation_code(invitee.runtime().effects().as_ref(), &start.enrollment_code)
+        .import_invitation_code(effects.as_ref(), &start.enrollment_code)
         .await
-        .expect("actual independently admitted code reimports under subject handler context");
+        .expect("actual independently admitted code reimports under the runtime authority");
     assert_eq!(imported.receiver_id, invited);
     assert_eq!(imported.invitation_type, invitation.invitation_type);
+    // A handler for another authority cannot import on this runtime: no raw
+    // code can supply replacement trust.
+    let foreign = handler_for(AuthorityContext::new_with_device(
+        invitation.sender_id,
+        invitee.context().device_id(),
+    ));
+    assert!(foreign
+        .import_invitation_code(effects.as_ref(), &start.enrollment_code)
+        .await
+        .is_err());
 });
 
 // Regression (work/8.md task 32): listing invitations re-caches persisted
