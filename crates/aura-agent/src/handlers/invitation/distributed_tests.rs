@@ -5,15 +5,34 @@
 
 large_stack_async_test!(device_enrollment_invitee_rejects_wrong_request_and_negative_confirmation, {
     use aura_invitation::protocol::DeviceEnrollmentMessageError;
-    for (case,expected_error) in [
-        ("wrong-request",DeviceEnrollmentMessageError::DeviceMismatch),
-        ("negative-confirmation",DeviceEnrollmentMessageError::NotEstablished),
-    ] {
-        let error=tokio::time::timeout(std::time::Duration::from_secs(10),
+    let reject = |case| {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
             Box::pin(super::enrollment_vm_admission::actual_invalid_control_rejection_for_test(case)),
-        ).await.expect("permanent authenticated failure stays bounded");
-        assert!(matches!(error,AgentError::DeviceEnrollmentMessage(reason) if reason==expected_error),"unexpected error: {error:?}");
+        )
+    };
+    let error = reject("wrong-request")
+        .await
+        .expect("permanent authenticated failure stays bounded");
+    assert!(
+        matches!(error, AgentError::DeviceEnrollmentMessage(DeviceEnrollmentMessageError::DeviceMismatch)),
+        "unexpected error: {error:?}"
+    );
+    // The issuer refuses to sign a negative Committed decision for an
+    // uncommitted epoch, so no authenticated negative confirmation exists.
+    let error = reject("negative-confirmation")
+        .await
+        .expect("permanent authenticated failure stays bounded");
+    let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+    let mut refused = false;
+    while let Some(current) = cause {
+        refused |= matches!(
+            current.downcast_ref::<super::enrollment_vm_admission::EnrollmentVmAdmissionError>(),
+            Some(super::enrollment_vm_admission::EnrollmentVmAdmissionError::CurrentMembership)
+        );
+        cause = current.source();
     }
+    assert!(refused, "unexpected error: {error:?}");
 });
 
 #[tokio::test]

@@ -1588,17 +1588,16 @@ pub(crate) async fn actual_invalid_control_rejection_for_test(case: &str) -> Age
                 established: false,
                 new_epoch: Some(request.pending_epoch),
             };
-            let signed = sign_control(
+            // The issuer will not even sign a Committed decision for an epoch it
+            // has not committed, so no authenticated negative confirmation exists
+            // for the invitee to adopt.
+            sign_control(
                 issuer_effects.as_ref(),
                 &retained,
                 EnrollmentControlDecision::Committed(negative),
             )
             .await
-            .unwrap();
-            signed
-                .verify_confirmation(invitee_effects.as_ref(), &admitted, &request)
-                .await
-                .expect_err("authenticated negative decision cannot establish enrollment")
+            .expect_err("issuer cannot sign a negative uncommitted confirmation")
         }
         _ => panic!("unsupported actual negative fixture"),
     }
