@@ -177,6 +177,30 @@ async fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
     effects
 }
 
+/// Attach a reactive pipeline so required fact processing has its scheduler
+/// ingress, as the runtime's pipeline service provides outside tests.
+async fn start_test_reactive_pipeline(
+    effects: &Arc<AuraEffectSystem>,
+) -> crate::reactive::ReactivePipeline {
+    // Signals may already be registered by the fixture.
+    let _ = aura_app::signal_defs::register_app_signals(&effects.reactive_handler()).await;
+    let pipeline = crate::reactive::ReactivePipeline::start_for_test(
+        crate::reactive::SchedulerConfig {
+            batch_window: std::time::Duration::ZERO,
+            ..crate::reactive::SchedulerConfig::default()
+        },
+        effects.fact_registry(),
+        Arc::new(effects.time_effects().clone()),
+        effects.clone(),
+        effects.runtime_authority_id(),
+        effects.reactive_handler(),
+    );
+    effects
+        .attach_fact_sink(pipeline.fact_sender())
+        .expect("pipeline ingress belongs to the fixture runtime");
+    pipeline
+}
+
 async fn bootstrap_test_signing_authority(
     effects: &Arc<AuraEffectSystem>,
     authority_id: AuthorityId,
@@ -2006,6 +2030,7 @@ large_stack_async_test!(contact_acceptance_processing_commits_chat_fact_envelope
     let config = AgentConfig::default();
     let effects =
         Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+    let _pipeline = start_test_reactive_pipeline(&effects).await;
     let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
     let context_id = ContextId::new_from_entropy([203u8; 32]);
@@ -2081,6 +2106,7 @@ large_stack_async_test!(
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
         );
+        let _pipeline = start_test_reactive_pipeline(&effects).await;
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([207u8; 32]);
@@ -2202,6 +2228,8 @@ large_stack_async_test!(
         .unwrap();
 
         register_test_app_signals(sender_effects.as_ref()).await;
+
+        let _sender_pipeline = start_test_reactive_pipeline(&sender_effects).await;
         register_test_app_signals(receiver_effects.as_ref()).await;
 
         let now_ms = 1_700_000_000_000;
@@ -2390,6 +2418,8 @@ large_stack_async_test!(
         .unwrap();
 
         register_test_app_signals(sender_effects.as_ref()).await;
+
+        let _sender_pipeline = start_test_reactive_pipeline(&sender_effects).await;
         register_test_app_signals(receiver_effects.as_ref()).await;
 
         let now_ms = 1_700_000_000_000;
@@ -2867,6 +2897,7 @@ large_stack_async_test!(
         let effects = Arc::new(
             AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap(),
         );
+        let _pipeline = start_test_reactive_pipeline(&effects).await;
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([210u8; 32]);

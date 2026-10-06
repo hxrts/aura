@@ -3241,13 +3241,16 @@ async fn execute_effect_command_owned(
 async fn execute_journal_append(
     fact: InvitationFact,
     authority: &AuthorityContext,
-    context_id: ContextId,
+    _local_context_id: ContextId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
+    // Journal the fact under its own context: reducers and the required
+    // invitation projection reject a payload context that differs from the
+    // journal context, and that rejection stops the reactive pipeline.
     HandlerUtilities::append_generic_fact(
         authority,
         effects,
-        context_id,
+        fact.context_id_for_fact(),
         INVITATION_FACT_TYPE_ID.into(),
         &fact.to_bytes(),
     )
