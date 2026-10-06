@@ -5528,8 +5528,10 @@ mod required_orphan_fact_tests {
                 3 => outer = aura_core::ContextId::new_from_entropy([98; 32]),
                 _ => unreachable!(),
             }
+            // The publisher was deliberately stopped above: persist the faulty
+            // fact without publishing it.
             let committed = effects
-                .commit_relational_facts(vec![aura_journal::RelationalFact::Generic {
+                .persist_relational_facts(vec![aura_journal::RelationalFact::Generic {
                     context_id: outer,
                     envelope,
                 }])
@@ -6873,7 +6875,11 @@ async fn owned_enrollment_reader_rejects_equal_scope_on_another_runtime_registry
         issuer.context().default_context_id(),
         aura_core::effects::ExecutionMode::Testing,
     );
-    let foreign = crate::runtime::EffectSystemBuilder::testing()
+    // The foreign registry owns its own profile, so it has an (empty) original
+    // inventory to refuse the retargeted read with.
+    let foreign_profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+        .expect("foreign profile lease");
+    let foreign = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(foreign_profile)
         .with_authority(issuer.authority_id())
         .with_config(config)
         .build(&context)
