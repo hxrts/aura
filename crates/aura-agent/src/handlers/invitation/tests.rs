@@ -1958,6 +1958,7 @@ large_stack_async_test!(
     invite_to_channel_imports_pending_invitation_in_harness_mode,
     {
         let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_guard = crate::testing::harness_env_lock().lock_blocking();
         let _env_restore = EnvRestore::capture(&[harness_mode_env]);
         std::env::set_var(harness_mode_env, "1");
 
@@ -2652,6 +2653,7 @@ async fn cache_peer_descriptor_promotes_fresh_explicit_transport_hints() {
 #[tokio::test]
 async fn cache_peer_descriptor_ignores_unauthenticated_hints_in_harness_mode() {
     let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_guard = crate::testing::harness_env_lock().lock_blocking();
     let _env_restore = EnvRestore::capture(&[harness_mode_env]);
     std::env::set_var(harness_mode_env, "1");
 
@@ -4607,6 +4609,7 @@ async fn production_import_rejects_unsigned_shareable_invitation() {
 #[tokio::test]
 async fn production_harness_mode_still_rejects_invalid_sender_proof() {
     let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_guard = crate::testing::harness_env_lock().lock_blocking();
     let _env_restore = EnvRestore::capture(&[harness_mode_env]);
     std::env::set_var(harness_mode_env, "1");
 
@@ -4670,6 +4673,7 @@ async fn production_harness_mode_still_rejects_invalid_sender_proof() {
 #[tokio::test]
 async fn production_sender_proof_validation_is_harness_mode_neutral() {
     let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+    let _env_guard = crate::testing::harness_env_lock().lock_blocking();
     let _env_restore = EnvRestore::capture(&[harness_mode_env]);
     std::env::remove_var(harness_mode_env);
 
