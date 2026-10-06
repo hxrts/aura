@@ -2003,6 +2003,12 @@ with optional architecture-specific hardware acceleration
         ];
         devDependencies = [
           {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "test-keyring" ];
+          }
+          {
             name = "patchbay";
             packageId = "patchbay";
             target = { target, features }: ("linux" == target."os" or null);
@@ -2235,7 +2241,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "rand";
@@ -2304,6 +2309,12 @@ with optional architecture-specific hardware acceleration
             name = "hxrts-aura-authentication";
             packageId = "hxrts-aura-authentication";
             rename = "aura-authentication";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "test-keyring" ];
           }
           {
             name = "hxrts-aura-invitation";
@@ -2512,7 +2523,6 @@ with optional architecture-specific hardware acceleration
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "serde";
@@ -2572,6 +2582,12 @@ with optional architecture-specific hardware acceleration
             packageId = "hxrts-aura-app";
             rename = "aura-app";
             features = [ "native" "app-internals" ];
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "test-keyring" ];
           }
           {
             name = "insta";
@@ -2833,6 +2849,12 @@ with optional architecture-specific hardware acceleration
             name = "hxrts-aura-composition";
             packageId = "hxrts-aura-composition";
             rename = "aura-composition";
+          }
+          {
+            name = "hxrts-aura-effects";
+            packageId = "hxrts-aura-effects";
+            rename = "aura-effects";
+            features = [ "test-keyring" ];
           }
           {
             name = "hxrts-aura-macros";
@@ -12559,7 +12581,7 @@ library used by the other higher-level Hickory DNS crates.
             name = "hxrts-aura-effects";
             packageId = "hxrts-aura-effects";
             rename = "aura-effects";
-            features = [ "test-support" ];
+            features = [ "test-support" "test-keyring" ];
           }
           {
             name = "hxrts-aura-invitation";
@@ -12968,7 +12990,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "serde";
@@ -13043,7 +13064,7 @@ library used by the other higher-level Hickory DNS crates.
             name = "hxrts-aura-effects";
             packageId = "hxrts-aura-effects";
             rename = "aura-effects";
-            features = [ "test-support" ];
+            features = [ "test-support" "test-keyring" ];
           }
           {
             name = "proptest";
@@ -13610,7 +13631,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "paste";
@@ -14009,7 +14029,7 @@ library used by the other higher-level Hickory DNS crates.
           "telltale-runtime-capability" = [ "dep:telltale-machine" ];
           "transparent_onion" = [ "aura-core/transparent_onion" ];
         };
-        resolvedDefaultFeatures = [ "default" "simulation" "telltale-runtime-capability" "test-support" "transparent_onion" ];
+        resolvedDefaultFeatures = [ "default" "simulation" "telltale-runtime-capability" "test-keyring" "test-support" "transparent_onion" ];
       };
       "hxrts-aura-guards" = rec {
         crateName = "hxrts-aura-guards";
@@ -14086,7 +14106,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "proptest";
@@ -14714,7 +14733,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "rand";
@@ -15442,7 +15460,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "parking_lot";
             packageId = "parking_lot 0.12.5";
-            features = [ "deadlock_detection" ];
           }
           {
             name = "rand";
@@ -37044,3 +37061,4 @@ even WASM!
   #
   };
 }
+

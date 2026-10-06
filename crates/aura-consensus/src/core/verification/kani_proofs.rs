@@ -192,20 +192,25 @@ fn any_valid_consensus_state() -> ConsensusState {
     state
 }
 
-fn assert_invariants_if_transition_succeeds(result: TransitionResult, message: &'static str) {
-    match result {
-        TransitionResult::Ok(new_state) => {
-            kani::assert(check_invariants(&new_state).is_ok(), message);
+// Macros, not functions: Kani requires `kani::assert` messages to be literals.
+macro_rules! assert_invariants_if_transition_succeeds {
+    ($result:expr, $message:literal $(,)?) => {
+        match $result {
+            TransitionResult::Ok(new_state) => {
+                kani::assert(check_invariants(&new_state).is_ok(), $message);
+            }
+            TransitionResult::NotEnabled(_) => {}
         }
-        TransitionResult::NotEnabled(_) => {}
-    }
+    };
 }
 
-fn assert_transition_rejected(result: TransitionResult, message: &'static str) {
-    match result {
-        TransitionResult::Ok(_) => kani::assert(false, message),
-        TransitionResult::NotEnabled(_) => {}
-    }
+macro_rules! assert_transition_rejected {
+    ($result:expr, $message:literal $(,)?) => {
+        match $result {
+            TransitionResult::Ok(_) => kani::assert(false, $message),
+            TransitionResult::NotEnabled(_) => {}
+        }
+    };
 }
 
 // =============================================================================
@@ -228,7 +233,7 @@ fn apply_share_preserves_invariants() {
 
     let proposal = any_share_proposal();
 
-    assert_invariants_if_transition_succeeds(
+    assert_invariants_if_transition_succeeds!(
         apply_share(&state, proposal),
         "apply_share must preserve invariants",
     );
@@ -242,7 +247,7 @@ fn trigger_fallback_preserves_invariants() {
 
     kani::assume(check_invariants(&state).is_ok());
 
-    assert_invariants_if_transition_succeeds(
+    assert_invariants_if_transition_succeeds!(
         trigger_fallback(&state),
         "trigger_fallback must preserve invariants",
     );
@@ -256,7 +261,7 @@ fn fail_consensus_preserves_invariants() {
 
     kani::assume(check_invariants(&state).is_ok());
 
-    assert_invariants_if_transition_succeeds(
+    assert_invariants_if_transition_succeeds!(
         fail_consensus(&state),
         "fail_consensus must preserve invariants",
     );
@@ -367,7 +372,7 @@ fn committed_state_is_terminal() {
 
     let proposal = any_share_proposal();
 
-    assert_transition_rejected(
+    assert_transition_rejected!(
         apply_share(&state, proposal),
         "committed state should not accept new shares",
     );
@@ -383,7 +388,7 @@ fn failed_state_is_terminal() {
 
     let proposal = any_share_proposal();
 
-    assert_transition_rejected(
+    assert_transition_rejected!(
         apply_share(&state, proposal),
         "failed state should not accept new shares",
     );

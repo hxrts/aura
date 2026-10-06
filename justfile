@@ -995,7 +995,7 @@ ci-lean-check-sorry:
 
 # Kani bounded model checking
 ci-kani:
-    just _run-kani cargo kani --package hxrts-aura-protocol --default-unwind 10 --output-format terse
+    just _run-kani cargo kani --package hxrts-aura-consensus --default-unwind 10 --output-format terse
 
 # ITF conformance tests
 ci-conformance-itf:
@@ -1685,11 +1685,11 @@ lean-translate jobs="1" crate="all":
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Run Kani verification on a package
-kani package="hxrts-aura-protocol" unwind="10":
+kani package="hxrts-aura-consensus" unwind="10":
     just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --default-unwind {{ unwind }}
 
 # Run a specific Kani harness
-kani-harness harness package="hxrts-aura-protocol" unwind="10":
+kani-harness harness package="hxrts-aura-consensus" unwind="10":
     just _nix-nightly -- just _run-kani cargo kani --package {{ package }} --harness {{ harness }} --default-unwind {{ unwind }}
 
 # Setup Kani (first time only)
@@ -1710,6 +1710,11 @@ _run-kani *ARGS:
     export KANI_HOME="${AURA_KANI_HOME:-$ROOT/kani-home}"
     bash scripts/verify/kani-ensure.sh
     export PATH="$ROOT/bin:$PATH"
+    # macOS: /usr/bin/gcc is an xcrun stub that cannot resolve a toolchain inside
+    # the Nix shell ("tool 'gcc' not found"); point goto-cc at the shell's cc.
+    if [[ "$(uname -s)" == Darwin && "$(command -v gcc)" == /usr/bin/gcc ]]; then
+        ln -sf "$(command -v cc)" "$ROOT/bin/gcc"
+    fi
     {{ ARGS }}
 
 # Run full Kani verification suite

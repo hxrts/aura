@@ -143,7 +143,7 @@ base64 = "0.22"
 hex = "0.4"
 indexmap = "2.5"
 dirs = "5.0"
-parking_lot = { version = "0.12", features = ["deadlock_detection"] }
+parking_lot = { version = "0.12" }
 getrandom = { version = "0.2", features = ["js"] }
 sysinfo = "0.33"
 
