@@ -3039,6 +3039,19 @@ impl AuraEffectSystem {
         self
     }
 
+    /// Corrupt the encrypted backing bytes of an immutable record (fixtures only;
+    /// the API never mutates immutable records).
+    #[cfg(test)]
+    pub(crate) async fn fault_corrupt_secure_record_for_test(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+    ) -> Result<(), aura_core::AuraError> {
+        self.crypto
+            .secure_storage()
+            .fault_corrupt_selected_record_for_test(location)
+            .await
+    }
+
     #[cfg(test)]
     pub(crate) async fn fault_remove_secure_record_for_test(
         &self,

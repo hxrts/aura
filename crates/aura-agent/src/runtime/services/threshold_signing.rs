@@ -3550,10 +3550,12 @@ mod tests {
             0,
             &ParticipantIdentity::device(effects.device_id()),
         );
-        effects
-            .secure_delete(&location, &[SecureStorageCapability::Delete])
+        // Immutable wrapping keys cannot be deleted through the API; inject the
+        // backing-provider loss instead.
+        assert!(effects
+            .fault_remove_secure_record_for_test(&location)
             .await
-            .unwrap();
+            .unwrap());
         let restarted = ThresholdSigningService::new(effects.clone());
         assert!(restarted.bootstrap_authority(&authority).await.is_err());
         assert!(!effects.secure_exists(&location).await.unwrap());

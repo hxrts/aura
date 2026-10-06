@@ -1024,10 +1024,10 @@ mod tests {
                 original,
                 "idempotent transfer cannot replace original admission time or pinned evidence"
             );
-            // Explicit test corruption models damaged existing ciphertext plaintext;
+            // Corrupt the actual backing ciphertext: the record is immutable and
             // production admission has no replacement authority.
             effects
-                .secure_store(&key, b"corrupt", &[SecureStorageCapability::Write])
+                .fault_corrupt_secure_record_for_test(&key)
                 .await
                 .unwrap();
             assert!(matches!(
@@ -1040,9 +1040,9 @@ mod tests {
                 .await,
                 Err(EnrollmentManifestError::Runtime(_))
             ));
-            assert_eq!(
-                effects.secure_retrieve(&key, &read).await.unwrap(),
-                b"corrupt"
+            assert!(
+                effects.secure_retrieve(&key, &read).await.is_err(),
+                "corrupt admission evidence fails closed and is not replaced"
             );
         }
     );
@@ -1058,10 +1058,10 @@ mod tests {
             .await;
             let effects = invitee.runtime().effects();
             let key = location(invitee.authority_id(), &invitation.invitation_id);
-            effects
-                .secure_delete(&key, &[SecureStorageCapability::Delete])
+            assert!(effects
+                .fault_remove_secure_record_for_test(&key)
                 .await
-                .unwrap();
+                .unwrap());
             assert!(matches!(
                 load_admitted_baseline(effects.as_ref(), invitee.authority_id(), &invitation).await,
                 Err(EnrollmentManifestError::MissingPin)

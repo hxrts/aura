@@ -1349,15 +1349,9 @@ mod real_crypto_tests {
             )
             .await
             .is_err());
+            // Retained trust is immutable: corrupt its backing ciphertext instead.
             effects
-                .secure_store(
-                    &location(subject, &ceremony),
-                    b"corrupt record",
-                    &[
-                        SecureStorageCapability::Read,
-                        SecureStorageCapability::Write,
-                    ],
-                )
+                .fault_corrupt_secure_record_for_test(&location(subject, &ceremony))
                 .await
                 .unwrap();
             assert!(
