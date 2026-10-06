@@ -89,3 +89,15 @@ async fn creator_moderation_commands_are_allowed_then_refused_when_limited() -> 
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn created_home_channel_appears_in_creator_chat() -> Result<()> {
+    let (_temp, app_core, _me) = creator_app_core(63).await?;
+    let home_id = context::create_home(&app_core, Some("ChatHome".to_string()), None).await?;
+    let chat = aura_app::ui::workflows::messaging::get_chat_state(&app_core).await?;
+    let channel = chat
+        .channel(&home_id)
+        .expect("the creator's chat must list the created home channel");
+    assert_eq!(channel.name, "ChatHome");
+    Ok(())
+}

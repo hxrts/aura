@@ -608,7 +608,19 @@ async fn persist_created_home(
             message: "join home channel".to_owned(),
             source: Some(Arc::new(error)),
         })?;
+    // The chat view materializes a channel only from `ChannelCreated`, so the
+    // home channel needs one for the creator to see it.
+    let channel_created = aura_chat::ChatFact::channel_created_ms(
+        context_id,
+        home_id,
+        home_name.to_string(),
+        Some(home_name.to_string()),
+        false,
+        timestamp_ms,
+        creator,
+    );
     let facts = [
+        channel_created.to_generic(),
         created.to_generic(),
         aura_social::SocialFact::member_joined_ms(
             creator,
@@ -626,6 +638,8 @@ async fn persist_created_home(
             message: "persist home".to_owned(),
             source: Some(Arc::new(error)),
         })?;
+    crate::workflows::observed_projection::reduce_chat_fact_observed(app_core, &channel_created)
+        .await?;
     Ok(created)
 }
 
