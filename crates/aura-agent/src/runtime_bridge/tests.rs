@@ -409,6 +409,10 @@ fn amp_list_channel_participants_includes_accepted_channel_invitees() {
                 .expect("build testing agent"),
         );
         let bridge = AgentRuntimeBridge::new(agent.clone());
+        bridge
+            .bootstrap_signing_keys()
+            .await
+            .expect("bootstrap canonical signing keys as a real account does");
         let context = ContextId::new_from_entropy([13u8; 32]);
         let channel = ChannelId::from_bytes(hash(b"accepted-channel-invitee-visible"));
 
@@ -499,6 +503,12 @@ fn amp_list_channel_participants_includes_transported_channel_acceptance() {
                 .await
                 .expect("build receiver simulation agent"),
         );
+        for agent in [&sender_agent, &receiver_agent] {
+            AgentRuntimeBridge::new(agent.clone())
+                .bootstrap_signing_keys()
+                .await
+                .expect("bootstrap canonical signing keys as a real account does");
+        }
         let sender_effects = sender_agent.runtime().effects();
         crate::handlers::invitation::InvitationHandler::new(crate::core::AuthorityContext::new(
             authority,
@@ -1283,6 +1293,10 @@ async fn try_get_invited_peer_ids_skips_generic_contact_invites() {
             .expect("build testing agent"),
     );
     let bridge = AgentRuntimeBridge::new(agent);
+    bridge
+        .bootstrap_signing_keys()
+        .await
+        .expect("bootstrap canonical signing keys as a real account does");
 
     bridge
         .create_contact_invitation(authority, None, Some("generic".to_string()), None, None)
@@ -1345,7 +1359,11 @@ async fn amp_list_channel_participants_requires_accepting_invitation_service() {
         .await
         .expect_err("stopping runtime should reject participant queries");
     assert!(
-        error.to_string().contains("invitation_service"),
+        error
+            .to_string()
+            .to_ascii_lowercase()
+            .replace('_', " ")
+            .contains("invitation service"),
         "expected invitation service error, got: {error}"
     );
 }
