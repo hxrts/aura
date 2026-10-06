@@ -112,7 +112,7 @@ fn install_full_invitation_biscuit_cache(effects: &Arc<AuraEffectSystem>, author
 }
 
 #[track_caller]
-fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
+fn unbootstrapped_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
     let config = AgentConfig {
         device_id: authority.device_id(),
         ..Default::default()
@@ -146,6 +146,34 @@ fn production_effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem>
             .unwrap(),
     );
     install_full_invitation_biscuit_cache(&effects, authority.authority_id());
+    effects
+}
+
+/// Simulation runtime with its canonical signing authority bootstrapped, as a
+/// real account has before it issues or accepts invitations.
+async fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
+    // One construction site serves every caller: salt the deterministic seed
+    // with the authority so distinct test identities get distinct seeds.
+    let config = AgentConfig {
+        device_id: authority.device_id(),
+        ..Default::default()
+    };
+    static RUNTIMES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let salt = u64::from_le_bytes(
+        authority.authority_id().to_bytes()[..8]
+            .try_into()
+            .expect("authority id has at least 8 bytes"),
+    ) ^ RUNTIMES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_test_for_authority_with_salt(
+            &config,
+            authority.authority_id(),
+            salt,
+        )
+        .unwrap(),
+    );
+    install_full_invitation_biscuit_cache(&effects, authority.authority_id());
+    bootstrap_test_signing_authority(&effects, authority.authority_id()).await;
     effects
 }
 
@@ -308,7 +336,7 @@ fn invitation_service_for(
 #[test]
 fn invitation_acceptance_caller_future_is_bounded() {
     let authority = create_test_authority(187);
-    let effects = effects_for(&authority);
+    let effects = unbootstrapped_effects_for(&authority);
     let service = invitation_service_for(authority, effects);
     let invitation = InvitationId::new("acceptance-future-budget");
     let future = service.accept(&invitation);
@@ -606,7 +634,8 @@ impl Drop for EnvRestore {
 async fn channel_home_materialization_requires_registered_homes_signal() {
     let effects = effects_for(&AuthorityContext::new(AuthorityId::new_from_entropy(
         [2u8; 32],
-    )));
+    )))
+    .await;
     let invitation = Invitation {
         invitation_id: InvitationId::new("registered-homes"),
         context_id: ContextId::new_from_entropy([3u8; 32]),
@@ -647,7 +676,7 @@ async fn channel_home_materialization_requires_registered_homes_signal() {
 #[tokio::test]
 async fn joined_home_evidence_requires_canonical_checkpoint_and_membership() {
     let own = AuthorityId::new_from_entropy([11u8; 32]);
-    let effects = effects_for(&AuthorityContext::new(own));
+    let effects = effects_for(&AuthorityContext::new(own)).await;
     let invite = ChannelInviteDetails {
         context_id: ContextId::new_from_entropy([12u8; 32]),
         channel_id: canonical_home_id(13),
@@ -697,7 +726,7 @@ fn accepted_home_evidence_rejects_pending_and_nonhome_invitations() {
 #[tokio::test]
 async fn test_execute_allowed_outcome() {
     let authority = create_test_authority(130);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
 
     let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget {
         cost: FlowCost::new(1),
@@ -710,7 +739,7 @@ async fn test_execute_allowed_outcome() {
 #[tokio::test]
 async fn test_execute_denied_outcome() {
     let authority = create_test_authority(131);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
 
     let outcome = GuardOutcome::denied(aura_guards::types::GuardViolation::other(
         "Test denial reason",
@@ -725,7 +754,7 @@ async fn test_execute_denied_outcome() {
 #[tokio::test]
 async fn test_execute_journal_append() {
     let authority = create_test_authority(132);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
 
     let fact = InvitationFact::sent_ms(
         ContextId::new_from_entropy([232u8; 32]),
@@ -756,6 +785,7 @@ async fn test_execute_notify_peer() {
         authority.authority_id(),
         shared_transport.clone(),
     );
+    bootstrap_test_signing_authority(&effects, authority.authority_id()).await;
     // Materialize a destination participant on the shared transport.
     let _peer_effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
@@ -763,6 +793,7 @@ async fn test_execute_notify_peer() {
             peer,
             shared_transport,
         );
+    bootstrap_test_signing_authority(&_peer_effects, peer).await;
     let _authority_rendezvous_tasks =
         attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
     let _peer_rendezvous_tasks = attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
@@ -830,7 +861,7 @@ async fn test_execute_notify_peer() {
 #[tokio::test]
 async fn test_execute_record_receipt() {
     let authority = create_test_authority(136);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
 
     let outcome = GuardOutcome::allowed(vec![EffectCommand::RecordReceipt {
         operation: InvitationOperation::SendInvitation,
@@ -900,6 +931,7 @@ async fn test_execute_multiple_commands() {
         authority.authority_id(),
         shared_transport.clone(),
     );
+    bootstrap_test_signing_authority(&effects, authority.authority_id()).await;
     // Materialize a destination participant on the shared transport.
     let _peer_effects =
         crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
@@ -907,6 +939,7 @@ async fn test_execute_multiple_commands() {
             peer,
             shared_transport,
         );
+    bootstrap_test_signing_authority(&_peer_effects, peer).await;
     let _authority_rendezvous_tasks =
         attach_test_rendezvous_manager(effects.as_ref(), authority.authority_id()).await;
     let _peer_rendezvous_tasks = attach_test_rendezvous_manager(_peer_effects.as_ref(), peer).await;
@@ -971,7 +1004,7 @@ async fn test_execute_multiple_commands() {
 #[tokio::test]
 async fn invitation_can_be_created() {
     let authority_context = create_test_authority(91);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = handler_for(authority_context.clone());
 
     let receiver_id = AuthorityId::new_from_entropy([92u8; 32]);
@@ -1000,7 +1033,7 @@ async fn invitation_can_be_created() {
 async fn invitation_reservation_is_side_effect_free_and_rejects_another_issuer() {
     let issuer = create_test_authority(181);
     let other = create_test_authority(182);
-    let effects = effects_for(&issuer);
+    let effects = effects_for(&issuer).await;
     let handler = handler_for(issuer.clone());
     let before = effects
         .load_committed_facts(issuer.authority_id())
@@ -1042,7 +1075,7 @@ async fn invitation_reservation_is_side_effect_free_and_rejects_another_issuer()
         issuer.authority_id(),
         DeviceId::new_from_entropy([186; 32]),
     );
-    let other_effects = effects_for(&other_device);
+    let other_effects = effects_for(&other_device).await;
     let other_before = other_effects
         .load_committed_facts(issuer.authority_id())
         .await
@@ -1077,7 +1110,7 @@ async fn invitation_reservation_is_side_effect_free_and_rejects_another_issuer()
 #[tokio::test]
 async fn invitation_preparation_caller_future_is_bounded() {
     let issuer = create_test_authority(187);
-    let effects = effects_for(&issuer);
+    let effects = effects_for(&issuer).await;
     let handler = handler_for(issuer);
     let future = handler.prepare_invitation_with_context(
         effects,
@@ -1098,7 +1131,7 @@ async fn invitation_preparation_caller_future_is_bounded() {
 #[tokio::test]
 async fn invitation_reservation_preserves_identity_and_rejects_deadline_overflow() {
     let issuer = create_test_authority(184);
-    let effects = effects_for(&issuer);
+    let effects = effects_for(&issuer).await;
     let handler = handler_for(issuer.clone());
     let before = effects
         .load_committed_facts(issuer.authority_id())
@@ -1166,7 +1199,7 @@ large_stack_async_test!(invitation_can_be_accepted, {
 #[tokio::test]
 async fn invitation_can_be_declined() {
     let authority_context = create_test_authority(96);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context).unwrap();
 
     let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
@@ -1214,7 +1247,7 @@ async fn invitation_can_be_declined() {
 #[tokio::test]
 async fn importing_channel_invitation_without_context_rejects_before_persist() {
     let authority_context = create_test_authority(101);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = handler_for(authority_context.clone());
 
     let shareable = ShareableInvitation {
@@ -1255,11 +1288,11 @@ large_stack_async_test!(
     accepting_guardian_invitation_surfaces_choreography_failure,
     {
         let authority_context = create_test_authority(103);
-        let effects = effects_for(&authority_context);
+        let effects = effects_for(&authority_context).await;
         let receiver_id = authority_context.authority_id();
         let handler = InvitationHandler::new(authority_context).unwrap();
         let sender_id = AuthorityId::new_from_entropy([104u8; 32]);
-        let sender_effects = effects_for(&create_test_authority(104));
+        let sender_effects = effects_for(&create_test_authority(104)).await;
         bootstrap_test_signing_authority(&sender_effects, sender_id).await;
         let sender_handler = handler_for_id(sender_id);
         install_full_invitation_biscuit_cache(&sender_effects, sender_id);
@@ -1350,7 +1383,7 @@ large_stack_async_test!(
 #[tokio::test]
 async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occurs() {
     let authority_context = create_test_authority(105);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context).unwrap();
     let shareable = ShareableInvitation {
         version: ShareableInvitation::CURRENT_VERSION,
@@ -1392,7 +1425,7 @@ async fn declining_contact_invitation_succeeds_locally_when_exchange_failure_occ
 #[tokio::test]
 async fn build_snapshot_uses_authoritative_flow_budget_state() {
     let authority_context = create_test_authority(115);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context.clone()).unwrap();
     let context_id = authority_context.default_context_id();
 
@@ -1434,7 +1467,7 @@ async fn build_snapshot_without_biscuit_frontier_has_empty_capability_frontier()
 #[tokio::test]
 async fn creating_invitation_is_denied_when_biscuit_lacks_invitation_send_capability() {
     let authority_context = create_test_authority(116);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context.clone()).unwrap();
     let keypair = aura_authorization::KeyPair::new();
     let authority = authority_context.authority_id().to_string();
@@ -1472,7 +1505,7 @@ async fn creating_invitation_is_denied_when_biscuit_lacks_invitation_send_capabi
 #[tokio::test]
 async fn accepting_unknown_invitation_is_rejected() {
     let authority_context = create_test_authority(118);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context).unwrap();
 
     let error = handler
@@ -1673,6 +1706,7 @@ async fn creating_contact_invitation_materializes_sender_contact() {
     let effects =
         Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, sender_id).unwrap());
     let handler = handler_for_id(sender_id);
+    bootstrap_test_signing_authority(&effects, sender_id).await;
 
     handler
         .create_invitation(
@@ -1766,6 +1800,8 @@ large_stack_async_test!(
                 sender_id,
                 shared_transport.clone(),
             );
+
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
         let receiver_effects =
             crate::testing::simulation_effect_system_with_shared_transport_for_authority_arc(
                 &config,
@@ -1887,6 +1923,7 @@ large_stack_async_test!(
             )
             .unwrap(),
         );
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
         let receiver_effects = Arc::new(
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
@@ -2115,6 +2152,7 @@ large_stack_async_test!(
             )
             .unwrap(),
         );
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
         let receiver_effects = Arc::new(
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
@@ -2302,6 +2340,7 @@ large_stack_async_test!(
             )
             .unwrap(),
         );
+        bootstrap_test_signing_authority(&sender_effects, sender_id).await;
         let receiver_effects = Arc::new(
             AuraEffectSystem::simulation_for_test_with_shared_transport_for_authority(
                 &config,
@@ -3512,6 +3551,7 @@ async fn created_invitation_is_retrievable_across_handler_instances() {
     let effects = Arc::new(
         AuraEffectSystem::simulation_for_test_for_authority(&config, own_authority).unwrap(),
     );
+    bootstrap_test_signing_authority(&effects, own_authority).await;
 
     let authority_context = AuthorityContext::new(own_authority);
 
@@ -3570,7 +3610,7 @@ large_stack_async_test!(
 
 large_stack_async_test!(invitation_can_be_cancelled, {
     let authority_context = create_test_authority(98);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context).unwrap();
 
     let receiver_id = AuthorityId::new_from_entropy([99u8; 32]);
@@ -3600,7 +3640,7 @@ large_stack_async_test!(invitation_can_be_cancelled, {
 
 large_stack_async_test!(list_pending_shows_only_pending, {
     let authority_context = create_test_authority(100);
-    let effects = effects_for(&authority_context);
+    let effects = effects_for(&authority_context).await;
     let handler = InvitationHandler::new(authority_context).unwrap();
 
     // Create 3 invitations
@@ -3902,7 +3942,7 @@ fn assert_device_enrollment_payload_restored(invitation_type: &InvitationType) {
 #[tokio::test]
 async fn device_enrollment_created_cache_redacts_regular_storage_and_restores_secure_payload() {
     let authority = create_test_authority(154);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let invitation = test_device_enrollment_invitation("created-device-secret-cache");
 
     InvitationCacheHandler::persist_created_invitation(
@@ -3939,7 +3979,7 @@ async fn device_enrollment_created_cache_redacts_regular_storage_and_restores_se
 #[tokio::test]
 async fn device_enrollment_imported_cache_redacts_regular_storage_and_restores_secure_payload() {
     let authority = create_test_authority(155);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let invitation = test_device_enrollment_invitation("imported-device-secret-cache");
     let shareable = ShareableInvitation {
         version: ShareableInvitation::CURRENT_VERSION,
@@ -4367,7 +4407,7 @@ fn shareable_invitation_parses_optional_sender_addr_and_device_segments() {
 #[tokio::test]
 async fn shareable_invitation_signed_envelope_roundtrips_sender_proof() {
     let authority = create_test_authority(240);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
     let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
     let shareable = ShareableInvitation {
@@ -4410,7 +4450,7 @@ async fn shareable_invitation_signed_envelope_binds_transport_metadata() {
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
     let authority = create_test_authority(239);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let (private_key, public_key) = effects.ed25519_generate_keypair().await.unwrap();
     let sender_id = AuthorityId::new_from_entropy(hash(&public_key));
     let sender_device_id = DeviceId::new_from_entropy([238u8; 32]);
@@ -5067,7 +5107,7 @@ fn sender_hint_list_yields_every_transport_type() {
 #[tokio::test]
 async fn sender_hint_suffix_does_not_overwrite_trusted_descriptor_route() {
     let authority = create_test_authority(252);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let manager = RendezvousManager::new_with_default_udp(
         authority.authority_id(),
         RendezvousManagerConfig::default(),
@@ -5384,7 +5424,7 @@ large_stack_async_test!(importing_multiple_contact_invitations_sequentially, {
 async fn contact_acceptance_signature_binds_accepter_nickname() {
     let sender = create_test_authority(171);
     let receiver = create_test_authority(172);
-    let receiver_effects = effects_for(&receiver);
+    let receiver_effects = effects_for(&receiver).await;
     let invitation = device_enrollment_test_invitation(
         "inv-contact-nickname-binding",
         sender.authority_id(),
@@ -5440,8 +5480,8 @@ async fn guardian_acceptance_records_verified_recovery_key() {
 
     let principal = create_test_authority(181);
     let guardian = create_test_authority(182);
-    let principal_effects = effects_for(&principal);
-    let guardian_effects = effects_for(&guardian);
+    let principal_effects = effects_for(&principal).await;
+    let guardian_effects = effects_for(&guardian).await;
     let principal_handler = handler_for(principal.clone());
     install_full_invitation_biscuit_cache(&principal_effects, principal.authority_id());
     bootstrap_test_signing_authority(&principal_effects, principal.authority_id()).await;
@@ -5699,7 +5739,7 @@ large_stack_async_test!(reimported_device_enrollment_keeps_invited_authority, {
 // restored, or accepting it skips the baseline tree and key package.
 large_stack_async_test!(listing_restores_device_enrollment_payload_before_caching, {
     let authority = create_test_authority(156);
-    let effects = effects_for(&authority);
+    let effects = effects_for(&authority).await;
     let handler = handler_for(authority.clone());
     let invitation = test_device_enrollment_invitation("listed-device-enrollment");
     let shareable = ShareableInvitation {
