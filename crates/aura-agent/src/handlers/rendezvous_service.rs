@@ -626,28 +626,29 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
-    async fn install_identity_key(effects: &AuraEffectSystem, authority: AuthorityId) -> [u8; 32] {
-        let (signing_key, verifying_key) = effects
-            .ed25519_generate_keypair()
+    /// Bootstrap the canonical signing authority (as a real account has) and
+    /// return its active identity public key.
+    async fn install_identity_key(
+        effects: &std::sync::Arc<AuraEffectSystem>,
+        authority: AuthorityId,
+    ) -> [u8; 32] {
+        aura_core::effects::ThresholdSigningEffects::bootstrap_authority(
+            &crate::runtime::services::ThresholdSigningService::new(effects.clone()),
+            &authority,
+        )
+        .await
+        .expect("canonical signing authority should bootstrap");
+        let identity =
+            crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                effects.as_ref(),
+                &authority,
+            )
             .await
-            .expect("test signing keypair should generate");
-        let public_key: [u8; 32] = verifying_key
-            .clone()
-            .try_into()
-            .expect("test verifying key should be 32 bytes");
-        let key_package = SingleSignerKeyPackage::new(signing_key, verifying_key);
-        let bytes = key_package
-            .export_for_secure_storage(SecretExportContext::secure_storage(
-                "aura-agent::handlers::rendezvous::retrieve_identity_keys",
-            ))
-            .expect("test signing key package should serialize");
-        let location =
-            SecureStorageLocation::with_sub_key("signing_keys", format!("{}:1", authority), "1");
-        effects
-            .secure_store(&location, &bytes, &[SecureStorageCapability::Write])
+            .expect("active identity context should exist");
+        crate::handlers::rendezvous_identity::require_identity_keys(&identity)
             .await
-            .expect("test signing key package should store");
-        public_key
+            .expect("active identity keys should exist")
+            .1
     }
 
     #[tokio::test]
@@ -664,7 +665,10 @@ mod tests {
     async fn test_publish_quic_descriptor() {
         let authority_context = create_test_authority(61);
         let config = AgentConfig::default();
-        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let effects = crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority_context.authority_id(),
+        );
         install_identity_key(&effects, authority_context.authority_id()).await;
 
         let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
@@ -713,7 +717,10 @@ mod tests {
     async fn test_channel_workflow() {
         let authority_context = create_test_authority(64);
         let config = AgentConfig::default();
-        let effects = crate::testing::simulation_effect_system_arc(&config);
+        let effects = crate::testing::simulation_effect_system_for_authority_arc(
+            &config,
+            authority_context.authority_id(),
+        );
         let peer_public_key =
             install_identity_key(&effects, authority_context.authority_id()).await;
 

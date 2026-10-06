@@ -2566,6 +2566,12 @@ mod tests {
     async fn test_invite_as_contact() {
         let authority_context = create_test_authority(111);
         let effects = effects_for(&authority_context);
+        aura_core::effects::ThresholdSigningEffects::bootstrap_authority(
+            &crate::runtime::services::ThresholdSigningService::new(effects.clone()),
+            &authority_context.authority_id(),
+        )
+        .await
+        .expect("canonical signing authority should bootstrap");
         let service = service_for(authority_context, effects);
 
         let receiver_id = AuthorityId::new_from_entropy([112u8; 32]);
@@ -2589,6 +2595,12 @@ mod tests {
     async fn test_invite_as_contact_self_out_of_band_does_not_require_peer() {
         let authority_context = create_test_authority(141);
         let effects = effects_for_simulation(&authority_context, 141);
+        aura_core::effects::ThresholdSigningEffects::bootstrap_authority(
+            &crate::runtime::services::ThresholdSigningService::new(effects.clone()),
+            &authority_context.authority_id(),
+        )
+        .await
+        .expect("canonical signing authority should bootstrap");
         let service = service_for(authority_context.clone(), effects);
 
         let receiver_id = authority_context.authority_id();
@@ -2612,6 +2624,12 @@ mod tests {
     async fn test_invite_as_guardian() {
         let authority_context = create_test_authority(113);
         let effects = effects_for(&authority_context);
+        aura_core::effects::ThresholdSigningEffects::bootstrap_authority(
+            &crate::runtime::services::ThresholdSigningService::new(effects.clone()),
+            &authority_context.authority_id(),
+        )
+        .await
+        .expect("canonical signing authority should bootstrap");
         let service = service_for(authority_context.clone(), effects);
 
         let receiver_id = AuthorityId::new_from_entropy([114u8; 32]);
@@ -2633,6 +2651,12 @@ mod tests {
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
         let effects = effects_for(&authority_context);
+        aura_core::effects::ThresholdSigningEffects::bootstrap_authority(
+            &crate::runtime::services::ThresholdSigningService::new(effects.clone()),
+            &authority_context.authority_id(),
+        )
+        .await
+        .expect("canonical signing authority should bootstrap");
         let service = service_for(authority_context, effects.clone());
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
