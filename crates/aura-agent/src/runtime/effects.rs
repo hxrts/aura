@@ -3826,6 +3826,7 @@ mod tests {
 
     #[test]
     fn production_platform_storage_requires_its_own_namespace_owner() {
+        let _env_guard = crate::testing::harness_env_lock().lock_blocking();
         let authority = AuthorityId::new_from_entropy([0xA7; 32]);
         let temp = tempfile::tempdir().expect("tempdir should build");
         let config = AgentConfig {
@@ -3836,8 +3837,12 @@ mod tests {
             },
             ..Default::default()
         };
+        // Platform storage assembles with its own profile and namespace lease;
+        // while it lives, no second writer can share that namespace.
+        let first = AuraEffectSystem::production(config.clone(), authority)
+            .expect("platform production retains its own namespace owner");
         let error = AuraEffectSystem::production(config.clone(), authority)
-            .expect_err("filesystem lease must not authorize a shared platform namespace");
+            .expect_err("a second writer cannot share the owned platform namespace");
         let mut source: &dyn std::error::Error = &error;
         let ownership = loop {
             if let Some(ownership) =
@@ -3849,9 +3854,10 @@ mod tests {
         };
         assert!(matches!(
             ownership,
-            aura_core::effects::profile_storage::ProfileStorageError::Unsupported
+            aura_core::effects::profile_storage::ProfileStorageError::Busy
         ));
         assert!(!config.storage.base_path.join("secure_store").exists());
+        drop(first);
     }
 
     #[test]
@@ -3878,6 +3884,7 @@ mod tests {
 
     #[test]
     fn production_rejects_filesystem_secure_storage_fallback() {
+        let _env_guard = crate::testing::harness_env_lock().lock_blocking();
         let authority = AuthorityId::new_from_entropy([0xA8; 32]);
         let temp = tempfile::tempdir().expect("tempdir should build");
         let config = AgentConfig {
@@ -4097,13 +4104,17 @@ mod tests {
     #[tokio::test]
     async fn test_bootstrapped_authority_signs_and_exposes_public_key_package() {
         let config = AgentConfig::default();
-        let effect_system = crate::testing::simulation_effect_system(&config);
         let authority = AuthorityId::new_from_entropy([34u8; 32]);
+        // Signing requires the runtime authority to match the signing authority.
+        let effect_system =
+            crate::testing::simulation_effect_system_for_authority_arc(&config, authority);
 
-        let bootstrapped_public_key = effect_system
-            .bootstrap_authority(&authority)
-            .await
-            .expect("bootstrap should succeed");
+        // The signing service writes the canonical epoch metadata signing reads.
+        let bootstrapped_public_key =
+            crate::runtime::services::ThresholdSigningService::new(effect_system.clone())
+                .bootstrap_authority(&authority)
+                .await
+                .expect("bootstrap should succeed");
 
         assert!(effect_system.has_signing_capability(&authority).await);
         assert_eq!(

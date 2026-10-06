@@ -58,3 +58,11 @@ pub(crate) fn simulation_effect_system_with_shared_transport_for_authority_arc(
         ),
     )
 }
+
+/// Serializes tests that set, or depend on the absence of, process-wide
+/// harness environment variables (`AURA_HARNESS_MODE`): runtime assembly reads
+/// them, so a concurrent setter changes another test's production checks.
+pub(crate) fn harness_env_lock() -> &'static async_lock::Mutex<()> {
+    static LOCK: std::sync::OnceLock<async_lock::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| async_lock::Mutex::new(()))
+}

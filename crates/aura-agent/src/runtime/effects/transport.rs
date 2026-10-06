@@ -1398,6 +1398,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_peer_addr_allows_loopback_direct_descriptor_in_harness_mode() {
         let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_guard = crate::testing::harness_env_lock().lock_blocking();
         let _env_restore = EnvRestore::capture(harness_mode_env);
         std::env::set_var(harness_mode_env, "1");
 
@@ -1468,6 +1469,7 @@ mod tests {
     #[test]
     fn harness_mode_allows_loopback_direct_routes() {
         let harness_mode_env = crate::runtime_bridge::harness_mode_env_key_for_tests();
+        let _env_guard = crate::testing::harness_env_lock().lock_blocking();
         let _env_restore = EnvRestore::capture(harness_mode_env);
         std::env::set_var(harness_mode_env, "1");
 

@@ -12,11 +12,9 @@ use std::ffi::OsString;
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 fn env_lock() -> &'static Mutex<()> {
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    ENV_LOCK.get_or_init(|| Mutex::new(()))
+    crate::testing::harness_env_lock()
 }
 
 struct EnvRestore {
