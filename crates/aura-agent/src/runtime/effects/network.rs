@@ -869,10 +869,12 @@ mod tests {
 
     fn production_config_for_tests() -> AgentConfig {
         let mut config = AgentConfig::default();
-        let path =
-            std::env::temp_dir().join(format!("aura-agent-network-test-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&path);
-        config.storage.base_path = path;
+        // One profile per runtime: concurrent tests must not share an owned profile.
+        config.storage.base_path = tempfile::Builder::new()
+            .prefix("aura-agent-network-test-")
+            .tempdir()
+            .expect("isolated network test profile")
+            .keep();
         config
     }
 
@@ -882,12 +884,16 @@ mod tests {
         let shared = crate::SharedTransport::new();
         let alice = AuthorityId::new_from_entropy([seeds.0; 32]);
         let bob = AuthorityId::new_from_entropy([seeds.1; 32]);
-        let build = |name: String, authority, shared| {
+        let build = |name: String, authority: AuthorityId, shared| {
+            // Distinct devices: the shared transport routes by device.
+            let config = AgentConfig {
+                device_id: aura_core::DeviceId::new_from_entropy(aura_core::hash::hash(
+                    &authority.to_bytes(),
+                )),
+                ..AgentConfig::default()
+            };
             AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
-                &AgentConfig::default(),
-                &name,
-                authority,
-                shared,
+                &config, &name, authority, shared,
             )
             .expect("simulation effect system")
         };

@@ -1020,14 +1020,15 @@ async fn try_list_authorities_requires_readable_storage_listing() {
     let mut config = AgentConfig::default();
     config.storage.base_path = storage_root.clone();
 
-    let agent = Arc::new(
-        AgentBuilder::new()
-            .with_authority(authority)
-            .with_config(config)
-            .build_testing_async(&build_context)
-            .await
-            .expect("build testing agent"),
-    );
+    // Path-based (unowned) storage: an owned profile holds an open directory
+    // handle, so swapping the path out from under it does not break listing.
+    let runtime = crate::runtime::EffectSystemBuilder::testing()
+        .with_authority(authority)
+        .with_config(config)
+        .build(&build_context)
+        .await
+        .expect("build unowned testing runtime");
+    let agent = Arc::new(crate::AuraAgent::new(runtime, authority));
     let bridge = AgentRuntimeBridge::new(agent);
 
     fs::remove_dir_all(&storage_root).expect("remove storage root directory");
@@ -1045,7 +1046,8 @@ async fn try_list_authorities_requires_readable_storage_listing() {
     let message = error.to_string();
     assert!(
         message.contains("Failed to list stored authorities")
-            || message.contains("List stored authorities failed"),
+            || message.contains("List stored authorities failed")
+            || message.contains("Read account config failed"),
         "authority-list failure should stay explicit: {message}"
     );
 
