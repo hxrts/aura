@@ -49,6 +49,17 @@ impl CeremonyRunner {
         Self { tracker }
     }
 
+    /// Release a terminally failed (e.g. cancelled) enrollment's pending
+    /// generation once its signed terminal notice has been handled.
+    pub(crate) async fn retire_failed_enrollment_generation(
+        &self,
+        ceremony: &CeremonyId,
+    ) -> Result<(), AuraError> {
+        self.tracker
+            .retire_failed_enrollment_generation(ceremony)
+            .await
+    }
+
     /// Register a new ceremony with prestate binding.
     pub async fn start(&self, request: CeremonyInitRequest) -> Result<(), AuraError> {
         self.tracker

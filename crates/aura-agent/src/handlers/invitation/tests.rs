@@ -5987,12 +5987,17 @@ large_stack_async_test!(
         .await
         .unwrap();
 
-        let (inviter_key, _) = crate::handlers::rendezvous_identity::retrieve_identity_keys(
-            pair.sender_effects.as_ref(),
-            &pair.sender_id,
-        )
-        .await
-        .expect("inviter identity keys should exist");
+        let inviter_identity =
+            crate::handlers::rendezvous_identity::require_active_identity_signing_context(
+                pair.sender_effects.as_ref(),
+                &pair.sender_id,
+            )
+            .await
+            .expect("inviter identity context should exist");
+        let (inviter_key, _) =
+            crate::handlers::rendezvous_identity::require_identity_keys(&inviter_identity)
+                .await
+                .expect("inviter identity keys should exist");
         let (forger_key, _) = pair
             .sender_effects
             .ed25519_generate_keypair()

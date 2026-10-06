@@ -882,6 +882,8 @@ impl InvitationServiceApi {
             issued,
             registered,
         } = capability;
+        let ceremony = issued.manifest().ceremony.clone();
+        let retirement = self.ceremony_runner.clone();
         let runner = self.ceremony_runner.clone();
         let tasks = self.tasks.group(format!(
             "invitation_service.cancelled_notice.{}",
@@ -892,7 +894,8 @@ impl InvitationServiceApi {
                 crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::Eligible(window) => window,
                 crate::runtime::services::enrollment_window::CancelledNoticeWindowAdmission::EligibilityEnded { cause } => {
                     tracing::debug!(error = %cause, "cancelled enrollment notice eligibility ended; no send");
-                    return Ok::<(), aura_core::AuraError>(());
+                    // No notice can be sent; release the pending generation now.
+                    return retirement.retire_failed_enrollment_generation(&ceremony).await;
                 }
             };
             super::invitation::execute_recovered_cancelled_notice(
@@ -910,7 +913,13 @@ impl InvitationServiceApi {
                     message: "required cancelled enrollment notice execution".into(),
                     source: Some(Arc::new(source)),
                 },
-            })
+            })?;
+            // The signed terminal notice is handled; only now release the
+            // cancelled pending generation (and its provisional signer), so a
+            // later enrollment is not refused until restart.
+            retirement
+                .retire_failed_enrollment_generation(&ceremony)
+                .await
         });
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
