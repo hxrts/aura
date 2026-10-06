@@ -126,6 +126,21 @@ async fn moderation_reaches_member_after_delayed_fanout() -> Result<()> {
     moderation_reaches_member(Some(LinkFault::Hold)).await
 }
 
+/// The override and ban fanout is lost on the Alex<->Barbara link (a
+/// partition the sender cannot observe); after the link heals, Alex's
+/// home-context journal sync pulls the missed facts.
+#[tokio::test]
+async fn moderation_reaches_member_after_lost_fanout() -> Result<()> {
+    moderation_reaches_member(Some(LinkFault::Drop)).await
+}
+
+/// After a lost fanout, Alex's home-context journal sync pulls the facts.
+async fn resync(alex: &Arc<RwLock<AppCore>>, fault: Option<LinkFault>) {
+    if matches!(fault, Some(LinkFault::Drop)) {
+        let _ = aura_app::ui::workflows::sync::force_sync(alex).await;
+    }
+}
+
 /// Run `action` with the Alex<->Barbara link faulted, then heal it.
 async fn faulted<T, Fut: std::future::Future<Output = T>>(
     transport: &SharedTransport,
@@ -190,7 +205,9 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         home_view(&alex.app, home).await.is_some()
     })
     .await?;
-    let alex_home = home_view(&alex.app, home).await.expect("home");
+    let alex_home = home_view(&alex.app, home)
+        .await
+        .ok_or_else(|| anyhow!("Alex home view missing"))?;
     eprintln!(
         "[joined] alex home members={} moderators={:?}",
         alex_home.members.len(),
@@ -219,6 +236,7 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     )
     .await?;
     wait_until("Alex sees his Limited override", || async {
+        resync(&alex.app, fault).await;
         home_view(&alex.app, home)
             .await
             .is_some_and(|h| h.access_override(&alex.id) == Some(aura_social::AccessLevel::Limited))
@@ -274,12 +292,15 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         "ban barrier must be satisfied: {:?}",
         ban.completion_outcome
     );
-    let barbara_other = home_view(&barbara.app, other).await.expect("other home");
+    let barbara_other = home_view(&barbara.app, other)
+        .await
+        .ok_or_else(|| anyhow!("Barbara other home missing"))?;
     assert!(
         !barbara_other.ban_list.contains_key(&alex.id),
         "the ban targets the planned home, not the selected one"
     );
     wait_until("Alex sees his ban", || async {
+        resync(&alex.app, fault).await;
         home_view(&alex.app, home)
             .await
             .is_some_and(|h| h.ban_list.contains_key(&alex.id))

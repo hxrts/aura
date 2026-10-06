@@ -2479,7 +2479,7 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
             &issuer.authority_id(),
             first.pending_epoch.value(),
         );
-        let released_by = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut release_attempts_left = 200_u32;
         while issuer
             .runtime()
             .effects()
@@ -2487,8 +2487,9 @@ fn enrollment_unissued_allocation_preserves_first_retirement_and_releases_after_
             .await
             .unwrap()
         {
+            release_attempts_left = release_attempts_left.saturating_sub(1);
             assert!(
-                std::time::Instant::now() < released_by,
+                release_attempts_left > 0,
                 "cancelled generation is released shortly after cancel"
             );
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2757,8 +2758,9 @@ fn runtime_enrollment_cancel_then_reissue_without_restart() {
             )
             .unwrap(),
         ));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut admission_attempts_left = 100_u32;
         let replacement = loop {
+            admission_attempts_left = admission_attempts_left.saturating_sub(1);
             let setup =
                 aura_app::ui::workflows::ceremonies::pin_user_transferred_device_enrollment_setup(
                     &app,
@@ -2771,7 +2773,7 @@ fn runtime_enrollment_cancel_then_reissue_without_restart() {
                 .await
             {
                 Ok(started) => break started,
-                Err(error) if std::time::Instant::now() < deadline => {
+                Err(error) if admission_attempts_left > 0 => {
                     eprintln!("replacement enrollment not yet admitted: {error}");
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }

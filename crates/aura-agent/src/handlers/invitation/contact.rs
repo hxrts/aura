@@ -14,6 +14,16 @@ const CONTACT_INVITATION_ACCEPTANCE_PROCESS_TIMEOUT_MS: u64 = 20_000;
 const CONTACT_ACCEPTANCE_PEER_CHANNEL_ATTEMPTS: usize = 6;
 const CONTACT_ACCEPTANCE_PEER_CHANNEL_BACKOFF_MS: u64 = 75;
 
+/// Home-context journal sync request: a home peer's digest of the home
+/// governance and moderation facts it holds (docs/115 §3.2).
+pub(super) const HOME_CONTEXT_SYNC_CONTENT_TYPE: &str = "application/aura-home-context-sync";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct HomeContextSyncRequest {
+    context_id: ContextId,
+    held: std::collections::BTreeSet<Hash32>,
+}
+
 #[derive(Debug, thiserror::Error)]
 enum ContactInvitationAcceptanceError {
     #[error("contact invitation acceptance peer channel is not yet established for {sender_id}")]
@@ -52,6 +62,7 @@ impl<'a> InvitationContactHandler<'a> {
             Some(CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE)
                 | Some(CHANNEL_INVITATION_ACCEPTANCE_CONTENT_TYPE)
                 | Some(CHAT_FACT_CONTENT_TYPE)
+                | Some(HOME_CONTEXT_SYNC_CONTENT_TYPE)
         );
         let evidence = IngressVerificationEvidence::builder(metadata)
             .peer_identity(
@@ -972,6 +983,37 @@ impl<'a> InvitationContactHandler<'a> {
                     continue;
                 }
 
+                if content_type == HOME_CONTEXT_SYNC_CONTENT_TYPE {
+                    let Some(envelope) = in_flight_envelope.take() else {
+                        continue;
+                    };
+                    let request: HomeContextSyncRequest = match from_slice(&envelope.payload) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            tracing::warn!(error = %error, "Invalid home context sync request");
+                            continue;
+                        }
+                    };
+                    let request = match self.verified_invitation_payload(&envelope, request) {
+                        Ok(request) => request.payload().clone(),
+                        Err(error) => {
+                            tracing::warn!(
+                                error = %error,
+                                "Rejected unverified home context sync request"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(error) = self
+                        .serve_home_context_sync(effects.as_ref(), envelope.source, request)
+                        .await
+                    {
+                        tracing::debug!(error = %error, "home context sync not served");
+                    }
+                    processed = processed.saturating_add(1);
+                    continue;
+                }
+
                 if content_type == CHAT_FACT_CONTENT_TYPE {
                     let fact: RelationalFact = match in_flight_envelope
                         .as_ref()
@@ -1024,6 +1066,16 @@ impl<'a> InvitationContactHandler<'a> {
                                 continue;
                             }
                         }
+                    }
+
+                    // Home-context journal sync may deliver a fact again; commit it once.
+                    if self
+                        .already_holds_home_context_fact(effects.as_ref(), fact)
+                        .await?
+                    {
+                        processed = processed.saturating_add(1);
+                        in_flight_envelope = None;
+                        continue;
                     }
 
                     super::channel::InvitationChannelHandler::new(self.handler)
@@ -1164,6 +1216,207 @@ impl<'a> InvitationContactHandler<'a> {
         context_id: ContextId,
         newcomer: AuthorityId,
     ) -> AgentResult<()> {
+        self.send_home_context_facts(effects, context_id, newcomer, |_, envelope, _| {
+            Self::is_home_governance_envelope(envelope)
+        })
+        .await
+    }
+
+    /// Whether a home-context fact takes part in home-context journal sync:
+    /// governance state plus the moderation actions (mute/ban/kick, pins,
+    /// moderator grants and their reversals).
+    fn is_home_context_sync_envelope(envelope: &aura_core::types::facts::FactEnvelope) -> bool {
+        Self::is_home_governance_envelope(envelope)
+            || aura_social::moderation::facts::claimed_moderation_actor(envelope).is_some()
+    }
+
+    /// Whether this authority may serve `envelope` to a syncing member. A
+    /// receiver requires a moderation fact's actor to be its sender, so a
+    /// moderation fact is served only by its author.
+    fn may_serve_home_context_fact(
+        envelope: &aura_core::types::facts::FactEnvelope,
+        own_authority: AuthorityId,
+    ) -> bool {
+        if let Some(actor) = aura_social::moderation::facts::claimed_moderation_actor(envelope) {
+            return actor == own_authority;
+        }
+        Self::is_home_governance_envelope(envelope)
+    }
+
+    fn home_context_fact_digest(fact: &RelationalFact) -> AgentResult<Hash32> {
+        let bytes = aura_core::util::serialization::to_vec(fact)
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+        Ok(Hash32::from_bytes(&bytes))
+    }
+
+    /// Digests of the home-context sync facts this authority holds for
+    /// `context_id`.
+    async fn held_home_context_digests(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+    ) -> AgentResult<std::collections::BTreeSet<Hash32>> {
+        let own_authority = self.handler.context.authority.authority_id();
+        let facts = effects
+            .load_committed_facts(own_authority)
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        let mut held = std::collections::BTreeSet::new();
+        for fact in facts {
+            let aura_journal::fact::FactContent::Relational(relational) = &fact.content else {
+                continue;
+            };
+            let RelationalFact::Generic {
+                context_id: fact_context,
+                envelope,
+            } = relational
+            else {
+                continue;
+            };
+            if *fact_context == context_id && Self::is_home_context_sync_envelope(envelope) {
+                held.insert(Self::home_context_fact_digest(relational)?);
+            }
+        }
+        Ok(held)
+    }
+
+    /// Authorities a home with `context_id` lists as members or moderation
+    /// targets in this authority's homes view (the home-context sync peers).
+    pub(super) async fn home_context_peers(
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+    ) -> std::collections::BTreeSet<AuthorityId> {
+        use aura_core::effects::reactive::ReactiveEffects;
+        let Ok(homes) = effects
+            .reactive_handler()
+            .read(&*aura_app::signal_defs::HOMES_SIGNAL)
+            .await
+        else {
+            return std::collections::BTreeSet::new();
+        };
+        let mut peers = std::collections::BTreeSet::new();
+        for home in homes.all_homes() {
+            if home.context_id != Some(context_id) {
+                continue;
+            }
+            peers.extend(home.members.iter().map(|member| member.id));
+            peers.extend(home.ban_list.keys().copied());
+            peers.extend(home.mute_list.keys().copied());
+            peers.extend(home.access_overrides.keys().copied());
+        }
+        peers
+    }
+
+    /// Ask a home peer for the home-context facts this authority lacks
+    /// (home-context journal sync, pull side): send the digest of what it
+    /// holds; the peer answers with the missing facts it may serve.
+    pub(super) async fn request_home_context_sync(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        peer: AuthorityId,
+    ) -> AgentResult<()> {
+        let own_authority = self.handler.context.authority.authority_id();
+        let request = HomeContextSyncRequest {
+            context_id,
+            held: self.held_home_context_digests(effects, context_id).await?,
+        };
+        let payload = aura_core::util::serialization::to_vec(&request)
+            .map_err(|error| AgentError::internal(error.to_string()))?;
+        let delivery_context = default_context_id_for_authority(peer);
+        let mut envelope = TransportEnvelope {
+            destination: peer,
+            source: own_authority,
+            context: delivery_context,
+            payload,
+            metadata: crate::handlers::shared::build_transport_metadata(
+                HOME_CONTEXT_SYNC_CONTENT_TYPE,
+                [("home-context", context_id.to_string())],
+            ),
+            receipt: super::execute_charge_flow_budget(
+                FlowCost::new(1),
+                delivery_context,
+                peer,
+                effects,
+            )
+            .await?
+            .map(transport_receipt_from_flow),
+        };
+        super::attach_invitation_test_receipt_if_needed(effects, &mut envelope);
+        super::execution::attempt_network_send_envelope(
+            effects,
+            "home context sync request send failed",
+            envelope,
+        )
+        .await
+    }
+
+    /// Serve a verified home-context sync request: the requester must be a
+    /// peer of that home here; it receives the sync facts it lacks.
+    async fn serve_home_context_sync(
+        &self,
+        effects: &AuraEffectSystem,
+        requester: AuthorityId,
+        request: HomeContextSyncRequest,
+    ) -> AgentResult<()> {
+        if !Self::home_context_peers(effects, request.context_id)
+            .await
+            .contains(&requester)
+        {
+            tracing::debug!(
+                requester = %requester,
+                context = %request.context_id,
+                "Ignored home context sync request from a non-member"
+            );
+            return Ok(());
+        }
+        let held = request.held;
+        self.send_home_context_facts(
+            effects,
+            request.context_id,
+            requester,
+            |relational, envelope, own| {
+                Self::may_serve_home_context_fact(envelope, own)
+                    && Self::home_context_fact_digest(relational)
+                        .is_ok_and(|digest| !held.contains(&digest))
+            },
+        )
+        .await
+    }
+
+    /// Whether `fact` is a home-context sync fact already in this authority's
+    /// journal, so a synced fact is committed once.
+    async fn already_holds_home_context_fact(
+        &self,
+        effects: &AuraEffectSystem,
+        fact: &RelationalFact,
+    ) -> AgentResult<bool> {
+        let RelationalFact::Generic { envelope, .. } = fact else {
+            return Ok(false);
+        };
+        if !Self::is_home_context_sync_envelope(envelope) {
+            return Ok(false);
+        }
+        let own_authority = self.handler.context.authority.authority_id();
+        let facts = effects
+            .load_committed_facts(own_authority)
+            .await
+            .map_err(|error| AgentError::effects(error.to_string()))?;
+        Ok(facts.iter().any(|held| {
+            matches!(
+                &held.content,
+                aura_journal::fact::FactContent::Relational(rel) if rel == fact
+            )
+        }))
+    }
+
+    async fn send_home_context_facts(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        newcomer: AuthorityId,
+        include: impl Fn(&RelationalFact, &aura_core::types::facts::FactEnvelope, AuthorityId) -> bool,
+    ) -> AgentResult<()> {
         let own_authority = self.handler.context.authority.authority_id();
         let facts = effects
             .load_committed_facts(own_authority)
@@ -1180,7 +1433,7 @@ impl<'a> InvitationContactHandler<'a> {
             else {
                 continue;
             };
-            if *fact_context != context_id || !Self::is_home_governance_envelope(envelope) {
+            if *fact_context != context_id || !include(relational, envelope, own_authority) {
                 continue;
             }
             let payload = aura_core::util::serialization::to_vec(relational)

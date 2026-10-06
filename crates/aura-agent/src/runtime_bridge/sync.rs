@@ -111,6 +111,8 @@ pub(super) async fn get_sync_peers(
 )]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
+    // Home-context sync rides the authority transport, not the sync service.
+    sync_home_contexts(bridge, bridge.agent.runtime().sync()).await;
     let sync = require_sync_service(bridge)?;
     exchange_facts_with_siblings(bridge, sync).await;
 
@@ -455,6 +457,78 @@ async fn exchange_facts_with_siblings(
                 let _task_handle = bridge.agent.runtime().tasks().spawn_local_named(task_name, fut);
             } else {
                 let _task_handle = bridge.agent.runtime().tasks().spawn_named(task_name, fut);
+            }
+        }
+    }
+}
+
+/// Home-context journal sync (docs/115 §3.2): for each home in this
+/// authority's view, ask each home peer for the governance and moderation
+/// facts of that home's context this authority lacks. Fanout at commit time
+/// only cuts latency; this pull is what makes a fanout lost to a partition
+/// converge. Coalesced per (context, peer) by the sync manager when present.
+async fn sync_home_contexts(
+    bridge: &AgentRuntimeBridge,
+    sync: Option<&crate::runtime::services::SyncServiceManager>,
+) {
+    use aura_core::effects::reactive::ReactiveEffects;
+    let effects = bridge.agent.runtime().effects();
+    let Ok(homes) = effects
+        .reactive_handler()
+        .read(&*aura_app::signal_defs::HOMES_SIGNAL)
+        .await
+    else {
+        return;
+    };
+    let contexts: std::collections::BTreeSet<ContextId> = homes
+        .all_homes()
+        .filter_map(|home| home.context_id)
+        .collect();
+    if contexts.is_empty() {
+        return;
+    }
+    let own_authority = bridge.agent.authority_id();
+    let Ok(handler) = crate::handlers::invitation::InvitationHandler::new(
+        crate::core::AuthorityContext::new_with_device(
+            own_authority,
+            bridge.agent.runtime().device_id(),
+        ),
+    ) else {
+        return;
+    };
+    let now_ms = effects
+        .physical_time()
+        .await
+        .map(|time| time.ts_ms)
+        .unwrap_or_default();
+    for context_id in contexts {
+        let peers = crate::handlers::invitation::InvitationHandler::home_context_sync_targets(
+            effects.as_ref(),
+            context_id,
+        )
+        .await;
+        for peer in peers {
+            if peer == own_authority {
+                continue;
+            }
+            if let Some(sync) = sync {
+                if !sync
+                    .take_due_home_context_sync(context_id, peer, now_ms)
+                    .await
+                {
+                    continue;
+                }
+            }
+            if let Err(error) = handler
+                .request_home_context_sync(effects.as_ref(), context_id, peer)
+                .await
+            {
+                tracing::debug!(
+                    peer = %peer,
+                    context = %context_id,
+                    error = %error,
+                    "home context sync request not sent"
+                );
             }
         }
     }

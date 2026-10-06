@@ -204,7 +204,8 @@ pub(super) async fn commit_and_fanout(
 
     // The fact is committed; delivery to each peer is best-effort so an
     // offline peer cannot turn a committed action into a reported failure
-    // (a retry would commit it twice). Peers catch up through journal sync.
+    // (a retry would commit it twice). Immediate fanout only cuts latency: a
+    // peer that misses it converges through home-context journal sync.
     for peer in fanout {
         let delivery =
             send_moderation_fact_with_retry(runtime, peer, scope.context_id, &fact).await;

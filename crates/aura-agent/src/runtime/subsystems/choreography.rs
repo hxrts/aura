@@ -574,6 +574,7 @@ impl ChoreographyState {
         &mut self,
         session_id: RuntimeChoreographySessionId,
         source: AuthorityId,
+        source_device: Option<&str>,
         context_id: ContextId,
         self_authority: AuthorityId,
         self_device_id: &str,
@@ -599,20 +600,28 @@ impl ChoreographyState {
         inbox
             .iter()
             .position(|env| {
+                // A device-scoped role is identified by its device; the runtime
+                // playing it sends under its own authority.
+                let source_match = env.source == source
+                    || source_device.is_some_and(|device| {
+                        env.metadata
+                            .get("aura-source-device-id")
+                            .is_some_and(|sent| sent == device)
+                    });
                 let device_match = env
                     .metadata
                     .get("aura-destination-device-id")
                     .is_some_and(|dst| dst == self_device_id);
 
                 if env.destination == self_authority {
-                    env.source == source
+                    source_match
                         && env.context == context_id
                         && match env.metadata.get("aura-destination-device-id") {
                             Some(dst) => dst == self_device_id,
                             None => true,
                         }
                 } else {
-                    env.source == source && env.context == context_id && device_match
+                    source_match && env.context == context_id && device_match
                 }
             })
             .map(|pos| inbox.remove(pos))

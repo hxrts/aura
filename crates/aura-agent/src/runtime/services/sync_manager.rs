@@ -187,11 +187,11 @@ struct SyncState {
 const MIN_PEER_RESYNC_INTERVAL_MS: u64 = 3_000;
 
 /// Peers not attempted within the resync window, recording `now_ms` for each.
-fn take_due_peers(
-    recent: &mut HashMap<DeviceId, u64>,
-    peers: Vec<DeviceId>,
+fn take_due_peers<K: Copy + Eq + std::hash::Hash>(
+    recent: &mut HashMap<K, u64>,
+    peers: Vec<K>,
     now_ms: u64,
-) -> Vec<DeviceId> {
+) -> Vec<K> {
     peers
         .into_iter()
         .filter(|peer| {
@@ -226,6 +226,9 @@ struct SyncManagerShared {
     recent_sibling_exchanges: Mutex<HashMap<DeviceId, u64>>,
     /// Sibling devices with an exchange currently running.
     sibling_exchanges_in_flight: Mutex<std::collections::HashSet<DeviceId>>,
+    /// Wall-clock ms of the last home-context journal sync per (home context, peer).
+    recent_home_context_syncs:
+        Mutex<HashMap<(aura_core::types::identifiers::ContextId, AuthorityId), u64>>,
 }
 
 #[derive(Clone)]
@@ -377,6 +380,7 @@ impl SyncServiceManager {
             recent_peer_syncs: Mutex::new(HashMap::new()),
             recent_sibling_exchanges: Mutex::new(HashMap::new()),
             sibling_exchanges_in_flight: Mutex::new(std::collections::HashSet::new()),
+            recent_home_context_syncs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -843,6 +847,22 @@ impl SyncServiceManager {
             siblings,
             now_ms,
         )
+    }
+
+    /// Whether a home-context journal sync with `member` is due, coalesced
+    /// like peer syncs.
+    pub async fn take_due_home_context_sync(
+        &self,
+        context: aura_core::types::identifiers::ContextId,
+        member: AuthorityId,
+        now_ms: u64,
+    ) -> bool {
+        !take_due_peers(
+            &mut *self.shared.recent_home_context_syncs.lock().await,
+            vec![(context, member)],
+            now_ms,
+        )
+        .is_empty()
     }
 
     /// Claim a sibling for one exchange; false if one is already running.

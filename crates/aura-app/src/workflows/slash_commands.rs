@@ -875,7 +875,9 @@ mod tests {
     /// submitting.
     #[tokio::test]
     async fn invite_slash_command_reaches_terminal_settlement_on_refusal() {
-        use crate::views::contacts::{Contact, ContactRelationshipState, ContactsState};
+        use crate::views::contacts::{
+            Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
+        };
         use crate::views::{Channel, ChannelType, ChatState};
         use aura_core::types::identifiers::ChannelId;
 
@@ -893,7 +895,7 @@ mod tests {
                     is_member: false,
                     last_interaction: None,
                     is_online: true,
-                    read_receipt_policy: Default::default(),
+                    read_receipt_policy: ReadReceiptPolicy::default(),
                     relationship_state: ContactRelationshipState::Contact,
                     invitation_code: None,
                 }]));

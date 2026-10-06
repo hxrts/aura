@@ -40,6 +40,7 @@ fn take_session_envelope(
     effects: &AuraEffectSystem,
     session_id: RuntimeChoreographySessionId,
     source: AuthorityId,
+    source_device: Option<&str>,
     context: ContextId,
 ) -> Option<TransportEnvelope> {
     let self_device_id = effects.config.device_id.to_string();
@@ -49,6 +50,7 @@ fn take_session_envelope(
         .take_matching_session_envelope(
             session_id,
             source,
+            source_device,
             context,
             effects.authority_id,
             &self_device_id,
@@ -205,7 +207,9 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         let envelope = TransportEnvelope {
             destination: peer,
-            source: current_role.authority_id,
+            // The runtime authority is the actual sender: its flow budget is
+            // charged and its receipt names it as `src` (docs/111 section 3).
+            source: self.authority_id,
             context: context_id,
             payload: message,
             metadata,
@@ -272,6 +276,11 @@ impl ChoreographicEffects for AuraEffectSystem {
         };
 
         let source_authority = role.authority_id;
+        // A device-scoped role may be played by a runtime whose own authority
+        // differs from the role authority (an enrolling device acts for the
+        // subject before it is a member). Its envelopes carry its real sending
+        // authority, which its receipt charges, so match them by source device.
+        let source_device = (!role.is_authority_scoped()).then(|| role.device_id.to_string());
         tracing::debug!(
             session_id = %session_id,
             "Choreography receive: waiting for message from {:?} (authority {:?}) in context {:?}, timeout={}ms",
@@ -282,15 +291,25 @@ impl ChoreographicEffects for AuraEffectSystem {
         );
 
         let envelope = loop {
-            if let Some(env) = take_session_envelope(self, session_id, source_authority, context_id)
-            {
+            if let Some(env) = take_session_envelope(
+                self,
+                session_id,
+                source_authority,
+                source_device.as_deref(),
+                context_id,
+            ) {
                 self.transport.record_receive();
                 break env;
             }
 
             promote_shared_session_envelopes(self, session_id);
-            if let Some(env) = take_session_envelope(self, session_id, source_authority, context_id)
-            {
+            if let Some(env) = take_session_envelope(
+                self,
+                session_id,
+                source_authority,
+                source_device.as_deref(),
+                context_id,
+            ) {
                 self.transport.record_receive();
                 break env;
             }
@@ -1176,6 +1195,7 @@ mod tests {
             effects.as_ref(),
             RuntimeChoreographySessionId::from_uuid(session_id),
             peer_authority,
+            None,
             context_id,
         )
         .expect("session-scoped envelope should be available")
@@ -1493,6 +1513,7 @@ mod tests {
                 effects.as_ref(),
                 session_runtime_id,
                 peer_authority,
+                None,
                 context_id,
             )
             .expect("session envelope should be available");

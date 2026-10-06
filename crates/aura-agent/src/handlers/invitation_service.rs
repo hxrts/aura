@@ -2438,7 +2438,6 @@ mod tests {
             .unwrap_or_else(|error| panic!("large-stack test thread should complete: {error:?}"));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn retained_invitation_service_clone_rejects_import_after_admission_closes(
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2899,14 +2898,16 @@ mod required_enrollment_task_tests {
             .timeout_budget
             .deadline_at_ms()
             .min(issued.manifest().expires_at_ms);
-        let wall = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // Bounded by attempts (600 x 50ms) rather than ambient wall-clock reads.
+        let mut attempts_left = 600_u32;
         let outcome = loop {
             clock.set_time(deadline + 1);
             if let Some(outcome) = runner.terminal_outcome(&start.ceremony_id).await.unwrap() {
                 break outcome;
             }
+            attempts_left = attempts_left.saturating_sub(1);
             assert!(
-                std::time::Instant::now() < wall,
+                attempts_left > 0,
                 "initiator owner must terminate the tracked ceremony at its window"
             );
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;

@@ -232,7 +232,10 @@ impl AgentBuilder {
         shared_transport: crate::SharedTransport,
     ) -> AgentResult<AuraAgent> {
         self.reject_profile_in_nonproduction()?;
-        let sync_config = self.sync_config.clone();
+        // Multi-agent simulation runs the production sync service, as
+        // `build_production` does; its timers use the runtime's (simulated)
+        // time effects.
+        let sync_config = self.sync_config.clone().unwrap_or_default();
         let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
@@ -242,10 +245,8 @@ impl AgentBuilder {
         let mut builder = EffectSystemBuilder::simulation_with_owned_profile(seed, profile)
             .with_config(config)
             .with_authority(authority_id)
-            .with_shared_transport(shared_transport);
-        if let Some(sync_config) = sync_config {
-            builder = builder.with_sync_config(sync_config);
-        }
+            .with_shared_transport(shared_transport)
+            .with_sync_config(sync_config);
         if let Some(rendezvous_config) = rendezvous_config {
             builder = builder.with_rendezvous_config(rendezvous_config);
         }

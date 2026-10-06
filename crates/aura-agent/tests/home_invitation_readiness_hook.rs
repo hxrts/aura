@@ -166,11 +166,11 @@ async fn inviter_readiness_hooks_survive_home_invitation_acceptance() -> Result<
         for update in &updates {
             eprintln!("[{name}] update failure: {update}");
         }
+        // Task 88: shared-transport simulation runs the production sync
+        // service, so no refresh update may fail (e.g. a missing sync status).
         assert!(
-            !updates.iter().any(|f| f
-                .to_string()
-                .contains("required authoritative AMP membership read")),
-            "{name}'s membership read failed: {updates:?}"
+            updates.is_empty(),
+            "{name}'s refresh updates failed: {updates:?}"
         );
     }
     Ok(())

@@ -269,7 +269,27 @@ impl InvitationDeviceEnrollmentHandler {
             let cancellation = ceremony_runner.await_enrollment_cancellation(&retained);
             futures::pin_mut!(progress, cancellation);
             match futures::future::select(progress, cancellation).await {
-                futures::future::Either::Left((result, _)) => result.map(|_| None),
+                futures::future::Either::Left((Ok(_), _)) => Ok(None),
+                // A response that arrives after a committed cancellation is
+                // refused by the attempt; the cancellation still owns the
+                // terminal path, so the signed notice must be sent.
+                futures::future::Either::Left((Err(error), cancellation)) => {
+                    let cancelled = matches!(
+                        ceremony_runner
+                            .terminal_outcome(&retained.manifest().ceremony)
+                            .await,
+                        Ok(Some(
+                            aura_app::runtime_bridge::CeremonyTerminalOutcome::Failed(
+                                aura_app::runtime_bridge::CeremonyFailureReason::Cancelled
+                            )
+                        ))
+                    );
+                    if cancelled {
+                        cancellation.await.map(Some).map_err(AgentError::from)
+                    } else {
+                        Err(error)
+                    }
+                }
                 futures::future::Either::Right((result, _)) => {
                     result.map(Some).map_err(AgentError::from)
                 }
@@ -531,6 +551,15 @@ impl InvitationDeviceEnrollmentHandler {
                         .is_some()
                         {
                             break Ok(());
+                        }
+
+                        // A deferred receive leaves the VM blocked on the invitee's
+                        // response (a step reports Stuck); keep waiting within the
+                        // window rather than failing the attempt.
+                        if matches!(round.host_wait_status, AuraVmHostWaitStatus::Deferred)
+                            && matches!(round.step, StepResult::Stuck)
+                        {
+                            continue;
                         }
 
                         if handle_invitation_vm_step(
