@@ -7487,8 +7487,11 @@ async fn interrupted_signed_issuance_resumes_actual_original_registration_owner(
                 aura_core::effects::ExecutionMode::Testing,
             );
             eprintln!("enrollment fixture {label}: build runtime");
-            let builder = EffectSystemBuilder::testing()
-                .with_authority(authority)
+            let builder = EffectSystemBuilder::testing_with_owned_profile(
+                crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+                    .expect("actual isolated selected profile custody"),
+            )
+            .with_authority(authority)
                 .with_config(config)
                 .with_shared_transport(transport.clone());
             let clock: Option<Arc<dyn aura_core::effects::PhysicalTimeEffects>> = None;
