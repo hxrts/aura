@@ -163,7 +163,20 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         })
         .await?;
     }
-    messaging::send_message(&alex.app, home, "partial send", 1_700_000_000_250).await?;
+    // Send through the TUI submission path (the typed handoff with an id
+    // target), which must succeed and actually reach Barbara.
+    let partial = messaging::handoff::send_chat_message(
+        &alex.app,
+        messaging::handoff::SendChatMessageRequest {
+            target: messaging::handoff::SendChatTarget::ChannelId(home),
+            content: "partial send".to_string(),
+            operation_instance_id: None,
+        },
+    )
+    .await;
+    partial
+        .result
+        .map_err(|error| anyhow!("Alex's TUI send at Partial failed: {error}"))?;
     wait_until("Barbara receives Alex's Partial send", || async {
         let chat = barbara.app.read().await.read(&*CHAT_SIGNAL).await;
         chat.is_ok_and(|c| {

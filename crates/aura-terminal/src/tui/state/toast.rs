@@ -153,7 +153,14 @@ impl ToastQueue {
         if is_duplicate_error {
             return;
         }
-        if self.active.is_none() {
+        // Error toasts never auto-dismiss, so a newer error supersedes the
+        // visible one; otherwise a stale failure masks the latest.
+        let supersedes_active_error = toast.level == ToastLevel::Error
+            && self
+                .active
+                .as_ref()
+                .is_some_and(|active| active.level == ToastLevel::Error);
+        if self.active.is_none() || supersedes_active_error {
             self.active = Some(toast);
         } else {
             // Use portable constant from aura-app
@@ -318,6 +325,19 @@ mod tests {
         let mut queue = ToastQueue::new();
         queue.enqueue(QueuedToast::error(1, "Couldn't reach peer"));
         queue.enqueue(QueuedToast::error(2, "Couldn't reach peer"));
+        queue.dismiss();
+        assert!(queue.current().is_none());
+    }
+
+    #[test]
+    fn newer_error_toast_replaces_the_visible_error() {
+        let mut queue = ToastQueue::new();
+        queue.enqueue(QueuedToast::error(1, "access level refusal"));
+        queue.enqueue(QueuedToast::error(2, "banned refusal"));
+        assert_eq!(
+            queue.current().map(|toast| toast.message.as_str()),
+            Some("banned refusal")
+        );
         queue.dismiss();
         assert!(queue.current().is_none());
     }

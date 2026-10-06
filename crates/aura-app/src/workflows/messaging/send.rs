@@ -774,6 +774,37 @@ async fn send_message_ref_owned(
                 )
                 .await;
             }
+            // Readiness facts are retained across refreshes, so recheck the
+            // authoritative AMP membership: success is reported before
+            // delivery, and a shared-channel send with no recipient would
+            // otherwise succeed with nothing to deliver.
+            match authoritative_recipient_peers_for_channel(
+                &runtime,
+                authoritative_channel,
+                sender_id,
+            )
+            .await
+            {
+                Ok(recipients) if !recipients.is_empty() => {}
+                Ok(_) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::RecipientResolutionNotReady { channel_id },
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    return fail_send_message(
+                        owner,
+                        SendMessageError::ReadinessFactsUnavailable {
+                            detail: format!(
+                                "recipient resolution failed for {channel_id}: {error}"
+                            ),
+                        },
+                    )
+                    .await;
+                }
+            }
 
             let send_params = ChannelSendParams {
                 context: context_id,

@@ -3210,3 +3210,59 @@ async fn joining_an_unknown_channel_with_a_runtime_is_not_found() {
         .expect_err("an unknown channel name is not created by /join");
     assert!(error.to_string().contains("lounge"), "{error}");
 }
+
+/// Task 120: readiness facts from an earlier resolution must not let a send
+/// proceed when the authoritative AMP membership now resolves no recipient.
+/// The send fails typed before AMP encryption instead of committing locally
+/// and reporting success with nothing to deliver to.
+#[tokio::test]
+async fn send_with_no_authoritative_recipients_fails_before_commit() {
+    let local = AuthorityId::new_from_entropy([131u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(local));
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(AppConfig::default(), runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
+
+    let channel_id = ChannelId::from_bytes(hash(b"send-no-recipients"));
+    let context_id = ContextId::new_from_entropy([132u8; 32]);
+    runtime.set_amp_channel_context(channel_id, context_id);
+    runtime.set_amp_channel_state_exists(context_id, channel_id, true);
+    runtime.set_amp_channel_participants(context_id, channel_id, vec![local]);
+    runtime.set_moderation_status(
+        context_id,
+        channel_id,
+        local,
+        crate::runtime_bridge::AuthoritativeModerationStatus {
+            is_banned: false,
+            is_muted: false,
+            roster_known: true,
+            is_member: true,
+        },
+    );
+    let key = ChannelFactKey {
+        id: Some(channel_id.to_string()),
+        name: Some("BarbHome".to_string()),
+    };
+    update_authoritative_semantic_facts(&app_core, |facts| {
+        facts.push(AuthoritativeSemanticFact::RecipientPeersResolved {
+            channel: key.clone(),
+            member_count: 2,
+        });
+        facts.push(AuthoritativeSemanticFact::MessageDeliveryReady {
+            channel: key.clone(),
+            member_count: 2,
+        });
+    })
+    .await
+    .unwrap();
+
+    let error = send_message(&app_core, channel_id, "partial send", 1_700_000_000_250)
+        .await
+        .expect_err("a send with no authoritative recipient must fail");
+    assert!(
+        error.to_string().contains("Recipient peers are not resolved"),
+        "{error}"
+    );
+}
