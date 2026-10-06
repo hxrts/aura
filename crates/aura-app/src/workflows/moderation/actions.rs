@@ -1,4 +1,4 @@
-use super::scope::{current_moderation_scope, scope_for_message};
+use super::scope::{current_moderation_scope, moderation_scope_for_home, scope_for_message};
 use super::support::{
     apply_local_home_projection, commit_and_fanout, moderation_timestamp,
     require_access_capability, require_capability, resolve_channel_hint, resolve_target_id,
@@ -99,7 +99,18 @@ pub async fn ban_user_resolved(
     reason: Option<&str>,
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = current_moderation_scope(app_core).await?;
+    ban_user_in_home(app_core, None, target_id, reason, banned_at_ms).await
+}
+
+/// Ban a canonical authority in `home` (the selected home when `None`).
+pub(crate) async fn ban_user_in_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home: Option<ChannelId>,
+    target_id: AuthorityId,
+    reason: Option<&str>,
+    banned_at_ms: u64,
+) -> Result<(), AuraError> {
+    let scope = moderation_scope_for_home(app_core, home).await?;
     require_capability(&scope, ModerationCapability::Ban)?;
     require_access_capability(app_core, &scope, ModerationCapability::Ban).await?;
 
@@ -139,7 +150,16 @@ pub async fn unban_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    let scope = current_moderation_scope(app_core).await?;
+    unban_user_in_home(app_core, None, target_id).await
+}
+
+/// Unban a canonical authority in `home` (the selected home when `None`).
+pub(crate) async fn unban_user_in_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home: Option<ChannelId>,
+    target_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let scope = moderation_scope_for_home(app_core, home).await?;
     require_capability(&scope, ModerationCapability::Ban)?;
     require_access_capability(app_core, &scope, ModerationCapability::Ban).await?;
 
@@ -181,7 +201,18 @@ pub async fn mute_user_resolved(
     duration_secs: Option<u64>,
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = current_moderation_scope(app_core).await?;
+    mute_user_in_home(app_core, None, target_id, duration_secs, muted_at_ms).await
+}
+
+/// Mute a canonical authority in `home` (the selected home when `None`).
+pub(crate) async fn mute_user_in_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home: Option<ChannelId>,
+    target_id: AuthorityId,
+    duration_secs: Option<u64>,
+    muted_at_ms: u64,
+) -> Result<(), AuraError> {
+    let scope = moderation_scope_for_home(app_core, home).await?;
     require_capability(&scope, ModerationCapability::Mute)?;
     require_access_capability(app_core, &scope, ModerationCapability::Mute).await?;
 
@@ -224,7 +255,16 @@ pub async fn unmute_user_resolved(
     app_core: &Arc<RwLock<AppCore>>,
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    let scope = current_moderation_scope(app_core).await?;
+    unmute_user_in_home(app_core, None, target_id).await
+}
+
+/// Unmute a canonical authority in `home` (the selected home when `None`).
+pub(crate) async fn unmute_user_in_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    home: Option<ChannelId>,
+    target_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let scope = moderation_scope_for_home(app_core, home).await?;
     require_capability(&scope, ModerationCapability::Mute)?;
     require_access_capability(app_core, &scope, ModerationCapability::Mute).await?;
 

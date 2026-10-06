@@ -101,3 +101,27 @@ async fn created_home_channel_appears_in_creator_chat() -> Result<()> {
     assert_eq!(channel.name, "ChatHome");
     Ok(())
 }
+
+#[tokio::test]
+async fn creator_ban_stays_in_home_ban_list() -> Result<()> {
+    use aura_app::ui::signals::HOMES_SIGNAL;
+    use aura_core::effects::reactive::ReactiveEffects;
+
+    let (_temp, app_core, _me) = creator_app_core(64).await?;
+    let home_id = context::create_home(&app_core, Some("BanHome".to_string()), None).await?;
+    let target = AuthorityId::new_from_entropy([65u8; 32]);
+    moderation::ban_user_resolved(&app_core, target, Some("spam"), 2_000).await?;
+
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let homes = app_core.read().await.read(&*HOMES_SIGNAL).await?;
+        let home = homes
+            .home_state(&home_id)
+            .expect("the created home must stay in the homes signal");
+        assert!(
+            home.ban_list.contains_key(&target),
+            "the creator's ban must stay in the home ban list"
+        );
+    }
+    Ok(())
+}

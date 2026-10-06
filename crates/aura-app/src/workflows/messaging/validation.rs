@@ -172,6 +172,10 @@ mod tests {
         let core = Arc::new(RwLock::new(
             AppCore::with_runtime(AppConfig::default(), runtime.clone()).unwrap(),
         ));
+        // The sender access check reads the homes signal.
+        crate::signal_defs::register_app_signals(&*core.read().await)
+            .await
+            .unwrap();
         for (status, reason) in [
             (
                 S {

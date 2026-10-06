@@ -67,6 +67,9 @@ pub(super) async fn execute_moderation(
     app_core: &Arc<RwLock<AppCore>>,
     plan: &CommandPlan<ModerationPlan>,
 ) -> Result<Option<String>, AuraError> {
+    // Act on the home the plan (and its consistency barrier) targets, not
+    // on whichever home happens to be selected.
+    let planned_home = super::consistency::planned_moderation_home(app_core, &plan.scope).await;
     let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
     match &plan.operation.command {
         ResolvedCommand::Kick { target, reason } => {
@@ -82,20 +85,24 @@ pub(super) async fn execute_moderation(
             Ok(Some("kick applied".to_string()))
         }
         ResolvedCommand::Ban { target, reason } => {
-            let _ = optional_scope_channel_id(&plan.scope);
-            moderation::ban_user_resolved(app_core, target.0, reason.as_deref(), timestamp_ms)
-                .await?;
+            moderation::ban_user_in_home(
+                app_core,
+                planned_home,
+                target.0,
+                reason.as_deref(),
+                timestamp_ms,
+            )
+            .await?;
             Ok(Some("ban applied".to_string()))
         }
         ResolvedCommand::Unban { target } => {
-            let _ = optional_scope_channel_id(&plan.scope);
-            moderation::unban_user_resolved(app_core, target.0).await?;
+            moderation::unban_user_in_home(app_core, planned_home, target.0).await?;
             Ok(Some("unban applied".to_string()))
         }
         ResolvedCommand::Mute { target, duration } => {
-            let _ = optional_scope_channel_id(&plan.scope);
-            moderation::mute_user_resolved(
+            moderation::mute_user_in_home(
                 app_core,
+                planned_home,
                 target.0,
                 duration.map(|value| value.as_secs()),
                 timestamp_ms,
@@ -104,8 +111,7 @@ pub(super) async fn execute_moderation(
             Ok(Some("mute applied".to_string()))
         }
         ResolvedCommand::Unmute { target } => {
-            let _ = optional_scope_channel_id(&plan.scope);
-            moderation::unmute_user_resolved(app_core, target.0).await?;
+            moderation::unmute_user_in_home(app_core, planned_home, target.0).await?;
             Ok(Some("unmute applied".to_string()))
         }
         ResolvedCommand::Invite { target } => {

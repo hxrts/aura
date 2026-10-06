@@ -133,7 +133,11 @@ async fn consistency_invariant_holds(
                 homes,
                 ..StateSnapshot::default()
             };
-            let home = match home_for_scope(&snapshot, &plan.scope) {
+            // Selected-home commands (ban, mute) planned outside a home channel
+            // act on the selected home; check the same home here.
+            let home = match home_for_scope(&snapshot, &plan.scope)
+                .or_else(|| snapshot.homes.current_home())
+            {
                 Some(value) => value,
                 None => return false,
             };
@@ -172,6 +176,20 @@ async fn consistency_invariant_holds(
         }
         PlannedCommand::General(_) => true,
     }
+}
+
+/// Home a moderation plan targets: the home its scope names, if any.
+#[cfg(feature = "signals")]
+pub(super) async fn planned_moderation_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    scope: &CommandScope,
+) -> Option<aura_core::types::identifiers::ChannelId> {
+    let homes = homes_signal_snapshot(app_core).await.ok()?;
+    let snapshot = StateSnapshot {
+        homes,
+        ..StateSnapshot::default()
+    };
+    home_for_scope(&snapshot, scope).map(|home| home.id)
 }
 
 #[cfg(feature = "signals")]
