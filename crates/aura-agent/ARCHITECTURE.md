@@ -687,8 +687,22 @@ Structured concurrency, ownership boundaries, and runtime composition are the pr
 ### Commands
 
 ```
-cargo test -p aura-agent
-cargo test -p aura-agent --test compile_fail   # compile-fail boundary tests
+cargo test -p hxrts-aura-agent
+cargo test -p hxrts-aura-agent --test compile_fail   # compile-fail boundary tests
+```
+
+Integration tests are aggregated (`autotests = false`): the `tests/*.rs`
+module files belong to the `runtime_integration`, `home_flows` or
+`telltale_machine` roots; `lan_integration`, `compile_fail`,
+`custom_provider_fidelity` and `web_runtime_bridge_wasm` stay separate
+binaries. Add new test files as a `mod` of the matching root.
+
+For a local edit-test loop, opt in to incremental compilation (CI stays
+non-incremental); see `docs/804_testing_guide.md` "Build and Caching":
+
+```
+CARGO_INCREMENTAL=1 bash scripts/dev/build-budget.sh --lane agent-loop -- \
+  cargo test -p hxrts-aura-agent --lib <filter>
 ```
 
 ### Coverage Matrix

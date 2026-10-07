@@ -711,9 +711,8 @@ These commands run the conformance test suite and report any divergence between 
 ```bash
 AURA_CONFORMANCE_SCENARIO=scenario_name \
 AURA_CONFORMANCE_SEED=42 \
-cargo test -p aura-agent \
-  --features choreo-backend-telltale-machine \
-  --test telltale_machine_parity test_name \
+cargo test -p hxrts-aura-agent \
+  --test telltale_machine test_name \
   -- --nocapture
 ```
 
@@ -893,6 +892,57 @@ cargo test --package aura-terminal --test unit_state_machine
 ```
 
 Use `just test` for the full suite. Use `just test-crate` for focused iteration on a single crate.
+
+### Build and Caching
+
+Route builds through `scripts/dev/build-budget.sh`. It writes to the
+checkout's own `target/` (it sets `CARGO_TARGET_DIR`), sweeps that target to a
+per-checkout soft cap (`AURA_BUILD_TARGET_CAP_GIB`, default 10), and admits a
+build only if the volume keeps `AURA_BUILD_MIN_FREE_GIB` (default 15) free
+after the reservations of other admitted builds. Each admitted build reserves
+`AURA_BUILD_RESERVE_GIB` (default 4) under `~/.cache/aura-build/reservations`
+until it exits. The admission lock is held only while checking and reserving,
+and only builders of the same checkout block its sweeps, so two worktrees can
+build at once.
+
+The dev shell exports `RUSTC_WRAPPER=sccache` with one shared store at
+`SCCACHE_DIR` (default `~/.cache/aura-sccache`, capped by
+`SCCACHE_CACHE_SIZE`, default 10G). Every worktree and checkout reuses its
+compiled dependencies. sccache caches only non-incremental compilations, the
+default, and passes `CARGO_INCREMENTAL=1` compilations through. Set
+`AURA_NO_SCCACHE=1` at shell entry or on a single cargo command to opt out.
+`just disk-report` shows the shared store's size. `sccache --show-stats`
+shows hit rates.
+
+The dev profile builds third-party dependencies at `opt-level = 1` (2 for
+`curve25519-dalek` and `frost-ed25519`) without debuginfo, and workspace crates
+with line tables only. Set `CARGO_PROFILE_DEV_DEBUG=true` for a debugging
+session; it rebuilds the workspace crates.
+
+For a local edit-test loop in `aura-agent`, opt in to incremental compilation
+and run one integration binary or a lib filter:
+
+```bash
+CARGO_INCREMENTAL=1 bash scripts/dev/build-budget.sh --lane agent-loop -- \
+  cargo test -p hxrts-aura-agent --lib <filter>
+CARGO_INCREMENTAL=1 bash scripts/dev/build-budget.sh --lane agent-loop -- \
+  cargo test -p hxrts-aura-agent --test runtime_integration <module>::
+```
+
+A one-file edit then recompiles in about 10-30 s instead of 1-2 minutes. The
+incremental cache costs several GiB; `just prune-inactive-lane
+debug-incremental` reclaims it. CI and gates stay non-incremental.
+
+`aura-agent` sets `autotests = false` and aggregates its integration tests
+into a few binaries: `runtime_integration`, `home_flows` (also the
+reduced-stack accept-chain lane), `telltale_machine`, plus the separate
+`lan_integration`, `compile_fail`, `custom_provider_fidelity` and
+`web_runtime_bridge_wasm`. Add a new test file as a `mod` of the matching root
+file in `crates/aura-agent/tests/`. Select one file with its module path, for
+example `--test telltale_machine telltale_machine_parity::`.
+
+`cargo nextest run -p <crate>` is available in the dev shell for local
+per-test timing. Gates keep libtest, since their parsers read libtest output.
 
 ## 12. Best Practices
 

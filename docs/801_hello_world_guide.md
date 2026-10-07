@@ -51,7 +51,7 @@ pushed commit on both hosts, in the background and one host at a time. Set
 `CARGO_BUILD_JOBS` to half the available cores on the Air. The recipes use
 `nice -n 10`. Use `AURA_BUILD_TARGET_CAP_GIB`, `AURA_BUILD_MIN_FREE_GIB`, and
 `AURA_BUILD_EMERGENCY_FREE_GIB` to adjust Host B thresholds after its own
-read-only baseline. The 24 GiB Cargo target cap is a between-build soft target;
+read-only baseline. The 10 GiB per-checkout Cargo target cap is a between-build soft target;
 it is not a quota during compilation. The scripts preserve `.tmp/e2e` and failure
 evidence. Use `scripts/dev/retain-e2e-runs.sh prune --dry-run` to inspect
 completed successful run bundles, then `--apply` when no harness run is
@@ -72,7 +72,8 @@ AURA_BUILD_PROFILE=debug nice -n 10 bash scripts/dev/build-budget.sh \
 
 Replace the Cargo command after `--` for `cargo check`, `cargo clippy`, or
 another package test. Omit `--allow-live-harness` outside a live run. The
-guard refuses admission when another builder is active or free space is below
+guard refuses admission when another builder of the same checkout is active,
+or when free space minus other admitted builds' reservations is below
 the configured floor; wait for the current owner to finish and release an
 idle cache window before retrying. The Cargo development profile disables
 incremental compilation by default for ordinary Cargo and editor checks;
@@ -183,7 +184,7 @@ When only an unused debug lane can be released, inspect it with
 The cleanup checks for active compilers and open files in that lane.
 Global Cargo sweeping also skips a target with open files, such as proc-macro
 libraries loaded by `rust-analyzer`; it then considers only fully inactive
-whole lanes. The 24 GiB target is a soft between-build goal, so a lane held
+whole lanes. The 10 GiB per-checkout target is a soft between-build goal, so a lane held
 open by another process may remain above it until that process exits.
 `just prune-inactive-lane debug-incremental --dry-run` previews the complete
 incremental cache independently of sibling debug dependencies. With `--apply`,
