@@ -7,7 +7,7 @@
 
 #![allow(missing_docs)]
 
-mod support;
+use crate::support;
 
 use anyhow::{anyhow, Result};
 use async_lock::RwLock;
