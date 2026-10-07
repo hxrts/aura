@@ -45,8 +45,8 @@
 //! Since `AuraEffects` is a supertrait of both, existing code continues to work.
 
 use aura_core::effects::{
-    CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
-    SecureStorageEffects, StorageEffects, ThresholdSigningEffects,
+    CryptoEffects, JournalEffects, LogicalClockEffects, NetworkEffects, PhysicalTimeEffects,
+    RandomEffects, SecureStorageEffects, StorageEffects, ThresholdSigningEffects,
 };
 
 /// Composed effects required for local recovery operations.
@@ -76,6 +76,7 @@ use aura_core::effects::{
 /// ```
 pub trait RecoveryEffects:
     PhysicalTimeEffects
+    + LogicalClockEffects
     + CryptoEffects
     + JournalEffects
     + RandomEffects
@@ -90,6 +91,7 @@ pub trait RecoveryEffects:
 /// Blanket implementation for any type that implements all required traits.
 impl<T> RecoveryEffects for T where
     T: PhysicalTimeEffects
+        + LogicalClockEffects
         + CryptoEffects
         + JournalEffects
         + RandomEffects

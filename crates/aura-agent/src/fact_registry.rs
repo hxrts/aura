@@ -25,6 +25,7 @@
 //! | `aura-invitation` | `InvitationFact` | Invitation lifecycle |
 //! | `aura-relational` | `ContactFact` | Contact management |
 //! | `aura-recovery` | `RecoveryFact` | Guardian setup, membership, key recovery |
+//! | `aura-social` | `SocialFact` | Homes, membership, neighborhoods, storage |
 //! | `aura-social/moderation` | `Home*Fact` | Home, mute, ban, kick |
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
@@ -48,6 +49,7 @@ use aura_relational::{
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 use aura_social::moderation::register_moderation_facts;
+use aura_social::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 
 /// Assembles the journal fact registry with all domain reducers.
 ///
@@ -86,6 +88,7 @@ pub fn build_fact_registry() -> FactRegistry {
         CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
         Box::new(ChannelMembershipFactReducer),
     );
+    registry.register::<SocialFact>(SOCIAL_FACT_TYPE_ID, Box::new(SocialFactReducer));
     register_moderation_facts(&mut registry);
 
     registry
@@ -113,6 +116,7 @@ mod tests {
         assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
         assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
         assert!(registry.is_registered(CHANNEL_MEMBERSHIP_FACT_TYPE_ID));
+        assert!(registry.is_registered(SOCIAL_FACT_TYPE_ID));
         assert!(registry.is_registered("moderation:home-mute"));
         assert!(registry.is_registered("moderation:home-unmute"));
     }

@@ -361,6 +361,15 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         // Emit MembershipChangeProposed fact
         let proposal_hash = Self::proposal_hash(&change_id);
+        // The context is unique to this change, so no earlier proposal competes;
+        // the stamp orders it causally against concurrent retries.
+        let causal = crate::facts::stamp_recovery_initiation(
+            self.effect_system().as_ref(),
+            context_id,
+            crate::facts::RecoveryInitiationKind::MembershipProposal,
+            &[],
+        )
+        .await?;
         let proposed_fact = RecoveryFact::MembershipChangeProposed {
             context_id,
             proposer_id: request.base.initiator_id,
@@ -368,6 +377,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             change_type: Self::to_fact_change_type(&request.change),
             proposal_hash,
             proposed_at: exact_physical_time(now_ms),
+            causal,
         };
         self.emit_fact(proposed_fact).await?;
 

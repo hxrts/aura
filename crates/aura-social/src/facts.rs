@@ -28,7 +28,7 @@
 //! ```
 
 use aura_core::service::NeighborhoodReentryHint;
-use aura_core::time::{CausalMetadata, PhysicalTime, TimeStamp};
+use aura_core::time::{CausalMetadata, CausalTag, PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::Hash32;
 use aura_journal::{
@@ -898,7 +898,7 @@ pub struct SocialFactKey {
 /// These facts represent social-related state changes in the journal,
 /// including blocks, members, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "social", schema_version = 4, context = "context_id")]
+#[domain_fact(type_id = "social", schema_version = 5, context = "context_id")]
 pub enum SocialFact {
     /// Home created
     HomeCreated {
@@ -915,7 +915,7 @@ pub enum SocialFact {
         /// Storage limit in bytes (default: 10 MB)
         storage_limit: u64,
     },
-    /// Home deleted/archived
+    /// Home deleted. Terminal for the creations it revokes (docs/115 §3.5).
     HomeDeleted {
         /// Home being deleted
         home_id: HomeId,
@@ -923,8 +923,11 @@ pub enum SocialFact {
         context_id: ContextId,
         /// When the home was deleted
         deleted_at: PhysicalTime,
-        /// Authority that deleted the home
+        /// Authority that deleted the home; must be the home's creator.
         actor_id: AuthorityId,
+        /// Causal metadata (schema v5): `revokes` names the `HomeCreated`
+        /// tags the deleter observed.
+        causal: CausalMetadata,
     },
     /// Member joined a home. Each join starts the membership episode named by
     /// its `episode` (docs/115 §3.4).
@@ -960,34 +963,6 @@ pub enum SocialFact {
         /// Causal metadata (schema v4): `revokes` names the membership
         /// episodes (`MemberJoined` tags) the leaver observed; it ends them.
         causal: CausalMetadata,
-    },
-    /// Moderator granted capabilities in a home
-    ModeratorGranted {
-        /// Authority being granted moderator role
-        authority_id: AuthorityId,
-        /// Home where moderator operates
-        home_id: HomeId,
-        /// Relational context
-        context_id: ContextId,
-        /// When moderator was granted
-        granted_at: PhysicalTime,
-        /// Authority granting the moderator role
-        grantor_id: AuthorityId,
-        /// Capability strings granted
-        capabilities: Vec<String>,
-    },
-    /// Moderator revoked from a home
-    ModeratorRevoked {
-        /// Authority losing moderator role
-        authority_id: AuthorityId,
-        /// Home where moderator was revoked
-        home_id: HomeId,
-        /// Relational context
-        context_id: ContextId,
-        /// When moderator was revoked
-        revoked_at: PhysicalTime,
-        /// Authority revoking the moderator role
-        revoker_id: AuthorityId,
     },
     /// Explicit per-authority access override within a home.
     AccessOverrideSet {
@@ -1039,6 +1014,8 @@ pub enum SocialFact {
         total_bytes: u64,
         /// When storage was updated
         updated_at: PhysicalTime,
+        /// Register metadata (schema v5): superseded observed storage writes.
+        causal: CausalMetadata,
     },
     /// Neighborhood created
     NeighborhoodCreated {
@@ -1072,6 +1049,9 @@ pub enum SocialFact {
         context_id: ContextId,
         /// When the home left
         left_at: PhysicalTime,
+        /// Causal metadata (schema v5): `revokes` names the
+        /// `HomeJoinedNeighborhood` tags the leaver observed.
+        causal: CausalMetadata,
     },
     /// Signed, expiring neighborhood discovery-board hint used only for
     /// bounded stale-node re-entry.
@@ -1097,10 +1077,17 @@ impl SocialFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(SOCIAL_FACT_TYPE_ID),
-            4,
-            4,
+            5,
+            5,
             envelope,
         )
+    }
+
+    /// Content-derived tag of this fact (type id and canonical encoding): the
+    /// add tag deletions and leaves revoke and register writes supersede.
+    #[must_use]
+    pub fn content_tag(&self) -> CausalTag {
+        CausalTag::from_content(SOCIAL_FACT_TYPE_ID, &self.to_envelope().payload)
     }
 
     /// Default storage limit for blocks: 10 MB
@@ -1123,8 +1110,6 @@ impl SocialFact {
             SocialFact::HomeDeleted { deleted_at, .. } => deleted_at.ts_ms,
             SocialFact::MemberJoined { joined_at, .. } => joined_at.ts_ms,
             SocialFact::MemberLeft { left_at, .. } => left_at.ts_ms,
-            SocialFact::ModeratorGranted { granted_at, .. } => granted_at.ts_ms,
-            SocialFact::ModeratorRevoked { revoked_at, .. } => revoked_at.ts_ms,
             SocialFact::AccessOverrideSet { set_at, .. } => set_at.ts_ms,
             SocialFact::AccessLevelCapabilitiesConfigured { configured_at, .. } => {
                 configured_at.ts_ms
@@ -1174,14 +1159,6 @@ impl SocialFact {
             },
             SocialFact::MemberLeft { authority_id, .. } => SocialFactKey {
                 sub_type: "member-left",
-                data: authority_id.to_string().into_bytes(),
-            },
-            SocialFact::ModeratorGranted { authority_id, .. } => SocialFactKey {
-                sub_type: "moderator-granted",
-                data: authority_id.to_string().into_bytes(),
-            },
-            SocialFact::ModeratorRevoked { authority_id, .. } => SocialFactKey {
-                sub_type: "moderator-revoked",
                 data: authority_id.to_string().into_bytes(),
             },
             SocialFact::AccessOverrideSet {
@@ -1341,6 +1318,7 @@ impl SocialFact {
         used_bytes: u64,
         total_bytes: u64,
         updated_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::StorageUpdated {
             home_id,
@@ -1348,6 +1326,41 @@ impl SocialFact {
             used_bytes,
             total_bytes,
             updated_at: Self::physical_time(updated_at_ms),
+            causal,
+        }
+    }
+
+    /// Create a HomeDeleted fact with millisecond timestamp.
+    pub fn home_deleted_ms(
+        home_id: HomeId,
+        context_id: ContextId,
+        deleted_at_ms: u64,
+        actor_id: AuthorityId,
+        causal: CausalMetadata,
+    ) -> Self {
+        Self::HomeDeleted {
+            home_id,
+            context_id,
+            deleted_at: Self::physical_time(deleted_at_ms),
+            actor_id,
+            causal,
+        }
+    }
+
+    /// Create a HomeLeftNeighborhood fact with millisecond timestamp.
+    pub fn home_left_neighborhood_ms(
+        home_id: HomeId,
+        neighborhood_id: NeighborhoodId,
+        context_id: ContextId,
+        left_at_ms: u64,
+        causal: CausalMetadata,
+    ) -> Self {
+        Self::HomeLeftNeighborhood {
+            home_id,
+            neighborhood_id,
+            context_id,
+            left_at: Self::physical_time(left_at_ms),
+            causal,
         }
     }
 
@@ -1430,7 +1443,7 @@ impl FactReducer for SocialFactReducer {
             return None;
         }
 
-        let fact = SocialFact::from_envelope(envelope)?;
+        let fact = SocialFact::try_from_envelope(envelope).ok()?;
 
         if !fact.validate_for_reduction(context_id) {
             return None;
@@ -1509,6 +1522,14 @@ mod tests {
             1024 * 1024,      // 1 MB used
             10 * 1024 * 1024, // 10 MB total
             1234567890,
+            CausalMetadata {
+                revokes: Vec::new(),
+                supersedes: Vec::new(),
+                clock: aura_core::time::CausalClock {
+                    lamport: 1,
+                    vector: Vec::new(),
+                },
+            },
         );
 
         let bytes = fact.to_bytes();

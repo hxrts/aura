@@ -1858,14 +1858,23 @@ impl RecoveryServiceApi {
                 .physical_time()
                 .await
                 .map_err(|error| AgentError::effects(error.to_string()))?;
+            let context_id = crate::core::default_context_id_for_authority(proposal.initiator_id);
+            let causal = crate::handlers::shared::stamp_recovery_initiation_causal(
+                &self.effects,
+                authority_id,
+                context_id,
+                aura_recovery::RecoveryInitiationKind::GuardianSetup,
+            )
+            .await?;
             use aura_journal::DomainFact as _;
             let request_fact = aura_recovery::RecoveryFact::GuardianSetupInitiated {
-                context_id: crate::core::default_context_id_for_authority(proposal.initiator_id),
+                context_id,
                 initiator_id: proposal.initiator_id,
                 trace_id: Some(ceremony_id.to_string()),
                 guardian_ids: guardians.iter().copied().collect(),
                 threshold: proposal.operation.threshold_k,
                 initiated_at,
+                causal,
             }
             .to_generic();
             if let Err(error) = self

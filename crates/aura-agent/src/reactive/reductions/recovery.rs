@@ -82,6 +82,15 @@ mod tests {
             ],
             2,
             1234567890,
+            aura_recovery::recovery_initiation_causal(
+                test_context_id(),
+                aura_recovery::RecoveryInitiationKind::GuardianSetup,
+                &[],
+                &aura_core::time::LogicalTime {
+                    vector: aura_core::time::VectorClock::new(),
+                    lamport: 1,
+                },
+            ),
         );
 
         let facts = vec![make_test_fact(

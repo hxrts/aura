@@ -27,13 +27,6 @@ use aura_journal::DomainFact;
 
 use crate::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 
-fn apply_if_newer(timestamp_ms: &mut u64, incoming_timestamp_ms: u64, apply: impl FnOnce()) {
-    if incoming_timestamp_ms >= *timestamp_ms {
-        *timestamp_ms = incoming_timestamp_ms;
-        apply();
-    }
-}
-
 fn format_authority_id(id: &AuthorityId) -> String {
     let bytes = id.to_bytes();
     format!(
@@ -64,7 +57,7 @@ fn membership_change_description(change_type: &crate::facts::MembershipChangeTyp
 ///
 /// These deltas represent incremental changes to recovery UI state,
 /// derived from journal facts during view reduction.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RecoveryDelta {
     // ========================================================================
     // Guardian Setup Deltas
@@ -274,273 +267,20 @@ impl ComposableDelta for RecoveryDelta {
         }
     }
 
+    /// Merge two deltas of the same variant as a join: keep the greater
+    /// under the derived total order. The join is commutative, associative
+    /// and idempotent, so the merged delta is independent of arrival order
+    /// and never chooses a winner by arrival or by physical time first:
+    /// timestamps are trailing fields after the identifying content. The authoritative winner among competing
+    /// facts is `RecoveryState`, which orders them causally.
     fn try_merge(&mut self, other: Self) -> bool {
-        match (self, other) {
-            (
-                RecoveryDelta::GuardianSetupStarted {
-                    started_at,
-                    guardian_count: count,
-                    threshold: thresh,
-                },
-                RecoveryDelta::GuardianSetupStarted {
-                    started_at: other_ts,
-                    guardian_count,
-                    threshold,
-                },
-            ) => {
-                apply_if_newer(started_at, other_ts, || {
-                    *count = guardian_count;
-                    *thresh = threshold;
-                });
-                true
-            }
-            (
-                RecoveryDelta::GuardianResponded {
-                    responded_at,
-                    guardian_id: id,
-                    accepted: acc,
-                },
-                RecoveryDelta::GuardianResponded {
-                    responded_at: other_ts,
-                    guardian_id,
-                    accepted,
-                },
-            ) => {
-                apply_if_newer(responded_at, other_ts, || {
-                    *id = guardian_id;
-                    *acc = accepted;
-                });
-                true
-            }
-            (
-                RecoveryDelta::GuardianSetupProgress {
-                    accepted_count: acc,
-                    total_count: total,
-                    threshold: thresh,
-                },
-                RecoveryDelta::GuardianSetupProgress {
-                    accepted_count,
-                    total_count,
-                    threshold,
-                },
-            ) => {
-                *acc = accepted_count;
-                *total = total_count;
-                *thresh = threshold;
-                true
-            }
-            (
-                RecoveryDelta::GuardianSetupCompleted {
-                    completed_at,
-                    guardian_ids: ids,
-                    threshold: thresh,
-                },
-                RecoveryDelta::GuardianSetupCompleted {
-                    completed_at: other_ts,
-                    guardian_ids,
-                    threshold,
-                },
-            ) => {
-                apply_if_newer(completed_at, other_ts, || {
-                    *ids = guardian_ids;
-                    *thresh = threshold;
-                });
-                true
-            }
-            (
-                RecoveryDelta::GuardianSetupFailed {
-                    failed_at,
-                    reason: r,
-                },
-                RecoveryDelta::GuardianSetupFailed {
-                    failed_at: other_ts,
-                    reason,
-                },
-            ) => {
-                apply_if_newer(failed_at, other_ts, || {
-                    *r = reason;
-                });
-                true
-            }
-            (
-                RecoveryDelta::MembershipProposalCreated {
-                    proposed_at,
-                    proposal_hash: hash,
-                    change_description: desc,
-                },
-                RecoveryDelta::MembershipProposalCreated {
-                    proposed_at: other_ts,
-                    proposal_hash,
-                    change_description,
-                },
-            ) => {
-                apply_if_newer(proposed_at, other_ts, || {
-                    *hash = proposal_hash;
-                    *desc = change_description;
-                });
-                true
-            }
-            (
-                RecoveryDelta::MembershipVoteReceived {
-                    proposal_hash: hash,
-                    voter_id: voter,
-                    approved: ok,
-                    votes_for: vf,
-                    votes_against: va,
-                },
-                RecoveryDelta::MembershipVoteReceived {
-                    proposal_hash,
-                    voter_id,
-                    approved,
-                    votes_for,
-                    votes_against,
-                },
-            ) => {
-                *hash = proposal_hash;
-                *voter = voter_id;
-                *ok = approved;
-                *vf = votes_for;
-                *va = votes_against;
-                true
-            }
-            (
-                RecoveryDelta::MembershipChangeApplied {
-                    proposal_hash: hash,
-                    new_guardian_count: count,
-                    new_threshold: thresh,
-                    applied_at: ts,
-                },
-                RecoveryDelta::MembershipChangeApplied {
-                    proposal_hash,
-                    new_guardian_count,
-                    new_threshold,
-                    applied_at,
-                },
-            ) => {
-                *hash = proposal_hash;
-                *count = new_guardian_count;
-                *thresh = new_threshold;
-                *ts = applied_at;
-                true
-            }
-            (
-                RecoveryDelta::MembershipChangeRejected {
-                    rejected_at,
-                    proposal_hash: hash,
-                    reason: r,
-                },
-                RecoveryDelta::MembershipChangeRejected {
-                    rejected_at: other_ts,
-                    proposal_hash,
-                    reason,
-                },
-            ) => {
-                apply_if_newer(rejected_at, other_ts, || {
-                    *hash = proposal_hash;
-                    *r = reason;
-                });
-                true
-            }
-            (
-                RecoveryDelta::RecoveryStarted {
-                    started_at,
-                    account_id: id,
-                    shares_needed: shares,
-                },
-                RecoveryDelta::RecoveryStarted {
-                    started_at: other_ts,
-                    account_id,
-                    shares_needed,
-                },
-            ) => {
-                apply_if_newer(started_at, other_ts, || {
-                    *id = account_id;
-                    *shares = shares_needed;
-                });
-                true
-            }
-            (
-                RecoveryDelta::RecoveryShareReceived {
-                    guardian_id: id,
-                    shares_received: recv,
-                    shares_needed: need,
-                },
-                RecoveryDelta::RecoveryShareReceived {
-                    guardian_id,
-                    shares_received,
-                    shares_needed,
-                },
-            ) => {
-                *id = guardian_id;
-                *recv = shares_received;
-                *need = shares_needed;
-                true
-            }
-            (
-                RecoveryDelta::RecoveryApproved {
-                    approved_at,
-                    account_id: id,
-                },
-                RecoveryDelta::RecoveryApproved {
-                    approved_at: other_ts,
-                    account_id,
-                },
-            ) => {
-                apply_if_newer(approved_at, other_ts, || {
-                    *id = account_id;
-                });
-                true
-            }
-            (
-                RecoveryDelta::RecoveryDisputeWindow {
-                    dispute_end_ms,
-                    disputes_filed: filed,
-                },
-                RecoveryDelta::RecoveryDisputeWindow {
-                    dispute_end_ms: other_end,
-                    disputes_filed,
-                },
-            ) => {
-                apply_if_newer(dispute_end_ms, other_end, || {
-                    *filed = disputes_filed;
-                });
-                true
-            }
-            (
-                RecoveryDelta::RecoverySucceeded {
-                    completed_at,
-                    account_id: id,
-                },
-                RecoveryDelta::RecoverySucceeded {
-                    completed_at: other_ts,
-                    account_id,
-                },
-            ) => {
-                apply_if_newer(completed_at, other_ts, || {
-                    *id = account_id;
-                });
-                true
-            }
-            (
-                RecoveryDelta::RecoveryFailed {
-                    failed_at,
-                    account_id: id,
-                    reason: r,
-                },
-                RecoveryDelta::RecoveryFailed {
-                    failed_at: other_ts,
-                    account_id,
-                    reason,
-                },
-            ) => {
-                apply_if_newer(failed_at, other_ts, || {
-                    *id = account_id;
-                    *r = reason;
-                });
-                true
-            }
-            _ => false,
+        if std::mem::discriminant(self) != std::mem::discriminant(&other) {
+            return false;
         }
+        if other > *self {
+            *self = other;
+        }
+        true
     }
 }
 
@@ -762,6 +502,58 @@ mod tests {
         }
     }
 
+    fn test_causal() -> aura_core::time::CausalMetadata {
+        crate::facts::recovery_initiation_causal(
+            test_context_id(),
+            crate::facts::RecoveryInitiationKind::GuardianSetup,
+            &[],
+            &aura_core::time::LogicalTime {
+                vector: aura_core::time::VectorClock::new(),
+                lamport: 1,
+            },
+        )
+    }
+
+    /// Merging deltas of one key gives the same result for every arrival
+    /// order, including equal timestamps (no arrival-order tie-break).
+    #[test]
+    fn delta_merge_is_order_independent() {
+        let deltas = vec![
+            RecoveryDelta::GuardianSetupStarted {
+                guardian_count: 3,
+                threshold: 2,
+                started_at: 1_000,
+            },
+            RecoveryDelta::GuardianSetupStarted {
+                guardian_count: 2,
+                threshold: 2,
+                started_at: 1_000,
+            },
+            RecoveryDelta::GuardianSetupStarted {
+                guardian_count: 2,
+                threshold: 1,
+                started_at: 9_000,
+            },
+            RecoveryDelta::GuardianResponded {
+                guardian_id: "g".to_string(),
+                accepted: false,
+                responded_at: 5,
+            },
+            RecoveryDelta::GuardianResponded {
+                guardian_id: "g".to_string(),
+                accepted: true,
+                responded_at: 5,
+            },
+        ];
+        let merged =
+            aura_journal::causal_reduction::assert_permutation_invariant(&deltas, |order| {
+                let mut merged = compact_deltas(order.to_vec());
+                merged.sort();
+                merged
+            });
+        assert_eq!(merged.len(), 2);
+    }
+
     #[test]
     fn test_guardian_setup_initiated_reduction() {
         let reducer = RecoveryViewReducer;
@@ -777,6 +569,7 @@ mod tests {
             ],
             threshold: 2,
             initiated_at: pt(1234567890),
+            causal: test_causal(),
         };
 
         let bytes = fact.to_bytes();
@@ -888,6 +681,7 @@ mod tests {
             change_type: crate::facts::MembershipChangeType::UpdateThreshold { new_threshold: 3 },
             proposal_hash: test_hash(42),
             proposed_at: pt(1234567890),
+            causal: test_causal(),
         };
 
         let bytes = fact.to_bytes();

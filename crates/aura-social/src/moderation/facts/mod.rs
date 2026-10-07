@@ -48,7 +48,7 @@ pub fn claimed_moderation_actor(
             HomeRevokeModeratorFact::from_envelope(envelope).map(|f| f.actor_authority)
         }
         crate::facts::SOCIAL_FACT_TYPE_ID => {
-            match crate::facts::SocialFact::from_envelope(envelope) {
+            match crate::facts::SocialFact::try_from_envelope(envelope).ok() {
                 Some(
                     crate::facts::SocialFact::AccessOverrideSet { actor_id, .. }
                     | crate::facts::SocialFact::AccessLevelCapabilitiesConfigured {

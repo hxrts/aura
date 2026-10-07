@@ -54,9 +54,10 @@
 //! }
 //! ```
 
-use crate::facts::{MembershipChangeType, RecoveryFact};
+use crate::facts::{MembershipChangeType, RecoveryFact, TaggedRecoveryInitiation};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
+use aura_journal::causal_reduction::{causal_cmp, register_survivors, CausalFact};
 use aura_journal::DomainFact;
 use std::collections::HashMap;
 
@@ -115,8 +116,9 @@ impl RecoveryState {
     ///   `AwaitingShares`
     ///
     /// Among competing facts of the same kind (two initiations, two failure
-    /// reasons, two disputes) the winner is chosen by a total order (latest
-    /// physical timestamp for initiations, then canonical bytes), so every
+    /// reasons, two disputes) the winner is chosen by a total order (causal order,
+    /// then `causal_cmp`, for initiations; canonical order for reasons and
+    /// disputes), so every
     /// replica derives the same state.
     pub fn from_facts(facts: &[RecoveryFact]) -> Self {
         let mut groups: HashMap<ContextId, ContextFacts<'_>> = HashMap::new();
@@ -226,13 +228,23 @@ struct ContextFacts<'a> {
     recovery_failures: Vec<&'a str>,
 }
 
-/// Deterministic winner among competing facts of one kind: latest physical
-/// timestamp, ties broken by canonical encoding.
-fn latest_fact<'a>(facts: &[&'a RecoveryFact]) -> Option<&'a RecoveryFact> {
-    facts
+/// Winner among competing initiations of one family (a multi-value register).
+/// Causal order first: initiations superseded by, or causally before, another
+/// are dropped. Explicit policy for concurrent survivors: the greatest under
+/// `causal_cmp` (causal depth, Lamport scalar, then the content tag as the
+/// deterministic tie-break). Physical time never orders them.
+fn winning_initiation<'a>(facts: &[&'a RecoveryFact]) -> Option<&'a RecoveryFact> {
+    let tagged: Vec<TaggedRecoveryInitiation<'a>> = facts
         .iter()
-        .copied()
-        .max_by_key(|fact| (fact.timestamp_ms(), fact.to_bytes()))
+        .filter_map(|fact| TaggedRecoveryInitiation::new(fact))
+        .collect();
+    let refs: Vec<&TaggedRecoveryInitiation<'a>> = tagged.iter().collect();
+    let survivors = register_survivors(&refs);
+    tagged
+        .iter()
+        .filter(|fact| survivors.contains(&fact.causal_tag()))
+        .max_by(|a, b| causal_cmp(*a, *b))
+        .map(TaggedRecoveryInitiation::fact)
 }
 
 /// Canonical (sorted, deduplicated) authority set.
@@ -292,7 +304,7 @@ impl<'a> ContextFacts<'a> {
             threshold,
             initiated_at,
             ..
-        } = latest_fact(&self.setup_initiations)?
+        } = winning_initiation(&self.setup_initiations)?
         else {
             return None;
         };
@@ -329,7 +341,7 @@ impl<'a> ContextFacts<'a> {
             proposal_hash,
             proposed_at,
             ..
-        } = latest_fact(&self.proposals)?
+        } = winning_initiation(&self.proposals)?
         else {
             return None;
         };
@@ -358,7 +370,7 @@ impl<'a> ContextFacts<'a> {
             request_hash,
             initiated_at,
             ..
-        } = latest_fact(&self.recovery_initiations)?
+        } = winning_initiation(&self.recovery_initiations)?
         else {
             return None;
         };
@@ -621,7 +633,107 @@ pub struct RecoveryFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::time::PhysicalTime;
+    use aura_core::time::{CausalClock, CausalMetadata, PhysicalTime};
+    use aura_core::types::identifiers::DeviceId;
+    use aura_journal::causal_reduction::assert_permutation_invariant;
+
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
+    /// Causal metadata at `lamport` with vector entries `(device seed, counter)`.
+    fn stamp(lamport: u64, vector: &[(u8, u64)]) -> CausalMetadata {
+        let mut vector: Vec<(DeviceId, u64)> = vector
+            .iter()
+            .map(|(seed, counter)| (device(*seed), *counter))
+            .collect();
+        vector.sort();
+        CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: CausalClock { lamport, vector },
+        }
+    }
+
+    fn setup_initiation(threshold: u16, initiated_ms: u64, causal: CausalMetadata) -> RecoveryFact {
+        RecoveryFact::GuardianSetupInitiated {
+            context_id: test_context_id(),
+            initiator_id: test_authority_id(1),
+            trace_id: None,
+            guardian_ids: vec![test_authority_id(2), test_authority_id(3)],
+            threshold,
+            initiated_at: pt(initiated_ms),
+            causal,
+        }
+    }
+
+    /// A causally later initiation wins even when its physical timestamp is
+    /// earlier; physical time is display-only.
+    #[test]
+    fn causally_later_setup_initiation_wins_regardless_of_wall_clock() {
+        let first = setup_initiation(1, 9_000, stamp(1, &[(1, 1)]));
+        let second = setup_initiation(2, 1_000, stamp(2, &[(1, 2)]));
+        let state = assert_order_independent(&[first, second]);
+        let setup = state.setup_for_context(&test_context_id()).unwrap();
+        assert_eq!(setup.threshold, 2);
+        assert_eq!(setup.initiated_at, 1_000);
+    }
+
+    /// An explicit supersession wins over a write the writer observed even
+    /// when the clocks are concurrent.
+    #[test]
+    fn superseding_initiation_wins_over_observed_concurrent_one() {
+        let first = setup_initiation(1, 5_000, stamp(9, &[(1, 5)]));
+        let observed = [first.clone()];
+        let ctx = test_context_id();
+        let causal = crate::facts::recovery_initiation_causal(
+            ctx,
+            crate::facts::RecoveryInitiationKind::GuardianSetup,
+            &observed,
+            &stamp(1, &[(2, 1)]).clock.to_logical(),
+        );
+        assert_eq!(causal.supersedes.len(), 1);
+        let second = setup_initiation(2, 1_000, causal);
+        let state = assert_order_independent(&[first, second]);
+        assert_eq!(state.setup_for_context(&ctx).unwrap().threshold, 2);
+    }
+
+    /// Truly concurrent initiations resolve by `causal_cmp`, identically for
+    /// every arrival order, and independently of physical time.
+    #[test]
+    fn concurrent_initiations_resolve_deterministically_without_wall_clock() {
+        let a = setup_initiation(1, 1_000, stamp(3, &[(1, 1)]));
+        let b = setup_initiation(2, 9_000, stamp(3, &[(2, 1)]));
+        let c = setup_initiation(3, 5_000, stamp(3, &[(3, 1)]));
+        let winner = assert_order_independent(&[a, b, c])
+            .setup_for_context(&test_context_id())
+            .unwrap()
+            .threshold;
+        // Re-stamping physical times leaves the winner unchanged.
+        let retimed = [
+            setup_initiation(1, 9_000, stamp(3, &[(1, 1)])),
+            setup_initiation(2, 1_000, stamp(3, &[(2, 1)])),
+            setup_initiation(3, 0, stamp(3, &[(3, 1)])),
+        ];
+        let retimed_winner = assert_order_independent(&retimed)
+            .setup_for_context(&test_context_id())
+            .unwrap()
+            .threshold;
+        assert_eq!(winner, retimed_winner);
+
+        let recoveries: Vec<RecoveryFact> = [(1u8, 7_000u64), (2, 3_000)]
+            .iter()
+            .map(|(seed, ms)| RecoveryFact::RecoveryInitiated {
+                context_id: test_context_id(),
+                account_id: test_authority_id(*seed),
+                trace_id: None,
+                request_hash: test_hash(*seed),
+                initiated_at: pt(*ms),
+                causal: stamp(1, &[(*seed, 1)]),
+            })
+            .collect();
+        assert_order_independent(&recoveries);
+    }
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -659,6 +771,7 @@ mod tests {
                 guardian_ids: vec![guardian1, guardian2, guardian3],
                 threshold: 2,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
@@ -692,6 +805,7 @@ mod tests {
                 guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
@@ -730,6 +844,7 @@ mod tests {
                 guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianDeclined {
                 context_id: ctx,
@@ -765,6 +880,7 @@ mod tests {
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx,
@@ -806,6 +922,7 @@ mod tests {
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::MembershipChangeRejected {
                 context_id: ctx,
@@ -841,6 +958,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx,
@@ -872,6 +990,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryApproved {
                 context_id: ctx,
@@ -901,6 +1020,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryDisputeFiled {
                 context_id: ctx,
@@ -936,6 +1056,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryFailed {
                 context_id: ctx,
@@ -973,6 +1094,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx,
@@ -1066,6 +1188,7 @@ mod tests {
                 guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             // Completed setup
             RecoveryFact::GuardianSetupInitiated {
@@ -1075,6 +1198,7 @@ mod tests {
                 guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(2000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx2,
@@ -1101,22 +1225,6 @@ mod tests {
         assert!(!state.has_active_operation(&ctx2));
     }
 
-    fn permutations(facts: &[RecoveryFact]) -> Vec<Vec<RecoveryFact>> {
-        if facts.len() <= 1 {
-            return vec![facts.to_vec()];
-        }
-        let mut out = Vec::new();
-        for i in 0..facts.len() {
-            let mut rest = facts.to_vec();
-            let head = rest.remove(i);
-            for mut tail in permutations(&rest) {
-                tail.insert(0, head.clone());
-                out.push(tail);
-            }
-        }
-        out
-    }
-
     fn snapshot(state: &RecoveryState, ctx: &ContextId) -> String {
         format!(
             "{:?}|{:?}|{:?}",
@@ -1129,21 +1237,15 @@ mod tests {
     /// Every permutation (plus a duplicated copy) reduces to one state.
     fn assert_order_independent(facts: &[RecoveryFact]) -> RecoveryState {
         let ctx = test_context_id();
-        let expected = RecoveryState::from_facts(facts);
-        let expected_snapshot = snapshot(&expected, &ctx);
-        for order in permutations(facts) {
-            assert_eq!(
-                snapshot(&RecoveryState::from_facts(&order), &ctx),
-                expected_snapshot
-            );
-            let mut doubled = order.clone();
-            doubled.extend(order);
-            assert_eq!(
-                snapshot(&RecoveryState::from_facts(&doubled), &ctx),
-                expected_snapshot
-            );
-        }
-        expected
+        let reduce = |order: &[RecoveryFact]| {
+            let mut doubled = order.to_vec();
+            doubled.extend_from_slice(order);
+            let once = snapshot(&RecoveryState::from_facts(order), &ctx);
+            assert_eq!(once, snapshot(&RecoveryState::from_facts(&doubled), &ctx));
+            once
+        };
+        assert_permutation_invariant(facts, reduce);
+        RecoveryState::from_facts(facts)
     }
 
     #[test]
@@ -1180,6 +1282,7 @@ mod tests {
                 guardian_ids: vec![g1, g2, g3],
                 threshold: 2,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
         ];
         let state = assert_order_independent(&facts);
@@ -1201,6 +1304,7 @@ mod tests {
                 guardian_ids: vec![g1, g2],
                 threshold: 2,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
@@ -1247,6 +1351,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::RecoveryCompleted {
                 context_id: ctx,
@@ -1301,6 +1406,7 @@ mod tests {
                 guardian_ids: vec![g1],
                 threshold: 1,
                 initiated_at: pt(1000),
+                causal: stamp(1, &[]),
             },
             RecoveryFact::GuardianSetupCompleted {
                 context_id: ctx,
@@ -1330,6 +1436,7 @@ mod tests {
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 1 },
                 proposal_hash: test_hash(5),
                 proposed_at: pt(2100),
+                causal: stamp(1, &[]),
             },
         ];
         let state = assert_order_independent(&facts);

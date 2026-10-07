@@ -69,6 +69,31 @@ impl HomeState {
         Ok(true)
     }
 
+    /// Set the fact-backed neighborhoods to `live` (id to name), given every
+    /// neighborhood `known` from join facts. Known memberships are released
+    /// and the live ones rejoined in id order, so the result depends only on
+    /// the reduced fact set and the local-only joins (which are kept). Joins
+    /// past the neighborhood budget are refused. Returns whether the
+    /// neighborhoods changed.
+    pub fn reconcile_fact_neighborhoods(
+        &mut self,
+        known: &std::collections::BTreeSet<String>,
+        live: &std::collections::BTreeMap<String, String>,
+    ) -> bool {
+        let before = self.neighborhoods.clone();
+        for id in known {
+            if self.neighborhoods.remove(id).is_some() {
+                let _ = self.storage.leave_neighborhood();
+            }
+        }
+        for (id, name) in live {
+            if let Err(error) = self.join_neighborhood(id, name) {
+                tracing::warn!(home_id = %self.id, neighborhood = %id, %error, "neighborhood join fact exceeds the home budget");
+            }
+        }
+        self.neighborhoods != before
+    }
+
     pub fn new(
         id: ChannelId,
         name: Option<String>,

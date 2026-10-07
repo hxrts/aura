@@ -1501,6 +1501,15 @@ mod tests {
             ],
             2,
             1234567890,
+            aura_recovery::recovery_initiation_causal(
+                test_context_id(),
+                aura_recovery::RecoveryInitiationKind::GuardianSetup,
+                &[],
+                &aura_core::time::LogicalTime {
+                    vector: aura_core::time::VectorClock::new(),
+                    lamport: 1,
+                },
+            ),
         );
 
         let guardian_accepted = RecoveryFact::guardian_accepted_ms(
@@ -1611,6 +1620,14 @@ mod tests {
             1024 * 1024,      // 1 MB used
             10 * 1024 * 1024, // 10 MB total
             3000,
+            aura_core::time::CausalMetadata {
+                revokes: Vec::new(),
+                supersedes: Vec::new(),
+                clock: aura_core::time::CausalClock {
+                    lamport: 1,
+                    vector: Vec::new(),
+                },
+            },
         );
 
         let facts = vec![

@@ -266,6 +266,27 @@ pub async fn stamp_contact_causal(
     Ok(aura_relational::contact_causal(key, &observed, &clock))
 }
 
+/// Causal metadata for a new recovery initiation of `kind` in `context_id`,
+/// observing every initiation of that family committed in `authority`'s
+/// journal.
+pub async fn stamp_recovery_initiation_causal(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    context_id: aura_core::types::identifiers::ContextId,
+    kind: aura_recovery::RecoveryInitiationKind,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    let observed = load_decoded_facts(
+        effects,
+        authority,
+        aura_recovery::RECOVERY_FACT_TYPE_ID,
+        aura_recovery::RecoveryFact::try_from_envelope,
+    )
+    .await?;
+    aura_recovery::stamp_recovery_initiation(effects, context_id, kind, &observed)
+        .await
+        .map_err(|source| stamping_failure("stamp recovery initiation", source))
+}
+
 /// Causal metadata for a new friendship fact about `key`, observing every
 /// friendship fact committed in `authority`'s journal.
 pub async fn stamp_friendship_causal(

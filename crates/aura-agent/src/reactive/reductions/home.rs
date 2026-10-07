@@ -6,7 +6,6 @@
 use crate::reactive::scheduler::ViewReduction;
 use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
-use aura_journal::DomainFact;
 use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
 
 /// Delta type for home view
@@ -50,7 +49,7 @@ impl ViewReduction<HomeDelta> for HomeReduction {
                     }
 
                     // Deserialize the SocialFact from envelope
-                    let social_fact = SocialFact::from_envelope(envelope)?;
+                    let social_fact = SocialFact::try_from_envelope(envelope).ok()?;
 
                     match social_fact {
                         SocialFact::HomeCreated {
@@ -108,6 +107,7 @@ mod tests {
     use super::*;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ContextId};
+    use aura_journal::DomainFact;
     use aura_social::HomeId;
 
     fn test_context_id() -> ContextId {

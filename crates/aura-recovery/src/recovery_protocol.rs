@@ -11,7 +11,9 @@ use crate::utils::workflow::{context_id_from_operation_id, persist_recovery_fact
 use aura_consensus::relational::run_consensus_with_commit;
 use aura_consensus::types::CommitFact;
 use aura_core::crypto::Ed25519Signature;
-use aura_core::effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects};
+use aura_core::effects::{
+    CryptoEffects, JournalEffects, LogicalClockEffects, NetworkEffects, PhysicalTimeEffects,
+};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::key_resolution::TrustedKeyResolver;
@@ -607,6 +609,7 @@ impl RecoveryProtocolHandler {
         &self,
         request: RecoveryRequest,
         time_effects: &dyn PhysicalTimeEffects,
+        logical_clock: &dyn LogicalClockEffects,
         network: &dyn NetworkEffects,
         journal: &dyn JournalEffects,
     ) -> Result<()> {
@@ -619,12 +622,22 @@ impl RecoveryProtocolHandler {
 
         // Emit RecoveryInitiated fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
+        // The context is unique to this recovery id, so no earlier initiation
+        // competes; the stamp orders it causally against concurrent retries.
+        let causal = crate::facts::stamp_recovery_initiation(
+            logical_clock,
+            context_id,
+            crate::facts::RecoveryInitiationKind::Recovery,
+            &[],
+        )
+        .await?;
         let initiated_fact = RecoveryFact::RecoveryInitiated {
             context_id,
             account_id: request.account_authority,
             trace_id: recovery_trace_id(&request.recovery_id),
             request_hash: recovery_request_hash(&request.recovery_id),
             initiated_at: crate::utils::workflow::exact_physical_time(timestamp),
+            causal,
         };
         self.emit_fact(initiated_fact, journal).await?;
 

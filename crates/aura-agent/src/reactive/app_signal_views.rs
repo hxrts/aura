@@ -53,7 +53,7 @@ use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 use aura_social::moderation::TaggedHomeGovernanceEvent;
-use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
+use aura_social::{SocialFact, SocialLifecycle, SocialLifecycleLog, SOCIAL_FACT_TYPE_ID};
 
 fn required_projection_source(
     source: aura_core::effects::reactive::ReactiveError,
@@ -1158,6 +1158,8 @@ pub struct HomeSignalView {
     /// Governance facts held per home context; homes are re-reduced from
     /// the whole set so arrival order cannot change the result.
     governance: Mutex<HashMap<ContextId, HomeGovernanceLog>>,
+    /// Home and neighborhood lifecycle facts, reduced as a whole each batch.
+    lifecycle: Mutex<SocialLifecycleLog>,
 }
 
 impl HomeSignalView {
@@ -1167,6 +1169,7 @@ impl HomeSignalView {
             reactive,
             pending_memberships: Mutex::new(Vec::new()),
             governance: Mutex::new(HashMap::new()),
+            lifecycle: Mutex::new(SocialLifecycleLog::default()),
         }
     }
 
@@ -1249,48 +1252,49 @@ impl HomeSignalView {
         });
         Some(true)
     }
-    /// Applies committed neighborhood joins (charged against the home's
-    /// neighborhood budget once per neighborhood, so replays are no-ops).
-    fn apply_neighborhood_joins(homes: &mut HomesState, social_facts: &[SocialFact]) -> bool {
-        let neighborhood_names: std::collections::HashMap<String, String> = social_facts
-            .iter()
-            .filter_map(|fact| match fact {
-                SocialFact::NeighborhoodCreated {
-                    neighborhood_id,
-                    name,
-                    ..
-                } => Some((
-                    ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string(),
-                    name.clone(),
-                )),
-                _ => None,
-            })
-            .collect();
+    /// Applies the reduced lifecycle: removes deleted homes and sets each
+    /// home's fact-backed neighborhoods to its live memberships.
+    fn apply_lifecycle(homes: &mut HomesState, lifecycle: &SocialLifecycle) -> bool {
+        let channel = |bytes: &[u8; 32]| ChannelId::from_bytes(*bytes);
         let mut changed = false;
-        for fact in social_facts {
-            let SocialFact::HomeJoinedNeighborhood {
-                home_id,
-                neighborhood_id,
-                ..
-            } = fact
-            else {
-                continue;
-            };
-            let home_id = ChannelId::from_bytes(*home_id.as_bytes());
-            let neighborhood = ChannelId::from_bytes(*neighborhood_id.as_bytes()).to_string();
-            let name = neighborhood_names
-                .get(&neighborhood)
+        for home in &lifecycle.deleted_homes {
+            changed |= homes
+                .remove_home(&channel(home.as_bytes()))
+                .removed
+                .is_some();
+        }
+        let name = |id: &aura_social::NeighborhoodId| {
+            lifecycle
+                .neighborhood_names
+                .get(id)
                 .cloned()
-                .unwrap_or_else(|| "Neighborhood".to_string());
-            let Some(home) = homes.home_mut(&home_id) else {
+                .unwrap_or_else(|| "Neighborhood".to_string())
+        };
+        let homes_with_facts: BTreeSet<_> = lifecycle
+            .neighborhoods
+            .keys()
+            .chain(lifecycle.left_neighborhoods.keys())
+            .collect();
+        for home_id in homes_with_facts {
+            let Some(home) = homes.home_mut(&channel(home_id.as_bytes())) else {
                 continue;
             };
-            match home.join_neighborhood(&neighborhood, &name) {
-                Ok(joined) => changed |= joined,
-                Err(error) => {
-                    tracing::warn!(%home_id, %error, "neighborhood join fact exceeds the home budget");
-                }
-            }
+            let live: BTreeMap<String, String> = lifecycle
+                .neighborhoods
+                .get(home_id)
+                .into_iter()
+                .flatten()
+                .map(|id| (channel(id.as_bytes()).to_string(), name(id)))
+                .collect();
+            let known: BTreeSet<String> = lifecycle
+                .left_neighborhoods
+                .get(home_id)
+                .into_iter()
+                .flatten()
+                .map(|id| channel(id.as_bytes()).to_string())
+                .chain(live.keys().cloned())
+                .collect();
+            changed |= home.reconcile_fact_neighborhoods(&known, &live);
         }
         changed
     }
@@ -1305,8 +1309,10 @@ impl ReactiveView for HomeSignalView {
             // may publish to the same signal.
             let mut pending = self.pending_memberships.lock().await;
             let mut governance_held = self.governance.lock().await;
+            let mut lifecycle_held = self.lifecycle.lock().await;
             loop {
                 let mut governance = governance_held.clone();
+                let mut lifecycle_log = lifecycle_held.clone();
                 let current = match owner.snapshot(ProjectionSlot::homes()).await {
                     Ok(current) => current,
                     Err(e) => {
@@ -1331,10 +1337,22 @@ impl ReactiveView for HomeSignalView {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(required_projection_fact_source)?;
 
+                for fact in &social_facts {
+                    lifecycle_log.insert(fact);
+                }
+                let lifecycle = lifecycle_log.reduce();
+
                 // Creation is reduced first even when journal replay presents
-                // membership before creation in the same batch.
+                // membership before creation in the same batch. A deleted
+                // home is never materialized.
                 for fact in &social_facts {
                     if let Some(witness) = owner.home_created_witness(fact) {
+                        if lifecycle
+                            .deleted_homes
+                            .contains(&aura_social::HomeId::from_bytes(*witness.id().as_bytes()))
+                        {
+                            continue;
+                        }
                         governance
                             .entry(witness.context_id())
                             .or_default()
@@ -1357,7 +1375,7 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
 
-                changed |= Self::apply_neighborhood_joins(&mut homes, &social_facts);
+                changed |= Self::apply_lifecycle(&mut homes, &lifecycle);
 
                 // Governance facts join their home's fact set (validated even
                 // before the home materializes; missing canonical context is
@@ -1421,6 +1439,7 @@ impl ReactiveView for HomeSignalView {
                 if !changed {
                     *pending = unresolved;
                     *governance_held = governance;
+                    *lifecycle_held = lifecycle_log;
                     return Ok(());
                 }
 
@@ -1431,6 +1450,7 @@ impl ReactiveView for HomeSignalView {
                     Ok(ConditionalEmit::Published { .. }) => {
                         *pending = unresolved;
                         *governance_held = governance;
+                        *lifecycle_held = lifecycle_log;
                         return Ok(());
                     }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
@@ -2459,12 +2479,14 @@ mod tests {
             .unwrap()
             .revision;
         for (type_id, view) in views {
-            // Social facts and kicks are at schema 4 (membership episodes),
+            // Social facts are at schema 5 (lifecycle causal metadata), kicks at
+            // schema 4 (membership episodes),
             // other home governance facts at schema 3 and contact facts at
             // schema 2 (causal stamps).
             let supported: u16 = match type_id {
-                CONTACT_FACT_TYPE_ID => 2,
-                SOCIAL_FACT_TYPE_ID | HOME_KICK_FACT_TYPE_ID => 4,
+                CONTACT_FACT_TYPE_ID | FRIENDSHIP_FACT_TYPE_ID | RECOVERY_FACT_TYPE_ID => 2,
+                SOCIAL_FACT_TYPE_ID => 5,
+                HOME_KICK_FACT_TYPE_ID => 4,
                 HOME_BAN_FACT_TYPE_ID
                 | HOME_UNBAN_FACT_TYPE_ID
                 | HOME_MUTE_FACT_TYPE_ID
@@ -2988,6 +3010,15 @@ mod tests {
             guardian_ids: vec![own_authority, other_guardian],
             threshold: 2,
             initiated_at: at.clone(),
+            causal: aura_recovery::recovery_initiation_causal(
+                context_id,
+                aura_recovery::RecoveryInitiationKind::GuardianSetup,
+                &[],
+                &aura_core::time::LogicalTime {
+                    vector: aura_core::time::VectorClock::new(),
+                    lamport: 1,
+                },
+            ),
         };
         view.update(&[fact_from_relational(request.to_generic())])
             .await
@@ -4776,6 +4807,69 @@ mod tests {
             "a fifth neighborhood is refused by the home budget"
         );
         assert!(home.join_neighborhood("one-more", "Block 99").is_err());
+    }
+
+    // Task 103: deletion and neighborhood leave reduce over the whole fact
+    // set held by the view, whichever batch delivers them first.
+    #[tokio::test]
+    async fn home_signal_view_reduces_deletion_and_leave_in_either_batch_order() {
+        let context = ContextId::new_from_entropy([6u8; 32]);
+        let actor = AuthorityId::new_from_entropy([1u8; 32]);
+        let home_id = aura_social::HomeId::from_bytes([45u8; 32]);
+        let channel = ChannelId::from_bytes([45u8; 32]);
+        let neighborhood = aura_social::NeighborhoodId::from_bytes([70u8; 32]);
+        let stamp = |revokes| aura_core::time::CausalMetadata {
+            revokes,
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: 2,
+                vector: Vec::new(),
+            },
+        };
+        let created = SocialFact::home_created_ms(home_id, context, 50, actor, "Den".into());
+        let joined = SocialFact::home_joined_neighborhood_ms(home_id, neighborhood, context, 60);
+        let left = SocialFact::home_left_neighborhood_ms(
+            home_id,
+            neighborhood,
+            context,
+            61,
+            stamp(vec![joined.content_tag()]),
+        );
+        let deleted = SocialFact::home_deleted_ms(
+            home_id,
+            context,
+            62,
+            actor,
+            stamp(vec![created.content_tag()]),
+        );
+        let batch = |facts: &[&SocialFact]| -> Vec<Fact> {
+            facts
+                .iter()
+                .map(|fact| fact_from_relational(fact.to_generic()))
+                .collect()
+        };
+
+        for leave_first in [false, true] {
+            let reactive = ReactiveHandler::new();
+            let _ = setup_homes(&reactive, ContextId::new_from_entropy([2u8; 32])).await;
+            let view = HomeSignalView::new(actor, reactive.clone());
+            let (early, late) = if leave_first {
+                (batch(&[&left]), batch(&[&created, &joined]))
+            } else {
+                (batch(&[&created, &joined]), batch(&[&left]))
+            };
+            view.update(&early).await.unwrap();
+            view.update(&late).await.unwrap();
+            let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+            let home = homes.home_state(&channel).expect("home");
+            assert!(home.neighborhoods.is_empty(), "leave_first={leave_first}");
+            assert_eq!(home.storage.neighborhood_count, 0);
+
+            view.update(&batch(&[&deleted])).await.unwrap();
+            view.update(&batch(&[&created])).await.unwrap(); // replay
+            let homes = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+            assert!(!homes.has_home(&channel), "deletion is terminal");
+        }
     }
 
     // Task 125: one drop record covers inbound intake refusals (with the

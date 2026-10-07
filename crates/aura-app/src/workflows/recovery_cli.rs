@@ -32,7 +32,9 @@ pub const DISPUTE_WINDOW_HOURS_MIN: u64 = 1;
 pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 
 use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
-use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects};
+use aura_core::effects::{
+    JournalEffects, LogicalClockEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects,
+};
 use aura_core::frost::PublicKeyPackage;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId, RecoveryId};
@@ -113,7 +115,7 @@ pub fn validate_guardian_set_full(
 
 /// Run the recovery protocol initiation sequence.
 pub async fn initiate_recovery_protocol<
-    E: PhysicalTimeEffects + NetworkEffects + JournalEffects,
+    E: PhysicalTimeEffects + LogicalClockEffects + NetworkEffects + JournalEffects,
 >(
     effects: &E,
     account_authority: AuthorityId,
@@ -130,7 +132,7 @@ pub async fn initiate_recovery_protocol<
     );
     let protocol_handler = RecoveryProtocolHandler::new(Arc::new(recovery_protocol));
     protocol_handler
-        .handle_recovery_initiation(request, effects, effects, effects)
+        .handle_recovery_initiation(request, effects, effects, effects, effects)
         .await
         .map_err(|e| super::error::runtime_call("initiate recovery protocol", e))?;
     Ok(())

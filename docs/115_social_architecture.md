@@ -99,7 +99,7 @@ Moderators are designated via governance decisions in the home. A moderator must
 
 ### 3.4 Order-Independent Governance Reduction
 
-Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides, the capability configuration, and member joins and leaves. They follow the causal fact model of docs/105 §4.2.1 (schema 3; kicks and social facts schema 4). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::causal_stamp` with `CausalStampKey::HomeGovernance`), which advances its logical clock past every governance fact it holds for the home.
+Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides, the capability configuration, and member joins and leaves. They follow the causal fact model of docs/105 §4.2.1 (schema 3; kicks schema 4; social facts schema 5). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::causal_stamp` with `CausalStampKey::HomeGovernance`), which advances its logical clock past every governance fact it holds for the home.
 
 - Bans and mutes are tagged observed-remove sets keyed by target and channel scope. An unban or unmute revokes the bans or mutes of that key its writer observed. A concurrent ban the writer did not observe stays in force.
 - Moderator designations are a tagged observed-remove set keyed by target. The creator is a permanent moderator. Roles are derived from the whole set, so a grant that arrives before the member joins takes effect when the member joins.
@@ -112,6 +112,17 @@ Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants 
 - Banned members leave the visible roster and return when the ban is lifted.
 
 The pure reducer is `aura_app::views::home::reduce_home_governance`. The home signal view keeps each home's governance fact set and reduces it after every batch.
+
+### 3.5 Order-Independent Lifecycle Reduction
+
+The remaining `SocialFact` pairs (schema 5) reduce in `aura_social::lifecycle` over the whole fact set; physical timestamps never order them.
+
+- Home existence is a tagged observed-remove set. Each `HomeCreated` is an add tagged by its content. A `HomeDeleted` by the home's creator revokes the creations it observed; a deletion by anyone else, or one that observed no creation, removes nothing. Deletion is terminal: a `HomeId` is minted once, so a recreated home is a new `HomeId`. A deleted home is never materialized, even when its creation arrives after the deletion.
+- Neighborhood membership is a tagged observed-remove set of episodes per home and neighborhood. A `HomeLeftNeighborhood` revokes the joins its writer observed; a later join is a new episode and survives. The home view sets each home's fact-backed neighborhoods to the live set, rejoining in neighborhood-id order within the neighborhood budget.
+- Storage readings (`StorageUpdated`) are a multi-value register per home. A write supersedes the writes its writer observed; concurrent survivors resolve to the largest usage, then the largest capacity, then the later write in causal order.
+- Neighborhood names come from `NeighborhoodCreated`; duplicate creations of one id resolve to the smallest name.
+
+`SocialFact` is registered in the agent `FactRegistry` with `SocialFactReducer`, which decodes through `SocialFact::try_from_envelope`. Moderator designations are `HomeGrantModeratorFact` and `HomeRevokeModeratorFact` only.
 
 ## 4. Neighborhood Architecture
 

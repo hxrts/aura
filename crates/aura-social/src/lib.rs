@@ -56,6 +56,7 @@ pub mod availability;
 pub mod error;
 pub mod facts;
 pub mod home;
+pub mod lifecycle;
 pub mod membership;
 pub mod moderation;
 pub mod neighborhood;
@@ -113,6 +114,7 @@ pub use availability::{HomeAvailability, NeighborhoodAvailability};
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use home::Home;
+pub use lifecycle::{HomeStorageReading, SocialLifecycle, SocialLifecycleLog};
 pub use moderation::governance::{
     home_governance_causal, observed_governance_vector, HomeGovernanceEvent, HomeGovernanceKey,
     TaggedHomeGovernanceEvent,

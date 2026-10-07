@@ -151,8 +151,9 @@ pub use guardian_membership::{MembershipChange, MembershipChangeRequest};
 
 // Re-export facts for registry integration
 pub use facts::{
-    MembershipChangeType, RecoveryFact, RecoveryFactEmitter, RecoveryFactReducer,
-    RECOVERY_FACT_TYPE_ID,
+    recovery_initiation_causal, stamp_recovery_initiation, MembershipChangeType, RecoveryFact,
+    RecoveryFactEmitter, RecoveryFactReducer, RecoveryInitiationKind, TaggedRecoveryInitiation,
+    RECOVERY_FACT_SCHEMA_VERSION, RECOVERY_FACT_TYPE_ID,
 };
 
 // Re-export view deltas for UI integration

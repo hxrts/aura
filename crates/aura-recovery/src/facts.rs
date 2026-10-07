@@ -36,6 +36,7 @@
 //!     guardian_ids: vec![guardian1, guardian2, guardian3],
 //!     threshold: 2,
 //!     initiated_at: PhysicalTime { ts_ms: 1234567890, uncertainty: None },
+//!     causal, // from `stamp_recovery_initiation`
 //! };
 //!
 //! // Convert to generic for storage
@@ -46,12 +47,14 @@
 //! ```
 
 use aura_core::{
+    effects::time::LogicalClockEffects,
     hash,
-    time::PhysicalTime,
+    time::{CausalClock, CausalMetadata, CausalTag, LogicalTime, PhysicalTime},
     types::{AuthorityId, ContextId},
     Hash32,
 };
 use aura_journal::{
+    causal_reduction::{merged_vector, CausalFact},
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
 };
@@ -60,6 +63,10 @@ use serde::{Deserialize, Serialize};
 
 /// Type identifier for recovery facts
 pub const RECOVERY_FACT_TYPE_ID: &str = "recovery";
+
+/// Recovery fact schema version. Version 2 added causal metadata to
+/// initiation facts; version 1 payloads are not decoded.
+pub const RECOVERY_FACT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecoveryFactKey {
@@ -77,7 +84,7 @@ pub struct RecoveryFactKey {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
 #[domain_fact(
     type_id = "recovery",
-    schema_version = 1,
+    schema_version = 2,
     context_fn = "get_context_id"
 )]
 pub enum RecoveryFact {
@@ -97,8 +104,10 @@ pub enum RecoveryFact {
         guardian_ids: Vec<AuthorityId>,
         /// Required threshold for recovery
         threshold: u16,
-        /// Timestamp when setup was initiated (uses unified time system)
+        /// Timestamp when setup was initiated (display only; never orders facts)
         initiated_at: PhysicalTime,
+        /// Causal metadata ordering competing setup initiations in this context
+        causal: CausalMetadata,
     },
 
     /// Invitation sent to a guardian
@@ -186,8 +195,10 @@ pub enum RecoveryFact {
         change_type: MembershipChangeType,
         /// Hash of the proposal details
         proposal_hash: Hash32,
-        /// Timestamp when proposed (uses unified time system)
+        /// Timestamp when proposed (display only; never orders facts)
         proposed_at: PhysicalTime,
+        /// Causal metadata ordering competing proposals in this context
+        causal: CausalMetadata,
     },
 
     /// Vote cast on membership change
@@ -253,8 +264,10 @@ pub enum RecoveryFact {
         trace_id: Option<String>,
         /// Hash of the recovery request
         request_hash: Hash32,
-        /// Timestamp when recovery was initiated (uses unified time system)
+        /// Timestamp when recovery was initiated (display only; never orders facts)
         initiated_at: PhysicalTime,
+        /// Causal metadata ordering competing recovery initiations in this context
+        causal: CausalMetadata,
     },
 
     /// Recovery share submitted by a guardian
@@ -353,6 +366,114 @@ pub enum MembershipChangeType {
     },
 }
 
+/// Family of competing initiation facts. Within one context, the initiations
+/// of one family form a multi-value register ordered causally, never by
+/// physical time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryInitiationKind {
+    /// `GuardianSetupInitiated`.
+    GuardianSetup,
+    /// `MembershipChangeProposed`.
+    MembershipProposal,
+    /// `RecoveryInitiated`.
+    Recovery,
+}
+
+/// An initiation fact with its content-derived tag.
+#[derive(Debug, Clone, Copy)]
+pub struct TaggedRecoveryInitiation<'a> {
+    tag: CausalTag,
+    causal: &'a CausalMetadata,
+    fact: &'a RecoveryFact,
+}
+
+impl<'a> TaggedRecoveryInitiation<'a> {
+    /// Wrap an initiation fact; `None` for other facts. The tag is the hash of
+    /// the type id and canonical encoding, never read from the wire.
+    #[must_use]
+    pub fn new(fact: &'a RecoveryFact) -> Option<Self> {
+        let causal = fact.initiation_causal()?;
+        Some(Self {
+            tag: CausalTag::from_content(RECOVERY_FACT_TYPE_ID, &fact.to_bytes()),
+            causal,
+            fact,
+        })
+    }
+
+    /// The wrapped fact.
+    #[must_use]
+    pub fn fact(&self) -> &'a RecoveryFact {
+        self.fact
+    }
+}
+
+impl CausalFact for TaggedRecoveryInitiation<'_> {
+    fn causal_tag(&self) -> CausalTag {
+        self.tag
+    }
+
+    fn causal_metadata(&self) -> &CausalMetadata {
+        self.causal
+    }
+}
+
+/// Initiations of `kind` in `context_id` among `observed`, tagged.
+fn observed_initiations(
+    context_id: ContextId,
+    kind: RecoveryInitiationKind,
+    observed: &[RecoveryFact],
+) -> Vec<TaggedRecoveryInitiation<'_>> {
+    observed
+        .iter()
+        .filter(|fact| fact.get_context_id() == context_id && fact.initiation_kind() == Some(kind))
+        .filter_map(TaggedRecoveryInitiation::new)
+        .collect()
+}
+
+/// Causal metadata for a new initiation of `kind` in `context_id`, written at
+/// `clock`: it supersedes every observed initiation of that family there.
+#[must_use]
+pub fn recovery_initiation_causal(
+    context_id: ContextId,
+    kind: RecoveryInitiationKind,
+    observed: &[RecoveryFact],
+    clock: &LogicalTime,
+) -> CausalMetadata {
+    let mut supersedes: Vec<CausalTag> = observed_initiations(context_id, kind, observed)
+        .iter()
+        .map(CausalFact::causal_tag)
+        .collect();
+    supersedes.sort();
+    supersedes.dedup();
+    CausalMetadata {
+        revokes: Vec::new(),
+        supersedes,
+        clock: CausalClock::from_logical(clock),
+    }
+}
+
+/// Stamp a new initiation: advance the logical clock past the observed
+/// initiations of `kind` in `context_id`, then build its causal metadata.
+///
+/// # Errors
+/// Returns the logical clock's failure.
+pub async fn stamp_recovery_initiation<L: LogicalClockEffects + ?Sized>(
+    logical: &L,
+    context_id: ContextId,
+    kind: RecoveryInitiationKind,
+    observed: &[RecoveryFact],
+) -> Result<CausalMetadata, aura_core::effects::time::TimeError> {
+    let vector = merged_vector(
+        observed_initiations(context_id, kind, observed)
+            .iter()
+            .map(|fact| &fact.causal_metadata().clock),
+    );
+    let clock = logical.logical_advance(Some(&vector)).await?;
+    Ok(recovery_initiation_causal(
+        context_id, kind, observed, &clock,
+    ))
+}
+
 fn exact_physical_time(ts_ms: u64) -> PhysicalTime {
     PhysicalTime {
         ts_ms,
@@ -390,8 +511,8 @@ impl RecoveryFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(RECOVERY_FACT_TYPE_ID),
-            1,
-            1,
+            RECOVERY_FACT_SCHEMA_VERSION,
+            RECOVERY_FACT_SCHEMA_VERSION,
             envelope,
         )
     }
@@ -533,6 +654,32 @@ impl RecoveryFact {
         }
     }
 
+    /// The initiation family this fact belongs to, if it is an initiation.
+    #[must_use]
+    pub fn initiation_kind(&self) -> Option<RecoveryInitiationKind> {
+        match self {
+            RecoveryFact::GuardianSetupInitiated { .. } => {
+                Some(RecoveryInitiationKind::GuardianSetup)
+            }
+            RecoveryFact::MembershipChangeProposed { .. } => {
+                Some(RecoveryInitiationKind::MembershipProposal)
+            }
+            RecoveryFact::RecoveryInitiated { .. } => Some(RecoveryInitiationKind::Recovery),
+            _ => None,
+        }
+    }
+
+    /// Causal metadata of an initiation fact.
+    #[must_use]
+    pub fn initiation_causal(&self) -> Option<&CausalMetadata> {
+        match self {
+            RecoveryFact::GuardianSetupInitiated { causal, .. }
+            | RecoveryFact::MembershipChangeProposed { causal, .. }
+            | RecoveryFact::RecoveryInitiated { causal, .. } => Some(causal),
+            _ => None,
+        }
+    }
+
     // ========================================================================
     // Backward Compatibility Constructors
     // ========================================================================
@@ -544,6 +691,7 @@ impl RecoveryFact {
         guardian_ids: Vec<AuthorityId>,
         threshold: u16,
         initiated_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::GuardianSetupInitiated {
             context_id,
@@ -552,6 +700,7 @@ impl RecoveryFact {
             guardian_ids,
             threshold,
             initiated_at: exact_physical_time(initiated_at_ms),
+            causal,
         }
     }
 
@@ -636,6 +785,7 @@ impl RecoveryFact {
         change_type: MembershipChangeType,
         proposal_hash: Hash32,
         proposed_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::MembershipChangeProposed {
             context_id,
@@ -644,6 +794,7 @@ impl RecoveryFact {
             change_type,
             proposal_hash,
             proposed_at: exact_physical_time(proposed_at_ms),
+            causal,
         }
     }
 
@@ -705,6 +856,7 @@ impl RecoveryFact {
         account_id: AuthorityId,
         request_hash: Hash32,
         initiated_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::RecoveryInitiated {
             context_id,
@@ -712,6 +864,7 @@ impl RecoveryFact {
             trace_id: None,
             request_hash,
             initiated_at: exact_physical_time(initiated_at_ms),
+            causal,
         }
     }
 
@@ -927,6 +1080,17 @@ mod tests {
         }
     }
 
+    fn test_causal() -> CausalMetadata {
+        CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: CausalClock {
+                lamport: 1,
+                vector: Vec::new(),
+            },
+        }
+    }
+
     /// RecoveryFact survives to_bytes/from_bytes roundtrip without loss.
     #[test]
     fn test_recovery_fact_serialization() {
@@ -941,6 +1105,7 @@ mod tests {
             ],
             threshold: 2,
             initiated_at: pt(1234567890),
+            causal: test_causal(),
         };
 
         let bytes = fact.to_bytes();
@@ -1019,6 +1184,7 @@ mod tests {
             change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
             proposal_hash: test_hash(2),
             proposed_at: pt(0),
+            causal: test_causal(),
         };
 
         let key = fact.binding_key();
@@ -1062,6 +1228,7 @@ mod tests {
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
+                causal: test_causal(),
             },
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
@@ -1069,6 +1236,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(0),
+                causal: test_causal(),
             },
             RecoveryFact::MembershipChangeProposed {
                 context_id: ctx,
@@ -1077,6 +1245,7 @@ mod tests {
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(2),
                 proposed_at: pt(0),
+                causal: test_causal(),
             },
         ];
 
@@ -1097,6 +1266,7 @@ mod tests {
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
+                causal: test_causal(),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
@@ -1131,6 +1301,7 @@ mod tests {
                 guardian_ids: vec![],
                 threshold: 2,
                 initiated_at: pt(0),
+                causal: test_causal(),
             }
             .sub_type(),
             RecoveryFact::GuardianInvitationSent {
@@ -1177,6 +1348,7 @@ mod tests {
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(0),
+                causal: test_causal(),
             }
             .sub_type(),
             RecoveryFact::MembershipVoteCast {
@@ -1211,6 +1383,7 @@ mod tests {
                 trace_id: None,
                 request_hash: test_hash(1),
                 initiated_at: pt(0),
+                causal: test_causal(),
             }
             .sub_type(),
             RecoveryFact::RecoveryShareSubmitted {
@@ -1294,6 +1467,7 @@ mod tests {
             vec![test_authority_id(2), test_authority_id(3)],
             2,
             1234567890,
+            test_causal(),
         );
         assert_eq!(fact.timestamp_ms(), 1234567890);
 

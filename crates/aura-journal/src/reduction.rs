@@ -727,17 +727,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelPolicy(policy) => {
-                                channel_policies
-                                    .entry(policy.channel)
-                                    .and_modify(|existing| {
-                                        // Prefer policies that specify a skip window override
-                                        if existing.skip_window.is_none()
-                                            && policy.skip_window.is_some()
-                                        {
-                                            *existing = policy.clone();
-                                        }
-                                    })
-                                    .or_insert_with(|| policy.clone());
+                                merge_channel_policy(&mut channel_policies, policy);
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => {
@@ -928,17 +918,40 @@ fn merge_channel_bootstrap(
     bootstraps: &mut BTreeMap<ChannelId, ChannelBootstrap>,
     bootstrap: &ChannelBootstrap,
 ) {
-    let precedes = |candidate: &ChannelBootstrap, current: &ChannelBootstrap| {
-        (&candidate.bootstrap_id, candidate) < (&current.bootstrap_id, current)
-    };
-    bootstraps
-        .entry(bootstrap.channel)
+    merge_per_channel_min(bootstraps, bootstrap.channel, bootstrap, |fact| {
+        (fact.bootstrap_id, fact.clone())
+    });
+}
+
+/// Fold one policy fact into the per-channel canonical policy. Policy facts
+/// carry no causal stamp, so concurrent policies resolve by an explicit
+/// policy, then a deterministic tie-break: a policy that sets a skip-window
+/// override beats one that does not, then the smallest override (the most
+/// conservative window), then the full fact order. The result is a function
+/// of the fact set.
+fn merge_channel_policy(policies: &mut BTreeMap<ChannelId, ChannelPolicy>, policy: &ChannelPolicy) {
+    merge_per_channel_min(policies, policy.channel, policy, |fact| {
+        (fact.skip_window.is_none(), fact.skip_window, fact.clone())
+    });
+}
+
+/// Keep, per channel, the fact with the smallest `rank`: a join over a total
+/// order, so the result does not depend on arrival order. `rank` must be
+/// injective (end it with the fact itself).
+fn merge_per_channel_min<T: Clone, R: Ord>(
+    canonical: &mut BTreeMap<ChannelId, T>,
+    channel: ChannelId,
+    fact: &T,
+    rank: impl Fn(&T) -> R,
+) {
+    canonical
+        .entry(channel)
         .and_modify(|existing| {
-            if precedes(bootstrap, existing) {
-                *existing = bootstrap.clone();
+            if rank(fact) < rank(existing) {
+                *existing = fact.clone();
             }
         })
-        .or_insert_with(|| bootstrap.clone());
+        .or_insert_with(|| fact.clone());
 }
 
 fn canonical_checkpoint(
@@ -1558,5 +1571,40 @@ mod bootstrap_tests {
             Hash32::new([6; 32]),
             "wall-clock order is not an input"
         );
+    }
+
+    fn policy(channel: u8, context: u8, skip_window: Option<u32>) -> ChannelPolicy {
+        ChannelPolicy {
+            context: ContextId::new_from_entropy([context; 32]),
+            channel: ChannelId::from_bytes([channel; 32]),
+            skip_window,
+        }
+    }
+
+    #[test]
+    fn channel_policy_reduction_is_order_independent() {
+        let facts = [
+            policy(1, 1, None),
+            policy(1, 2, Some(64)),
+            policy(1, 3, Some(16)),
+            policy(1, 4, Some(16)),
+            policy(2, 1, None),
+            policy(2, 2, None),
+        ];
+        let reduced = assert_permutation_invariant(&facts, |facts| {
+            let mut out = BTreeMap::new();
+            for fact in facts {
+                merge_channel_policy(&mut out, fact);
+            }
+            out
+        });
+        let first = &reduced[&ChannelId::from_bytes([1; 32])];
+        assert_eq!(first.skip_window, Some(16), "smallest override wins");
+        assert_eq!(
+            first.context,
+            ContextId::new_from_entropy([3; 32]).min(ContextId::new_from_entropy([4; 32]))
+        );
+        let second = &reduced[&ChannelId::from_bytes([2; 32])];
+        assert_eq!(second.skip_window, None);
     }
 }
