@@ -23,7 +23,7 @@ type Point = <Ed25519Group as Group>::Element;
 const HASH_TO_POINT_DOMAIN: &[u8] = b"aura.threshold-prf.v1.point";
 const CHALLENGE_DOMAIN: &[u8] = b"aura.threshold-prf.v1.dleq";
 const KEY_DOMAIN: &[u8] = b"aura.threshold-prf.v1.key";
-const MAX_HASH_TO_POINT_ATTEMPTS: u32 = 1024;
+const HASH_TO_POINT_ATTEMPT_LIMIT: u32 = 1024;
 
 /// Errors from evaluating, verifying or combining partial evaluations.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -97,7 +97,7 @@ pub fn hash_to_point(input: &[u8]) -> Result<[u8; 32], ThresholdPrfError> {
 }
 
 fn hash_to_point_inner(input: &[u8]) -> Result<Point, ThresholdPrfError> {
-    for counter in 0..MAX_HASH_TO_POINT_ATTEMPTS {
+    for counter in 0..HASH_TO_POINT_ATTEMPT_LIMIT {
         let mut material = Vec::with_capacity(HASH_TO_POINT_DOMAIN.len() + input.len() + 4);
         material.extend_from_slice(HASH_TO_POINT_DOMAIN);
         material.extend_from_slice(&counter.to_le_bytes());

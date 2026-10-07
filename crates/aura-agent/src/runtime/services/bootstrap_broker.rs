@@ -328,11 +328,15 @@ impl LocalBootstrapBrokerService {
         let accept_tasks = tasks.clone();
         let connection_tasks = tasks.clone();
         let _bootstrap_broker_handle =
-            accept_tasks.spawn_named("bootstrap_broker_http", async move {
+            // The accept loop runs for the runtime's life; a listener failure
+            // ends it as a supervised task failure (Task 117).
+            accept_tasks.spawn_try_named("bootstrap_broker_http", async move {
                 loop {
-                    let Ok((mut stream, _addr)) = listener.accept().await else {
-                        break;
-                    };
+                    let (mut stream, _addr) =
+                        listener.accept().await.map_err(|error| aura_core::AuraError::Internal {
+                            message: "bootstrap broker listener accept failed".to_string(),
+                            source: Some(std::sync::Arc::new(error)),
+                        })?;
                     let Ok(permit) = permits.clone().try_acquire_owned() else {
                         let _ = write_http_response(
                             &mut stream,
