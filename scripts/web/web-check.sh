@@ -8,5 +8,5 @@ source "$script_dir/log-bootstrap.sh"
 aura_web_redirect_logs "$repo_root" "$repo_root/artifacts/aura-web/web-check.log"
 
 cd "$repo_root"
-cargo clippy -p aura-ui -- -D warnings
-cargo clippy -p aura-web --target wasm32-unknown-unknown --features web -- -D warnings
+bash scripts/dev/cargo-check-no-warnings.sh -p aura-ui
+bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features web

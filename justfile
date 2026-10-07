@@ -675,12 +675,12 @@ ci-choreo-concurrency-contracts:
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
 # The telltale backend is a default feature, so `--features web` covers it.
-# Warnings are denied through clippy rather than RUSTFLAGS so these lanes reuse
-# the dependency builds of every other lane.
+# Warnings are denied by clippy or cargo-check-no-warnings.sh rather than
+# RUSTFLAGS, so these lanes reuse the dependency builds of every other lane.
 ci-agent-wasm:
     cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
-    cargo clippy -p hxrts-aura-agent --target wasm32-unknown-unknown --features web -- -D warnings
-    cargo clippy -p aura-web --target wasm32-unknown-unknown --features "web,harness" -- -D warnings
+    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
+    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:
