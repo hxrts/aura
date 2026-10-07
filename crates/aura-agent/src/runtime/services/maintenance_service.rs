@@ -322,6 +322,118 @@ impl RuntimeMaintenanceService {
             }
         }
 
+        // Co-sign quorum requests from this authority's other devices on its
+        // own loop: a rotation participant waiting in its session must still
+        // contribute the share its initiator needs to sign the commit.
+        let quorum_signing = self.threshold_signing.clone();
+        let quorum_service = self.clone();
+        let quorum_round = move || {
+            let signing = quorum_signing.clone();
+            let service = quorum_service.clone();
+            async move {
+                if let Err(error) = signing.process_device_quorum_inbound().await {
+                    service
+                        .record_degraded_reason(format!("device_quorum_signing: {error}"))
+                        .await;
+                    tracing::debug!(%error, "Failed to process device quorum signing");
+                } else {
+                    service
+                        .clear_degraded_reason_contains("device_quorum_signing")
+                        .await;
+                }
+                true
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _quorum_task_handle = tasks.spawn_local_interval_until_named(
+                    "device_quorum_signing",
+                    time_effects.clone(),
+                    Duration::from_millis(200),
+                    quorum_round,
+                );
+            } else {
+                let _quorum_task_handle = tasks.spawn_interval_until_named(
+                    "device_quorum_signing",
+                    time_effects.clone(),
+                    Duration::from_millis(200),
+                    quorum_round,
+                );
+            }
+        }
+
+        // Run the channel key ceremonies other members invite this device to
+        // (Task 164): a coordinator needs standing in the channel.
+        let ceremony_effects = self.effects.clone();
+        let ceremony_service = self.clone();
+        let ceremony_round = move || {
+            let effects = ceremony_effects.clone();
+            let service = ceremony_service.clone();
+            async move {
+                let standing_effects = effects.clone();
+                let standing =
+                    move |invite: crate::runtime::channel_key_ceremony::ChannelKeyInvite| {
+                        let effects = standing_effects.clone();
+                        async move {
+                            aura_amp::channel_membership_observations(
+                                effects.as_ref(),
+                                invite.scope.context,
+                                invite.scope.channel,
+                            )
+                            .await
+                            .map(|observed| observed.has_standing(invite.coordinator))
+                        }
+                    };
+                match crate::runtime::channel_key_ceremony::process_channel_key_invites(
+                    effects.as_ref(),
+                    standing,
+                    crate::runtime::channel_key_ceremony::CEREMONY_MAX_POLLS,
+                )
+                .await
+                {
+                    Ok(outcomes) => {
+                        for (invite, outcome) in outcomes {
+                            if let Err(error) = outcome {
+                                tracing::warn!(
+                                    context = %invite.scope.context,
+                                    channel = %invite.scope.channel,
+                                    epoch = invite.epoch,
+                                    %error,
+                                    "channel key ceremony failed"
+                                );
+                            }
+                        }
+                        service
+                            .clear_degraded_reason_contains("channel_key_ceremony")
+                            .await;
+                    }
+                    Err(error) => {
+                        service
+                            .record_degraded_reason(format!("channel_key_ceremony: {error}"))
+                            .await;
+                    }
+                }
+                true
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _ceremony_task_handle = tasks.spawn_local_interval_until_named(
+                    "channel_key_ceremony",
+                    time_effects.clone(),
+                    Duration::from_millis(500),
+                    ceremony_round,
+                );
+            } else {
+                let _ceremony_task_handle = tasks.spawn_interval_until_named(
+                    "channel_key_ceremony",
+                    time_effects.clone(),
+                    Duration::from_millis(500),
+                    ceremony_round,
+                );
+            }
+        }
+
         if let Some(rendezvous_handler) = self.rendezvous_handler.clone() {
             let effects = self.effects.clone();
             let handshake_service = self.clone();

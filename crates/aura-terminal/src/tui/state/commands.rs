@@ -292,6 +292,12 @@ pub enum DispatchCommand {
     UpdateMfaPolicy {
         policy: MfaPolicy,
     },
+    /// Toggle this device's co-signing consent (ask me / automatic).
+    ToggleSigningConsent,
+    /// Approve or decline the oldest pending co-signing request here.
+    DecideSigningRequest {
+        approve: bool,
+    },
     AddDevice {
         name: String,
         /// User-transferred setup request exported by the new device.

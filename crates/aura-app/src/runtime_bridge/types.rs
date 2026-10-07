@@ -18,7 +18,10 @@ pub use invitation::{
     InvitationBridgeType, InvitationInfo, InvitationMutationOutcome,
 };
 pub(crate) use offline_state::*;
-pub use settings::{BridgeAuthorityInfo, BridgeDeviceInfo, SettingsBridgeState};
+pub use settings::{
+    BridgeAuthorityInfo, BridgeDeviceInfo, DeviceSigningConsent, PendingSigningRequest,
+    SettingsBridgeState,
+};
 pub use sync::{
     AuthenticationStatus, CeremonyProcessingCounts, CeremonyProcessingOutcome,
     DiscoveryTriggerOutcome, ReachabilityRefreshOutcome, RendezvousStatus, RuntimeStatus,

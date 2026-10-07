@@ -87,6 +87,17 @@ pub(super) async fn get_settings(
         threshold_n,
         device_count,
         contact_count,
+        signing_consent: bridge
+            .agent
+            .threshold_signing()
+            .device_signing_consent()
+            .await
+            .map_err(|error| {
+                super::error_boundary::bridge_runtime_internal(
+                    "Read device signing consent failed",
+                    error,
+                )
+            })?,
     })
 }
 

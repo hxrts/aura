@@ -32,7 +32,7 @@ fn rejected(source: EnrollmentTranscriptSigningError) -> AuraError {
     }
 }
 
-fn native_commitment_matches(
+pub(super) fn native_commitment_matches(
     package: &FrostSigningPackage,
     index: u16,
     original: Option<&Vec<u8>>,

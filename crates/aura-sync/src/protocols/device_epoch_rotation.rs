@@ -163,29 +163,34 @@ pub struct DeviceEpochAcceptanceTranscriptPayload {
     pub accepted_at_ms: u64,
 }
 
-pub struct DeviceEpochAcceptanceTranscript<'a> {
-    acceptance: &'a DeviceEpochAcceptance,
+pub struct DeviceEpochAcceptanceTranscript {
+    payload: DeviceEpochAcceptanceTranscriptPayload,
 }
 
-impl<'a> DeviceEpochAcceptanceTranscript<'a> {
+impl DeviceEpochAcceptanceTranscript {
     #[must_use]
-    pub fn new(acceptance: &'a DeviceEpochAcceptance) -> Self {
-        Self { acceptance }
+    pub fn new(acceptance: &DeviceEpochAcceptance) -> Self {
+        Self::from_payload(DeviceEpochAcceptanceTranscriptPayload {
+            ceremony_id: acceptance.ceremony_id.clone(),
+            acceptor_device_id: acceptance.acceptor_device_id,
+            proposal_hash: acceptance.proposal_hash,
+            accepted_at_ms: acceptance.accepted_at_ms,
+        })
+    }
+    /// Transcript of an acceptance not yet built (the proof signs it first).
+    #[must_use]
+    pub fn from_payload(payload: DeviceEpochAcceptanceTranscriptPayload) -> Self {
+        Self { payload }
     }
 }
 
-impl SecurityTranscript for DeviceEpochAcceptanceTranscript<'_> {
+impl SecurityTranscript for DeviceEpochAcceptanceTranscript {
     type Payload = DeviceEpochAcceptanceTranscriptPayload;
 
     const DOMAIN_SEPARATOR: &'static str = "aura.sync.device-epoch.acceptance";
 
     fn transcript_payload(&self) -> Self::Payload {
-        DeviceEpochAcceptanceTranscriptPayload {
-            ceremony_id: self.acceptance.ceremony_id.clone(),
-            acceptor_device_id: self.acceptance.acceptor_device_id,
-            proposal_hash: self.acceptance.proposal_hash,
-            accepted_at_ms: self.acceptance.accepted_at_ms,
-        }
+        self.payload.clone()
     }
 }
 

@@ -1627,6 +1627,57 @@ pub(super) fn handle_dispatch_command_match(
             );
             (cb.settings.on_update_mfa)(policy, operation);
         }
+        DispatchCommand::ToggleSigningConsent | DispatchCommand::DecideSigningRequest { .. } => {
+            let app_core = app_core_for_events;
+            let update_tx = update_tx_for_events;
+            tasks_for_events.spawn(async move {
+                use aura_app::runtime_bridge::DeviceSigningConsent;
+                use aura_app::ui::workflows::settings::{
+                    decide_pending_signing_request, update_device_signing_consent,
+                };
+                let settings = {
+                    let core = app_core.read().await;
+                    core.read(&*aura_app::ui::signals::SETTINGS_SIGNAL)
+                        .await
+                        .unwrap_or_default()
+                };
+                let (result, done) = match dispatch_cmd {
+                    DispatchCommand::DecideSigningRequest { approve } => {
+                        match settings.pending_signing_requests.first() {
+                            Some(request) => (
+                                decide_pending_signing_request(&app_core, &request.id, approve)
+                                    .await,
+                                if approve {
+                                    "Co-signing request approved"
+                                } else {
+                                    "Co-signing request declined"
+                                },
+                            ),
+                            None => (Ok(()), "No pending co-signing requests"),
+                        }
+                    }
+                    _ => {
+                        let next = match settings.signing_consent {
+                            DeviceSigningConsent::EscalateToUser => {
+                                DeviceSigningConsent::AutoSignVerified
+                            }
+                            DeviceSigningConsent::AutoSignVerified => {
+                                DeviceSigningConsent::EscalateToUser
+                            }
+                        };
+                        (
+                            update_device_signing_consent(&app_core, next).await,
+                            "Co-signing setting updated",
+                        )
+                    }
+                };
+                let toast = match result {
+                    Ok(()) => ToastMessage::info("signing-consent", done),
+                    Err(error) => ToastMessage::error("signing-consent", error.to_string()),
+                };
+                send_optional_ui_update_required(&update_tx, UiUpdate::ToastAdded(toast)).await;
+            });
+        }
         DispatchCommand::AddDevice { name, setup_code } => {
             let Some(update_tx) = update_tx_for_events else {
                 new_state.toast_error("UI update sender is unavailable");

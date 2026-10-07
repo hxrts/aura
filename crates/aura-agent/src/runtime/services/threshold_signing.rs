@@ -24,6 +24,8 @@
 struct UnownedThresholdContextModeError;
 
 use super::state::with_state_mut_validated;
+mod device_quorum;
+pub(crate) use device_quorum::DevicePossessionProof;
 mod enrollment_quorum_registry;
 mod enrollment_transcript_proxy;
 mod enrollment_transcript_signing;
@@ -349,6 +351,8 @@ pub struct ThresholdSigningService {
 
 struct ThresholdSigningShared {
     quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry,
+    /// Co-signer rounds of device quorum signing (Task 163).
+    device_quorum: device_quorum::DeviceQuorumSlots,
     /// Serializes signing-material lifecycle changes across cloned handles.
     transitions: Mutex<()>,
     /// In-memory signing state (contexts + leases)
@@ -490,6 +494,7 @@ impl ThresholdSigningService {
             effects,
             shared: Arc::new(ThresholdSigningShared {
                 quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry::new(),
+                device_quorum: device_quorum::DeviceQuorumSlots::default(),
                 transitions: Mutex::new(()),
                 state: RwLock::new(ThresholdSigningState::default()),
                 lifecycle: RwLock::new(ServiceHealth::NotStarted),
@@ -507,6 +512,7 @@ impl ThresholdSigningService {
             effects,
             shared: Arc::new(ThresholdSigningShared {
                 quorum: enrollment_quorum_registry::EnrollmentQuorumRegistry::new(),
+                device_quorum: device_quorum::DeviceQuorumSlots::default(),
                 transitions: Mutex::new(()),
                 state: RwLock::new(ThresholdSigningState::default()),
                 lifecycle: RwLock::new(ServiceHealth::NotStarted),
