@@ -469,12 +469,22 @@ impl FactReducer for ChannelMembershipFactReducer {
 /// authorization nor canonical channel creation evidence. Episode ends are
 /// permanent; opaque order tokens never order a join after a departure, only
 /// a join naming a fresh episode re-admits a departed participant.
+///
+/// An event written for another participant counts only when its author has
+/// standing: the author was admitted by an event that counts (its own join,
+/// or a join written by an admitted member such as the inviter of an accepted
+/// invitation). Events without standing wait and count once their author is
+/// admitted, so the result does not depend on observation order. Moderator
+/// standing for a departure written for someone else (a kick) is home
+/// governance, which the runtime checks on ingress.
 #[derive(Debug, Clone)]
 pub struct ChannelMembershipObservations {
     context: ContextId,
     channel: ChannelId,
     started: BTreeMap<AuthorityId, BTreeSet<Option<String>>>,
     ended: BTreeMap<AuthorityId, BTreeSet<Option<String>>>,
+    /// Events written for another participant whose author has no standing.
+    awaiting_standing: Vec<ChannelMembershipFact>,
 }
 impl ChannelMembershipObservations {
     /// Begin empty observations for an exact context and channel.
@@ -484,6 +494,7 @@ impl ChannelMembershipObservations {
             channel,
             started: BTreeMap::new(),
             ended: BTreeMap::new(),
+            awaiting_standing: Vec::new(),
         }
     }
     /// Observe an exact-scope fact; foreign context/channel facts are rejected.
@@ -492,6 +503,39 @@ impl ChannelMembershipObservations {
         if fact.context() != self.context || fact.channel() != self.channel {
             return false;
         }
+        if !self.authorizes(fact) {
+            self.awaiting_standing.push(fact.clone());
+            return true;
+        }
+        self.apply(fact);
+        // A newly admitted author may give waiting events standing.
+        loop {
+            let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.awaiting_standing)
+                .into_iter()
+                .partition(|waiting| self.authorizes(waiting));
+            self.awaiting_standing = waiting;
+            if ready.is_empty() {
+                break;
+            }
+            for fact in &ready {
+                self.apply(fact);
+            }
+        }
+        true
+    }
+    /// Whether `author` was admitted to the channel by an event that counts.
+    #[must_use]
+    pub fn has_standing(&self, author: AuthorityId) -> bool {
+        self.started.contains_key(&author)
+    }
+    /// Whether `fact` counts given its author: the participant itself, or an
+    /// author with standing.
+    #[must_use]
+    pub fn authorizes(&self, fact: &ChannelMembershipFact) -> bool {
+        let author = fact.author();
+        author == fact.participant() || self.has_standing(author)
+    }
+    fn apply(&mut self, fact: &ChannelMembershipFact) {
         match fact.event() {
             ChannelParticipantEvent::Joined => {
                 self.started
@@ -505,7 +549,6 @@ impl ChannelMembershipObservations {
                 ended.extend(fact.ends.iter().cloned().map(Some));
             }
         }
-        true
     }
     /// Sorted participants with a live episode.
     pub fn participants(&self) -> impl Iterator<Item = AuthorityId> + '_ {

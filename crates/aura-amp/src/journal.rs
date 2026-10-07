@@ -230,6 +230,17 @@ pub async fn list_channel_participants<A: AmpJournalEffects>(
         .collect())
 }
 
+/// Membership observations reduced from the context journal, for a runtime
+/// ingress check of an incoming membership event's author standing.
+pub async fn channel_membership_observations<A: AmpJournalEffects>(
+    effects: &A,
+    context: ContextId,
+    channel: ChannelId,
+) -> Result<crate::channel::ChannelMembershipObservations> {
+    let journal = effects.fetch_context_journal(context).await?;
+    Ok(reduce_membership(&journal, context, channel))
+}
+
 /// Membership fact recording `event` for `participant`, from the observed
 /// episodes. A join names its episode (the accepted invitation id, or `None`
 /// for the unnamed episode) and is refused when it would not leave the
@@ -528,6 +539,103 @@ mod schema_one_membership_tests {
                 assert!(!attempted_rejoin.contains(participant));
             }
         }
+    }
+
+    /// An event written for someone else counts only once its author has
+    /// standing (an admitted member, e.g. the inviter), in every observation
+    /// order; a stranger's join or departure for someone else never counts.
+    #[test]
+    fn membership_written_for_another_needs_author_standing_in_every_order() {
+        let context = ContextId::new_from_entropy(hash(b"aura-amp.standing.context"));
+        let channel = ChannelId::from_bytes(hash(b"aura-amp.standing.channel"));
+        let inviter = AuthorityId::new_from_entropy(hash(b"aura-amp.standing.inviter"));
+        let acceptor = AuthorityId::new_from_entropy(hash(b"aura-amp.standing.acceptor"));
+        let stranger = AuthorityId::new_from_entropy(hash(b"aura-amp.standing.stranger"));
+        let victim = AuthorityId::new_from_entropy(hash(b"aura-amp.standing.victim"));
+        let token = |byte| TimeStamp::OrderClock(OrderTime([byte; 32]));
+        let inviter_join = ChannelMembershipFact::new(
+            context,
+            channel,
+            inviter,
+            ChannelParticipantEvent::Joined,
+            token(1),
+        );
+        let victim_join = ChannelMembershipFact::new(
+            context,
+            channel,
+            victim,
+            ChannelParticipantEvent::Joined,
+            token(2),
+        );
+        let invited_join = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            acceptor,
+            "inv-1".into(),
+            token(3),
+        )
+        .authored_by(inviter);
+        let forged_join = ChannelMembershipFact::new(
+            context,
+            channel,
+            stranger,
+            ChannelParticipantEvent::Joined,
+            token(4),
+        )
+        .authored_by(victim)
+        .authored_by(stranger);
+        let forged_join_for_other = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            AuthorityId::new_from_entropy(hash(b"aura-amp.standing.friend")),
+            "inv-2".into(),
+            token(5),
+        )
+        .authored_by(stranger);
+        let forged_kick = ChannelMembershipFact::new(
+            context,
+            channel,
+            victim,
+            ChannelParticipantEvent::Left,
+            token(6),
+        )
+        .authored_by(stranger);
+        let facts = [
+            &inviter_join,
+            &victim_join,
+            &invited_join,
+            &forged_join_for_other,
+            &forged_kick,
+        ];
+        for rotation in 0..facts.len() {
+            for reverse in [false, true] {
+                let mut order: Vec<_> = facts
+                    .iter()
+                    .cycle()
+                    .skip(rotation)
+                    .take(facts.len())
+                    .collect();
+                if reverse {
+                    order.reverse();
+                }
+                let mut observed = crate::ChannelMembershipObservations::new(context, channel);
+                for fact in order {
+                    assert!(observed.observe(fact));
+                }
+                assert!(observed.contains(acceptor), "inviter-written join counts");
+                assert!(observed.contains(victim), "a stranger cannot kick");
+                assert!(!observed.departed(victim));
+                assert_eq!(
+                    observed.participants().collect::<Vec<_>>().len(),
+                    3,
+                    "a stranger cannot add a friend"
+                );
+            }
+        }
+        // A self-written join needs no standing.
+        let mut observed = crate::ChannelMembershipObservations::new(context, channel);
+        assert!(observed.observe(&forged_join));
+        assert!(observed.contains(stranger));
     }
 
     /// A departure ends the episodes its writer observed; a fresh invitation

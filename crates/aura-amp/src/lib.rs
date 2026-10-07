@@ -52,8 +52,9 @@ pub mod wire;
 // ============================================================================
 
 pub use journal::{
-    get_channel_state, get_reduced_channel_state, list_channel_bootstraps,
-    list_channel_participants, AmpContextStore, AmpJournalEffects, ChannelStateUnavailable,
+    channel_membership_observations, get_channel_state, get_reduced_channel_state,
+    list_channel_bootstraps, list_channel_participants, AmpContextStore, AmpJournalEffects,
+    ChannelStateUnavailable,
 };
 
 // ============================================================================
