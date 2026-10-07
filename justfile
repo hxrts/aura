@@ -789,8 +789,15 @@ ci-vm-session-lifecycle:
 ci-public-frost-signing:
     just _policy-check check public-frost-signing
 
+# Accept-chain integration targets under a 1.5 MiB stack (async frame growth guard).
+ci-accept-chain-stack:
+    bash scripts/check/accept-chain-stack.sh
+
 ci-ownership-policy:
     just _policy-check check ownership-policy
+
+ci-domain-fact-model:
+    just _policy-check check domain-fact-model
 
 ci-security-boundary-policy:
     just _policy-check check security-boundary-policy
@@ -1239,6 +1246,7 @@ ci-dry-run profile="push":
     add_step "Dependency Advisory Audit"  "nix develop .#ci --command just ci-security-audit"
     add_step "Security Boundary Policy"   "nix develop --command just ci-security-boundary-policy"
     add_step "Ownership Policy"           "nix develop --command just ci-ownership-policy"
+    add_step "Accept Chain Stack"         "nix develop --command just ci-accept-chain-stack"
     add_step "Tests + Protocol Compat"    "nix develop --command bash -lc 'just ci-test && just ci-protocol-compat'"
 
     # CI / Deep Conformance (push + pull_request)

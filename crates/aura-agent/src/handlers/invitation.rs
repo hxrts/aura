@@ -1582,11 +1582,7 @@ impl InvitationHandler {
             &operation_budget,
             "accept_invitation_materialize",
             INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS,
-            Box::pin(self.materialize_accept_invitation_state(
-                effects.clone(),
-                invitation_id,
-                now_ms,
-            )),
+            self.materialize_accept_invitation_state(effects.clone(), invitation_id, now_ms),
         )
         .await?;
 

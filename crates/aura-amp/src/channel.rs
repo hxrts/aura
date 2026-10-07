@@ -285,7 +285,6 @@ pub enum ChannelParticipantEvent {
 #[domain_fact(
     type_id = "amp-channel-membership",
     schema_version = 2,
-    min_supported_schema_version = 2,
     context = "context"
 )]
 pub struct ChannelMembershipFact {
@@ -733,6 +732,49 @@ mod membership_tests {
             "all departed membership must not grant send authority"
         );
         assert_eq!(*effects.journal.lock().await, initial);
+    }
+
+    #[test]
+    fn membership_reduction_is_independent_of_arrival_order() {
+        let (context, channel, participant) = scope();
+        let at = |byte| TimeStamp::OrderClock(aura_core::time::OrderTime([byte; 32]));
+        let first = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            participant,
+            "first".to_string(),
+            at(1),
+        );
+        let mut observed = ChannelMembershipObservations::new(context, channel);
+        observed.observe(&first);
+        let departure = ChannelMembershipFact::departure(&observed, participant, at(2));
+        let rejoin = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            participant,
+            "second".to_string(),
+            at(3),
+        );
+        let reduce = |facts: &[ChannelMembershipFact]| {
+            let mut observations = ChannelMembershipObservations::new(context, channel);
+            for fact in facts {
+                observations.observe(fact);
+            }
+            (
+                observations.participants().collect::<Vec<_>>(),
+                observations.episode_ended(participant, Some("first")),
+            )
+        };
+        let ended = aura_journal::causal_reduction::assert_permutation_invariant(
+            &[first.clone(), departure.clone()],
+            reduce,
+        );
+        assert_eq!(ended, (Vec::new(), true));
+        let rejoined = aura_journal::causal_reduction::assert_permutation_invariant(
+            &[first, departure, rejoin],
+            reduce,
+        );
+        assert_eq!(rejoined, (vec![participant], true));
     }
 
     #[test]

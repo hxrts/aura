@@ -13,7 +13,6 @@ use syn::{
 struct DomainFactArgs {
     type_id: Option<Expr>,
     schema_version: Option<Expr>,
-    min_supported_schema_version: Option<Expr>,
     context_field: Option<LitStr>,
     context_fn: Option<LitStr>,
 }
@@ -23,7 +22,6 @@ impl DomainFactArgs {
         let mut args = DomainFactArgs {
             type_id: None,
             schema_version: None,
-            min_supported_schema_version: None,
             context_field: None,
             context_fn: None,
         };
@@ -38,7 +36,10 @@ impl DomainFactArgs {
                     "type_id" => args.type_id = Some(item.value.clone()),
                     "schema_version" => args.schema_version = Some(item.value.clone()),
                     "min_supported_schema_version" => {
-                        args.min_supported_schema_version = Some(item.value.clone());
+                        return Err(syn::Error::new(
+                            item.key.span(),
+                            "domain facts declare one exact `schema_version`; older shapes are replaced, not decoded",
+                        ))
                     }
                     "context" => {
                         let lit = expr_to_string_literal(&item.value, item.key.span())?;
@@ -117,11 +118,6 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
             .into();
         }
     };
-    let min_supported_schema_version = args
-        .min_supported_schema_version
-        .clone()
-        .unwrap_or_else(|| schema_version.clone());
-
     if args.context_field.is_some() && args.context_fn.is_some() {
         return syn::Error::new(
             Span::call_site(),
@@ -168,10 +164,7 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
                 if envelope.type_id.as_str() != #type_id {
                     return None;
                 }
-                if aura_core::types::facts::FactSchemaCompatibility::range(
-                    #min_supported_schema_version,
-                    #schema_version,
-                )
+                if aura_core::types::facts::FactSchemaCompatibility::exact(#schema_version)
                 .ensure_supported(envelope.schema_version)
                 .is_err()
                 {

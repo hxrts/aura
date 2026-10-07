@@ -94,12 +94,10 @@ fn required_projection_fact_source(
     use aura_core::types::facts::FactError;
     let message = "decode required projection fact".into();
     match source {
-        source @ (FactError::Serialization(_) | FactError::Json(_)) => {
-            aura_core::AuraError::Serialization {
-                message,
-                source: Some(Arc::new(source)),
-            }
-        }
+        source @ FactError::Serialization(_) => aura_core::AuraError::Serialization {
+            message,
+            source: Some(Arc::new(source)),
+        },
         source => aura_core::AuraError::Invalid {
             message,
             source: Some(Arc::new(source)),
@@ -2477,11 +2475,9 @@ mod tests {
                 let mut cause: Option<&(dyn Error + 'static)> = Some(&failed);
                 let mut native = false;
                 while let Some(source) = cause {
-                    native |= if schema_version == supported {
-                        source.is::<serde_json::Error>()
-                    } else {
-                        source.is::<FactError>()
-                    };
+                    // A JSON envelope is rejected as non-canonical before any
+                    // payload decoding, as is an unsupported schema.
+                    native |= source.is::<FactError>();
                     cause = source.source();
                 }
                 assert!(

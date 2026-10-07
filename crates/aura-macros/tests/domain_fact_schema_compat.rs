@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[domain_fact(
     type_id = "tests/domain-fact-schema-compat",
     schema_version = 2,
-    min_supported_schema_version = 1,
     context = "context_id"
 )]
 struct CompatFact {
@@ -17,7 +16,7 @@ struct CompatFact {
 }
 
 #[test]
-fn domain_fact_from_envelope_accepts_supported_older_schema_versions() {
+fn domain_fact_from_envelope_rejects_older_schema_versions() {
     let fact = CompatFact {
         context_id: ContextId::new_from_entropy([7u8; 32]),
         value: 42,
@@ -30,7 +29,10 @@ fn domain_fact_from_envelope_accepts_supported_older_schema_versions() {
             .unwrap_or_else(|error| panic!("serialize fact: {error}")),
     };
 
-    let decoded = CompatFact::from_envelope(&envelope)
-        .unwrap_or_else(|| panic!("decode supported older schema"));
-    assert_eq!(decoded, fact);
+    assert!(CompatFact::from_envelope(&envelope).is_none());
+    let current = FactEnvelope {
+        schema_version: 2,
+        ..envelope
+    };
+    assert_eq!(CompatFact::from_envelope(&current), Some(fact));
 }

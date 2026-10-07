@@ -65,78 +65,88 @@ pub(super) async fn invitation_timeout_budget(
     })
 }
 
-pub(super) async fn timeout_invitation_stage_with_budget<T>(
-    effects: &AuraEffectSystem,
-    budget: &TimeoutBudget,
+/// Boxed like [`timeout_prepare_invitation_stage`]: the accept chain awaits
+/// several budgeted stages whose inlined state machines overflowed the
+/// debug stack budget.
+pub(super) fn timeout_invitation_stage_with_budget<'a, T: 'a>(
+    effects: &'a AuraEffectSystem,
+    budget: &'a TimeoutBudget,
     stage: &'static str,
     timeout_ms: u64,
-    future: impl Future<Output = AgentResult<T>>,
-) -> AgentResult<T> {
-    // One shared observation owner orders the required physical read and child
-    // allocation; no competing branch can capture a stale time then publish it.
-    let child_budget = {
-        let _observation = budget.acquire_observation().await;
-        let now = effects.physical_time().await.map_err(|error| {
+    future: impl Future<Output = AgentResult<T>> + 'a,
+) -> std::pin::Pin<Box<impl Future<Output = AgentResult<T>> + 'a>> {
+    Box::pin(async move {
+        // One shared observation owner orders the required physical read and child
+        // allocation; no competing branch can capture a stale time then publish it.
+        let child_budget = {
+            let _observation = budget.acquire_observation().await;
+            let now = effects.physical_time().await.map_err(|error| {
+                invitation_stage_runtime_error(
+                    "invitation stage",
+                    stage,
+                    "could not read physical time",
+                    error,
+                )
+            })?;
+            let scaled_timeout = invitation_timeout_profile(effects)
+                .scale_duration(Duration::from_millis(timeout_ms))
+                .map_err(|error| {
+                    invitation_stage_runtime_error(
+                        "invitation stage",
+                        stage,
+                        "could not scale timeout budget",
+                        error,
+                    )
+                })?;
+            budget
+                .child_budget(&now, scaled_timeout)
+                .map_err(|source| {
+                    super::vm_loop::map_invitation_vm_timeout(
+                        stage,
+                        budget,
+                        TimeoutRunError::Timeout(source),
+                    )
+                })?
+        };
+        execute_with_timeout_budget(effects, &child_budget, || future)
+            .await
+            .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &child_budget, error))
+    })
+}
+
+/// Boxed so each stage's state machine lives on the heap: the reserved
+/// preparation path awaits many stages and inlining them overflowed
+/// the debug stack budget (`just ci-accept-chain-stack`).
+pub(super) fn timeout_prepare_invitation_stage<'a, T: 'a>(
+    effects: &'a AuraEffectSystem,
+    stage: &'static str,
+    future: impl Future<Output = AgentResult<T>> + 'a,
+) -> std::pin::Pin<Box<impl Future<Output = AgentResult<T>> + 'a>> {
+    Box::pin(async move {
+        let started_at = effects.physical_time().await.map_err(|error| {
             invitation_stage_runtime_error(
-                "invitation stage",
+                "invitation.prepare stage",
                 stage,
                 "could not read physical time",
                 error,
             )
         })?;
-        let scaled_timeout = invitation_timeout_profile(effects)
-            .scale_duration(Duration::from_millis(timeout_ms))
-            .map_err(|error| {
-                invitation_stage_runtime_error(
-                    "invitation stage",
-                    stage,
-                    "could not scale timeout budget",
-                    error,
-                )
-            })?;
-        budget
-            .child_budget(&now, scaled_timeout)
-            .map_err(|source| {
-                super::vm_loop::map_invitation_vm_timeout(
-                    stage,
-                    budget,
-                    TimeoutRunError::Timeout(source),
-                )
-            })?
-    };
-    execute_with_timeout_budget(effects, &child_budget, || future)
-        .await
-        .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &child_budget, error))
-}
-
-pub(super) async fn timeout_prepare_invitation_stage<T>(
-    effects: &AuraEffectSystem,
-    stage: &'static str,
-    future: impl Future<Output = AgentResult<T>>,
-) -> AgentResult<T> {
-    let started_at = effects.physical_time().await.map_err(|error| {
-        invitation_stage_runtime_error(
-            "invitation.prepare stage",
-            stage,
-            "could not read physical time",
-            error,
+        let budget = TimeoutBudget::from_start_and_timeout(
+            &started_at,
+            Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
         )
-    })?;
-    let budget = TimeoutBudget::from_start_and_timeout(
-        &started_at,
-        Duration::from_millis(INVITATION_PREPARE_STAGE_TIMEOUT_MS),
-    )
-    .map_err(|error| {
-        invitation_stage_runtime_error(
-            "invitation stage",
-            stage,
-            "could not construct timeout budget",
-            error,
-        )
-    })?;
-    execute_with_timeout_budget(effects, &budget, || future)
-        .await
-        .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &budget, error))
+        .map_err(|error| {
+            invitation_stage_runtime_error(
+                "invitation stage",
+                stage,
+                "could not construct timeout budget",
+                error,
+            )
+        })?;
+        execute_with_timeout_budget(effects, &budget, || future)
+            .await
+            .map_err(|error| super::vm_loop::map_invitation_vm_timeout(stage, &budget, error))
+    })
 }
 
 pub(super) async fn timeout_deferred_network_stage<T>(

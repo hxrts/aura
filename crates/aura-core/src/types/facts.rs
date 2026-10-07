@@ -133,9 +133,10 @@ pub enum FactError {
     #[error("serialization failed: {0}")]
     Serialization(#[from] SerializationError),
 
-    /// Declared JSON payload decoding failed with its original codec cause.
-    #[error("JSON fact decoding failed: {0}")]
-    Json(#[from] serde_json::Error),
+    /// The envelope declares a non-canonical encoding; domain facts decode
+    /// only canonical DAG-CBOR.
+    #[error("non-canonical fact encoding {0:?}; only DAG-CBOR is decoded")]
+    NonCanonicalEncoding(FactEncoding),
 
     /// Type ID mismatch
     #[error("type ID mismatch: expected {expected}, got {actual}")]
@@ -307,7 +308,7 @@ pub fn decode_domain_fact<T: DeserializeOwned>(
     }
     match envelope.encoding {
         FactEncoding::DagCbor => crate::util::serialization::from_slice(&envelope.payload).ok(),
-        FactEncoding::Json => serde_json::from_slice(&envelope.payload).ok(),
+        FactEncoding::Json => None,
     }
 }
 
@@ -420,7 +421,7 @@ pub fn try_decode_envelope<T: DeserializeOwned>(
 
     let payload = match envelope.encoding {
         FactEncoding::DagCbor => crate::util::serialization::from_slice(&envelope.payload)?,
-        FactEncoding::Json => serde_json::from_slice(&envelope.payload)?,
+        encoding @ FactEncoding::Json => return Err(FactError::NonCanonicalEncoding(encoding)),
     };
 
     Ok(payload)
@@ -604,8 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn required_fact_json_decoder_retains_native_cause_through_both_entry_points() {
-        use std::error::Error;
+    fn required_fact_decoder_rejects_json_through_both_entry_points() {
         let type_id = FactTypeId::new("test/v1");
         let envelope = FactEnvelope {
             type_id: type_id.clone(),
@@ -618,10 +618,10 @@ mod tests {
             try_decode_envelope::<TestFact>(&type_id, 1, 1, &envelope).unwrap_err(),
             try_decode_fact::<TestFact>(&type_id, 1, 1, &encoded).unwrap_err(),
         ] {
-            assert!(matches!(&failed, FactError::Json(_)));
-            assert!(failed
-                .source()
-                .is_some_and(|source| source.is::<serde_json::Error>()));
+            assert!(matches!(
+                failed,
+                FactError::NonCanonicalEncoding(FactEncoding::Json)
+            ));
         }
     }
 

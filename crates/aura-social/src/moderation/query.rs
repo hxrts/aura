@@ -282,9 +282,6 @@ pub enum RequiredModerationQueryError {
     /// Canonical binary decoding failed.
     #[error("Moderation binary payload failed: {0}")]
     DagCbor(#[source] aura_core::util::serialization::SerializationError),
-    /// Declared JSON decoding failed.
-    #[error("Moderation JSON payload failed: {0}")]
-    Json(#[source] serde_json::Error),
     /// The payload was stored beneath a different context.
     #[error("Moderation context mismatch: outer {outer}, payload {payload}")]
     ContextMismatch {
@@ -318,8 +315,7 @@ impl From<RequiredModerationQueryError> for aura_core::AuraError {
     fn from(error: RequiredModerationQueryError) -> Self {
         let message = error.to_string();
         match error {
-            codec @ (RequiredModerationQueryError::DagCbor(_)
-            | RequiredModerationQueryError::Json(_)) => Self::Serialization {
+            codec @ RequiredModerationQueryError::DagCbor(_) => Self::Serialization {
                 message,
                 source: Some(std::sync::Arc::new(codec)),
             },
@@ -361,8 +357,8 @@ pub(crate) fn decode_required_moderation_fact<T: DomainFact + serde::de::Deseria
     let fact: T = match envelope.encoding {
         FactEncoding::DagCbor => aura_core::util::serialization::from_slice(&envelope.payload)
             .map_err(RequiredModerationQueryError::DagCbor)?,
-        FactEncoding::Json => {
-            serde_json::from_slice(&envelope.payload).map_err(RequiredModerationQueryError::Json)?
+        encoding => {
+            return Err(FactError::NonCanonicalEncoding(encoding).into());
         }
     };
     if fact.context_id() != outer {
@@ -526,10 +522,12 @@ mod tests {
         let mut json = original.clone();
         json.encoding = FactEncoding::Json;
         json.payload = serde_json::to_vec(&ban).unwrap();
-        assert_eq!(
-            try_is_user_banned_and_muted(&[wrap(json)], &context, &subject, 101, None).unwrap(),
-            (true, false)
-        );
+        assert!(matches!(
+            try_is_user_banned_and_muted(&[wrap(json)], &context, &subject, 101, None),
+            Err(RequiredModerationQueryError::Envelope(
+                aura_core::types::facts::FactError::NonCanonicalEncoding(FactEncoding::Json)
+            ))
+        ));
         for type_id in [
             HOME_BAN_FACT_TYPE_ID,
             HOME_UNBAN_FACT_TYPE_ID,
@@ -538,13 +536,15 @@ mod tests {
         ] {
             let mut corrupt = original.clone();
             corrupt.type_id = aura_core::types::facts::FactTypeId::from(type_id);
-            corrupt.encoding = FactEncoding::Json;
-            corrupt.payload = b"not-json".to_vec();
+            corrupt.payload = vec![0xff];
             let error =
                 try_is_user_banned_and_muted(&[wrap(corrupt)], &context, &subject, 101, None)
                     .unwrap_err();
-            assert!(matches!(error, RequiredModerationQueryError::Json(_)));
-            assert!(error.source().unwrap().is::<serde_json::Error>());
+            assert!(matches!(error, RequiredModerationQueryError::DagCbor(_)));
+            assert!(error
+                .source()
+                .unwrap()
+                .is::<aura_core::util::serialization::SerializationError>());
         }
         let mut schema = original.clone();
         schema.schema_version = 1;
@@ -568,7 +568,9 @@ mod tests {
         mislabeled.encoding = FactEncoding::Json;
         assert!(matches!(
             try_is_user_banned_and_muted(&[wrap(mislabeled)], &context, &subject, 101, None),
-            Err(RequiredModerationQueryError::Json(_))
+            Err(RequiredModerationQueryError::Envelope(
+                aura_core::types::facts::FactError::NonCanonicalEncoding(FactEncoding::Json)
+            ))
         ));
     }
 

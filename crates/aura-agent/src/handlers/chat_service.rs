@@ -2216,17 +2216,12 @@ mod tests {
                 .expect_err("matching corrupted fact cannot become empty group list"),
         ];
         for failure in failures {
-            if schema_failure {
-                assert!(
-                    native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
-                    "required schema admission retains original structured FactError"
-                );
-            } else {
-                assert!(
-                    native_read_source::<serde_json::Error>(&failure).is_some(),
-                    "actual malformed persisted JSON retains concrete codec cause"
-                );
-            }
+            // Unsupported schemas and non-canonical JSON envelopes are both
+            // rejected at envelope admission with a structured FactError.
+            assert!(
+                native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
+                "required envelope admission retains original structured FactError"
+            );
         }
         let now = effects
             .physical_time()
@@ -2245,8 +2240,7 @@ mod tests {
             .await
         {
             assert!(
-                native_read_source::<serde_json::Error>(&failure).is_some()
-                    || native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
+                native_read_source::<aura_core::types::facts::FactError>(&failure).is_some(),
                 "scheduler rejection must retain the actual corruption source"
             );
         }

@@ -99,7 +99,7 @@ Moderators are designated via governance decisions in the home. A moderator must
 
 ### 3.4 Order-Independent Governance Reduction
 
-Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides, the capability configuration, and member joins and leaves. They follow the causal fact model of docs/105 §4.2.1 (schema 3; kicks schema 4; social facts schema 5). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::causal_stamp` with `CausalStampKey::HomeGovernance`), which advances its logical clock past every governance fact it holds for the home.
+Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides, the capability configuration, and member joins and leaves. They follow the canonical domain fact model of docs/105 §4.2.1 (schema 3; kicks schema 4; social facts schema 5). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::causal_stamp` with `CausalStampKey::HomeGovernance`), which advances its logical clock past every governance fact it holds for the home.
 
 - Bans and mutes are tagged observed-remove sets keyed by target and channel scope. An unban or unmute revokes the bans or mutes of that key its writer observed. A concurrent ban the writer did not observe stays in force.
 - Moderator designations are a tagged observed-remove set keyed by target. The creator is a permanent moderator. Roles are derived from the whole set, so a grant that arrives before the member joins takes effect when the member joins.

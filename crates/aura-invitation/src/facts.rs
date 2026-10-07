@@ -124,7 +124,6 @@ pub struct InvitationFactKey {
 #[domain_fact(
     type_id = INVITATION_FACT_TYPE_ID,
     schema_version = INVITATION_FACT_SCHEMA_VERSION,
-    min_supported_schema_version = 3,
     context_fn = "context_id_for_fact"
 )]
 #[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data
@@ -300,9 +299,6 @@ pub enum InvitationFactDecodeError {
     /// Canonical DAG-CBOR payload could not be decoded.
     #[error("invitation DAG-CBOR payload failed: {0}")]
     DagCbor(#[source] aura_core::util::serialization::SerializationError),
-    /// Declared JSON payload could not be decoded.
-    #[error("invitation JSON payload failed: {0}")]
-    Json(#[source] serde_json::Error),
     /// A known payload context disagrees with its journal wrapper.
     #[error("invitation fact context mismatch: wrapper {outer}, payload {payload}")]
     ContextMismatch {
@@ -316,7 +312,7 @@ pub enum InvitationFactDecodeError {
 impl InvitationFact {
     /// Decode a required fact without converting corruption into absence.
     /// Schema 3 added outcome causal metadata; older schemas are rejected.
-    /// Only the explicitly declared encoding is attempted.
+    /// Only canonical DAG-CBOR is decoded; a JSON envelope is rejected.
     ///
     /// # Errors
     /// Returns envelope validation or the original declared-codec failure.
@@ -348,9 +344,7 @@ impl InvitationFact {
         match envelope.encoding {
             FactEncoding::DagCbor => aura_core::util::serialization::from_slice(&envelope.payload)
                 .map_err(InvitationFactDecodeError::DagCbor),
-            FactEncoding::Json => {
-                serde_json::from_slice(&envelope.payload).map_err(InvitationFactDecodeError::Json)
-            }
+            encoding => Err(FactError::NonCanonicalEncoding(encoding).into()),
         }
     }
     /// Decode required journal evidence and check its explicit payload context.
@@ -761,10 +755,12 @@ mod tests {
             assert_eq!(InvitationFact::try_from_envelope(&envelope).unwrap(), fact);
             envelope.encoding = FactEncoding::Json;
             envelope.payload = serde_json::to_vec(&fact).unwrap();
-            assert_eq!(
-                InvitationFact::try_from_envelope_in_context(&envelope, test_context_id()).unwrap(),
-                fact
-            );
+            assert!(matches!(
+                InvitationFact::try_from_envelope_in_context(&envelope, test_context_id()),
+                Err(InvitationFactDecodeError::Envelope(
+                    FactError::NonCanonicalEncoding(FactEncoding::Json)
+                ))
+            ));
         }
         let mut future = fact.to_envelope();
         future.schema_version = 4;
@@ -791,11 +787,12 @@ mod tests {
         let mut mislabeled = fact.to_envelope();
         mislabeled.encoding = FactEncoding::Json;
         let error = InvitationFact::try_from_envelope(&mislabeled).unwrap_err();
-        assert!(matches!(error, InvitationFactDecodeError::Json(_)));
-        assert!(error
-            .source()
-            .and_then(|source| source.downcast_ref::<serde_json::Error>())
-            .is_some());
+        assert!(matches!(
+            error,
+            InvitationFactDecodeError::Envelope(FactError::NonCanonicalEncoding(
+                FactEncoding::Json
+            ))
+        ));
         let mut mislabeled_json = fact.to_envelope();
         mislabeled_json.payload = serde_json::to_vec(&fact).unwrap();
         assert!(matches!(

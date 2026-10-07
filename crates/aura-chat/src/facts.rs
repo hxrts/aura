@@ -302,12 +302,7 @@ impl ChatFact {
                     message: "decode required canonical chat fact".to_string(),
                     source: Some(std::sync::Arc::new(error)),
                 }),
-            FactEncoding::Json => serde_json::from_slice(&envelope.payload).map_err(|error| {
-                aura_core::AuraError::Serialization {
-                    message: "decode required JSON chat fact".to_string(),
-                    source: Some(std::sync::Arc::new(error)),
-                }
-            }),
+            encoding => Err(invalid(FactError::NonCanonicalEncoding(encoding))),
         }
     }
     fn physical_time(ts_ms: u64) -> PhysicalTime {
@@ -823,16 +818,15 @@ mod required_decode_tests {
         let mut json = envelope.clone();
         json.encoding = aura_core::types::facts::FactEncoding::Json;
         json.payload = serde_json::to_vec(&fact).expect("encode JSON fixture");
-        assert_eq!(
-            ChatFact::try_from_envelope(&json).expect("declared JSON fixture decodes"),
-            fact
-        );
-        json.payload = b"{broken JSON".to_vec();
-        let error = ChatFact::try_from_envelope(&json).expect_err("corrupt declared JSON fails");
-        assert!(error
-            .source()
-            .expect("JSON cause")
-            .is::<serde_json::Error>());
+        let error = ChatFact::try_from_envelope(&json).expect_err("JSON envelope is rejected");
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<aura_core::types::facts::FactError>()),
+            Some(aura_core::types::facts::FactError::NonCanonicalEncoding(
+                aura_core::types::facts::FactEncoding::Json
+            ))
+        ));
         let mut cbor = envelope.clone();
         cbor.payload = vec![0xff];
         let error = ChatFact::try_from_envelope(&cbor).expect_err("corrupt canonical CBOR fails");

@@ -931,3 +931,110 @@ impl RecoveryProtocolHandler {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod initiation_fact_tests {
+    use super::*;
+    use aura_core::{FactValue, FlowBudget, FlowCost, Journal};
+    use aura_journal::DomainFact;
+    use aura_testkit::mock_effects::MockEffects;
+    use std::collections::BTreeMap;
+
+    /// Journal that keeps what the protocol persists so the test can read it back.
+    #[derive(Default)]
+    struct RecordingJournal {
+        journal: Mutex<Journal>,
+    }
+
+    #[async_trait::async_trait]
+    impl JournalEffects for RecordingJournal {
+        async fn merge_facts(&self, mut target: Journal, delta: Journal) -> Result<Journal> {
+            target.merge_facts(delta.facts);
+            Ok(target)
+        }
+        async fn refine_caps(&self, mut target: Journal, refinement: Journal) -> Result<Journal> {
+            target.refine_caps(refinement.caps);
+            Ok(target)
+        }
+        async fn get_journal(&self) -> Result<Journal> {
+            Ok(self.journal.lock().await.clone())
+        }
+        async fn persist_journal(&self, journal: &Journal) -> Result<()> {
+            *self.journal.lock().await = journal.clone();
+            Ok(())
+        }
+        async fn get_flow_budget(&self, _: &ContextId, _: &AuthorityId) -> Result<FlowBudget> {
+            Ok(FlowBudget::new(u64::MAX, Epoch::from(0)))
+        }
+        async fn update_flow_budget(
+            &self,
+            _: &ContextId,
+            _: &AuthorityId,
+            budget: &FlowBudget,
+        ) -> Result<FlowBudget> {
+            Ok(*budget)
+        }
+        async fn charge_flow_budget(
+            &self,
+            _: &ContextId,
+            _: &AuthorityId,
+            _: FlowCost,
+        ) -> Result<FlowBudget> {
+            Ok(FlowBudget::new(u64::MAX, Epoch::from(0)))
+        }
+    }
+
+    /// Initiation through the canonical protocol commits the typed
+    /// `RecoveryInitiated` fact; frontends must not record their own.
+    #[tokio::test]
+    async fn initiation_commits_typed_recovery_initiated_fact() {
+        let account = AuthorityId::new_from_entropy([0x31; 32]);
+        let guardians = vec![
+            AuthorityId::new_from_entropy([0x32; 32]),
+            AuthorityId::new_from_entropy([0x33; 32]),
+        ];
+        let protocol = RecoveryProtocol::new(
+            Arc::new(RelationalContext::new(guardians.clone())),
+            account,
+            guardians,
+            2,
+        );
+        let request = RecoveryRequest {
+            recovery_id: RecoveryId::new("initiation-fact-test"),
+            account_authority: account,
+            new_tree_commitment: Hash32([0x34; 32]),
+            operation: RecoveryOperation::ReplaceTree {
+                new_public_key: PublicKeyPackage::new(vec![0x35; 32], BTreeMap::new(), 1, 1),
+            },
+            justification: "lost device".to_string(),
+            prestate_hash: Hash32([0x36; 32]),
+        };
+        let effects = MockEffects::deterministic();
+        let journal = RecordingJournal::default();
+
+        RecoveryProtocolHandler::new(Arc::new(protocol))
+            .handle_recovery_initiation(request, &effects, &effects, &effects, &journal)
+            .await
+            .expect("recovery initiation");
+
+        let persisted = journal.get_journal().await.unwrap();
+        let initiated: Vec<RecoveryFact> = persisted
+            .facts
+            .iter()
+            .filter_map(|(_, value)| match value {
+                FactValue::Bytes(bytes) => RecoveryFact::from_bytes(bytes),
+                _ => None,
+            })
+            .filter(|fact| matches!(fact, RecoveryFact::RecoveryInitiated { .. }))
+            .collect();
+        assert_eq!(
+            initiated.len(),
+            1,
+            "exactly one typed RecoveryInitiated fact"
+        );
+        assert!(matches!(
+            &initiated[0],
+            RecoveryFact::RecoveryInitiated { account_id, .. } if *account_id == account
+        ));
+    }
+}

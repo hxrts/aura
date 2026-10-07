@@ -1489,6 +1489,7 @@ pub fn run_harness_ownership_policy() -> Result<()> {
 pub fn run_ownership_policy() -> Result<()> {
     let repo_root = repo_root()?;
     run_canonical_channel_witness_boundary()?;
+    super::domain_fact_model::run()?;
     run_ownership_category_declarations()?;
     run_service_surface_declarations()?;
     run_service_registry_ownership()?;

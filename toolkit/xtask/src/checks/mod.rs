@@ -1,4 +1,5 @@
 mod arch;
+mod domain_fact_model;
 mod guardian_transcript_scope;
 mod policy;
 mod public_frost_signing;
@@ -91,6 +92,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         }
         "runtime-bootstrap-guardrails" => policy::run_runtime_bootstrap_guardrails(),
         "runtime-typed-lifecycle-bridge" => runtime_typed_lifecycle_bridge::run(),
+        "domain-fact-model" => domain_fact_model::run(),
         "vm-session-lifecycle" => vm_session_lifecycle::run(),
         "absolute-time-observation" => vm_session_lifecycle::run_absolute_time_observation(),
         "public-frost-signing" => public_frost_signing::run(),

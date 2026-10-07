@@ -2671,8 +2671,7 @@ async fn required_moderation_rejects_corrupt_committed_ban_with_native_codec_sou
         expires_at: None,
     }
     .to_envelope();
-    envelope.encoding = aura_core::types::facts::FactEncoding::Json;
-    envelope.payload = b"not-json".to_vec();
+    envelope.payload = vec![0xff];
     bridge
         .agent
         .runtime()
@@ -2691,7 +2690,9 @@ async fn required_moderation_rejects_corrupt_committed_ban_with_native_codec_sou
         error.kind(),
         aura_app::runtime_bridge::RuntimeBridgeErrorKind::Serialization
     );
-    assert!(native_identity_has_source::<serde_json::Error>(&error));
+    assert!(native_identity_has_source::<
+        aura_core::util::serialization::SerializationError,
+    >(&error));
     assert!(native_identity_has_source::<
         aura_social::RequiredModerationQueryError,
     >(&error));
@@ -3036,8 +3037,8 @@ async fn bridge_reports_supervised_task_failures_with_group_task_and_cause() {
 #[tokio::test]
 async fn sequential_access_overrides_by_one_writer_supersede() {
     use aura_social::moderation::resolved_access_overrides;
-    use aura_social::{HomeGovernanceEvent, TaggedHomeGovernanceEvent};
     use aura_social::{AccessLevel, HomeId, SocialFact};
+    use aura_social::{HomeGovernanceEvent, TaggedHomeGovernanceEvent};
     let authority = AuthorityId::new_from_entropy([120u8; 32]);
     let context = ContextId::new_from_entropy([121u8; 32]);
     let target = AuthorityId::new_from_entropy([122u8; 32]);

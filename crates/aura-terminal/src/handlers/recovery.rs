@@ -205,21 +205,9 @@ async fn start_recovery(
         "Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {request_path}`"
     ));
 
-    // Update journal with recovery initiation using portable workflow
-    let recovery_fact_key = format!("recovery_initiated.{account_authority}");
-    recovery_cli::record_recovery_fact(
-        ctx.effects(),
-        ctx.context_id(),
-        recovery_fact_key.clone(),
-        "recovery_initiated",
-        &recovery_request,
-    )
-    .await
-    .map_err(|e| TerminalError::Operation(format!("Failed to record recovery fact: {e}")))?;
-
+    // The protocol coordinator committed the typed RecoveryInitiated fact.
     output.blank();
     output.println("Recovery initiated successfully via protocol coordinator.");
-    output.kv("Recovery fact recorded with key", recovery_fact_key);
     output.println("Guardians will be notified via network effects.");
 
     Ok(output)

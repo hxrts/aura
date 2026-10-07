@@ -88,15 +88,9 @@ Enforcement:
 - All protocol facts are defined in `crates/aura-journal/src/protocol_facts.rs`.
 - Any new protocol fact requires a doc update in this section and a matching reduction rule.
 
-## 2.1 Domain Fact Contract (Checklist + Lint)
+## 2.1 Domain Fact Contract
 
-Domain facts are the extensibility mechanism for Layer 2 crates. Every domain fact must follow this contract to ensure cross-replica determinism and schema stability:
-
-- **Type ID**: define a `*_FACT_TYPE_ID` constant (unique, registered in `crates/aura-agent/src/fact_types.rs`).
-- **Schema version**: specify a schema version (via `#[domain_fact(schema_version = N)]` or `*_FACT_SCHEMA_VERSION`).
-- **Canonical encoding**: use `#[derive(DomainFact)]` or explicit `encode_domain_fact` / `VersionedMessage` helpers.
-- **Context derivation**: declare `context` / `context_fn` for `DomainFact` or implement a stable `context_id()` derivation.
-- **Reducer registration**: provide a `FactReducer` and register it in the central registry (`crates/aura-agent/src/fact_registry.rs`).
+Domain facts are the extensibility mechanism for feature crates. They are stored as `RelationalFact::Generic` envelopes and reduced by registered `FactReducer`s. Every domain fact family follows the canonical domain fact model of §4.2.1: one derive codec, one declared schema version, registration in the agent `FactRegistry`, and a reduction that is a pure function of the fact set.
 
 ## 3. Semilattice Structure
 
@@ -136,16 +130,49 @@ The reduction pipeline maintains strict determinism:
 
 These properties are verified by `test_reduction_determinism()` which confirms all fact permutations produce identical state.
 
-### 4.2.1 Reversible and Overwritable Facts
+### 4.2.1 Canonical Domain Fact Model
 
-Facts that a later fact can reverse or overwrite (bans, grants, overrides) reach replicas late and out of order through sync, so their reduction must not depend on arrival order or on physical timestamps. Such a fact family carries `aura_core::time::CausalMetadata`, stamped by the writer before commit:
+Facts reach replicas late, duplicated and out of order through sync. A domain fact family is therefore reduced by a pure function of its fact set: every permutation of the same facts yields the same state, and neither arrival order nor physical time decides an outcome.
 
-- The fact's tag (its identity) is not carried: every reader derives it as the hash of the fact's type id and canonical re-encoding, which names the author and includes the clock. A peer cannot claim another fact's tag to revoke or shadow it, and distinct content never shares a tag.
-- `clock`: the writer's logical clock (`LogicalClockEffects::logical_advance`) after observing every fact of the family it holds.
-- `revokes`: for a reversal, the tags of the adds of the same key the writer observed.
-- `supersedes`: for a register write, the tags of the writes of the same key the writer observed.
+#### Encoding, versioning and registration
 
-`aura-journal::causal_reduction` defines the shared rules. A tagged observed-remove set keeps every add whose tag no reversal of the same key revokes; a concurrent add the reversal's writer did not observe survives. A multi-value register keeps every write that no observing write supersedes and that is not causally before another write; the family resolves the remaining concurrent writes by an explicit policy, then by causal order. Causal order (`causal_cmp`) is happens-before, then `TimeStamp::sort_compare` with `OrderingPolicy::DeterministicTieBreak`, then causal depth, Lamport scalar and tag; it orders history for display. `assert_permutation_invariant` is the test harness: a reducer must produce identical state for every permutation of a small fact set. Physical time remains for user-visible timestamps and expiry only. Home governance (docs/115 §3.4) and contacts (`aura-relational::contacts`: existence as an observed-remove set per owner and contact, nickname and read receipt policy as registers that a removal clears) and the web of trust (`aura-relational::wot`: per unordered pair, proposals and acceptances form an observed-remove set, an acceptance supersedes the proposals it observed so a late proposal cannot reopen a pending state, a revocation ends the episode it observed so a concurrent acceptance survives and a later proposal starts a new episode; introductions are an observed-remove set whose expiry is evaluated at query time against a caller-supplied instant) use this model. Writers obtain the metadata through the runtime bridge `causal_stamp`, which advances the logical clock past the family's committed facts. AMP channel bootstraps carry no causal stamp; when a channel has several, journal reduction keeps the one with the smallest `bootstrap_id` (then full fact order), independent of arrival order.
+Each domain fact type has one shape and one codec.
+
+- **Derive codec.** The type uses `#[derive(DomainFact)]` (`aura-macros`). The derive writes a DAG-CBOR `FactEnvelope` and decodes only DAG-CBOR. Hand-written `impl DomainFact` blocks and JSON envelopes are not used. The shared `aura-core` decode helpers reject a JSON envelope with `FactError::NonCanonicalEncoding`.
+- **One schema version.** `#[domain_fact(type_id = ..., schema_version = N)]` declares the only version, carried by the envelope. Decoding accepts exactly `N`. When the shape changes, the version is bumped and the old shape is replaced, not decoded: there is no supported-version range, no legacy decoder and no compatibility shim. The payload carries no version field of its own, and the type id carries no version suffix.
+- **Type id and context.** The type id is a plain string (a literal, a `*_FACT_TYPE_ID` constant or a zero-argument accessor), unique across the registry and listed in `crates/aura-agent/src/fact_types.rs`. The derive's `context` or `context_fn` names the fact's `ContextId`.
+- **Keys and registration.** Reducers and views address facts through the family's `FactKey` helpers, never ad hoc strings. Each type is registered with its `FactReducer` in `build_fact_registry` (`crates/aura-agent/src/fact_registry.rs`); a Layer 2 crate that cannot depend on `aura-journal` is registered through a transparent derive wrapper in a higher crate (maintenance facts use `aura-sync::MaintenanceJournalFact`).
+
+#### Reduction patterns
+
+`aura-journal::causal_reduction` provides the shared rules. A family composes them; it does not reimplement them.
+
+- **Tagged observed-remove set.** An add is identified by its tag. A reversal names the tags of the adds of the same key that its writer observed. The set keeps every add that no reversal revokes, so a concurrent add the reversal's writer did not observe survives. Contacts (existence per owner and contact), web-of-trust introductions, home bans and mutes, and social lifecycle pairs use this pattern.
+- **Multi-value register.** A write names the writes of the same key it supersedes. The register keeps every write that no observing write supersedes and that is not causally before another write. The family resolves the remaining concurrent writes by an explicit domain policy, then by causal order. Contact nicknames and read-receipt policy, access overrides, storage readings and chat message revisions use this pattern.
+- **Episodes.** State that can end and restart, such as a friendship, a channel membership or a home neighborhood join, is a sequence of episodes. A terminal fact ends the episodes its writer observed, and only a fact that starts a new episode re-admits the subject. A late or replayed fact from an ended episode cannot reopen it.
+- **Explicit terminal precedence.** Families whose outcomes are terminal rather than reversible, such as recovery and invitation outcomes, define a total precedence over terminal states and resolve ties by causal order or canonical bytes. Protocol facts follow the same rule: AMP channel bootstraps resolve to the smallest `bootstrap_id`, then full fact order.
+
+#### Causal stamps and time
+
+A reversible or overwritable fact carries `aura_core::time::CausalMetadata`, stamped by the writer before commit:
+
+- `clock`: the writer's `LogicalClock` after observing every fact of the family it holds.
+- `revokes`: for a reversal, the tags of the observed adds of the same key.
+- `supersedes`: for a register write, the tags of the observed writes of the same key.
+
+The tag itself is not carried. Every reader derives it as the hash of the fact's type id and canonical re-encoding, which names the author and includes the clock. A peer cannot claim another fact's tag to revoke or shadow it, and distinct content never shares a tag.
+
+Writers obtain the metadata through `RuntimeBridge::causal_stamp(CausalStampKey)`, which advances the runtime's logical clock past the family's committed facts for that key. `CausalStampKey` names the family and key: `HomeGovernance`, `Contact`, `Friendship`, `Chat` and `InvitationOutcome`.
+
+Causal order (`causal_cmp`) is happens-before, then `TimeStamp::sort_compare` with `OrderingPolicy::DeterministicTieBreak`, then causal depth, Lamport scalar and tag. It is the tie-break of last resort and the order for display. Physical time is for user-visible timestamps and expiry only. Expiry is evaluated at query time against a caller-supplied instant, never during reduction.
+
+#### Verification and enforcement
+
+`assert_permutation_invariant` is the shared test harness: it reduces every permutation of a small fact set and requires identical state. Every reversible family keeps such a regression next to its reducer.
+
+`just ci-domain-fact-model` (also run by `just ci-ownership-policy`) is a Rust-native syntax check in `toolkit/xtask`. Over production code it requires that every `DomainFact` type uses the derive, has a resolvable unversioned type id and no in-payload version field, and is registered in the `FactRegistry`. It rejects JSON envelopes in domain fact crates. It keeps a typed inventory of reversible families; a fact carrying `CausalMetadata` must belong to a listed family, and each family must keep a test-scope `assert_permutation_invariant` call. The derive itself rejects a `min_supported_schema_version` key.
+
+Home governance (docs/115 §3.4), social lifecycle (docs/115 §3.5), contacts (`aura-relational::contacts`), the web of trust (`aura-relational::wot`), recovery (`aura-recovery::state`), invitation outcomes (`aura-invitation::lifecycle`), chat revisions (`aura-chat::revisions`) and AMP channel membership (`aura-amp::channel`) follow this model.
 
 ### 4.3 Canonical Entity Materialization
 

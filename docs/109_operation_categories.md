@@ -86,6 +86,8 @@ This pattern emits a fact into the existing relational context journal. The chan
 
 Category A operations work because encryption keys already exist (derived from established context), facts are CRDTs (eventual consistency is sufficient), no coordination is needed (shared state already agreed upon), and the worst case is delay rather than a security issue.
 
+The CRDT property is a contract on the fact family, not on transport. Each family is reduced by a pure, order-independent function of its fact set: reversible state uses the observed-remove set, multi-value register and episode patterns, writers stamp causal metadata with a logical clock, and physical time is display-only. See the canonical domain fact model in `docs/105_journal.md` §4.2.1.
+
 ## 3. Category B: Deferred Operations
 
 Category B operations have local effect pending until agreement is reached. The UI shows intent immediately with a "pending" indicator. Operations may require approval from capability holders. Automatic rollback occurs on rejection.

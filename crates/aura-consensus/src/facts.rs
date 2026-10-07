@@ -8,6 +8,7 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
 use aura_journal::extensibility::{DomainFact, FactEnvelope, FactReducer};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
+use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 
 /// Type ID for consensus facts
@@ -17,7 +18,12 @@ pub const CONSENSUS_FACT_TYPE_ID: &str = "consensus";
 pub const CONSENSUS_FACT_SCHEMA_VERSION: u16 = 1;
 
 /// Domain facts emitted by consensus protocol
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, DomainFact)]
+#[domain_fact(
+    type_id = CONSENSUS_FACT_TYPE_ID,
+    schema_version = CONSENSUS_FACT_SCHEMA_VERSION,
+    context_fn = "fact_context_id"
+)]
 pub enum ConsensusFact {
     /// Cryptographic proof of equivocation by a witness
     EquivocationProof(EquivocationProof),
@@ -56,44 +62,12 @@ impl EquivocationProof {
     }
 }
 
-impl DomainFact for ConsensusFact {
-    fn type_id(&self) -> &'static str {
-        CONSENSUS_FACT_TYPE_ID
-    }
-
-    fn schema_version(&self) -> u16 {
-        CONSENSUS_FACT_SCHEMA_VERSION
-    }
-
-    fn context_id(&self) -> ContextId {
+impl ConsensusFact {
+    /// Context the fact is scoped to.
+    pub fn fact_context_id(&self) -> ContextId {
         match self {
             ConsensusFact::EquivocationProof(proof) => proof.context_id,
         }
-    }
-
-    fn to_envelope(&self) -> FactEnvelope {
-        // SAFETY: ConsensusFact serialization should be deterministic.
-        // We use expect here because if serialization fails, it's a critical bug.
-        #[allow(clippy::expect_used)]
-        let payload = aura_core::util::serialization::to_vec(self)
-            .expect("ConsensusFact serialization should not fail");
-
-        FactEnvelope {
-            type_id: aura_core::types::facts::FactTypeId::from(self.type_id()),
-            schema_version: self.schema_version(),
-            encoding: aura_core::types::facts::FactEncoding::DagCbor,
-            payload,
-        }
-    }
-
-    fn from_envelope(envelope: &FactEnvelope) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        if envelope.type_id.as_str() != CONSENSUS_FACT_TYPE_ID {
-            return None;
-        }
-        aura_core::util::serialization::from_slice(&envelope.payload).ok()
     }
 }
 

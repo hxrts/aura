@@ -256,20 +256,6 @@ pub fn build_recovery_evidence(
 // Journal Operations
 // ============================================================================
 
-/// Write a generic recovery fact into the journal.
-pub async fn record_recovery_fact<T: Serialize, E: JournalEffects>(
-    effects: &E,
-    context_id: ContextId,
-    fact_key: String,
-    kind: &str,
-    payload: &T,
-) -> Result<(), AuraError> {
-    let fact_value = encode_relational_generic(context_id, kind, payload)?;
-    persist_fact_value(effects, fact_key, fact_value).await?;
-
-    Ok(())
-}
-
 /// List recovery-related fact keys for status reporting.
 pub async fn list_recovery_fact_keys<E: JournalEffects>(
     effects: &E,
@@ -343,14 +329,8 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
     }
 
     let dispute_key = format!("recovery_dispute.{evidence_id}.{guardian_authority}");
-    record_recovery_fact(
-        effects,
-        context_id,
-        dispute_key.clone(),
-        "recovery_dispute",
-        dispute,
-    )
-    .await?;
+    let fact_value = encode_relational_generic(context_id, "recovery_dispute", dispute)?;
+    persist_fact_value(effects, dispute_key.clone(), fact_value).await?;
 
     Ok(dispute_key)
 }
