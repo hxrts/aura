@@ -27,6 +27,14 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 ## Invariants
 
+- Every CLI command ends in one outcome: its structured `CliOutput` (text,
+  or one `{"ok":true,"result":..}` document under `--json`) with exit code 0,
+  or a typed `command::CommandError` whose `ErrorCode` fixes the exit code and
+  whose message is worded by `user_errors::classify`. Under `--json`, stdout
+  carries only that document. Destructive commands confirm through
+  `command::confirm` (`--yes`), and `--timeout` is measured on the runtime
+  clock.
+
 - Runtime bring-up retains the original agent error as its native source.
   `AURA_SECURE_STORAGE_BACKEND` explicitly selects `platform` or
   `filesystem-fallback`; invalid values fail construction. The runtime owns
@@ -169,6 +177,7 @@ cargo test -p aura-terminal
 | Demo mobile enrollment regression | `tests/regression/regression_demo_mobile_enrollment.rs` | Covered |
 | Guardian ceremony no-peers regression | `tests/regression/regression_guardian_ceremony_no_peers.rs` | Covered |
 | ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
+| CLI `--json` output or exit codes wrong | `tests/cli_json.rs`, `src/command/error.rs` | Covered |
 
 ## References
 

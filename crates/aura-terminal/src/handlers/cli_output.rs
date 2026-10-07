@@ -1,12 +1,12 @@
 //! CLI Output Types for Testable Command Results
 //!
-//! This module provides structured output types that handlers return
-//! instead of printing directly. This enables:
-//! - Unit testing of handlers without capturing stdout
-//! - Consistent output formatting
-//! - Clear separation of logic from I/O
+//! Handlers return a structured [`CliOutput`] instead of printing. The text
+//! rendering and the `--json` view are both derived from the same entries,
+//! so the two cannot disagree about what a command reported.
 
-/// A single line of CLI output
+use serde_json::{Map, Value};
+
+/// A single line of rendered CLI output
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputLine {
     /// Standard output (stdout)
@@ -27,48 +27,62 @@ impl OutputLine {
     }
 }
 
-/// Structured CLI output that can be rendered or tested
+/// One structured element of a command's output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Entry {
+    Line(String),
+    Warning(String),
+    Section(String),
+    Field(String, String),
+    Table {
+        headers: Vec<String>,
+        rows: Vec<Vec<String>>,
+    },
+    Blank,
+}
+
+/// Structured CLI output that can be rendered as text or JSON, or tested
 #[derive(Debug, Clone, Default)]
 pub struct CliOutput {
-    lines: Vec<OutputLine>,
+    entries: Vec<Entry>,
 }
 
 impl CliOutput {
     /// Create an empty output
     #[must_use]
     pub fn new() -> Self {
-        Self { lines: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Add a stdout line
     pub fn println(&mut self, s: impl Into<String>) -> &mut Self {
-        self.lines.push(OutputLine::Out(s.into()));
+        self.entries.push(Entry::Line(s.into()));
         self
     }
 
-    /// Add a stderr line
+    /// Add a stderr line (a warning or diagnostic, not a failure)
     pub fn eprintln(&mut self, s: impl Into<String>) -> &mut Self {
-        self.lines.push(OutputLine::Err(s.into()));
+        self.entries.push(Entry::Warning(s.into()));
         self
     }
 
     /// Add a section header (e.g., "=== Title ===")
     pub fn section(&mut self, title: impl Into<String>) -> &mut Self {
-        let title = title.into();
-        self.lines.push(OutputLine::Out(format!("=== {title} ===")));
+        self.entries.push(Entry::Section(title.into()));
         self
     }
 
     /// Add a key-value pair (e.g., "Key: Value")
     pub fn kv(&mut self, key: impl Into<String>, value: impl Into<String>) -> &mut Self {
-        self.lines
-            .push(OutputLine::Out(format!("{}: {}", key.into(), value.into())));
+        self.entries.push(Entry::Field(key.into(), value.into()));
         self
     }
 
     /// Add a blank line
     pub fn blank(&mut self) -> &mut Self {
-        self.lines.push(OutputLine::Out(String::new()));
+        self.entries.push(Entry::Blank);
         self
     }
 
@@ -77,87 +91,126 @@ impl CliOutput {
         if headers.is_empty() {
             return self;
         }
-
-        // Calculate column widths
-        let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-        for row in rows {
-            for (i, cell) in row.iter().enumerate() {
-                if i < widths.len() {
-                    widths[i] = widths[i].max(cell.len());
-                }
-            }
-        }
-
-        // Format header
-        let header_line: String = headers
-            .iter()
-            .zip(&widths)
-            .map(|(h, w)| format!("{:width$}", h, width = *w))
-            .collect::<Vec<_>>()
-            .join("  ");
-        self.lines.push(OutputLine::Out(header_line));
-
-        // Format separator
-        let separator: String = widths
-            .iter()
-            .map(|w| "-".repeat(*w))
-            .collect::<Vec<_>>()
-            .join("  ");
-        self.lines.push(OutputLine::Out(separator));
-
-        // Format rows
-        for row in rows {
-            let row_line: String = row
-                .iter()
-                .zip(&widths)
-                .map(|(cell, w)| format!("{:width$}", cell, width = *w))
-                .collect::<Vec<_>>()
-                .join("  ");
-            self.lines.push(OutputLine::Out(row_line));
-        }
-
+        self.entries.push(Entry::Table {
+            headers: headers.iter().map(|h| (*h).to_string()).collect(),
+            rows: rows.to_vec(),
+        });
         self
     }
 
-    /// Get all output lines
+    /// All output as rendered text lines
     #[must_use]
-    pub fn lines(&self) -> &[OutputLine] {
-        &self.lines
+    pub fn lines(&self) -> Vec<OutputLine> {
+        let mut lines = Vec::new();
+        for entry in &self.entries {
+            match entry {
+                Entry::Line(s) => lines.push(OutputLine::Out(s.clone())),
+                Entry::Warning(s) => lines.push(OutputLine::Err(s.clone())),
+                Entry::Section(title) => lines.push(OutputLine::Out(format!("=== {title} ==="))),
+                Entry::Field(k, v) => lines.push(OutputLine::Out(format!("{k}: {v}"))),
+                Entry::Blank => lines.push(OutputLine::Out(String::new())),
+                Entry::Table { headers, rows } => {
+                    lines.extend(render_table(headers, rows).into_iter().map(OutputLine::Out));
+                }
+            }
+        }
+        lines
     }
 
     /// Check if output is empty
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
+        self.entries.is_empty()
     }
 
-    /// Get all stdout lines as strings
+    /// All stdout lines
     #[must_use]
-    pub fn stdout_lines(&self) -> Vec<&str> {
-        self.lines
-            .iter()
+    pub fn stdout_lines(&self) -> Vec<String> {
+        self.lines()
+            .into_iter()
             .filter_map(|l| match l {
-                OutputLine::Out(s) => Some(s.as_str()),
+                OutputLine::Out(s) => Some(s),
                 OutputLine::Err(_) => None,
             })
             .collect()
     }
 
-    /// Get all stderr lines as strings
+    /// All stderr lines
     #[must_use]
-    pub fn stderr_lines(&self) -> Vec<&str> {
-        self.lines
-            .iter()
+    pub fn stderr_lines(&self) -> Vec<String> {
+        self.lines()
+            .into_iter()
             .filter_map(|l| match l {
                 OutputLine::Out(_) => None,
-                OutputLine::Err(s) => Some(s.as_str()),
+                OutputLine::Err(s) => Some(s),
             })
             .collect()
     }
 
+    /// Structured view of this output for `--json`.
+    ///
+    /// Sections become objects carrying their key-value `fields`, table
+    /// `rows` (objects keyed by header) and free-form `lines`; entries before
+    /// the first section go into an untitled leading section. Warnings are
+    /// collected under `warnings`.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        let mut sections: Vec<Map<String, Value>> = Vec::new();
+        let mut warnings = Vec::new();
+        for entry in &self.entries {
+            match entry {
+                Entry::Section(title) => {
+                    let mut section = Map::new();
+                    section.insert("title".to_string(), Value::String(title.clone()));
+                    sections.push(section);
+                }
+                Entry::Field(k, v) => {
+                    if let Value::Object(fields) = current_section(&mut sections)
+                        .entry("fields")
+                        .or_insert_with(|| Value::Object(Map::new()))
+                    {
+                        fields.insert(k.clone(), Value::String(v.clone()));
+                    }
+                }
+                Entry::Line(line) => {
+                    let line = line.trim();
+                    if !line.is_empty() {
+                        push_item(
+                            current_section(&mut sections),
+                            "lines",
+                            Value::String(line.to_string()),
+                        );
+                    }
+                }
+                Entry::Table { headers, rows } => {
+                    let section = current_section(&mut sections);
+                    for row in rows {
+                        let object: Map<String, Value> = headers
+                            .iter()
+                            .zip(row)
+                            .map(|(h, cell)| (h.clone(), Value::String(cell.clone())))
+                            .collect();
+                        push_item(section, "rows", Value::Object(object));
+                    }
+                }
+                Entry::Warning(w) => warnings.push(Value::String(w.clone())),
+                Entry::Blank => {}
+            }
+        }
+        let mut doc = Map::new();
+        doc.insert(
+            "sections".to_string(),
+            Value::Array(sections.into_iter().map(Value::Object).collect()),
+        );
+        if !warnings.is_empty() {
+            doc.insert("warnings".to_string(), Value::Array(warnings));
+        }
+        Value::Object(doc)
+    }
+
     /// Render output to stdout/stderr
     pub fn render(&self) {
-        for line in &self.lines {
+        for line in self.lines() {
             match line {
                 OutputLine::Out(s) => println!("{s}"),
                 OutputLine::Err(s) => eprintln!("{s}"),
@@ -167,9 +220,55 @@ impl CliOutput {
 
     /// Merge another output into this one
     pub fn extend(&mut self, other: CliOutput) -> &mut Self {
-        self.lines.extend(other.lines);
+        self.entries.extend(other.entries);
         self
     }
+}
+
+fn current_section(sections: &mut Vec<Map<String, Value>>) -> &mut Map<String, Value> {
+    if sections.is_empty() {
+        sections.push(Map::new());
+    }
+    let last = sections.len() - 1;
+    &mut sections[last]
+}
+
+fn push_item(section: &mut Map<String, Value>, key: &str, value: Value) {
+    if let Value::Array(items) = section
+        .entry(key)
+        .or_insert_with(|| Value::Array(Vec::new()))
+    {
+        items.push(value);
+    }
+}
+
+fn render_table(headers: &[String], rows: &[Vec<String>]) -> Vec<String> {
+    let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < widths.len() {
+                widths[i] = widths[i].max(cell.len());
+            }
+        }
+    }
+    let pad = |cells: &[String]| {
+        cells
+            .iter()
+            .zip(&widths)
+            .map(|(cell, w)| format!("{cell:w$}", w = *w))
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    let mut lines = vec![pad(headers)];
+    lines.push(
+        widths
+            .iter()
+            .map(|w| "-".repeat(*w))
+            .collect::<Vec<_>>()
+            .join("  "),
+    );
+    lines.extend(rows.iter().map(|row| pad(row)));
+    lines
 }
 
 /// Builder for CliOutput that allows method chaining
@@ -286,18 +385,12 @@ mod tests {
         out.blank();
         out.println("After");
 
-        let lines = out.stdout_lines();
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], "Before");
-        assert_eq!(lines[1], "");
-        assert_eq!(lines[2], "After");
+        assert_eq!(out.stdout_lines(), vec!["Before", "", "After"]);
     }
 
     #[test]
     fn test_is_empty() {
-        let empty = CliOutput::new();
-        assert!(empty.is_empty());
-
+        assert!(CliOutput::new().is_empty());
         let mut non_empty = CliOutput::new();
         non_empty.println("Hello");
         assert!(!non_empty.is_empty());
@@ -320,20 +413,9 @@ mod tests {
     }
 
     #[test]
-    fn test_output_line_constructors() {
-        let out = OutputLine::out("stdout");
-        let err = OutputLine::err("stderr");
-
-        assert_eq!(out, OutputLine::Out("stdout".to_string()));
-        assert_eq!(err, OutputLine::Err("stderr".to_string()));
-    }
-
-    #[test]
     fn test_table_empty_headers() {
         let mut out = CliOutput::new();
         out.table(&[], &[]);
-
-        // Empty headers should result in no output
         assert!(out.is_empty());
     }
 
@@ -349,19 +431,25 @@ mod tests {
         );
 
         let lines = out.stdout_lines();
-        // Column widths should accommodate longest values
-        assert!(lines[2].contains("1   ") || lines[2].contains("1  ")); // ID column
-        assert!(lines[3].contains("1000")); // Second row
+        assert!(lines[2].starts_with("1   "));
+        assert!(lines[3].contains("1000"));
     }
 
     #[test]
-    fn test_builder_eprintln() {
-        let out = CliOutputBuilder::new()
-            .println("stdout")
-            .eprintln("stderr")
-            .build();
+    fn json_view_groups_fields_rows_and_lines_by_section() {
+        let mut out = CliOutput::new();
+        out.println("preamble");
+        out.section("Account");
+        out.kv("Nickname", "Alex");
+        out.table(&["ID", "Name"], &[vec!["1".into(), "Barbara".into()]]);
+        out.blank();
+        out.eprintln("careful");
 
-        assert_eq!(out.stdout_lines().len(), 1);
-        assert_eq!(out.stderr_lines().len(), 1);
+        let json = out.to_json();
+        assert_eq!(json["sections"][0]["lines"][0], "preamble");
+        assert_eq!(json["sections"][1]["title"], "Account");
+        assert_eq!(json["sections"][1]["fields"]["Nickname"], "Alex");
+        assert_eq!(json["sections"][1]["rows"][0]["Name"], "Barbara");
+        assert_eq!(json["warnings"][0], "careful");
     }
 }

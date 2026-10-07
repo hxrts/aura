@@ -76,6 +76,7 @@
 #![allow(missing_docs)]
 
 pub mod cli;
+pub mod command;
 pub mod demo_invitation;
 pub mod env;
 pub mod error;

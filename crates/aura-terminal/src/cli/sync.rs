@@ -5,7 +5,6 @@
 //! with peers.
 
 use bpaf::{construct, long, pure, Parser};
-use std::path::PathBuf;
 
 /// Sync subcommands for journal synchronization
 #[derive(Debug, Clone)]
@@ -23,18 +22,12 @@ pub enum SyncAction {
 
         /// Initial peers to sync with (comma-separated device IDs)
         peers: Option<String>,
-
-        /// Config file path
-        config: Option<PathBuf>,
     },
 
     /// Perform a one-shot sync with specific peers
     Once {
         /// Peers to sync with (comma-separated device IDs)
         peers: String,
-
-        /// Config file path
-        config: Option<PathBuf>,
     },
 
     /// Show sync service status and metrics
@@ -66,16 +59,10 @@ fn daemon_command() -> impl Parser<SyncAction> {
         .help("Initial peers to sync with (comma-separated device IDs)")
         .argument::<String>("PEERS")
         .optional();
-    let config = long("config")
-        .short('c')
-        .help("Config file path")
-        .argument::<PathBuf>("CONFIG")
-        .optional();
     construct!(SyncAction::Daemon {
         interval,
         max_concurrent,
-        peers,
-        config
+        peers
     })
     .to_options()
     .command("daemon")
@@ -86,12 +73,7 @@ fn once_command() -> impl Parser<SyncAction> {
     let peers = long("peers")
         .help("Peers to sync with (comma-separated device IDs)")
         .argument::<String>("PEERS");
-    let config = long("config")
-        .short('c')
-        .help("Config file path")
-        .argument::<PathBuf>("CONFIG")
-        .optional();
-    construct!(SyncAction::Once { peers, config })
+    construct!(SyncAction::Once { peers })
         .to_options()
         .command("once")
         .help("Perform a one-shot sync with specific peers")

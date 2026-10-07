@@ -146,10 +146,9 @@ pub async fn handle_sync(
             interval,
             max_concurrent,
             peers,
-            config: _,
         } => handle_daemon_mode(ctx, *interval, *max_concurrent, peers.as_deref()).await,
 
-        SyncAction::Once { peers, config: _ } => handle_once_mode(ctx, peers).await,
+        SyncAction::Once { peers } => handle_once_mode(ctx, peers).await,
 
         SyncAction::Status => handle_status(ctx),
 
@@ -195,9 +194,6 @@ async fn handle_daemon_mode(
         output.kv("Initial peers", initial_peers.len().to_string());
     }
 
-    // Render startup messages immediately
-    output.render();
-
     // Configure sync manager
     let config = SyncManagerConfig {
         auto_sync_enabled: true,
@@ -215,7 +211,7 @@ async fn handle_daemon_mode(
     let time_handler = manager.time_effects();
     let tick_count = run_sync_with_cleanup(async {
 
-        println!("\nSync daemon started. Press Ctrl+C to stop.\n");
+        eprintln!("Sync daemon started. Press Ctrl+C to stop.");
         let started = time_handler.physical_time().await.map_err(sync_source)?;
         let observation = aura_core::TimeoutClockObservation::new(&started);
         let mut tick_count = 0u64;
@@ -227,7 +223,7 @@ async fn handle_daemon_mode(
                 _ = manager.closed() => { break; }
                 result = signal::ctrl_c() => {
                     result.map_err(sync_source)?;
-                    println!("\nReceived shutdown signal...");
+                    eprintln!("Received shutdown signal...");
                     break;
                 }
                 result = required_sync_tick(time_handler.as_ref(), &observation, started.ts_ms, interval_ms) => {
@@ -237,10 +233,10 @@ async fn handle_daemon_mode(
                     }
                     tick_count += 1;
                     let health = manager.health().await;
-                    println!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
+                    eprintln!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
                     if tick_count % 5 == 0 {
                         if let Some(metrics) = manager.metrics().await {
-                            println!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
+                            eprintln!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
                                 metrics.requests_processed, metrics.errors_encountered, metrics.avg_latency_ms);
                         }
                     }
@@ -249,15 +245,14 @@ async fn handle_daemon_mode(
         }
         Ok::<_, aura_core::AuraError>(tick_count)
     }, || async {
-        println!("Stopping sync daemon...");
+        eprintln!("Stopping sync daemon...");
         manager.stop().await
     }).await?;
 
-    // Return shutdown summary (startup messages already rendered)
-    let mut shutdown_output = CliOutput::new();
-    shutdown_output.println("Sync daemon stopped.");
-    shutdown_output.kv("Total ticks", tick_count.to_string());
-    Ok(shutdown_output)
+    // Progress went to stderr while running; stdout gets one summary.
+    output.println("Sync daemon stopped.");
+    output.kv("Total ticks", tick_count.to_string());
+    Ok(output)
 }
 
 /// Perform a one-shot sync with specific peers

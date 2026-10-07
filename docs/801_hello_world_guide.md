@@ -369,6 +369,16 @@ aura authority list
 
 Command output is printed plainly. Add `-v` to also print runtime diagnostics.
 
+For scripts, the global flags make every command machine-readable:
+
+```bash
+aura --json status            # {"ok":true,"result":{...}} on stdout
+aura --yes chat leave -g ID   # confirm a destructive command without a prompt
+aura --timeout 30 sync once --peers PEER
+```
+
+Under `--json`, stdout carries exactly one JSON document, either `{"ok":true,"result":...}` or `{"ok":false,"error":{"code":...,"message":...}}`; diagnostics go to stderr. Destructive commands prompt on a terminal and fail without `--yes` otherwise. The exit code classifies failures: 0 success, 1 failed, 2 invalid input, 3 not found, 4 permission denied, 5 timeout, 6 unavailable.
+
 ## Testing Your Protocol
 
 Create a test script for the hello world protocol:

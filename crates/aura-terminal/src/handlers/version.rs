@@ -1,42 +1,34 @@
 //! Version Command Handler
 //!
-//! Effect-based implementation of the version command.
-//! Returns structured `CliOutput` for testability.
+//! Returns structured `CliOutput`; needs no runtime or account.
 
-use crate::error::TerminalResult;
-use crate::handlers::{CliOutput, HandlerContext};
+use crate::handlers::CliOutput;
 
-/// Handle version display through effects
-///
-/// Returns `CliOutput` instead of printing directly.
-///
-/// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub fn handle_version(_ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
+/// Version information for `aura version`.
+#[must_use]
+pub fn version_output() -> CliOutput {
     let mut output = CliOutput::new();
-
-    // Display version information through console effects
-    output.println(format!("aura {}", env!("CARGO_PKG_VERSION")));
+    output.kv("Version", format!("aura {}", env!("CARGO_PKG_VERSION")));
     output.kv("Package", env!("CARGO_PKG_NAME"));
     output.kv("Description", env!("CARGO_PKG_DESCRIPTION"));
-    output.kv(
-        "Repository",
-        format!(
-            "{} {}",
-            env!("CARGO_PKG_REPOSITORY"),
-            env!("CARGO_PKG_VERSION")
-        ),
-    );
-
-    Ok(output)
+    output.kv("Repository", env!("CARGO_PKG_REPOSITORY"));
+    output
 }
 
 #[cfg(test)]
 mod tests {
-    #[tokio::test]
-    async fn test_version_output_format() {
-        // We can't easily create a HandlerContext in tests, but we can test the output format
-        // by checking what the output would contain given the env vars
-        let version = env!("CARGO_PKG_VERSION");
-        assert!(!version.is_empty());
+    use super::*;
+
+    #[test]
+    fn version_output_names_the_package_version() {
+        let output = version_output();
+        assert_eq!(
+            output.stdout_lines()[0],
+            format!("Version: aura {}", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            output.to_json()["sections"][0]["fields"]["Package"],
+            env!("CARGO_PKG_NAME")
+        );
     }
 }

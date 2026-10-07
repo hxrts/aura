@@ -100,6 +100,12 @@ pub struct GlobalArgs {
     pub config: Option<PathBuf>,
     /// Account data directory shared with the TUI (`aura tui --data-dir`).
     pub data_dir: Option<PathBuf>,
+    /// Print one JSON document per command instead of text.
+    pub json: bool,
+    /// Confirm destructive commands without prompting.
+    pub yes: bool,
+    /// Fail with exit code 5 when the command takes longer (seconds).
+    pub timeout: Option<u64>,
     pub command: Commands,
 }
 
@@ -118,11 +124,29 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
         .help("Account data directory (same as `aura tui --data-dir`)")
         .argument::<PathBuf>("DIR")
         .optional();
+    let json = long("json")
+        .help("Print the result (or error) as one JSON document on stdout")
+        .switch();
+    let yes = short('y')
+        .long("yes")
+        .help("Confirm destructive commands without prompting (required without a terminal)")
+        .switch();
+    let timeout = long("timeout")
+        .help("Fail with exit code 5 if the command takes longer than SECONDS")
+        .argument::<u64>("SECONDS")
+        .guard(
+            |seconds| *seconds > 0,
+            "--timeout must be at least 1 second",
+        )
+        .optional();
     let command = commands_parser();
     construct!(GlobalArgs {
         verbose,
         config,
         data_dir,
+        json,
+        yes,
+        timeout,
         command
     })
 }

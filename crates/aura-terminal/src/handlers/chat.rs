@@ -1,130 +1,81 @@
-//! Chat command handlers using the aura-chat service and effect system
+//! Chat command handlers using the aura-chat service.
 //!
-//! This module implements CLI handlers for chat functionality, integrating
-//! with the agent-layer ChatServiceApi for group management and messaging.
+//! Returns structured `CliOutput` for text and `--json` rendering.
 
 use crate::cli::chat::ChatCommands;
+use crate::command::confirm;
 use crate::error::{TerminalError, TerminalResult};
-use crate::handlers::HandlerContext;
+use crate::handlers::{CliOutput, HandlerContext};
 use aura_agent::handlers::{ChatGroupId, ChatMessageId};
-use aura_agent::AuraEffectSystem;
-use aura_core::effects::ConsoleEffects;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+fn confirmed(prompt: &str, assume_yes: bool) -> TerminalResult<()> {
+    confirm(prompt, assume_yes).map_err(|e| TerminalError::Input(e.message))
+}
+
 /// Execute chat management commands through the ChatServiceApi
-///
-/// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_chat(
     ctx: &HandlerContext<'_>,
-    _effects: &AuraEffectSystem,
     command: &ChatCommands,
-) -> TerminalResult<()> {
+    assume_yes: bool,
+) -> TerminalResult<CliOutput> {
     let agent = ctx.agent().ok_or_else(|| {
         TerminalError::Operation("Agent not available - please initialize an account first".into())
     })?;
 
     let chat = agent.chat()?;
     let authority_id = ctx.effect_context().authority_id();
+    let mut output = CliOutput::new();
 
     match command {
-        ChatCommands::Create {
-            name,
-            description,
-            members,
-        } => {
+        ChatCommands::Create { name, members } => {
             let group = chat
                 .create_group(name, authority_id, members.clone())
                 .await?;
-
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("Created chat group: {} (ID: {})", group.name, group.id),
-            )
-            .await?;
-
-            if let Some(desc) = description {
-                ConsoleEffects::log_warn(
-                    ctx.effects(),
-                    &format!(
-                        "Group descriptions are not yet fact-backed; ignoring provided description: {desc}"
-                    ),
-                )
-                .await?;
-            }
+            output.kv("Created chat group", &group.name);
+            output.kv("ID", group.id.to_string());
         }
 
-        ChatCommands::Send {
-            group_id,
-            message,
-            reply_to: _,
-        } => {
+        ChatCommands::Send { group_id, message } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             let msg = chat
                 .send_message(&group_id, authority_id, message.clone())
                 .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), &format!("Message sent (ID: {})", msg.id))
-                .await?;
+            output.kv("Message sent", msg.id.to_string());
         }
 
         ChatCommands::History {
             group_id,
             limit,
-            before: _,
-            message_type: _,
-            sender: _,
+            sender,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             let history = chat.get_history(&group_id, Some(*limit), None).await?;
-
-            if history.is_empty() {
-                ConsoleEffects::log_info(ctx.effects(), "No messages in this group").await?;
-            } else {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    &format!("=== Message History ({} messages) ===", history.len()),
-                )
-                .await?;
-
-                for msg in history {
-                    let sender_short = msg.sender_id.to_string();
-                    let sender_display = &sender_short[..12.min(sender_short.len())];
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!("[{}...] {}", sender_display, msg.content),
-                    )
-                    .await?;
-                }
-            }
+            let rows: Vec<Vec<String>> = history
+                .iter()
+                .filter(|msg| sender.map_or(true, |s| msg.sender_id == s))
+                .map(|msg| vec![msg.sender_id.to_string(), msg.content.clone()])
+                .collect();
+            output.section(format!("Message History ({} messages)", rows.len()));
+            output.table(&["Sender", "Message"], &rows);
         }
 
         ChatCommands::List => {
             let groups = chat.list_user_groups(&authority_id).await?;
-
-            if groups.is_empty() {
-                ConsoleEffects::log_info(ctx.effects(), "No chat groups found").await?;
-            } else {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    &format!("=== Your Chat Groups ({}) ===", groups.len()),
-                )
-                .await?;
-
-                for group in groups {
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!(
-                            "  {} - {} ({} members)",
-                            group.id,
-                            group.name,
-                            group.members.len()
-                        ),
-                    )
-                    .await?;
-                }
-            }
+            let rows: Vec<Vec<String>> = groups
+                .iter()
+                .map(|group| {
+                    vec![
+                        group.id.to_string(),
+                        group.name.clone(),
+                        group.members.len().to_string(),
+                    ]
+                })
+                .collect();
+            output.section(format!("Your Chat Groups ({})", rows.len()));
+            output.table(&["ID", "Name", "Members"], &rows);
         }
 
         ChatCommands::Show {
@@ -138,35 +89,29 @@ pub async fn handle_chat(
                 .await?
                 .ok_or_else(|| TerminalError::NotFound(format!("Group not found: {group_id}")))?;
 
-            ConsoleEffects::log_info(ctx.effects(), &format!("=== {} ===", group.name)).await?;
-            ConsoleEffects::log_info(ctx.effects(), &format!("ID: {}", group.id)).await?;
+            output.section(&group.name);
+            output.kv("ID", group.id.to_string());
             if let Some((context_id, channel_id)) = chat.group_transport_ids(&group_id).await? {
-                ConsoleEffects::log_info(ctx.effects(), &format!("Context: {context_id}")).await?;
-                ConsoleEffects::log_info(ctx.effects(), &format!("Channel: {channel_id}")).await?;
+                output.kv("Context", context_id.to_string());
+                output.kv("Channel", channel_id.to_string());
             }
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("Description: {}", group.description),
-            )
-            .await?;
-            ConsoleEffects::log_info(ctx.effects(), &format!("Created by: {}", group.created_by))
-                .await?;
+            output.kv("Description", &group.description);
+            output.kv("Created by", group.created_by.to_string());
 
             if *show_members {
-                ConsoleEffects::log_info(ctx.effects(), "\nMembers:").await?;
-                for member in &group.members {
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!("  - {} ({:?})", member.nickname_suggestion, member.role),
-                    )
-                    .await?;
-                }
+                output.section("Members");
+                let rows: Vec<Vec<String>> = group
+                    .members
+                    .iter()
+                    .map(|m| vec![m.nickname_suggestion.clone(), format!("{:?}", m.role)])
+                    .collect();
+                output.table(&["Name", "Role"], &rows);
             }
 
             if *show_metadata && !group.metadata.is_empty() {
-                ConsoleEffects::log_info(ctx.effects(), "\nMetadata:").await?;
+                output.section("Metadata");
                 for (k, v) in &group.metadata {
-                    ConsoleEffects::log_info(ctx.effects(), &format!("  {k}: {v}")).await?;
+                    output.kv(k, v);
                 }
             }
         }
@@ -174,41 +119,33 @@ pub async fn handle_chat(
         ChatCommands::Invite {
             group_id,
             authority_id: member_to_add,
-            role: _,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             chat.add_member(&group_id, authority_id, *member_to_add)
                 .await?;
-
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("Added {member_to_add} to group {group_id}"),
-            )
-            .await?;
+            output.println(format!("Added {member_to_add} to group {group_id}"));
         }
 
-        ChatCommands::Leave { group_id, force: _ } => {
+        ChatCommands::Leave { group_id } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
+            confirmed(&format!("Leave group {group_id}?"), assume_yes)?;
             chat.remove_member(&group_id, authority_id, authority_id)
                 .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), &format!("Left group {group_id}")).await?;
+            output.println(format!("Left group {group_id}"));
         }
 
         ChatCommands::Remove {
             group_id,
             member_id,
-            force: _,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
+            confirmed(
+                &format!("Remove {member_id} from group {group_id}?"),
+                assume_yes,
+            )?;
             chat.remove_member(&group_id, authority_id, *member_id)
                 .await?;
-
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("Removed {member_id} from group {group_id}"),
-            )
-            .await?;
+            output.println(format!("Removed {member_id} from group {group_id}"));
         }
 
         ChatCommands::Update {
@@ -218,26 +155,18 @@ pub async fn handle_chat(
             metadata,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
-
-            // Parse metadata key=value pairs
             let meta_map: Option<HashMap<String, String>> = if metadata.is_empty() {
                 None
             } else {
-                Some(
-                    metadata
-                        .iter()
-                        .filter_map(|s| {
-                            let parts: Vec<&str> = s.splitn(2, '=').collect();
-                            if parts.len() == 2 {
-                                Some((parts[0].to_string(), parts[1].to_string()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                )
+                let mut map = HashMap::new();
+                for pair in metadata {
+                    let (k, v) = pair.split_once('=').ok_or_else(|| {
+                        TerminalError::Input(format!("metadata must be key=value, got {pair}"))
+                    })?;
+                    map.insert(k.to_string(), v.to_string());
+                }
+                Some(map)
             };
-
             let group = chat
                 .update_group_details(
                     &group_id,
@@ -247,9 +176,7 @@ pub async fn handle_chat(
                     meta_map,
                 )
                 .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), &format!("Updated group: {}", group.name))
-                .await?;
+            output.kv("Updated group", &group.name);
         }
 
         ChatCommands::Search {
@@ -258,36 +185,19 @@ pub async fn handle_chat(
             limit,
             sender,
         } => {
-            if let Some(gid) = group_id {
-                let group_id = ChatGroupId::from_uuid(*gid);
-                let results = chat
-                    .search_messages(&group_id, query, *limit, sender.as_ref())
-                    .await?;
-
-                if results.is_empty() {
-                    ConsoleEffects::log_info(ctx.effects(), "No messages found").await?;
-                } else {
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!("=== Search Results ({}) ===", results.len()),
-                    )
-                    .await?;
-
-                    for msg in results {
-                        ConsoleEffects::log_info(
-                            ctx.effects(),
-                            &format!("[{}] {}", msg.id, msg.content),
-                        )
-                        .await?;
-                    }
-                }
-            } else {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    "Please specify a group ID with --group-id to search",
-                )
+            let group_id = group_id.ok_or_else(|| {
+                TerminalError::Input("specify a group with --group-id to search".into())
+            })?;
+            let group_id = ChatGroupId::from_uuid(group_id);
+            let results = chat
+                .search_messages(&group_id, query, *limit, sender.as_ref())
                 .await?;
-            }
+            let rows: Vec<Vec<String>> = results
+                .iter()
+                .map(|msg| vec![msg.id.to_string(), msg.content.clone()])
+                .collect();
+            output.section(format!("Search Results ({})", rows.len()));
+            output.table(&["ID", "Message"], &rows);
         }
 
         ChatCommands::Edit {
@@ -300,39 +210,35 @@ pub async fn handle_chat(
             let msg = chat
                 .edit_message(&group_id, authority_id, &message_id, content)
                 .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), &format!("Message {} updated", msg.id)).await?;
+            output.kv("Message updated", msg.id.to_string());
         }
 
         ChatCommands::Delete {
             group_id,
             message_id,
-            force: _,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             let message_id = ChatMessageId::from_uuid(*message_id);
+            confirmed(&format!("Delete message {message_id}?"), assume_yes)?;
             chat.delete_message(&group_id, authority_id, &message_id)
                 .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), "Message deleted").await?;
+            output.println("Message deleted");
         }
 
         ChatCommands::Export {
             group_id,
-            output,
+            output: path,
             format,
             include_system,
         } => {
             let group_id = ChatGroupId::from_uuid(*group_id);
             let history = chat.get_history(&group_id, None, None).await?;
-            let include_system = *include_system;
             let filtered_history = history
                 .into_iter()
-                .filter(|message| include_system || !message.is_system())
+                .filter(|message| *include_system || !message.is_system())
                 .collect::<Vec<_>>();
 
-            let format = format.to_lowercase();
-            let body = match format.as_str() {
+            let body = match format.to_lowercase().as_str() {
                 "json" => serde_json::to_string_pretty(&filtered_history).map_err(|error| {
                     TerminalError::Operation(format!("Failed to serialize chat export: {error}"))
                 })?,
@@ -381,7 +287,7 @@ pub async fn handle_chat(
                 }
             };
 
-            let output_path = Path::new(output);
+            let output_path = Path::new(path);
             if let Some(parent) = output_path
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty())
@@ -399,18 +305,11 @@ pub async fn handle_chat(
                     output_path.display()
                 ))
             })?;
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!(
-                    "Exported {} chat messages from group {} to {}",
-                    filtered_history.len(),
-                    group_id,
-                    output_path.display()
-                ),
-            )
-            .await?;
+            output.kv("Exported messages", filtered_history.len().to_string());
+            output.kv("Group", group_id.to_string());
+            output.kv("File", output_path.display().to_string());
         }
     }
 
-    Ok(())
+    Ok(output)
 }

@@ -38,7 +38,7 @@
 //! - **Easy to debug**: Full visibility into captured output
 
 use crate::error::TerminalResult;
-use crate::handlers::{CliHandler, EffectContext};
+use crate::handlers::{CliHandler, CliOutput, EffectContext};
 use crate::{ids, ContextAction, RecoveryAction};
 
 use async_lock::RwLock;
@@ -146,22 +146,17 @@ impl CliTestHarness {
     // Command execution methods
     // =========================================================================
 
+    fn capture(&mut self, output: CliOutput) {
+        self.output = CapturedOutput {
+            stdout: output.stdout_lines(),
+            stderr: output.stderr_lines(),
+        };
+    }
+
     /// Execute the version command
+    #[allow(clippy::unused_async)]
     pub async fn exec_version(&mut self) -> TerminalResult<()> {
-        self.clear_output();
-        // Version command prints directly, so we capture it
-        // For now, we'll run it and note the output comes from println!
-        self.handler.handle_version().await?;
-        // Since version uses println!, we mark that output was produced
-        self.output
-            .stdout
-            .push(format!("aura {}", env!("CARGO_PKG_VERSION")));
-        self.output
-            .stdout
-            .push(format!("Package: {}", env!("CARGO_PKG_NAME")));
-        self.output
-            .stdout
-            .push(format!("Description: {}", env!("CARGO_PKG_DESCRIPTION")));
+        self.capture(crate::handlers::version::version_output());
         Ok(())
     }
 
@@ -173,30 +168,39 @@ impl CliTestHarness {
         output_path: &std::path::Path,
     ) -> TerminalResult<()> {
         self.clear_output();
-        self.handler
+        let output = self
+            .handler
             .handle_init(num_devices, threshold, output_path)
-            .await
+            .await?;
+        self.capture(output);
+        Ok(())
     }
 
     /// Execute the status command
     pub async fn exec_status(&mut self, config_path: &std::path::Path) -> TerminalResult<()> {
         self.clear_output();
-        self.handler.handle_status(config_path).await
+        let output = self.handler.handle_status(config_path).await?;
+        self.capture(output);
+        Ok(())
     }
 
     /// Execute the recovery command
     pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> TerminalResult<()> {
         self.clear_output();
-        self.handler.handle_recovery(action).await
+        let output = self.handler.handle_recovery(action).await?;
+        self.capture(output);
+        Ok(())
     }
 
     /// Execute the authority list command
     pub async fn exec_authority_list(&mut self) -> TerminalResult<()> {
         self.clear_output();
-        use crate::AuthorityCommands;
-        self.handler
-            .handle_authority(&AuthorityCommands::List)
-            .await
+        let output = self
+            .handler
+            .handle_authority(&crate::AuthorityCommands::List)
+            .await?;
+        self.capture(output);
+        Ok(())
     }
 
     /// Execute the context inspect command
@@ -210,7 +214,9 @@ impl CliTestHarness {
             context: context_id,
             state_file: state_file.to_path_buf(),
         };
-        self.handler.handle_context(&action).await
+        let output = self.handler.handle_context(&action).await?;
+        self.capture(output);
+        Ok(())
     }
 
     /// Execute the context receipts command
@@ -226,7 +232,9 @@ impl CliTestHarness {
             state_file: state_file.to_path_buf(),
             detailed,
         };
-        self.handler.handle_context(&action).await
+        let output = self.handler.handle_context(&action).await?;
+        self.capture(output);
+        Ok(())
     }
 
     // =========================================================================
