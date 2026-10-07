@@ -180,8 +180,22 @@ opt-level = "s"
 
 [profile.dev]
 opt-level = 0
-debug = true
+# Line tables keep file:line backtraces for workspace crates at a fraction
+# of full DWARF's size; use `CARGO_PROFILE_DEV_DEBUG=true` for a debugger.
+debug = "line-tables-only"
 incremental = false
+
+# Third-party dependencies: no debuginfo (most of target/debug's size) and
+# light optimization, since tests run real FROST/DKG/AEAD on them.
+[profile.dev.package."*"]
+debug = false
+opt-level = 1
+
+[profile.dev.package.curve25519-dalek]
+opt-level = 2
+
+[profile.dev.package.frost-ed25519]
+opt-level = 2
 
 [profile.wasm]
 inherits = "release"
