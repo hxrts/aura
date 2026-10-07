@@ -27,6 +27,8 @@ remote_platform="$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" 'uname -sm')"
 }
 
 if [ "$build" = 1 ]; then
+  # Approved cleanup: keep the shared target under budget before release builds.
+  nix develop -c cargo sweep --maxsize 20GiB . >/dev/null 2>&1 || true
   for lane in terminal-live web-live; do
     AURA_EXPECT_COMMIT="$commit" nix develop -c bash "$here/build.sh" "$lane"
   done
