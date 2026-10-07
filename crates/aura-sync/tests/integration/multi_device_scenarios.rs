@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 /// Test complete partition healing and recovery workflow
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
     let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
@@ -103,7 +103,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
 }
 
 /// Test coordinated multi-protocol sync workflow
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_multi_protocol_coordination() -> AuraResult<()> {
     let fixture = ScenarioBuilder::threshold_group().build().await?;
 
@@ -197,7 +197,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
 }
 
 /// Test large-scale device coordination (stress test)
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_large_scale_device_coordination() -> AuraResult<()> {
     // Create larger device set for stress testing
     let fixture = ScenarioBuilder::new(8).build().await?; // 8 devices
@@ -278,7 +278,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
 }
 
 /// Test recovery from multiple concurrent failures
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_concurrent_failure_recovery() -> AuraResult<()> {
     let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
@@ -432,7 +432,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
 }
 
 /// Test end-to-end workflow with all protocol features
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
     let mut fixture = ScenarioBuilder::threshold_group().build().await?;
 
