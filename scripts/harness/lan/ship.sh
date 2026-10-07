@@ -61,7 +61,7 @@ for f in "$terminal_out/bin/aura" "$harness_out/bin/tool_repl" "$web_public/inde
 done
 
 remote_program="${AURA_NIX_REMOTE_PROGRAM:-/nix/var/nix/profiles/default/bin/nix-daemon}"
-"$nix_bin" copy --to "ssh-ng://$AURA_E2E_REMOTE?remote-program=$remote_program" \
+"$nix_bin" copy --no-check-sigs --to "ssh-ng://$AURA_E2E_REMOTE?remote-program=$remote_program" \
   "$terminal_out" "$harness_out"
 
 remote_root="$AURA_E2E_REMOTE_ROOT"
