@@ -234,6 +234,10 @@
             cargo-audit
             cargoDeny
             cargo-sweep
+            # Shared compiler cache for every Aura worktree (opt out: AURA_NO_SCCACHE=1)
+            sccache
+            # Local test runner (not used by gates; their parsers read libtest output)
+            cargo-nextest
 
             # WASM tools
             wasm-pack
@@ -299,6 +303,15 @@
             export CARGO_TARGET_DIR="$PWD/target"
             export AURA_WORKSPACE_ROOT="$PWD"
             export AURA_CARGO_DENY_BIN="${cargoDeny}/bin/cargo-deny"
+            # One sccache store shared by every Aura worktree and checkout.
+            # Non-incremental builds (the default) are cached; with
+            # CARGO_INCREMENTAL=1 sccache passes compilations through.
+            # AURA_NO_SCCACHE=1 opts out, at shell entry or per cargo command.
+            if [ "''${AURA_NO_SCCACHE:-0}" != 1 ]; then
+              export RUSTC_WRAPPER=sccache
+              export SCCACHE_DIR="''${SCCACHE_DIR:-$HOME/.cache/aura-sccache}"
+              export SCCACHE_CACHE_SIZE="''${SCCACHE_CACHE_SIZE:-10G}"
+            fi
             if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
               echo "Aura Development Environment"
               echo "============================"

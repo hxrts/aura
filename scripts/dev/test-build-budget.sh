@@ -22,6 +22,8 @@ export OPEN_TARGET_FILE="$test_root/open-target"
 export DU_FAIL_ONCE_FILE="$test_root/du-fail-once"
 export DU_EMPTY_FILE="$test_root/du-empty"
 export AURA_BUILD_TARGET_CAP_GIB=8
+export PROJECT_ROOT="$project"
+export AURA_BUILD_SHARED_DIR="$test_root/shared"
 export PATH="$fakebin:$PATH"
 
 cat > "$fakebin/df" <<'EOF'
@@ -41,7 +43,7 @@ fi
 EOF
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
-[[ ! -f "$ACTIVE_FILE" ]] || printf '999 %s\n' "$(cat "$ACTIVE_FILE")"
+[[ ! -f "$ACTIVE_FILE" ]] || printf '999 %s --out-dir %s/target/debug/deps\n' "$(cat "$ACTIVE_FILE")" "${ACTIVE_ROOT:-$PROJECT_ROOT}"
 EOF
 cat > "$fakebin/lsof" <<'EOF'
 #!/usr/bin/env bash
@@ -270,5 +272,32 @@ if kill -0 "$(cat "$CHILD_PID_FILE")" 2>/dev/null; then
   exit 1
 fi
 [[ ! -d "$project/target/.aura-build-budget.lock" ]]
+
+# A sibling worktree's builder does not block this checkout.
+reset_case
+printf 'rustc\n' > "$ACTIVE_FILE"
+expect_status 0 env ACTIVE_ROOT="$test_root/sibling" bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test -- sh -c 'exit 0'
+
+# Cargo output goes to this checkout's target even if the shell named another.
+reset_case
+expect_status 0 env CARGO_TARGET_DIR=/elsewhere/target bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'test "$CARGO_TARGET_DIR" = "$PROJECT_ROOT/target"'
+
+# A live reservation of another admitted build counts against the volume
+# floor (20 GiB free - 6 GiB reserved < 15 GiB); a dead one is reclaimed.
+reset_case
+mkdir -p "$AURA_BUILD_SHARED_DIR/reservations"
+sleep 30 &
+holder_pid=$!
+printf '%s\n' $((6 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$holder_pid"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.build-ran"'
+[[ ! -e "$FREE_FILE.build-ran" ]]
+rg -q 'other admitted builds' "$test_root/output"
+kill "$holder_pid"; wait "$holder_pid" 2>/dev/null || true
+expect_status 0 run_budget --no-prune -- sh -c 'ls "$AURA_BUILD_SHARED_DIR/reservations" > "$FREE_FILE.during"'
+[[ "$(wc -l < "$FREE_FILE.during")" -eq 1 ]] # Only this build's own reservation.
+[[ -z "$(ls -A "$AURA_BUILD_SHARED_DIR/reservations")" ]] # Released on exit.
+[[ ! -d "$AURA_BUILD_SHARED_DIR/admission.lock" ]]
 
 echo 'build-budget safety tests passed'

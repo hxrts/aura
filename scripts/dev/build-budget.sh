@@ -9,10 +9,12 @@ lane=manual
 dry_run=0
 allow_live_harness=0
 no_prune=0
-cap_gib="${AURA_BUILD_TARGET_CAP_GIB:-24}"
+cap_gib="${AURA_BUILD_TARGET_CAP_GIB:-10}"
 min_free_gib="${AURA_BUILD_MIN_FREE_GIB:-15}"
 emergency_gib="${AURA_BUILD_EMERGENCY_FREE_GIB:-5}"
 poll_seconds="${AURA_BUILD_POLL_SECONDS:-2}"
+reserve_gib="${AURA_BUILD_RESERVE_GIB:-4}"
+shared_dir="${AURA_BUILD_SHARED_DIR:-$HOME/.cache/aura-build}"
 # Debug caches accumulate across rebuilds. Keep the measured bounded default,
 # with an explicit opt-in for workloads that benefit from incremental reuse.
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
@@ -25,9 +27,12 @@ usage() {
 Usage: build-budget.sh [--root PATH] [--lane NAME] [--dry-run]
                        [--allow-live-harness] [--no-prune] -- COMMAND [ARGS...]
 
-Defaults: target soft cap 24 GiB, admission floor 15 GiB free, emergency floor
+Defaults: per-checkout target soft cap 10 GiB, volume admission floor 15 GiB free
+(after other admitted builds' 4 GiB reservations), emergency floor
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
-AURA_BUILD_EMERGENCY_FREE_GIB (integer GiB). Run inside nix develop.
+AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (integer GiB) and
+AURA_BUILD_SHARED_DIR (default ~/.cache/aura-build). Run inside nix develop.
+Cargo output always goes to this checkout's target/ (CARGO_TARGET_DIR is set).
 Incremental compilation defaults to 0; set CARGO_INCREMENTAL=1 to opt in.
 EOF
 }
@@ -47,12 +52,15 @@ done
 
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo "build-budget: no Cargo.toml in $root" >&2; exit 2; }
+# Cargo writes to this checkout's target/ even when the shell exported
+# another checkout's CARGO_TARGET_DIR (the dev shell sets it at entry).
+export CARGO_TARGET_DIR="$root/target"
 [[ ! -L "$root/target" ]] || { echo 'build-budget: target is a symlink; refusing' >&2; exit 1; }
 if [[ "$dry_run" -eq 0 && "$#" -eq 0 ]]; then
   echo 'build-budget: command required after --' >&2
   exit 2
 fi
-for value in "$cap_gib" "$min_free_gib" "$emergency_gib" "$poll_seconds"; do
+for value in "$cap_gib" "$min_free_gib" "$emergency_gib" "$poll_seconds" "$reserve_gib"; do
   [[ "$value" =~ ^[0-9]+$ ]] || { echo 'build-budget: budgets and poll interval must be whole numbers' >&2; exit 2; }
 done
 (( cap_gib > 0 && min_free_gib > emergency_gib && emergency_gib > 0 && poll_seconds > 0 )) || {
@@ -77,15 +85,60 @@ cap_kib=$((cap_gib * 1024 * 1024))
 min_free_kib=$((min_free_gib * 1024 * 1024))
 emergency_kib=$((emergency_gib * 1024 * 1024))
 
+# Only this checkout's builders and harness consumers block its sweeps;
+# sibling worktrees build concurrently against their own target/.
+source "$repo_root/scripts/dev/scoped-builders.sh"
 active_consumers() {
-  ps -axo pid=,comm= | awk -v own="$$" -v allow="$allow_live_harness" '
-    {
-      pid=$1; name=$2; sub(/^.*\//, "", name);
-      builder = (name ~ /^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep)$/);
-      harness = (name ~ /^(tool_repl|aura-harness|aura)$/);
-      if (pid != own && (builder || (!allow && harness)))
-        printf "%s(%s) ", name, pid
-    }'
+  local names='cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep'
+  (( allow_live_harness == 1 )) || names="$names|tool_repl|aura-harness|aura"
+  aura_scoped_processes "$root" "$names" "$$"
+}
+
+# Volume-wide admission shared by every checkout on this machine. Each
+# admitted build holds a reservation of its expected growth until it exits; a
+# new build is admitted only if free space minus other live reservations stays
+# above the floor. The admission lock is held only while checking and
+# reserving, never during the build.
+reservation=''
+other_reservations_kib() {
+  local file pid total=0 kib
+  for file in "$shared_dir"/reservations/*; do
+    [[ -f "$file" ]] || continue
+    pid="${file##*/}"
+    if [[ ! "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$file"; continue
+    fi
+    [[ "$pid" == "$$" ]] && continue
+    kib="$(awk 'NR == 1 {print $1}' "$file")"
+    [[ "$kib" =~ ^[0-9]+$ ]] && total=$((total + kib))
+  done
+  printf '%s\n' "$total"
+}
+admit_build() {
+  local lock="$shared_dir/admission.lock" attempt holder free others
+  mkdir -p "$shared_dir/reservations"
+  for attempt in $(seq 1 50); do
+    if mkdir "$lock" 2>/dev/null; then break; fi
+    holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null || true
+    fi
+    sleep 0.2
+  done
+  [[ -d "$lock" ]] || { echo "build-budget: admission lock busy: $lock" >&2; return 1; }
+  printf '%s\n' "$$" > "$lock/pid"
+  free="$(free_kib)"
+  others="$(other_reservations_kib)"
+  printf 'Admission: free=%s KiB other-reservations=%s KiB reserve=%s GiB floor=%s GiB\n' \
+    "$free" "$others" "$reserve_gib" "$min_free_gib"
+  if (( free - others < min_free_kib )); then
+    rm -f "$lock/pid"; rmdir "$lock"
+    echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free after other admitted builds' reservations" >&2
+    return 1
+  fi
+  reservation="$shared_dir/reservations/$$"
+  printf '%s\n' $((reserve_gib * 1024 * 1024)) > "$reservation"
+  rm -f "$lock/pid"; rmdir "$lock"
 }
 require_idle() {
   local found
@@ -197,6 +250,7 @@ cleanup() {
     stop_owned_group "$child_pid"
     wait "$child_pid" 2>/dev/null || true
   fi
+  [[ -z "$reservation" ]] || rm -f "$reservation"
   rm -f "$lock_dir/pid"
   rmdir "$lock_dir" 2>/dev/null || true
 }
@@ -221,10 +275,7 @@ fi
 pre_free="$(free_kib)"
 pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
-if (( pre_free < min_free_kib )); then
-  echo "build-budget: insufficient headroom: need ${min_free_gib} GiB free before building" >&2
-  exit 1
-fi
+admit_build || exit 1
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 profile="${AURA_BUILD_PROFILE:-unlabelled}"

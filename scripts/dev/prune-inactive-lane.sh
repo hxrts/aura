@@ -14,13 +14,20 @@ while [[ $# -gt 0 ]]; do
     --dry-run) mode=dry; shift ;;
     --apply) mode=apply; shift ;;
     --lock-owned-by) lock_owner="${2:?missing owner pid}"; shift 2 ;;
-    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|wasm-debug|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
+    *) echo 'usage: prune-inactive-lane.sh --lane debug|debug-incremental|trybuild|trybuild-host-triple|kani|wasm-debug|wasm-release|wasm-host-release|dylint|release [--root PATH] [--dry-run|--apply]' >&2; exit 2 ;;
   esac
 done
 case "$lane" in
   debug) relative=target/debug ;;
   debug-incremental) relative=target/debug/incremental ;;
   trybuild) relative=target/tests/trybuild ;;
+  # trybuild keeps one extra tree per explicit --target triple; the host-triple
+  # tree duplicates the default tree whenever some lane passed --target.
+  trybuild-host-triple)
+    host_triple="${AURA_BUILD_TARGET_TRIPLE:-$(rustc -vV 2>/dev/null | awk '/^host: / {print $2}' || true)}"
+    [[ "$host_triple" =~ ^[A-Za-z0-9_.-]+$ ]] || { echo 'cannot determine host triple' >&2; exit 2; }
+    relative="target/tests/trybuild/$host_triple" ;;
+  kani) relative=target/kani ;;
   wasm-debug) relative=target/wasm32-unknown-unknown/debug ;;
   wasm-release) relative=target/wasm32-unknown-unknown/wasm-release ;;
   wasm-host-release) relative=target/wasm-release ;;
@@ -37,7 +44,7 @@ path="$root/$relative"
 if [[ "$lane" == debug-incremental && -L "$root/target/debug" ]]; then
   echo 'debug parent is a symlink' >&2; exit 1
 fi
-if [[ "$lane" == trybuild && -L "$root/target/tests" ]]; then
+if [[ "$lane" == trybuild* && -L "$root/target/tests" ]]; then
   echo 'trybuild parent is a symlink' >&2; exit 1
 fi
 [[ ! -L "$path" ]] || { echo "lane is a symlink: $path" >&2; exit 1; }
@@ -57,10 +64,12 @@ else
   mkdir "$lock_dir" 2>/dev/null || { echo 'another build or prune holds target lock' >&2; exit 1; }
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 fi
-builders="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep)$/)printf "%s(%s) ",n,$1}')"
+# Only this checkout's builders block it; sibling worktrees build independently.
+source "$repo_root/scripts/dev/scoped-builders.sh"
+builders="$(aura_scoped_processes "$root" 'cargo|rustc|rustdoc|dx|cargo-dylint|cargo-sweep|cargo-kani|kani-driver' "$$")"
 [[ -z "$builders" ]] || { echo "builder active: $builders" >&2; exit 1; }
 if [[ "$lane" == release || "$lane" == wasm-release || "$lane" == wasm-host-release ]]; then
-  consumers="$(ps -axo pid=,comm= | awk '{n=$2;sub(/^.*\//,"",n);if(n~/^(tool_repl|aura-harness|aura)$/)printf "%s(%s) ",n,$1}')"
+  consumers="$(aura_scoped_processes "$root" 'tool_repl|aura-harness|aura' "$$")"
   [[ -z "$consumers" ]] || { echo "harness consumer active: $consumers" >&2; exit 1; }
 fi
 open_files="$(lsof -n -P 2>/dev/null)" || { echo 'cannot inspect open files' >&2; exit 1; }
@@ -72,7 +81,7 @@ fi
 [[ -d "$path" && ! -L "$path" && ! -L "$root/target" ]] || { echo 'lane changed during preflight' >&2; exit 1; }
 [[ ! -L "$root/target/wasm32-unknown-unknown" ]] || { echo 'wasm parent changed during preflight' >&2; exit 1; }
 [[ "$lane" != debug-incremental || ! -L "$root/target/debug" ]] || { echo 'debug parent changed during preflight' >&2; exit 1; }
-[[ "$lane" != trybuild || ! -L "$root/target/tests" ]] || { echo 'trybuild parent changed during preflight' >&2; exit 1; }
+[[ "$lane" != trybuild* || ! -L "$root/target/tests" ]] || { echo 'trybuild parent changed during preflight' >&2; exit 1; }
 printf 'Removing whole inactive lane: %s (%s KiB)\n' "$path" "$size"
 rm -rf -- "$path"
 printf 'Free after: %s KiB\n' "$(df -Pk "$root" | awk 'NR == 2 {print $4}')"
