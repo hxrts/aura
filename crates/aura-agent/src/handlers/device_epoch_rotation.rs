@@ -34,10 +34,10 @@ use aura_sync::protocols::device_epoch_rotation::{
     device_epoch_proposal_hash, encrypt_device_epoch_key_package,
     verify_device_epoch_authority_signature, verify_device_epoch_proposal_hashes,
     DeviceEnrollmentEpochCommitTranscript, DeviceEnrollmentEpochCommitTranscriptPayload,
-    DeviceEpochAcceptance, DeviceEpochAcceptanceTranscript,
-    DeviceEpochAcceptanceTranscriptPayload, DeviceEpochCommit,
-    DeviceEpochCommitTranscript, DeviceEpochCommitTranscriptPayload, DeviceEpochProposal,
-    DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage, MAX_DEVICE_EPOCH_COMMIT_BYTES,
+    DeviceEpochAcceptance, DeviceEpochAcceptanceTranscript, DeviceEpochAcceptanceTranscriptPayload,
+    DeviceEpochCommit, DeviceEpochCommitTranscript, DeviceEpochCommitTranscriptPayload,
+    DeviceEpochProposal, DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage,
+    MAX_DEVICE_EPOCH_COMMIT_BYTES,
 };
 use aura_sync::protocols::DeviceEpochRotationKind;
 use std::{collections::BTreeMap, fmt};
