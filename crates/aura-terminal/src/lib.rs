@@ -303,11 +303,11 @@ pub enum RecoveryAction {
 /// Invitation subcommands.
 #[derive(Debug, Clone)]
 pub enum InvitationAction {
-    /// Create a device invitation envelope and broadcast it.
+    /// Create a contact, guardian or channel invitation.
     Create {
         /// Account identifier.
         account: String,
-        /// Device ID of the invitee.
+        /// Authority ID of the invitee.
         invitee: String,
         /// Role granted to the invitee.
         role: String,

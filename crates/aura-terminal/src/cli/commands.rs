@@ -333,10 +333,10 @@ fn recovery_command() -> impl Parser<Commands> {
 fn invite_command() -> impl Parser<Commands> {
     let create = {
         let account = long("account")
-            .help("Account identifier")
+            .help("Subject account authority (the guardian role protects it)")
             .argument::<String>("ACCOUNT");
         let invitee = long("invitee")
-            .help("Device ID of the invitee")
+            .help("Authority ID of the invitee")
             .argument::<String>("INVITEE");
         let role = long("role")
             .help("Role granted to the invitee")
@@ -354,7 +354,7 @@ fn invite_command() -> impl Parser<Commands> {
         })
         .to_options()
         .command("create")
-        .help("Invite a device to join this account")
+        .help("Invite an authority as a contact, guardian or channel member")
     };
 
     let accept = {
@@ -409,13 +409,13 @@ fn invite_command() -> impl Parser<Commands> {
         construct!(InvitationAction::Import { code })
             .to_options()
             .command("import")
-            .help("Import and display details of a shareable invite code")
+            .help("Import a shareable invite code and show its details")
     };
 
     construct!([create, accept, decline, cancel, list, export, import])
         .to_options()
         .command("invite")
-        .help("Device invitations")
+        .help("Contact, guardian and channel invitations")
         .map(|action| Commands::Invite { action })
 }
 
