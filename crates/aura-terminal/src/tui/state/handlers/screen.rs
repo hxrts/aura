@@ -447,6 +447,20 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 commands.push(TuiCommand::Dispatch(DispatchCommand::OpenMfaSetup));
             }
         }
+        KeyCode::Char('c') => {
+            if state.settings.section == SettingsSection::Authority {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::ToggleSigningConsent));
+            }
+        }
+        KeyCode::Char('y') | KeyCode::Char('n') => {
+            if state.settings.section == SettingsSection::Authority {
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::DecideSigningRequest {
+                        approve: key.code == KeyCode::Char('y'),
+                    },
+                ));
+            }
+        }
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
                 // Open nickname suggestion edit modal via queue

@@ -34,9 +34,10 @@ use aura_sync::protocols::device_epoch_rotation::{
     device_epoch_proposal_hash, encrypt_device_epoch_key_package,
     verify_device_epoch_authority_signature, verify_device_epoch_proposal_hashes,
     DeviceEnrollmentEpochCommitTranscript, DeviceEnrollmentEpochCommitTranscriptPayload,
-    DeviceEpochAcceptance, DeviceEpochCommit, DeviceEpochCommitTranscript,
-    DeviceEpochCommitTranscriptPayload, DeviceEpochProposal, DeviceEpochProposalTranscript,
-    EncryptedDeviceEpochKeyPackage, MAX_DEVICE_EPOCH_COMMIT_BYTES,
+    DeviceEpochAcceptance, DeviceEpochAcceptanceTranscript,
+    DeviceEpochAcceptanceTranscriptPayload, DeviceEpochCommit,
+    DeviceEpochCommitTranscript, DeviceEpochCommitTranscriptPayload, DeviceEpochProposal,
+    DeviceEpochProposalTranscript, EncryptedDeviceEpochKeyPackage, MAX_DEVICE_EPOCH_COMMIT_BYTES,
 };
 use aura_sync::protocols::DeviceEpochRotationKind;
 use std::{collections::BTreeMap, fmt};
@@ -251,8 +252,9 @@ impl DeviceEpochRotationService {
             if let Some(blocked) = round.blocked_receive {
                 let decoded: DeviceEpochAcceptance =
                     from_slice(&blocked.payload).map_err(map_decode_error)?;
-                let verified_acceptance =
-                    verified_device_epoch_acceptance(&request, &proposal, decoded)?;
+                let verified_acceptance = self
+                    .verified_device_epoch_acceptance(&request, &proposal, decoded)
+                    .await?;
                 acceptance = Some(verified_acceptance.clone());
                 let threshold_reached = self
                     .ceremony_runner
@@ -430,7 +432,7 @@ impl DeviceEpochRotationService {
     ) -> AgentResult<aura_core::threshold::ThresholdSignature> {
         let payload = transcript.transcript_bytes().map_err(map_internal_error)?;
         self.signing_service
-            .sign(SigningContext::message(
+            .sign_with_device_quorum(SigningContext::message(
                 self.authority_id,
                 domain.to_string(),
                 payload,
@@ -698,7 +700,7 @@ impl DeviceEpochRotationService {
         })?;
         self.effects.requeue_envelope(envelope);
 
-        let staged_proposal: Option<DeviceEpochProposal> = None;
+        let mut staged_proposal: Option<DeviceEpochProposal> = None;
 
         loop {
             let round = session
@@ -707,31 +709,37 @@ impl DeviceEpochRotationService {
                 .map_err(map_internal_error)?;
 
             if let Some(blocked) = round.blocked_receive {
-                if staged_proposal.is_none() {
-                    let proposal: DeviceEpochProposal =
-                        from_slice(&blocked.payload).map_err(map_decode_error)?;
-                    self.verify_device_epoch_proposal(&proposal, initiator_device_id, session_uuid)
-                        .await?;
-                    self.stage_proposal(&proposal).await?;
-                    let _ = session.close().await;
-                    return Err(AgentError::internal(
-                        "device epoch acceptance requires signed participant device proof; unsigned acceptances are disabled".to_string(),
-                    ));
-                } else {
+                if let Some(proposal) = staged_proposal.as_ref() {
                     if blocked.payload.len() > MAX_DEVICE_EPOCH_COMMIT_BYTES {
                         return Err(AgentError::invalid("oversized device epoch commit"));
                     }
                     let commit: DeviceEpochCommit =
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
-                    let proposal = staged_proposal
-                        .as_ref()
-                        .ok_or_else(|| AgentError::internal("missing staged proposal"))?;
                     self.apply_commit(proposal, &commit).await?;
                     self.record_native_session(session_uuid).await;
+                    // The commit is the participant's final protocol step;
+                    // the verified, applied commit completes its session.
+                    let _ = session.close().await;
+                    return Ok(true);
                 }
+                let proposal: DeviceEpochProposal =
+                    from_slice(&blocked.payload).map_err(map_decode_error)?;
+                self.verify_device_epoch_proposal(&proposal, initiator_device_id, session_uuid)
+                    .await?;
+                // An existing device accepts a rotation or removal with a
+                // proof of its current share; enrollment acceptance has its
+                // own signed path.
+                if proposal.kind == DeviceEpochRotationKind::Enrollment {
+                    let _ = session.close().await;
+                    return Err(enrollment_fence_failure(EnrollmentEpochFenceError::Binding));
+                }
+                self.stage_proposal(&proposal).await?;
+                let acceptance = self.build_signed_acceptance(&proposal).await?;
                 session
                     .inject_blocked_receive(&blocked)
                     .map_err(map_internal_error)?;
+                session.queue_send_bytes(to_vec(&acceptance).map_err(map_encode_error)?);
+                staged_proposal = Some(proposal);
                 continue;
             }
 
@@ -954,7 +962,6 @@ impl DeviceEpochRotationService {
     }
 
     async fn stage_proposal(&self, proposal: &DeviceEpochProposal) -> AgentResult<()> {
-        let participant = ParticipantIdentity::device(self.effects.device_id());
         let recipient_public_key = self
             .resolve_device_leaf_public_key(self.effects.device_id())
             .await?;
@@ -971,23 +978,14 @@ impl DeviceEpochRotationService {
         )
         .await
         .map_err(map_internal_error)?;
-        let location = SecureStorageLocation::with_sub_key(
-            "participant_shares",
-            format!("{}:{}", proposal.subject_authority, proposal.pending_epoch),
-            participant.storage_key(),
-        );
-
-        self.effects
-            .secure_store(
-                &location,
+        self.signing_service
+            .stage_rotated_device_share(
+                &proposal.subject_authority,
+                proposal.pending_epoch,
                 &key_package,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
             )
             .await
-            .map_err(map_internal_error)?;
+            .map_err(AgentError::from)?;
 
         let config_location = SecureStorageLocation::with_sub_key(
             "threshold_config",
@@ -1324,7 +1322,7 @@ impl DeviceEpochRotationService {
         };
         let signature = self
             .signing_service
-            .sign(SigningContext::self_tree_op(self.authority_id, op.clone()))
+            .sign_with_device_quorum(SigningContext::self_tree_op(self.authority_id, op.clone()))
             .await
             .map_err(map_internal_error)?;
         let attested = AttestedOp {
@@ -1348,7 +1346,7 @@ impl DeviceEpochRotationService {
         // crypto activation. Quorum signing follows the actual signing service.
         let fence_signature = self
             .signing_service
-            .sign(SigningContext::self_tree_op(
+            .sign_with_device_quorum(SigningContext::self_tree_op(
                 self.authority_id,
                 fence_op.clone(),
             ))
@@ -1598,15 +1596,136 @@ fn envelope_source_device_id(envelope: &TransportEnvelope) -> AgentResult<Device
     source.parse().map_err(map_internal_error)
 }
 
-fn verified_device_epoch_acceptance(
-    request: &DeviceEpochRotationInitRequest,
-    proposal: &DeviceEpochProposal,
-    acceptance: DeviceEpochAcceptance,
-) -> AgentResult<VerifiedIngress<DeviceEpochAcceptance>> {
-    let _ = (request, proposal, acceptance);
-    Err(AgentError::internal(
-        "device epoch acceptance verification requires signed participant-device proofs; unsigned acceptances are disabled".to_string(),
-    ))
+impl DeviceEpochRotationService {
+    /// This device's acceptance of `proposal`, proven with its current share
+    /// of the authority (the initiator checks it against that device's
+    /// verifying share in its own retained package).
+    async fn build_signed_acceptance(
+        &self,
+        proposal: &DeviceEpochProposal,
+    ) -> AgentResult<DeviceEpochAcceptance> {
+        use aura_signature::SecurityTranscript;
+        let accepted_at_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(map_internal_error)?
+            .ts_ms;
+        let payload = DeviceEpochAcceptanceTranscriptPayload {
+            ceremony_id: proposal.ceremony_id.clone(),
+            acceptor_device_id: self.effects.device_id(),
+            proposal_hash: device_epoch_proposal_hash(proposal).map_err(map_internal_error)?,
+            accepted_at_ms,
+        };
+        let message = DeviceEpochAcceptanceTranscript::from_payload(payload.clone())
+            .transcript_bytes()
+            .map_err(map_internal_error)?;
+        let possession = self
+            .signing_service
+            .prove_device_possession(&self.authority_id, &message)
+            .await
+            .map_err(AgentError::from)?;
+        Ok(DeviceEpochAcceptance {
+            ceremony_id: payload.ceremony_id,
+            acceptor_device_id: payload.acceptor_device_id,
+            proposal_hash: payload.proposal_hash,
+            accepted_at_ms: payload.accepted_at_ms,
+            signing_epoch: Some(possession.epoch),
+            signing_mode: Some(aura_core::crypto::single_signer::SigningMode::Threshold),
+            signing_index: Some(possession.index),
+            signing_package_digest: Some(possession.package_digest),
+            signature: possession.proof,
+        })
+    }
+
+    /// Admit a participant's acceptance of `proposal`: it names this
+    /// ceremony, the requested participant device and the exact proposal, and
+    /// carries a valid proof of that device's current share.
+    async fn verified_device_epoch_acceptance(
+        &self,
+        request: &DeviceEpochRotationInitRequest,
+        proposal: &DeviceEpochProposal,
+        acceptance: DeviceEpochAcceptance,
+    ) -> AgentResult<VerifiedIngress<DeviceEpochAcceptance>> {
+        use aura_signature::SecurityTranscript;
+        if request.kind == DeviceEpochRotationKind::Enrollment
+            || acceptance.ceremony_id != request.ceremony_id
+            || acceptance.acceptor_device_id != request.participant_device_id
+            || acceptance.proposal_hash
+                != device_epoch_proposal_hash(proposal).map_err(map_internal_error)?
+        {
+            return Err(AgentError::invalid(
+                "device epoch acceptance does not bind this ceremony, device and proposal",
+            ));
+        }
+        let (
+            Some(aura_core::crypto::single_signer::SigningMode::Threshold),
+            Some(epoch),
+            Some(index),
+            Some(package_digest),
+        ) = (
+            acceptance.signing_mode,
+            acceptance.signing_epoch,
+            acceptance.signing_index,
+            acceptance.signing_package_digest,
+        )
+        else {
+            return Err(AgentError::invalid(
+                "device epoch acceptance lacks its participant-device proof",
+            ));
+        };
+        let message = DeviceEpochAcceptanceTranscript::new(&acceptance)
+            .transcript_bytes()
+            .map_err(map_internal_error)?;
+        self.signing_service
+            .verify_device_possession(
+                &self.authority_id,
+                acceptance.acceptor_device_id,
+                &crate::runtime::services::threshold_signing::DevicePossessionProof {
+                    epoch,
+                    index,
+                    package_digest,
+                    proof: acceptance.signature.clone(),
+                },
+                &message,
+            )
+            .await
+            .map_err(AgentError::from)?;
+        let encoded = to_vec(&acceptance).map_err(map_encode_error)?;
+        let metadata = VerifiedIngressMetadata::new(
+            IngressSource::Device(acceptance.acceptor_device_id),
+            aura_core::types::identifiers::ContextId::new_from_entropy(hash::hash(
+                request.ceremony_id.as_str().as_bytes(),
+            )),
+            None,
+            Hash32::from_bytes(&encoded),
+            aura_protocol::messages::WIRE_FORMAT_VERSION,
+        );
+        let evidence = IngressVerificationEvidence::builder(metadata)
+            .peer_identity(true, "acceptance names the requested participant device")
+            .and_then(|builder| {
+                builder.envelope_authenticity(true, "acceptance carries a verified share proof")
+            })
+            .and_then(|builder| {
+                builder.capability_authorization(true, "acceptor is in the current device roster")
+            })
+            .and_then(|builder| builder.namespace_scope(true, "acceptance binds this ceremony"))
+            .and_then(|builder| builder.schema_version(true, "acceptance schema"))
+            .and_then(|builder| builder.replay_freshness(true, "acceptance binds this proposal"))
+            .and_then(|builder| {
+                builder.signer_membership(true, "proof verifies against the device's share")
+            })
+            .and_then(|builder| builder.proof_evidence(true, "participant possession proof"))
+            .and_then(|builder| builder.build())
+            .map_err(|error| {
+                AgentError::internal(format!("verify device epoch acceptance: {error}"))
+            })?;
+        DecodedIngress::new(acceptance, evidence.metadata().clone())
+            .verify(evidence)
+            .map_err(|error| {
+                AgentError::internal(format!("promote device epoch acceptance: {error}"))
+            })
+    }
 }
 
 fn verified_device_epoch_envelope(
@@ -1918,11 +2037,13 @@ mod tests {
             signature: vec![1; 64],
         };
 
-        let error = verified_device_epoch_acceptance(&request, &proposal, acceptance)
-            .expect_err("unsigned participant-device acceptance must fail closed");
+        let error = service
+            .verified_device_epoch_acceptance(&request, &proposal, acceptance)
+            .await
+            .expect_err("acceptance without a participant-device proof must fail closed");
         assert!(error
             .to_string()
-            .contains("unsigned acceptances are disabled"));
+            .contains("lacks its participant-device proof"));
     }
 
     #[tokio::test]

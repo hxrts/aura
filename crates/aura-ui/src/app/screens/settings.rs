@@ -299,6 +299,76 @@ pub(super) fn SettingsScreen(
                                 secondary: Some(format!("Policy: {}", runtime.mfa_policy)),
                                 active: false,
                             }
+                            UiListButton {
+                                label: format!(
+                                    "Co-signing (this device): {}",
+                                    match runtime.signing_consent {
+                                        aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser => "ask me",
+                                        aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified => "automatic",
+                                    }
+                                ),
+                                active: false,
+                                onclick: {
+                                    let controller = controller.clone();
+                                    let next = match runtime.signing_consent {
+                                        aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser => {
+                                            aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified
+                                        }
+                                        aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified => {
+                                            aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser
+                                        }
+                                    };
+                                    move |_| {
+                                        let controller = controller.clone();
+                                        let app_core = controller.app_core().clone();
+                                        spawn_ui(async move {
+                                            match aura_app::ui::workflows::settings::update_device_signing_consent(&app_core, next).await {
+                                                Ok(()) => controller.info_toast("Co-signing setting updated"),
+                                                Err(error) => controller.runtime_error_toast(error.to_string()),
+                                            }
+                                        });
+                                        render_tick.set(render_tick() + 1);
+                                    }
+                                }
+                            }
+                            for (request_id, device, operation) in runtime.pending_signing_requests.clone() {
+                                UiListItem {
+                                    label: format!(
+                                        "Co-signing request from {}",
+                                        device.chars().take(8).collect::<String>()
+                                    ),
+                                    secondary: Some(operation),
+                                    active: true,
+                                }
+                                div { class: "flex gap-2 justify-end",
+                                    for approve in [true, false] {
+                                        UiButton {
+                                            label: if approve { "Approve".to_string() } else { "Decline".to_string() },
+                                            variant: if approve { ButtonVariant::Primary } else { ButtonVariant::Secondary },
+                                            onclick: {
+                                                let controller = controller.clone();
+                                                let request_id = request_id.clone();
+                                                move |_| {
+                                                    let controller = controller.clone();
+                                                    let app_core = controller.app_core().clone();
+                                                    let request_id = request_id.clone();
+                                                    spawn_ui(async move {
+                                                        match aura_app::ui::workflows::settings::decide_pending_signing_request(&app_core, &request_id, approve).await {
+                                                            Ok(()) => controller.info_toast(if approve {
+                                                                "Co-signing request approved"
+                                                            } else {
+                                                                "Co-signing request declined"
+                                                            }),
+                                                            Err(error) => controller.runtime_error_toast(error.to_string()),
+                                                        }
+                                                    });
+                                                    render_tick.set(render_tick() + 1);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         UiCardFooter {
                             extra_class: None,

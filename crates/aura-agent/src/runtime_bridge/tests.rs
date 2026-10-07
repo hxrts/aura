@@ -2991,49 +2991,298 @@ fn runtime_enrollment_success_commits_on_both_sides_with_agreed_authority_packag
             hash(&invitee_package),
             "both devices must trust the same authority public package"
         );
-
-        // Tasks 33/35 (L9/K3): a device-threshold ceremony on the now 2-of-2
-        // authority reaches a typed terminal on the initiator instead of
-        // staying pending. Signing its proposal needs the coordinated quorum
-        // owner (QuorumOwnerRequired), so today that terminal is Failed;
-        // completing the rotation remains open under Task 33.
-        let status = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
-            &issuer_app,
-            aura_core::types::FrostThreshold::new(2).expect("threshold"),
-            2,
-            vec![
-                issuer.context().device_id().to_string(),
-                start.device_id.to_string(),
-            ],
-        )
-        .await
-        .expect("device threshold ceremony starts")
-        .status_handle();
-        let mut rounds_left = 200_u32;
-        loop {
-            let state = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-                &issuer_app,
-                &status,
-            )
-            .await
-            .expect("ceremony status");
-            if state.has_failed {
-                assert!(
-                    state.error_message.is_some(),
-                    "typed failure carries a reason"
-                );
-                break;
-            }
-            if state.is_complete {
-                break;
-            }
-            rounds_left = rounds_left
-                .checked_sub(1)
-                .expect("device threshold ceremony must reach a terminal outcome");
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
     });
 }
+/// A genuine two-device account: enroll a second device through the app
+/// accept flow, then reopen the joined device's profile as the account
+/// authority (what the app does after enrollment). Returns the initiator,
+/// the reopened joined device and its app core.
+pub(crate) async fn enrolled_two_device_account(
+    label: &str,
+) -> (
+    Arc<crate::AuraAgent>,
+    Arc<crate::AuraAgent>,
+    aura_core::DeviceId,
+) {
+    let transport = crate::SharedTransport::new();
+    let (issuer, invitee, invitation, start, accept, witness) =
+        crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture_with_transport(
+            label,
+            transport.clone(),
+        )
+        .await;
+    AgentRuntimeBridge::new(issuer.clone())
+        .initialize_account("Initiator")
+        .await
+        .expect("initiator nickname");
+    let invitee_bridge = Arc::new(AgentRuntimeBridge::new(invitee.clone()));
+    invitee_bridge
+        .initialize_account("Joiner")
+        .await
+        .expect("invitee nickname");
+    let info = invitee_bridge
+        .try_list_pending_invitations()
+        .await
+        .expect("invitee pending invitations")
+        .into_iter()
+        .find(|info| info.invitation_id == invitation.invitation_id)
+        .expect("imported enrollment invitation");
+    let invitee_app = Arc::new(async_lock::RwLock::new(
+        aura_app::AppCore::with_runtime(aura_app::AppConfig::default(), invitee_bridge.clone())
+            .unwrap(),
+    ));
+    aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(&invitee_app, &info)
+        .await
+        .expect("a genuine signed acceptance completes on the invitee");
+    let issuer_app = Arc::new(async_lock::RwLock::new(
+        aura_app::AppCore::with_runtime(
+            aura_app::AppConfig::default(),
+            Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+        )
+        .unwrap(),
+    ));
+    let observed =
+        aura_app::ui::workflows::ceremonies::observe_device_enrollment_completion_with_terminal_status(
+            &issuer_app,
+            &start.ceremony_id,
+            aura_app::ui_contract::OperationInstanceId(format!("{label}-enrollment")),
+        )
+        .await;
+    observed.result.expect("initiator observation");
+
+    // Reopen the joined device's own profile under the adopted account.
+    let projected: serde_json::Value = serde_json::from_slice(
+        &invitee
+            .runtime()
+            .effects()
+            .retrieve("account.json")
+            .await
+            .expect("read account config")
+            .expect("adopted account config"),
+    )
+    .expect("account config json");
+    let subject: AuthorityId =
+        serde_json::from_value(projected["authority_id"].clone()).expect("adopted authority");
+    assert_eq!(subject, issuer.authority_id(), "joined device adopted the account");
+    let adopted_context: aura_core::ContextId =
+        serde_json::from_value(projected["context_id"].clone()).expect("adopted context");
+    let config = invitee.runtime().effects().config().clone();
+    invitee
+        .runtime()
+        .tasks()
+        .shutdown_gracefully(std::time::Duration::from_secs(5))
+        .await
+        .expect("joined device tasks stop before reopen");
+    drop((invitee_app, invitee_bridge, info, accept, witness, invitation));
+    drop(invitee);
+    let profile = crate::runtime::builder::TestingOwnedProfileCapability::acquire(&config)
+        .expect("exclusive joined-device profile after teardown");
+    let context = EffectContext::new(subject, adopted_context, ExecutionMode::Testing);
+    let runtime = crate::runtime::EffectSystemBuilder::testing_with_owned_profile(profile)
+        .with_authority(subject)
+        .with_config(config)
+        .with_shared_transport(transport)
+        .build(&context)
+        .await
+        .expect("joined device reopens under the account authority");
+    let joined = Arc::new(crate::AuraAgent::new(runtime, subject));
+    AgentRuntimeBridge::new(joined.clone())
+        .bootstrap_signing_keys()
+        .await
+        .expect("joined device restores its account share");
+    (issuer, joined, start.device_id)
+}
+
+/// Start a 2-of-2 device-threshold rotation on `issuer` and wait for its
+/// terminal: `Ok(())` when complete, `Err(reason)` when failed.
+async fn run_two_of_two_rotation(
+    issuer: &Arc<crate::AuraAgent>,
+    joined_device: aura_core::DeviceId,
+    while_waiting: impl Fn() -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>>,
+) -> Result<(), Option<String>> {
+    let issuer_app = Arc::new(async_lock::RwLock::new(
+        aura_app::AppCore::with_runtime(
+            aura_app::AppConfig::default(),
+            Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+        )
+        .unwrap(),
+    ));
+    let status = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+        &issuer_app,
+        aura_core::types::FrostThreshold::new(2).expect("threshold"),
+        2,
+        vec![
+            issuer.context().device_id().to_string(),
+            joined_device.to_string(),
+        ],
+    )
+    .await
+    .expect("device threshold ceremony starts")
+    .status_handle();
+    for _ in 0..1200_u32 {
+        let state =
+            aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(&issuer_app, &status)
+                .await
+                .expect("ceremony status");
+        if state.has_failed {
+            return Err(state.error_message);
+        }
+        if state.is_complete {
+            return Ok(());
+        }
+        while_waiting().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("device threshold rotation must reach a terminal");
+}
+
+/// Both devices hold the same authority epoch, threshold and package.
+async fn assert_devices_agree(
+    issuer: &Arc<crate::AuraAgent>,
+    joined: &Arc<crate::AuraAgent>,
+    epoch_after: impl Fn(u64) -> bool,
+) {
+    use aura_core::effects::ThresholdSigningEffects;
+    let authority = issuer.authority_id();
+    for _ in 0..400_u32 {
+        let a = issuer.runtime().threshold_signing().threshold_state(&authority).await;
+        let b = joined.runtime().threshold_signing().threshold_state(&authority).await;
+        if let (Some(a), Some(b)) = (a, b) {
+            if epoch_after(a.epoch) && a.epoch == b.epoch {
+                assert_eq!((a.threshold, b.threshold), (2, 2));
+                assert_eq!(
+                    hash(
+                        &issuer
+                            .runtime()
+                            .threshold_signing()
+                            .public_key_package(&authority)
+                            .await
+                            .expect("initiator package")
+                    ),
+                    hash(
+                        &joined
+                            .runtime()
+                            .threshold_signing()
+                            .public_key_package(&authority)
+                            .await
+                            .expect("joined package")
+                    ),
+                    "both devices hold the same authority package"
+                );
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("both devices must agree on the authority epoch");
+}
+
+/// Task 163 (Tasks 33/58/60): a 2-of-2 device-threshold rotation succeeds
+/// across two runtimes. The proposal and commit are FROST-signed with both
+/// devices' shares (the joined device co-signs under its auto-sign consent
+/// after verifying the initiator's share proof) and the joined device
+/// accepts with a proof of its own share; both devices then activate the
+/// same rotated package at the next epoch.
+#[test]
+fn two_runtime_two_of_two_rotation_signs_with_both_device_shares() {
+    run_async_test_on_large_stack(async move {
+        use aura_core::effects::ThresholdSigningEffects;
+        let (issuer, joined, joined_device) =
+            enrolled_two_device_account("quorum-rotation-auto").await;
+        let before = issuer
+            .runtime()
+            .threshold_signing()
+            .threshold_state(&issuer.authority_id())
+            .await
+            .expect("authority state")
+            .epoch;
+        joined
+            .runtime()
+            .threshold_signing()
+            .set_device_signing_consent(
+                aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified,
+            )
+            .await
+            .expect("joined device auto-signs verified requests");
+        run_two_of_two_rotation(&issuer, joined_device, || Box::pin(async {}))
+            .await
+            .expect("2-of-2 rotation completes");
+        assert_devices_agree(&issuer, &joined, |epoch| epoch > before).await;
+    });
+}
+
+/// Task 163: with the default consent (escalate to the user) a co-signer
+/// never signs on its own. The request waits as a pending signing request
+/// on the joined device; a decline fails the rotation on the initiator, and
+/// an approval of the next request lets it complete.
+#[test]
+fn two_runtime_rotation_waits_for_user_consent_and_honors_decline() {
+    run_async_test_on_large_stack(async move {
+        use aura_core::effects::ThresholdSigningEffects;
+        let (issuer, joined, joined_device) =
+            enrolled_two_device_account("quorum-rotation-escalate").await;
+        let signing = joined.runtime().threshold_signing();
+        assert_eq!(
+            signing.device_signing_consent().await.expect("consent"),
+            aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser,
+            "escalation is the default"
+        );
+        let before = issuer
+            .runtime()
+            .threshold_signing()
+            .threshold_state(&issuer.authority_id())
+            .await
+            .expect("authority state")
+            .epoch;
+
+        // Decline: the initiator's rotation fails with the co-signer's refusal.
+        let initiator_device = issuer.context().device_id();
+        let declining = signing.clone();
+        let declined = run_two_of_two_rotation(&issuer, joined_device, move || {
+            let signing = declining.clone();
+            Box::pin(async move {
+                for request in signing.pending_signing_requests().await {
+                    assert_eq!(request.requesting_device, initiator_device);
+                    signing
+                        .decide_pending_signing_request(&request.id, false)
+                        .await
+                        .expect("decline");
+                }
+            })
+        })
+        .await;
+        assert!(declined.is_err(), "a declined request fails the rotation");
+        assert_eq!(
+            issuer
+                .runtime()
+                .threshold_signing()
+                .threshold_state(&issuer.authority_id())
+                .await
+                .expect("authority state")
+                .epoch,
+            before,
+            "nothing rotates without the co-signer's consent"
+        );
+
+        // Approve: the user on the joined device approves each request.
+        let approving = signing.clone();
+        run_two_of_two_rotation(&issuer, joined_device, move || {
+            let signing = approving.clone();
+            Box::pin(async move {
+                for request in signing.pending_signing_requests().await {
+                    signing
+                        .decide_pending_signing_request(&request.id, true)
+                        .await
+                        .expect("approve");
+                }
+            })
+        })
+        .await
+        .expect("approved rotation completes");
+        assert_devices_agree(&issuer, &joined, |epoch| epoch > before).await;
+    });
+}
+
 
 #[test]
 fn runtime_enrollment_selector_rejects_foreign_runtime_before_terminal_mutation() {

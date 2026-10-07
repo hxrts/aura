@@ -98,6 +98,12 @@ pub fn SettingsScreen(
     let reactive_nickname_suggestion = hooks.use_state(String::new);
     let reactive_devices = hooks.use_state(Vec::new);
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
+    let reactive_signing = hooks.use_state(|| {
+        (
+            aura_app::runtime_bridge::DeviceSigningConsent::default(),
+            Vec::<(String, String)>::new(),
+        )
+    });
     let reactive_guardian_count = hooks.use_state(|| 0usize);
     let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
     let reactive_authorities = hooks.use_state(Vec::<AuthorityInfo>::new);
@@ -113,6 +119,7 @@ pub fn SettingsScreen(
         let mut reactive_nickname_suggestion = reactive_nickname_suggestion.clone();
         let mut reactive_devices = reactive_devices.clone();
         let mut reactive_threshold = reactive_threshold.clone();
+        let mut reactive_signing = reactive_signing.clone();
         let mut reactive_authorities = reactive_authorities.clone();
         let app_core = app_ctx.for_subscription_scope("settings");
         async move {
@@ -130,6 +137,19 @@ pub fn SettingsScreen(
                     .collect();
                 reactive_devices.set(devices);
                 reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
+                reactive_signing.set((
+                    settings_state.signing_consent,
+                    settings_state
+                        .pending_signing_requests
+                        .iter()
+                        .map(|request| {
+                            (
+                                request.requesting_device.to_string(),
+                                request.operation.clone(),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ));
 
                 // Populate authorities from signal
                 let authorities = settings_state
@@ -234,6 +254,7 @@ pub fn SettingsScreen(
     let nickname_suggestion = reactive_nickname_suggestion.read().clone();
     let devices = reactive_devices.read().clone();
     let (threshold_k, threshold_n) = *reactive_threshold.read();
+    let (signing_consent, pending_signing) = reactive_signing.read().clone();
     let guardian_count = *reactive_guardian_count.read();
     let recovery_status = reactive_recovery_status.read().clone();
     let authorities = reactive_authorities.read().clone();
@@ -441,6 +462,33 @@ pub fn SettingsScreen(
 
             lines.push(("[m] Configure multifactor".into(), Theme::SECONDARY));
             lines.push(("[Enter] Configure multifactor".into(), Theme::TEXT_MUTED));
+
+            // Device-local consent for co-signing another device's request.
+            lines.push((String::new(), Theme::TEXT));
+            let consent_label = match signing_consent {
+                aura_app::runtime_bridge::DeviceSigningConsent::EscalateToUser => "ask me",
+                aura_app::runtime_bridge::DeviceSigningConsent::AutoSignVerified => "automatic",
+            };
+            lines.push((
+                format!("Co-signing (this device): {consent_label}"),
+                Theme::TEXT,
+            ));
+            lines.push(("[c] Toggle co-signing".into(), Theme::SECONDARY));
+            if pending_signing.is_empty() {
+                lines.push(("No pending co-signing requests".into(), Theme::TEXT_MUTED));
+            } else {
+                for (device, operation) in &pending_signing {
+                    let short: String = device.chars().take(8).collect();
+                    lines.push((
+                        format!("  Request from {short}: {operation}"),
+                        Theme::WARNING,
+                    ));
+                }
+                lines.push((
+                    "[y] Approve / [n] Decline oldest request".into(),
+                    Theme::SECONDARY,
+                ));
+            }
 
             lines
         }

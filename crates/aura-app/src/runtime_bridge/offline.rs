@@ -1186,6 +1186,27 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent("Settings update not available in offline mode").into())
     }
 
+    async fn set_device_signing_consent(
+        &self,
+        _consent: super::DeviceSigningConsent,
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Settings update not available in offline mode").into())
+    }
+
+    async fn try_list_pending_signing_requests(
+        &self,
+    ) -> Result<Vec<super::PendingSigningRequest>, RuntimeBridgeError> {
+        Err(IntentError::no_agent("Signing requests not available in offline mode").into())
+    }
+
+    async fn decide_pending_signing_request(
+        &self,
+        _request_id: &str,
+        _approve: bool,
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Signing requests not available in offline mode").into())
+    }
+
     async fn set_peer_flow_allowance(
         &self,
         _context: aura_core::types::identifiers::ContextId,

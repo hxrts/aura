@@ -66,9 +66,20 @@ async fn refresh_settings_signal_from_runtime(
     )
     .await?
     .map_err(|error| super::error::native_runtime_call("list authorities", error))?;
+    let pending_signing_requests = timeout_runtime_call(
+        &runtime,
+        "refresh_settings_from_runtime",
+        "try_list_pending_signing_requests",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.try_list_pending_signing_requests(),
+    )
+    .await?
+    .map_err(|error| super::error::native_runtime_call("list pending signing requests", error))?;
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.nickname_suggestion = settings.nickname_suggestion.clone();
     state.mfa_policy = settings.mfa_policy;
+    state.signing_consent = settings.signing_consent;
+    state.pending_signing_requests = pending_signing_requests;
     state.threshold_k = settings.threshold_k as u8;
     state.threshold_n = settings.threshold_n as u8;
     state.contact_count = settings.contact_count;
@@ -139,6 +150,45 @@ pub async fn update_mfa_policy(
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
+}
+
+/// Set this device's consent policy for co-signing another device's quorum
+/// request (device-local; never replicated), then refresh SETTINGS_SIGNAL.
+pub async fn update_device_signing_consent(
+    app_core: &Arc<RwLock<AppCore>>,
+    consent: crate::runtime_bridge::DeviceSigningConsent,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
+        &runtime,
+        "update_device_signing_consent",
+        "set_device_signing_consent",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.set_device_signing_consent(consent),
+    )
+    .await?
+    .map_err(|e| super::error::native_runtime_call("update device signing consent", e))?;
+    refresh_settings_from_runtime(app_core).await
+}
+
+/// Approve or decline a quorum signing request from another device of this
+/// account that waits for the user here, then refresh SETTINGS_SIGNAL.
+pub async fn decide_pending_signing_request(
+    app_core: &Arc<RwLock<AppCore>>,
+    request_id: &str,
+    approve: bool,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
+        &runtime,
+        "decide_pending_signing_request",
+        "decide_pending_signing_request",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.decide_pending_signing_request(request_id, approve),
+    )
+    .await?
+    .map_err(|e| super::error::native_runtime_call("decide pending signing request", e))?;
+    refresh_settings_from_runtime(app_core).await
 }
 
 /// Set the receive allowance granted to `peer` in `context`

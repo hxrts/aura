@@ -19,6 +19,55 @@ pub struct SettingsBridgeState {
     pub device_count: usize,
     /// Number of contacts.
     pub contact_count: usize,
+    /// This device's consent policy for co-signing another device's request.
+    pub signing_consent: DeviceSigningConsent,
+}
+
+/// Device-local consent policy for co-signing a quorum request from another
+/// device of this account (an authority threshold signature, e.g. a device
+/// rotation). It is a setting of this device only and is never replicated.
+/// The quorum signer consults it on every request and never bypasses
+/// escalation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum DeviceSigningConsent {
+    /// Ask the user on this device before contributing a signature share.
+    #[default]
+    EscalateToUser,
+    /// Sign automatically once the initiating device's request is verified.
+    AutoSignVerified,
+}
+
+impl DeviceSigningConsent {
+    /// Stable storage and display identifier.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EscalateToUser => "escalate",
+            Self::AutoSignVerified => "auto",
+        }
+    }
+
+    /// Parse the stable identifier; unknown values are `None`.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "escalate" => Some(Self::EscalateToUser),
+            "auto" => Some(Self::AutoSignVerified),
+            _ => None,
+        }
+    }
+}
+
+/// A quorum signing request from another device of this account that waits
+/// for the user's decision on this device (consent `EscalateToUser`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSigningRequest {
+    /// Request identifier for the decision call.
+    pub id: String,
+    /// Device of this account that asked for the signature.
+    pub requesting_device: DeviceId,
+    /// What would be signed, for the user.
+    pub operation: String,
 }
 
 impl SettingsBridgeState {

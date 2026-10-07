@@ -32,6 +32,10 @@ pub(in crate::app) struct SettingsRuntimeView {
     pub(in crate::app) pending_recovery_requests: usize,
     pub(in crate::app) guardian_binding_count: usize,
     pub(in crate::app) mfa_policy: String,
+    /// This device's co-signing consent (device-local).
+    pub(in crate::app) signing_consent: aura_app::runtime_bridge::DeviceSigningConsent,
+    /// Co-signing requests awaiting a decision here: (id, device, operation).
+    pub(in crate::app) pending_signing_requests: Vec<(String, String, String)>,
     pub(in crate::app) devices: Vec<SettingsRuntimeDevice>,
     pub(in crate::app) authorities: Vec<SettingsRuntimeAuthority>,
 }
@@ -84,6 +88,18 @@ fn build_settings_runtime_view(
         pending_recovery_requests: recovery.pending_requests().len(),
         guardian_binding_count: recovery.guardian_binding_count(),
         mfa_policy: settings.mfa_policy,
+        signing_consent: settings.signing_consent,
+        pending_signing_requests: settings
+            .pending_signing_requests
+            .iter()
+            .map(|request| {
+                (
+                    request.id.clone(),
+                    request.requesting_device.to_string(),
+                    request.operation.clone(),
+                )
+            })
+            .collect(),
         devices,
         authorities,
     }

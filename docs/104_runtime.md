@@ -1246,6 +1246,32 @@ policy. Required execution eligibility expires with the original protected
 window; cached signatures cannot renew it. Successful initial quorum initiation
 does not prove later confirmation quorum, complete enrollment or restart custody.
 
+### Device quorum signing for tree operations
+
+An authority signature whose current policy needs more than one device (a tree
+operation or a typed message such as a device-rotation proposal or commit) is
+produced by `ThresholdSigningService::sign_with_device_quorum`. The coordinating
+device sends each co-signer a request carrying the full signing context, proven
+with the coordinator's own share. The co-signer authenticates it against the
+coordinator's verifying share in its own retained current package, recomputes
+the exact message from its own state, and only then consults its consent policy.
+Every round packet is share-proven in both directions. Nonces exist only in
+memory after consent and are consumed by the one share they produce. A threshold
+of one signs locally; a raw `sign` call never starts a distributed round.
+
+Consent is a device-local setting (`DeviceSigningConsent`): escalate to the user
+on that device (the default) or sign automatically after verification. It is
+stored locally, never replicated, and consulted on every request. An escalated
+request waits as a pending signing request until the user approves or declines
+it. A decline is a share-proven cancel that fails the coordinator's operation
+with a typed refusal. Granular per-operation rules are future work.
+
+A device-rotation participant accepts with a proof of its current share, which
+the initiator checks against that device's verifying share. It stores its new
+share wrapped like every other participant share. Both devices then activate the
+same rotated package. The commit is the participant's final step: an applied,
+verified commit completes its session.
+
 ### Confirmed import activation custody
 
 Only the original durable confirmed enrollment capability can publish its

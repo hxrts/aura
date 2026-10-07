@@ -343,6 +343,11 @@ pub struct SettingsState {
     pub threshold_n: u8,
     /// MFA policy setting
     pub mfa_policy: String,
+    /// This device's consent policy for co-signing another device's request
+    /// (device-local, never replicated).
+    pub signing_consent: crate::runtime_bridge::DeviceSigningConsent,
+    /// Quorum signing requests from other devices awaiting a decision here.
+    pub pending_signing_requests: Vec<crate::runtime_bridge::PendingSigningRequest>,
     /// List of devices
     pub devices: Vec<DeviceInfo>,
     /// Number of contacts

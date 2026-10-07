@@ -4,10 +4,10 @@ use super::RuntimeBridgeError;
 use super::{
     AuthenticationStatus, AuthoritativeChannelBinding, AuthoritativeModerationStatus,
     BootstrapCandidateInfo, BridgeAuthorityInfo, BridgeDeviceInfo, CeremonyProcessingOutcome,
-    CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, DiscoveryTriggerOutcome,
-    InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus,
-    OutboundMessageDeliveryFailure, RendezvousStatus, RuntimeStatus, SettingsBridgeState,
-    SyncStatus,
+    CeremonyStatus, CeremonyTerminalOutcome, DeviceEnrollmentStart, DeviceSigningConsent,
+    DiscoveryTriggerOutcome, InvitationInfo, InvitationMutationOutcome, KeyRotationCeremonyStatus,
+    OutboundMessageDeliveryFailure, PendingSigningRequest, RendezvousStatus, RuntimeStatus,
+    SettingsBridgeState, SyncStatus,
 };
 use crate::core::IntentError;
 use crate::ui_contract::{
@@ -931,6 +931,25 @@ pub trait RuntimeBridge: Send + Sync {
 
     /// Update MFA policy
     async fn set_mfa_policy(&self, policy: &str) -> Result<(), RuntimeBridgeError>;
+
+    /// Set this device's consent policy for co-signing another device's
+    /// quorum request. Device-local; never replicated.
+    async fn set_device_signing_consent(
+        &self,
+        consent: DeviceSigningConsent,
+    ) -> Result<(), RuntimeBridgeError>;
+
+    /// Quorum signing requests waiting for the user's decision on this device.
+    async fn try_list_pending_signing_requests(
+        &self,
+    ) -> Result<Vec<PendingSigningRequest>, RuntimeBridgeError>;
+
+    /// Approve (`true`) or decline (`false`) a pending quorum signing request.
+    async fn decide_pending_signing_request(
+        &self,
+        request_id: &str,
+        approve: bool,
+    ) -> Result<(), RuntimeBridgeError>;
 
     /// Commit a per-peer flow allowance override (docs/111 §3.1): the receive
     /// window granted to `peer` in `context`, applied on all of this

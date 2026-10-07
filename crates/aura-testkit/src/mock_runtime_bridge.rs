@@ -286,6 +286,7 @@ pub struct MockRuntimeBridge {
     nickname_suggestion: Arc<RwLock<String>>,
     /// Mock MFA policy
     mfa_policy: Arc<RwLock<String>>,
+    signing_consent: Arc<RwLock<aura_app::runtime_bridge::DeviceSigningConsent>>,
     /// Counter for generating unique IDs
     id_counter: AtomicU64,
     /// Simulated current time (ms since epoch)
@@ -387,6 +388,9 @@ impl MockRuntimeBridge {
             contacts: Arc::new(RwLock::new(Vec::new())),
             nickname_suggestion: Arc::new(RwLock::new("MockUser".to_string())),
             mfa_policy: Arc::new(RwLock::new("Disabled".to_string())),
+            signing_consent: Arc::new(RwLock::new(
+                aura_app::runtime_bridge::DeviceSigningConsent::default(),
+            )),
             id_counter: AtomicU64::new(1),
             current_time_ms: AtomicU64::new(1700000000000), // Fixed original physical observation
             physical_time_changed: tokio::sync::Notify::new(),
@@ -1695,6 +1699,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             threshold_n: 3,
             device_count: devices.len(),
             contact_count: 0,
+            signing_consent: *self.signing_consent.read().await,
         })
     }
 
@@ -1742,6 +1747,31 @@ impl RuntimeBridge for MockRuntimeBridge {
     ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
         *self.mfa_policy.write().await = policy.to_string();
         Ok(())
+    }
+
+    async fn set_device_signing_consent(
+        &self,
+        consent: aura_app::runtime_bridge::DeviceSigningConsent,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        *self.signing_consent.write().await = consent;
+        Ok(())
+    }
+
+    async fn try_list_pending_signing_requests(
+        &self,
+    ) -> Result<
+        Vec<aura_app::runtime_bridge::PendingSigningRequest>,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
+        Ok(Vec::new())
+    }
+
+    async fn decide_pending_signing_request(
+        &self,
+        _request_id: &str,
+        _approve: bool,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        Err(aura_app::IntentError::validation_failed("no pending signing request").into())
     }
 
     async fn set_peer_flow_allowance(

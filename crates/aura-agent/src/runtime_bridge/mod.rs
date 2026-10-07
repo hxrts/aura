@@ -3815,6 +3815,52 @@ impl RuntimeBridge for AgentRuntimeBridge {
         identity::set_mfa_policy(self, policy).await
     }
 
+    async fn set_device_signing_consent(
+        &self,
+        consent: aura_app::runtime_bridge::DeviceSigningConsent,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        self.agent
+            .threshold_signing()
+            .set_device_signing_consent(consent)
+            .await
+            .map_err(|error| {
+                error_boundary::bridge_runtime_internal(
+                    "Store device signing consent failed",
+                    error,
+                )
+            })
+    }
+
+    async fn try_list_pending_signing_requests(
+        &self,
+    ) -> Result<
+        Vec<aura_app::runtime_bridge::PendingSigningRequest>,
+        aura_app::runtime_bridge::RuntimeBridgeError,
+    > {
+        Ok(self
+            .agent
+            .threshold_signing()
+            .pending_signing_requests()
+            .await)
+    }
+
+    async fn decide_pending_signing_request(
+        &self,
+        request_id: &str,
+        approve: bool,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        self.agent
+            .threshold_signing()
+            .decide_pending_signing_request(request_id, approve)
+            .await
+            .map_err(|error| {
+                error_boundary::bridge_runtime_internal(
+                    "Decide pending signing request failed",
+                    error,
+                )
+            })
+    }
+
     async fn set_peer_flow_allowance(
         &self,
         context: ContextId,
@@ -4351,7 +4397,7 @@ impl AuraAgent {
 // ============================================================================
 #[allow(clippy::disallowed_types)]
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     include!("tests.rs");
 }
 
