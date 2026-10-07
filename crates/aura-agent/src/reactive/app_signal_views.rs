@@ -1216,6 +1216,7 @@ impl HomeSignalView {
             joined_at,
             name,
             storage_allocated,
+            ..
         } = fact
         else {
             return Some(false);
@@ -2443,16 +2444,16 @@ mod tests {
             .unwrap()
             .revision;
         for (type_id, view) in views {
-            // Social and home governance facts are at schema 3 and contact
-            // facts at schema 2 (causal stamps).
+            // Social facts and kicks are at schema 4 (membership episodes),
+            // other home governance facts at schema 3 and contact facts at
+            // schema 2 (causal stamps).
             let supported: u16 = match type_id {
                 CONTACT_FACT_TYPE_ID => 2,
-                SOCIAL_FACT_TYPE_ID
-                | HOME_BAN_FACT_TYPE_ID
+                SOCIAL_FACT_TYPE_ID | HOME_KICK_FACT_TYPE_ID => 4,
+                HOME_BAN_FACT_TYPE_ID
                 | HOME_UNBAN_FACT_TYPE_ID
                 | HOME_MUTE_FACT_TYPE_ID
                 | HOME_UNMUTE_FACT_TYPE_ID
-                | HOME_KICK_FACT_TYPE_ID
                 | HOME_GRANT_MODERATOR_FACT_TYPE_ID
                 | HOME_REVOKE_MODERATOR_FACT_TYPE_ID => 3,
                 _ => 1,
@@ -3527,9 +3528,15 @@ mod tests {
         let created =
             SocialFact::home_created_ms(home_id, new_context, 50, actor, "Den".to_string())
                 .to_generic();
-        let joined =
-            SocialFact::member_joined_ms(target, home_id, new_context, 60, "Bob".to_string())
-                .to_generic();
+        let joined = SocialFact::member_joined_ms(
+            target,
+            home_id,
+            new_context,
+            60,
+            "Bob".to_string(),
+            "inv".into(),
+        )
+        .to_generic();
         view.update(&[fact_from_relational(created), fact_from_relational(joined)])
             .await
             .expect("required fixture projection succeeds");
@@ -3565,14 +3572,22 @@ mod tests {
         let other_home_id = aura_social::HomeId::from_bytes([87u8; 32]);
         let view = HomeSignalView::new(own, reactive.clone());
 
-        let joined = SocialFact::member_joined_ms(member, home_id, context, 20, "Member".into())
-            .to_generic();
+        let joined = SocialFact::member_joined_ms(
+            member,
+            home_id,
+            context,
+            20,
+            "Member".into(),
+            "inv".into(),
+        )
+        .to_generic();
         let wrong_home = SocialFact::member_joined_ms(
             AuthorityId::new_from_entropy([88u8; 32]),
             other_home_id,
             context,
             21,
             "Other".into(),
+            "inv".into(),
         )
         .to_generic();
         let wrong_context_join = SocialFact::member_joined_ms(
@@ -3581,6 +3596,7 @@ mod tests {
             wrong_context,
             22,
             "Wrong".into(),
+            "inv".into(),
         )
         .to_generic();
         view.update(&[

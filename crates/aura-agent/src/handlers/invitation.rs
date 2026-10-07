@@ -421,6 +421,9 @@ impl ReservedInvitationIssuance {
 }
 
 pub(crate) struct ChannelInviteDetails {
+    /// The accepted invitation: it names the membership episode a home join
+    /// starts, on both the inviter and the invitee.
+    pub(crate) invitation_id: InvitationId,
     pub(crate) context_id: ContextId,
     pub(crate) channel_id: ChannelId,
     pub(crate) home_name: String,
@@ -1837,6 +1840,7 @@ impl InvitationHandler {
             invite.context_id,
             now_ms,
             member.to_string(),
+            invite.invitation_id.to_string(),
         ));
         for fact in facts {
             effects

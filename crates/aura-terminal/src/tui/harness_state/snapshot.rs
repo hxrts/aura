@@ -400,7 +400,11 @@ fn build_authoritative_ui_snapshot(
         })
         .unwrap_or_default();
 
-    let messages = if semantic_inputs.chat_messages.is_empty() {
+    let selected_messages = crate::tui::channel_selection::selected_channel_messages(
+        semantic_inputs.chat_messages,
+        selected_channel_id.as_deref(),
+    );
+    let messages = if selected_messages.is_empty() {
         selected_channel_id
             .as_ref()
             .and_then(|channel_id| {
@@ -425,8 +429,7 @@ fn build_authoritative_ui_snapshot(
             })
             .unwrap_or_default()
     } else {
-        semantic_inputs
-            .chat_messages
+        selected_messages
             .iter()
             .map(|message| MessageSnapshot {
                 id: message.id.clone(),
@@ -714,5 +717,46 @@ mod tests {
             .items
             .iter()
             .any(|item| item.id == home_id.to_string()));
+    }
+
+    /// Task 127: harness `messages` follow the selected channel from the
+    /// shared all-channel message projection without a chat update.
+    #[test]
+    fn snapshot_messages_follow_channel_selection() {
+        use super::authoritative_ui_snapshot;
+        use crate::tui::types::{Channel, Message};
+        use crate::tui::TuiState;
+        use aura_app::ui::types::StateSnapshot;
+
+        let app_snapshot = StateSnapshot::default();
+        let channels = [
+            Channel::new("channel-1", "General"),
+            Channel::new("channel-2", "Ops"),
+        ];
+        let messages = [
+            Message::new("m1", "alice", "general hello").with_channel("channel-1"),
+            Message::new("m2", "bob", "ops one").with_channel("channel-2"),
+        ];
+        let mut state = TuiState::new();
+        for (idx, expected) in [(0, "m1"), (1, "m2"), (0, "m1")] {
+            state.chat.selected_channel = idx;
+            let snapshot = authoritative_ui_snapshot(
+                &state,
+                TuiSemanticInputs {
+                    app_snapshot: &app_snapshot,
+                    contacts: &[],
+                    settings_devices: &[],
+                    chat_channels: &channels,
+                    chat_messages: &messages,
+                    bootstrap_candidates: &[],
+                },
+            );
+            let ids = snapshot
+                .messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(ids, vec![expected]);
+        }
     }
 }

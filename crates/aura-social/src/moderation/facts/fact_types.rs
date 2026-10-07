@@ -31,7 +31,7 @@ required_moderation_decoder!(HomeBanFact, HOME_BAN_FACT_TYPE_ID, 3);
 required_moderation_decoder!(HomeUnbanFact, HOME_UNBAN_FACT_TYPE_ID, 3);
 required_moderation_decoder!(HomeMuteFact, HOME_MUTE_FACT_TYPE_ID, 3);
 required_moderation_decoder!(HomeUnmuteFact, HOME_UNMUTE_FACT_TYPE_ID, 3);
-required_moderation_decoder!(HomeKickFact, HOME_KICK_FACT_TYPE_ID, 3);
+required_moderation_decoder!(HomeKickFact, HOME_KICK_FACT_TYPE_ID, 4);
 required_moderation_decoder!(HomePinFact, HOME_PIN_FACT_TYPE_ID, 1);
 required_moderation_decoder!(HomeUnpinFact, HOME_UNPIN_FACT_TYPE_ID, 1);
 required_moderation_decoder!(HomeGrantModeratorFact, HOME_GRANT_MODERATOR_FACT_TYPE_ID, 3);
@@ -274,7 +274,7 @@ impl HomeUnbanFact {
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "moderation:home-kick",
-    schema_version = 3,
+    schema_version = 4,
     context = "context_id"
 )]
 pub struct HomeKickFact {
@@ -290,7 +290,9 @@ pub struct HomeKickFact {
     pub reason: String,
     /// When the kick occurred
     pub kicked_at: PhysicalTime,
-    /// Causal metadata (schema v3): logical clock for causal history order.
+    /// Causal metadata (schema v4): logical clock for causal history order;
+    /// `revokes` names the membership episodes (`MemberJoined` tags) of the
+    /// kicked member the kicker observed. A later join survives the kick.
     pub causal: CausalMetadata,
 }
 

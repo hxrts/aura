@@ -628,6 +628,7 @@ async fn persist_created_home(
             context_id,
             timestamp_ms,
             creator.to_string(),
+            "home-created".to_string(),
         )
         .to_generic(),
     ];

@@ -965,6 +965,7 @@ impl<'a> InvitationContactHandler<'a> {
                             .commit_home_membership(
                                 effects.as_ref(),
                                 &ChannelInviteDetails {
+                                    invitation_id: updated.invitation_id.clone(),
                                     context_id: updated.context_id,
                                     channel_id: *home_id,
                                     home_name: home_name.clone(),

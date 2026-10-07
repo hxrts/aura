@@ -18,7 +18,7 @@ use crate::tui::tasks::UiTaskOwner;
 use crate::tui::types::{Channel, Message};
 use crate::tui::updates::{spawn_ui_update, UiUpdate, UiUpdatePublication, UiUpdateSender};
 
-/// Shared messages state that can be read by closures without re-rendering.
+/// Shared messages of every channel (each tagged with its channel id) that can be read by closures without re-rendering.
 ///
 /// This uses Arc<RwLock<Vec<Message>>> instead of State<T> because:
 /// 1. Dispatch handler closures need to look up messages by ID (e.g., for retry).
@@ -202,7 +202,6 @@ pub fn use_channels_subscription(
     let shared_channels: SharedChannels = shared_channels_ref.read().clone();
     let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_messages: SharedMessages = shared_messages_ref.read().clone();
-    let selected_for_messages = selected_channel_id.clone();
     let tasks = app_ctx.tasks();
     let active_scope_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
     let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
@@ -235,25 +234,13 @@ pub fn use_channels_subscription(
         let mut message_projection_version = projection_version.clone();
         async move {
             subscribe_observed_projection_signal(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let selected_channel_id = selected_for_messages
-                    .read()
-                    .clone()
-                    .map(|selection| selection.channel_id().to_string());
-                let message_list: Vec<Message> = selected_channel_id
-                    .and_then(|selected_id| {
-                        chat_state
-                            .all_channels()
-                            .find(|channel| channel.id.to_string() == selected_id)
-                            .map(|channel| channel.id)
-                    })
-                    .map(|channel_id| {
-                        chat_state
-                            .messages_for_channel(&channel_id)
-                            .iter()
-                            .map(Message::from)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                // Every channel's messages; readers select by the current
+                // channel selection (`selected_channel_messages`).
+                let message_list: Vec<Message> = chat_state
+                    .all_channels()
+                    .flat_map(|channel| chat_state.messages_for_channel(&channel.id))
+                    .map(Message::from)
+                    .collect();
                 *messages.write() = message_list;
                 bump_projection_version(&mut message_projection_version);
                 coordinator.update_chat_state(chat_state);

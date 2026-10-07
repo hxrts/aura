@@ -735,6 +735,7 @@ impl<'a> InvitationChannelHandler<'a> {
                 let home_name =
                     require_channel_invitation_name(*home_id, nickname_suggestion.clone())?;
                 return Ok(Some(ChannelInviteDetails {
+                    invitation_id: invitation_id.clone(),
                     context_id: inv.context_id,
                     channel_id: *home_id,
                     home_name,
@@ -758,6 +759,7 @@ impl<'a> InvitationChannelHandler<'a> {
             {
                 let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
                 return Ok(Some(ChannelInviteDetails {
+                    invitation_id: shareable.invitation_id.clone(),
                     context_id: require_channel_invitation_context(
                         &shareable.invitation_id,
                         shareable.sender_id,
@@ -816,6 +818,7 @@ impl<'a> InvitationChannelHandler<'a> {
             {
                 let home_name = require_channel_invitation_name(home_id, nickname_suggestion)?;
                 return Ok(Some(ChannelInviteDetails {
+                    invitation_id: seen_id,
                     context_id,
                     channel_id: home_id,
                     home_name,

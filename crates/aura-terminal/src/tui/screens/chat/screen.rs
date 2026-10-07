@@ -24,7 +24,8 @@ use crate::tui::callbacks::{
     CreateChannelCallback, RetryMessageCallback, SetTopicCallback, SlashCommandCallback,
 };
 use crate::tui::channel_selection::{
-    authoritative_channel_binding, CommittedChannelSelection, SharedCommittedChannelSelection,
+    authoritative_channel_binding, selected_channel_messages, CommittedChannelSelection,
+    SharedCommittedChannelSelection,
 };
 use crate::tui::chat_scope::{active_home_scope_id, effective_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
@@ -215,7 +216,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let update_tx = props.update_tx.clone();
         let shared_selected = props.selected_channel.clone();
         let shared_channels = props.shared_channels.clone();
-        let shared_messages = props.shared_messages.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 // Sync navigation state via UiUpdate channel before consuming chat_state
@@ -254,28 +254,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         let mut guard = channels_ref.write();
                         if !next_channels.is_empty() || guard.is_empty() {
                             *guard = next_channels;
-                        }
-                    }
-
-                    if let Some(ref messages_ref) = shared_messages {
-                        let selected_messages = selected_channel_id
-                            .as_ref()
-                            .and_then(|channel_id| {
-                                chat_state
-                                    .all_channels()
-                                    .find(|channel| channel.id.to_string() == *channel_id)
-                                    .map(|channel| {
-                                        chat_state
-                                            .messages_for_channel(&channel.id)
-                                            .iter()
-                                            .map(Message::from)
-                                            .collect::<Vec<_>>()
-                                    })
-                            })
-                            .unwrap_or_default();
-                        let mut guard = messages_ref.write();
-                        if !selected_messages.is_empty() || guard.is_empty() {
-                            *guard = selected_messages;
                         }
                     }
 
@@ -403,7 +381,9 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let mut messages: Vec<Message> = props
         .shared_messages
         .as_ref()
-        .map(|messages_ref| messages_ref.read().clone())
+        .map(|messages_ref| {
+            selected_channel_messages(&messages_ref.read(), selected_channel_id.as_deref())
+        })
         .filter(|messages| !messages.is_empty())
         .unwrap_or_else(|| {
             selected_channel_id

@@ -9,6 +9,12 @@
 //! carries the writer's logical clock, which orders history (kicks) for
 //! display. Physical time is kept for user-visible timestamps and expiry only.
 //!
+//! Membership is an observed-remove set of episodes: each `MemberJoined`
+//! starts one (its tag), and a kick or `MemberLeft` revokes exactly the join
+//! tags of that member its writer observed. A rejoin the kicker never saw
+//! survives the kick in every arrival order, including a reinstalled member
+//! pulling the old kick back through home-context sync.
+//!
 //! The generic rules live in `aura_journal::causal_reduction`; this module
 //! binds them to the home governance fact family.
 
@@ -30,6 +36,20 @@ use aura_journal::fact::RelationalFact;
 use aura_journal::DomainFact;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+
+/// Tag domain of membership episodes (`MemberJoined`).
+const MEMBERSHIP_EPISODE_TAG_DOMAIN: &str = "social:membership-episode";
+
+/// Causal metadata of a join: it revokes and supersedes nothing. Its tag
+/// names its membership episode (see `TaggedHomeGovernanceEvent::from_event`).
+static JOIN_CAUSAL: CausalMetadata = CausalMetadata {
+    revokes: Vec::new(),
+    supersedes: Vec::new(),
+    clock: CausalClock {
+        lamport: 0,
+        vector: Vec::new(),
+    },
+};
 
 /// One decoded home governance fact.
 #[derive(Debug, Clone)]
@@ -53,6 +73,10 @@ pub enum HomeGovernanceEvent {
     /// Capability configuration register write
     /// (`SocialFact::AccessLevelCapabilitiesConfigured`).
     CapabilityConfig(SocialFact),
+    /// Membership episode add (`SocialFact::MemberJoined`).
+    MemberJoined(SocialFact),
+    /// Membership episode reversal (`SocialFact::MemberLeft`).
+    MemberLeft(SocialFact),
 }
 
 /// A decoded governance fact with its causal metadata.
@@ -123,6 +147,11 @@ pub enum HomeGovernanceKey {
     },
     /// Set the home's capability configuration.
     CapabilityConfig,
+    /// `target` leaves the home.
+    Leave {
+        /// Leaving authority.
+        target: AuthorityId,
+    },
 }
 
 impl HomeGovernanceEvent {
@@ -140,7 +169,12 @@ impl HomeGovernanceEvent {
                 causal,
                 ..
             }) => Some(causal),
-            Self::AccessOverride(_) | Self::CapabilityConfig(_) => None,
+            Self::MemberLeft(SocialFact::MemberLeft { causal, .. }) => Some(causal),
+            Self::MemberJoined(SocialFact::MemberJoined { .. }) => Some(&JOIN_CAUSAL),
+            Self::AccessOverride(_)
+            | Self::CapabilityConfig(_)
+            | Self::MemberJoined(_)
+            | Self::MemberLeft(_) => None,
         }
     }
 
@@ -160,7 +194,12 @@ impl HomeGovernanceEvent {
                 actor_id,
                 ..
             }) => Some(*actor_id),
-            Self::AccessOverride(_) | Self::CapabilityConfig(_) => None,
+            Self::MemberJoined(SocialFact::MemberJoined { authority_id, .. })
+            | Self::MemberLeft(SocialFact::MemberLeft { authority_id, .. }) => Some(*authority_id),
+            Self::AccessOverride(_)
+            | Self::CapabilityConfig(_)
+            | Self::MemberJoined(_)
+            | Self::MemberLeft(_) => None,
         }
     }
 
@@ -175,7 +214,10 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => f.context_id,
             Self::GrantModerator(f) => f.context_id,
             Self::RevokeModerator(f) => f.context_id,
-            Self::AccessOverride(fact) | Self::CapabilityConfig(fact) => fact.context_id(),
+            Self::AccessOverride(fact)
+            | Self::CapabilityConfig(fact)
+            | Self::MemberJoined(fact)
+            | Self::MemberLeft(fact) => fact.context_id(),
         }
     }
 
@@ -190,7 +232,10 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => f.to_generic(),
             Self::GrantModerator(f) => f.to_generic(),
             Self::RevokeModerator(f) => f.to_generic(),
-            Self::AccessOverride(fact) | Self::CapabilityConfig(fact) => fact.to_generic(),
+            Self::AccessOverride(fact)
+            | Self::CapabilityConfig(fact)
+            | Self::MemberJoined(fact)
+            | Self::MemberLeft(fact) => fact.to_generic(),
         }
     }
 
@@ -218,6 +263,25 @@ impl HomeGovernanceEvent {
     fn mute_remove(&self) -> Option<(AuthorityId, Option<ChannelId>)> {
         match self {
             Self::Unmute(f) => Some((f.unmuted_authority, f.channel_id)),
+            _ => None,
+        }
+    }
+
+    /// Member whose episode this join starts.
+    fn join_add(&self) -> Option<AuthorityId> {
+        match self {
+            Self::MemberJoined(SocialFact::MemberJoined { authority_id, .. }) => {
+                Some(*authority_id)
+            }
+            _ => None,
+        }
+    }
+
+    /// Member whose observed episodes this kick or leave ends.
+    fn episode_end(&self) -> Option<AuthorityId> {
+        match self {
+            Self::Kick(f) => Some(f.kicked_authority),
+            Self::MemberLeft(SocialFact::MemberLeft { authority_id, .. }) => Some(*authority_id),
             _ => None,
         }
     }
@@ -291,6 +355,8 @@ impl TaggedHomeGovernanceEvent {
                     SocialFact::AccessLevelCapabilitiesConfigured { .. } => {
                         HomeGovernanceEvent::CapabilityConfig(fact)
                     }
+                    SocialFact::MemberJoined { .. } => HomeGovernanceEvent::MemberJoined(fact),
+                    SocialFact::MemberLeft { .. } => HomeGovernanceEvent::MemberLeft(fact),
                     _ => return Ok(None),
                 };
                 if event.context_id() != outer {
@@ -309,18 +375,28 @@ impl TaggedHomeGovernanceEvent {
     /// Wrap a governance fact (`None` for a non-governance social fact). The
     /// tag is the hash of the fact's type id and canonical re-encoding, so it
     /// binds the whole content, author included: a fact cannot claim another
-    /// fact's tag, and distinct content never shares a tag.
+    /// fact's tag, and distinct content never shares a tag. A join's tag is
+    /// its membership episode instead (member, context and episode id), so
+    /// the inviter's and the invitee's copies of one join are one episode.
     #[must_use]
     pub fn from_event(event: HomeGovernanceEvent) -> Option<Self> {
         let causal = event.causal()?.clone();
-        let RelationalFact::Generic { envelope, .. } = event.to_generic() else {
-            return None;
+        let tag = if let HomeGovernanceEvent::MemberJoined(SocialFact::MemberJoined {
+            authority_id,
+            context_id,
+            episode,
+            ..
+        }) = &event
+        {
+            let identity = format!("{authority_id}\0{context_id}\0{episode}");
+            CausalTag::from_content(MEMBERSHIP_EPISODE_TAG_DOMAIN, identity.as_bytes())
+        } else {
+            let RelationalFact::Generic { envelope, .. } = event.to_generic() else {
+                return None;
+            };
+            CausalTag::from_content(envelope.type_id.as_str(), &envelope.payload)
         };
-        Some(Self {
-            tag: CausalTag::from_content(envelope.type_id.as_str(), &envelope.payload),
-            causal,
-            event,
-        })
+        Some(Self { tag, causal, event })
     }
 }
 
@@ -386,9 +462,12 @@ pub fn home_governance_causal(
             Vec::new(),
             tags_where(&|event| matches!(event, HomeGovernanceEvent::CapabilityConfig(_))),
         ),
+        HomeGovernanceKey::Kick { target, .. } | HomeGovernanceKey::Leave { target } => (
+            tags_where(&|event| event.join_add() == Some(target)),
+            Vec::new(),
+        ),
         HomeGovernanceKey::Ban { .. }
         | HomeGovernanceKey::Mute { .. }
-        | HomeGovernanceKey::Kick { .. }
         | HomeGovernanceKey::GrantModerator { .. } => (Vec::new(), Vec::new()),
     };
     CausalMetadata {
@@ -442,6 +521,34 @@ pub fn live_moderator_grant_tags(events: &[&TaggedHomeGovernanceEvent]) -> BTree
         HomeGovernanceEvent::grant_add,
         HomeGovernanceEvent::grant_remove,
     )
+}
+
+/// Membership of every member with a join among `events`: whether any of its
+/// episodes is live. A join starts an episode; a kick or leave ends exactly
+/// the episodes (join tags) its writer observed, so a join the kicker never
+/// saw (a rejoin, even one concurrent with the kick) survives. Callers pass
+/// only authorized kicks. Independent of input order.
+#[must_use]
+pub fn membership_liveness(events: &[&TaggedHomeGovernanceEvent]) -> BTreeMap<AuthorityId, bool> {
+    let adds: Vec<_> = events
+        .iter()
+        .filter_map(|event| event.event.join_add().map(|member| (member, event.tag)))
+        .collect();
+    let ends: Vec<_> = events
+        .iter()
+        .filter_map(|event| {
+            event
+                .event
+                .episode_end()
+                .map(|member| (member, event.causal.revokes.as_slice()))
+        })
+        .collect();
+    let live = observed_remove_live(&adds, &ends);
+    let mut liveness = BTreeMap::new();
+    for (member, tag) in adds {
+        *liveness.entry(member).or_insert(false) |= live.contains(&tag);
+    }
+    liveness
 }
 
 /// Effective access overrides: per target, the surviving override writes;

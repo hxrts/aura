@@ -419,3 +419,47 @@ async fn contact_and_governance_views_survive_restart() -> Result<()> {
     .await?;
     net.finish().await
 }
+
+/// Task 93: the inviter and the invitee each commit Alex's join under the
+/// accepted invitation, so both copies are one membership episode. Barbara's
+/// kick revokes that episode, which removes Alex on both clients. (A rejoin
+/// cannot be driven here: the kick's AMP channel departure makes the inviter
+/// refuse a later acceptance; the rejoin orders are covered by the
+/// `views::home::governance` permutation tests.)
+#[tokio::test(start_paused = true)]
+async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()> {
+    let net = SimNet::new();
+    let barbara = net.peer(91).await?;
+    let alex = net.peer(95).await?;
+    link_contacts(&barbara, &alex).await?;
+    let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    for (who, app) in [("Barbara", &barbara.app), ("Alex", &alex.app)] {
+        wait_until(&format!("{who} lists Alex as a member"), || async {
+            home_view(app, home)
+                .await
+                .is_some_and(|h| h.member(&alex.id).is_some())
+        })
+        .await?;
+    }
+
+    strong(
+        &barbara.app,
+        barbara.id,
+        home,
+        sc::ParsedCommand::Kick {
+            target: alex.id.to_string(),
+            reason: Some("cool off".to_string()),
+        },
+    )
+    .await?;
+    for (who, app) in [("Barbara", &barbara.app), ("Alex", &alex.app)] {
+        wait_until(&format!("{who} drops kicked Alex"), || async {
+            home_view(app, home)
+                .await
+                .is_some_and(|h| h.member(&alex.id).is_none() && h.kick_log.len() == 1)
+        })
+        .await?;
+    }
+    net.finish().await
+}

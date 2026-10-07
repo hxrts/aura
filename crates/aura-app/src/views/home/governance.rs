@@ -13,20 +13,19 @@ use super::state::HomeState;
 use aura_core::time::CausalTag;
 use aura_core::types::identifiers::AuthorityId;
 use aura_social::moderation::governance::{
-    live_ban_tags, live_moderator_grant_tags, live_mute_tags, resolved_access_overrides,
-    resolved_capability_config, sort_causally, HomeGovernanceEvent, TaggedHomeGovernanceEvent,
+    live_ban_tags, live_moderator_grant_tags, live_mute_tags, membership_liveness,
+    resolved_access_overrides, resolved_capability_config, sort_causally, HomeGovernanceEvent,
+    TaggedHomeGovernanceEvent,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The governance facts held for one home, plus the reducer's bookkeeping:
-/// members hidden because they are banned (restored when the ban is lifted)
-/// and kicks whose member removal was already applied.
+/// members hidden because they are banned (restored when the ban is lifted).
 #[derive(Debug, Clone, Default)]
 pub struct HomeGovernanceLog {
     creator: Option<AuthorityId>,
     events: BTreeMap<CausalTag, TaggedHomeGovernanceEvent>,
     banned_members: BTreeMap<AuthorityId, HomeMember>,
-    applied_kicks: BTreeSet<CausalTag>,
 }
 
 impl HomeGovernanceLog {
@@ -286,12 +285,19 @@ pub fn reduce_home_governance(
     let overflow = home.kick_log.len().saturating_sub(HomeState::MAX_KICK_LOG);
     home.kick_log.drain(..overflow);
 
-    // A kick removes its member once (rejoin scoping: work/8.md Task 93).
-    for event in &kicks {
-        if let HomeGovernanceEvent::Kick(kick) = &event.event {
-            if log.applied_kicks.insert(event.tag) {
-                let _ = home.remove_member(&kick.kicked_authority);
-            }
+    // Membership episodes: a kick or leave ends the joins its writer
+    // observed; a member whose every join has ended leaves the roster, and a
+    // later (unobserved) join keeps them in it.
+    let mut membership = of_kind(&events, |event| {
+        matches!(
+            event,
+            HomeGovernanceEvent::MemberJoined(_) | HomeGovernanceEvent::MemberLeft(_)
+        )
+    });
+    membership.extend(kicks.iter().copied());
+    for (id, live) in membership_liveness(&membership) {
+        if !live {
+            let _ = home.remove_member(&id);
         }
     }
 
@@ -314,8 +320,8 @@ mod tests {
     use aura_social::moderation::governance::test_support::{causal, tagged};
     use aura_social::moderation::governance::HomeGovernanceKey;
     use aura_social::moderation::{
-        HomeBanFact, HomeGrantModeratorFact, HomeMuteFact, HomeRevokeModeratorFact, HomeUnbanFact,
-        HomeUnmuteFact,
+        HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact,
+        HomeUnbanFact, HomeUnmuteFact,
     };
     use aura_social::{AccessLevel, SocialFact};
 
@@ -380,6 +386,19 @@ mod tests {
         viewer: u8,
     ) -> Observed {
         for event in events {
+            // The view adds a joining member before reducing governance.
+            if let HomeGovernanceEvent::MemberJoined(SocialFact::MemberJoined {
+                authority_id,
+                ..
+            }) = &event.event
+            {
+                if home.member(authority_id).is_none() {
+                    home.add_member(member(
+                        authority_id_byte(authority_id),
+                        HomeRole::Participant,
+                    ));
+                }
+            }
             log.insert(event.clone());
             // Reduce after every arrival, as the view does per batch.
             reduce_home_governance(&mut home, &mut log, &who(viewer));
@@ -728,5 +747,141 @@ mod tests {
         assert_ne!(forged.tag, b.tag);
         let state = assert_permutation_invariant(&[b, forged], |order| reduce(order, OWNER));
         assert_eq!(state.banned, BTreeSet::from([who(TARGET)]));
+    }
+
+    fn authority_id_byte(id: &AuthorityId) -> u8 {
+        [OWNER, MEMBER, TARGET]
+            .into_iter()
+            .find(|byte| who(*byte) == *id)
+            .expect("test authority")
+    }
+
+    /// `TARGET` joins (one membership episode per join, named by its tag).
+    fn join(at_ms: u64) -> Event {
+        tagged(HomeGovernanceEvent::MemberJoined(
+            SocialFact::member_joined_ms(
+                who(TARGET),
+                aura_social::HomeId::from_bytes(*home_id().as_bytes()),
+                ctx(),
+                at_ms,
+                "t".into(),
+                format!("inv-{at_ms}"),
+            ),
+        ))
+    }
+
+    /// The owner kicks `TARGET` after observing `observed`.
+    fn kick(device: u8, observed: &[Event]) -> Event {
+        let key = HomeGovernanceKey::Kick {
+            target: who(TARGET),
+            channel: home_id(),
+        };
+        tagged(HomeGovernanceEvent::Kick(HomeKickFact::new_ms(
+            ctx(),
+            home_id(),
+            who(TARGET),
+            who(OWNER),
+            "r".into(),
+            1,
+            causal(device, key, observed),
+        )))
+    }
+
+    /// Owner and threshold member; `TARGET` enters only through joins.
+    fn roster_without_target(events: &[Event], viewer: u8) -> Observed {
+        let mut home = base_home();
+        let _ = home.remove_member(&who(TARGET));
+        let mut log = HomeGovernanceLog::default();
+        log.set_creator(who(OWNER));
+        reduce_in(home, log, events, viewer)
+    }
+
+    fn has_target(state: &Observed) -> bool {
+        state.roles.iter().any(|(id, _)| *id == who(TARGET))
+    }
+
+    #[test]
+    fn kick_ends_the_observed_episode_in_every_order() {
+        let first = join(10);
+        let kicked = kick(1, std::slice::from_ref(&first));
+        assert!(kicked.causal.revokes.contains(&first.tag));
+        let state = assert_permutation_invariant(&[first, kicked], |order| {
+            roster_without_target(order, OWNER)
+        });
+        assert!(!has_target(&state));
+        assert_eq!(state.kicks, vec![who(TARGET)]);
+    }
+
+    #[test]
+    fn rejoin_after_kick_survives_in_every_order() {
+        let first = join(10);
+        let kicked = kick(1, std::slice::from_ref(&first));
+        let rejoin = join(20);
+        let state = assert_permutation_invariant(&[first, kicked, rejoin], |order| {
+            roster_without_target(order, OWNER)
+        });
+        assert!(has_target(&state));
+        assert_eq!(state.kicks, vec![who(TARGET)]);
+    }
+
+    #[test]
+    fn rejoin_concurrent_with_kick_survives_and_an_observing_kick_removes() {
+        let first = join(10);
+        // The kicker never saw the concurrent rejoin.
+        let concurrent = join(11);
+        let kicked = kick(1, std::slice::from_ref(&first));
+        let events = [first.clone(), concurrent.clone(), kicked.clone()];
+        let state =
+            assert_permutation_invariant(&events, |order| roster_without_target(order, OWNER));
+        assert!(has_target(&state));
+
+        // A second kick that observed both episodes ends the membership.
+        let again = kick(1, &[first.clone(), concurrent.clone(), kicked.clone()]);
+        let state = assert_permutation_invariant(&[first, concurrent, kicked, again], |order| {
+            roster_without_target(order, OWNER)
+        });
+        assert!(!has_target(&state));
+    }
+
+    #[test]
+    fn reinstalled_member_pulling_old_kick_stays_after_rejoin() {
+        // The kicked member reinstalls (empty journal and roster), rejoins,
+        // and home-context sync then serves the old join and kick.
+        let old_join = join(10);
+        let old_kick = kick(1, std::slice::from_ref(&old_join));
+        let rejoin = join(30);
+        for viewer in [TARGET, OWNER] {
+            let state = assert_permutation_invariant(
+                &[old_join.clone(), old_kick.clone(), rejoin.clone()],
+                |order| roster_without_target(order, viewer),
+            );
+            assert!(has_target(&state), "viewer {viewer}");
+        }
+    }
+
+    #[test]
+    fn leave_ends_the_observed_episode_and_rejoin_survives() {
+        let first = join(10);
+        let leave = tagged(HomeGovernanceEvent::MemberLeft(SocialFact::member_left_ms(
+            who(TARGET),
+            aura_social::HomeId::from_bytes(*home_id().as_bytes()),
+            ctx(),
+            15,
+            causal(
+                3,
+                HomeGovernanceKey::Leave {
+                    target: who(TARGET),
+                },
+                std::slice::from_ref(&first),
+            ),
+        )));
+        let left = assert_permutation_invariant(&[first.clone(), leave.clone()], |order| {
+            roster_without_target(order, OWNER)
+        });
+        assert!(!has_target(&left));
+        let rejoined = assert_permutation_invariant(&[first, leave, join(20)], |order| {
+            roster_without_target(order, OWNER)
+        });
+        assert!(has_target(&rejoined));
     }
 }

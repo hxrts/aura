@@ -1,4 +1,4 @@
-use crate::tui::types::Channel;
+use crate::tui::types::{Channel, Message};
 use aura_app::ui_contract::ChannelBindingWitness;
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -35,6 +35,23 @@ impl CommittedChannelSelection {
 }
 
 pub type SharedCommittedChannelSelection = Arc<RwLock<Option<CommittedChannelSelection>>>;
+
+/// Messages of the selected channel, taken from the shared all-channel
+/// message projection. Every reader (messages pane, retry, harness snapshot)
+/// derives the visible list from the current selection at read time, so a
+/// selection change shows immediately without waiting for a chat update.
+#[must_use]
+pub fn selected_channel_messages(messages: &[Message], channel_id: Option<&str>) -> Vec<Message> {
+    channel_id
+        .map(|channel_id| {
+            messages
+                .iter()
+                .filter(|message| message.channel_id == channel_id)
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 #[must_use]
 pub fn authoritative_channel_binding(channel: &Channel) -> ChannelBindingWitness {

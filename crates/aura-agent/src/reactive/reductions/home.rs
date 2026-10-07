@@ -151,6 +151,7 @@ mod tests {
             test_context_id(),
             2000,
             "Alice".to_string(),
+            "inv".to_string(),
         );
 
         let facts = vec![

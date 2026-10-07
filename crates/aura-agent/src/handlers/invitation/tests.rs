@@ -722,6 +722,7 @@ async fn joined_home_evidence_requires_canonical_checkpoint_and_membership() {
     let own = AuthorityId::new_from_entropy([11u8; 32]);
     let effects = effects_for(&AuthorityContext::new(own)).await;
     let invite = ChannelInviteDetails {
+        invitation_id: InvitationId::new("inv-test-home"),
         context_id: ContextId::new_from_entropy([12u8; 32]),
         channel_id: canonical_home_id(13),
         home_name: "Den".into(),
@@ -6227,6 +6228,7 @@ async fn home_invitation_acceptance_commits_durable_home_membership() {
     );
     let handler = handler_for_id(own);
     let invite = ChannelInviteDetails {
+        invitation_id: InvitationId::new("inv-test-home"),
         context_id: ContextId::new_from_entropy([63u8; 32]),
         channel_id: ChannelId::from_bytes([64u8; 32]),
         home_name: "Den".to_string(),

@@ -898,7 +898,7 @@ pub struct SocialFactKey {
 /// These facts represent social-related state changes in the journal,
 /// including blocks, members, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(type_id = "social", schema_version = 3, context = "context_id")]
+#[domain_fact(type_id = "social", schema_version = 4, context = "context_id")]
 pub enum SocialFact {
     /// Home created
     HomeCreated {
@@ -926,7 +926,8 @@ pub enum SocialFact {
         /// Authority that deleted the home
         actor_id: AuthorityId,
     },
-    /// Member joined a home
+    /// Member joined a home. Each join starts the membership episode named by
+    /// its `episode` (docs/115 §3.4).
     MemberJoined {
         /// Authority joining the home
         authority_id: AuthorityId,
@@ -938,6 +939,11 @@ pub enum SocialFact {
         joined_at: PhysicalTime,
         /// Human-readable name for the member
         name: String,
+        /// Membership episode identity (schema v4): the accepted invitation id,
+        /// or a fixed label for the home creator. The inviter and the invitee
+        /// each commit the join with the same episode, so their copies are one
+        /// episode for kicks and leaves.
+        episode: String,
         /// Storage allocated in bytes (default: 200 KB)
         storage_allocated: u64,
     },
@@ -951,6 +957,9 @@ pub enum SocialFact {
         context_id: ContextId,
         /// When the member left
         left_at: PhysicalTime,
+        /// Causal metadata (schema v4): `revokes` names the membership
+        /// episodes (`MemberJoined` tags) the leaver observed; it ends them.
+        causal: CausalMetadata,
     },
     /// Moderator granted capabilities in a home
     ModeratorGranted {
@@ -1088,8 +1097,8 @@ impl SocialFact {
     ) -> Result<Self, aura_core::types::facts::FactError> {
         aura_core::types::facts::try_decode_envelope(
             &aura_core::types::facts::FactTypeId::from(SOCIAL_FACT_TYPE_ID),
-            3,
-            3,
+            4,
+            4,
             envelope,
         )
     }
@@ -1295,6 +1304,7 @@ impl SocialFact {
         context_id: ContextId,
         joined_at_ms: u64,
         name: String,
+        episode: String,
     ) -> Self {
         Self::MemberJoined {
             authority_id,
@@ -1302,6 +1312,7 @@ impl SocialFact {
             context_id,
             joined_at: Self::physical_time(joined_at_ms),
             name,
+            episode,
             storage_allocated: Self::DEFAULT_MEMBER_STORAGE,
         }
     }
@@ -1312,12 +1323,14 @@ impl SocialFact {
         home_id: HomeId,
         context_id: ContextId,
         left_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::MemberLeft {
             authority_id,
             home_id,
             context_id,
             left_at: Self::physical_time(left_at_ms),
+            causal,
         }
     }
 
@@ -1476,6 +1489,7 @@ mod tests {
             test_context_id(),
             1234567890,
             "Alice".to_string(),
+            "inv".to_string(),
         );
 
         let bytes = fact.to_bytes();

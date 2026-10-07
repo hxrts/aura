@@ -520,4 +520,56 @@ mod tests {
         assert!(update_branch.contains("state.chat.selected_channel >= channel_count"));
         assert!(!update_branch.contains("committed_selection.is_none()\n                                    && state.chat.selected_channel >= channel_count"));
     }
+
+    /// Task 127: the messages pane, retry and send target read the selected
+    /// channel's messages from the shared all-channel projection at read
+    /// time, so moving the selection switches the visible messages with no
+    /// chat-state update in between.
+    #[test]
+    fn messages_pane_follows_selection_without_chat_update() {
+        use crate::tui::channel_selection::selected_channel_messages;
+        use crate::tui::types::Message;
+
+        let channels = Arc::new(parking_lot::RwLock::new(vec![
+            Channel::new("channel-1", "General"),
+            Channel::new("channel-2", "Ops"),
+        ]));
+        // Written once; never refreshed during the test.
+        let shared_messages = vec![
+            Message::new("m1", "alice", "general hello").with_channel("channel-1"),
+            Message::new("m2", "bob", "ops one").with_channel("channel-2"),
+            Message::new("m3", "bob", "ops two").with_channel("channel-2"),
+        ];
+        let selected = Arc::new(parking_lot::RwLock::new(None));
+        let pane = |selected: &crate::tui::channel_selection::SharedCommittedChannelSelection| {
+            selected_channel_messages(
+                &shared_messages,
+                selected
+                    .read()
+                    .as_ref()
+                    .map(CommittedChannelSelection::channel_id),
+            )
+            .into_iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>()
+        };
+
+        let mut previous = TuiState::new();
+        for (idx, expected_channel, expected_ids) in [
+            (0, "channel-1", vec!["m1"]),
+            (1, "channel-2", vec!["m2", "m3"]),
+            (0, "channel-1", vec!["m1"]),
+        ] {
+            let mut next = previous.clone();
+            next.chat.selected_channel = idx;
+            handle_channel_selection_change(&previous, &next, &channels, &selected);
+            assert_eq!(pane(&selected), expected_ids);
+            assert_eq!(
+                resolve_send_target_channel(selected.read().clone(), &next, &channels.read())
+                    .map(|selection| selection.channel_id().to_string()),
+                Some(expected_channel.to_string())
+            );
+            previous = next;
+        }
+    }
 }

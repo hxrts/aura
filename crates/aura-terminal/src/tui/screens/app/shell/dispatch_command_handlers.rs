@@ -753,8 +753,14 @@ pub(super) fn handle_dispatch_command_match(
         }
         DispatchCommand::RetryMessage => {
             let idx = new_state.chat.message_scroll;
-            let guard = shared_messages_for_dispatch.read();
-            if let Some(msg) = guard.get(idx) {
+            let selected_messages = crate::tui::channel_selection::selected_channel_messages(
+                &shared_messages_for_dispatch.read(),
+                tui_selected_for_events
+                    .read()
+                    .as_ref()
+                    .map(crate::tui::channel_selection::CommittedChannelSelection::channel_id),
+            );
+            if let Some(msg) = selected_messages.get(idx) {
                 let Some(update_tx) = update_tx_for_events else {
                     new_state.toast_error("UI update sender is unavailable");
                     return EventCommandLoopAction::ContinueCommand;
