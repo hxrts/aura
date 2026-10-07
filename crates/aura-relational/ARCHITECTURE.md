@@ -111,7 +111,7 @@ See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
 - [Relational Contexts](../../docs/114_relational_contexts.md)
 - [Operation Categories](../../docs/109_operation_categories.md)
 
-Required Contact (schema 2, causal metadata) and Friendship (schema 1) envelope
+Required Contact (schema 2, causal metadata) and Friendship (schema 2, causal metadata; reduced by `wot::FriendshipLog`) envelope
 decoders use the shared pure core validator for the declared domain and schema. Structural and native
 JSON/DAG-CBOR failures remain explicit; successful decoding alone establishes
 neither journal commitment nor relationship agreement.

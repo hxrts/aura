@@ -6,7 +6,7 @@
 use aura_amp::channel::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_amp::config::AmpRuntimeConfig;
 use aura_core::effects::amp::{
-    AmpChannelEffects, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
+    AmpChannelEffects, AmpChannelError, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
     ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::time::{OrderTime, TimeStamp};
@@ -379,56 +379,39 @@ async fn test_mock_effects_send_message_on_closed_channel() {
 }
 
 #[tokio::test]
-async fn test_mock_effects_close_increments_epoch() {
+async fn test_mock_effects_close_forbids_reopen() {
+    // Production contract (aura-agent runtime/effects/amp.rs): close records a
+    // terminal epoch bump but keeps channel state, so create on the same id
+    // reports AlreadyExists and the channel stays closed.
     let effects = MockEffects::deterministic();
-
-    // Create channel
-    let create_params = ChannelCreateParams {
+    let create_params = || ChannelCreateParams {
         context: test_context(),
         channel: Some(test_channel()),
         topic: None,
         skip_window: None,
     };
-    effects.create_channel(create_params).await.unwrap();
+    effects.create_channel(create_params()).await.unwrap();
+    effects
+        .close_channel(ChannelCloseParams {
+            context: test_context(),
+            channel: test_channel(),
+        })
+        .await
+        .unwrap();
 
-    // Get initial epoch via send
-    let send_params = ChannelSendParams {
-        context: test_context(),
-        channel: test_channel(),
-        sender: test_authority(),
-        plaintext: b"Before close".to_vec(),
-        reply_to: None,
-    };
-    let ct1 = effects.send_message(send_params).await.unwrap();
-    let initial_epoch = ct1.header.chan_epoch;
+    let reopen = effects.create_channel(create_params()).await.unwrap_err();
+    assert!(matches!(reopen, AmpChannelError::AlreadyExists { .. }));
 
-    // Close channel (should increment epoch)
-    let close_params = ChannelCloseParams {
-        context: test_context(),
-        channel: test_channel(),
-    };
-    effects.close_channel(close_params).await.unwrap();
-
-    // Reopen channel (create again)
-    let create_params2 = ChannelCreateParams {
-        context: test_context(),
-        channel: Some(test_channel()),
-        topic: None,
-        skip_window: None,
-    };
-    effects.create_channel(create_params2).await.unwrap();
-
-    // Check epoch incremented
-    let send_params2 = ChannelSendParams {
-        context: test_context(),
-        channel: test_channel(),
-        sender: test_authority(),
-        plaintext: b"After reopen".to_vec(),
-        reply_to: None,
-    };
-    let ct2 = effects.send_message(send_params2).await.unwrap();
-
-    assert_eq!(ct2.header.chan_epoch, initial_epoch + 1);
+    let send = effects
+        .send_message(ChannelSendParams {
+            context: test_context(),
+            channel: test_channel(),
+            sender: test_authority(),
+            plaintext: b"After reopen attempt".to_vec(),
+            reply_to: None,
+        })
+        .await;
+    assert!(send.is_err(), "closed channel must stay closed");
 }
 
 #[tokio::test]

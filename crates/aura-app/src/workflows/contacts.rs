@@ -19,7 +19,7 @@ use aura_core::types::identifiers::ChannelId;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_journal::DomainFact;
-use aura_relational::{ContactCausalKey, ContactFact, FriendshipFact};
+use aura_relational::{ContactCausalKey, ContactFact, FriendshipCausalKey, FriendshipFact};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -37,6 +37,22 @@ async fn contact_causal(
         "stamp contact fact",
         CONTACTS_RUNTIME_TIMEOUT,
         CausalStampKey::Contact(key),
+    )
+    .await
+}
+
+/// Causal metadata for a new friendship fact about `key` (docs/105 §4.2.1).
+async fn friendship_causal(
+    runtime: &Arc<dyn RuntimeBridge>,
+    operation: &'static str,
+    key: FriendshipCausalKey,
+) -> Result<aura_core::time::CausalMetadata, AuraError> {
+    runtime_causal_stamp(
+        runtime,
+        operation,
+        "stamp friendship fact",
+        CONTACTS_RUNTIME_TIMEOUT,
+        CausalStampKey::Friendship(key),
     )
     .await
 }
@@ -311,11 +327,21 @@ pub async fn send_friend_request(
     let runtime = require_runtime(app_core).await?;
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();
+    let causal = friendship_causal(
+        &runtime,
+        "send_friend_request",
+        FriendshipCausalKey::Propose {
+            a: owner_id,
+            b: target,
+        },
+    )
+    .await?;
     let fact = FriendshipFact::Proposed {
         context_id: friendship_context(owner_id, target),
         requester: owner_id,
         accepter: target,
         proposed_at: physical_time(timestamp_ms),
+        causal,
     }
     .to_generic();
     let facts = vec![fact];
@@ -349,11 +375,21 @@ pub async fn accept_friend_request(
     let runtime = require_runtime(app_core).await?;
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();
+    let causal = friendship_causal(
+        &runtime,
+        "accept_friend_request",
+        FriendshipCausalKey::Accept {
+            a: owner_id,
+            b: target,
+        },
+    )
+    .await?;
     let fact = FriendshipFact::Accepted {
         context_id: friendship_context(owner_id, target),
         requester: target,
         accepter: owner_id,
         accepted_at: physical_time(timestamp_ms),
+        causal,
     }
     .to_generic();
     let facts = vec![fact];
@@ -387,11 +423,21 @@ pub async fn decline_friend_request(
     let runtime = require_runtime(app_core).await?;
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();
+    let causal = friendship_causal(
+        &runtime,
+        "decline_friend_request",
+        FriendshipCausalKey::Revoke {
+            a: owner_id,
+            b: target,
+        },
+    )
+    .await?;
     let fact = FriendshipFact::Revoked {
         context_id: friendship_context(owner_id, target),
         requester: target,
         accepter: owner_id,
         revoked_at: physical_time(timestamp_ms),
+        causal,
     }
     .to_generic();
     let facts = vec![fact];
@@ -425,11 +471,21 @@ pub async fn revoke_friendship(
     let runtime = require_runtime(app_core).await?;
     let target = parse_authority_id(contact_id)?;
     let owner_id = runtime.authority_id();
+    let causal = friendship_causal(
+        &runtime,
+        "revoke_friendship",
+        FriendshipCausalKey::Revoke {
+            a: owner_id,
+            b: target,
+        },
+    )
+    .await?;
     let fact = FriendshipFact::Revoked {
         context_id: friendship_context(owner_id, target),
         requester: owner_id,
         accepter: target,
         revoked_at: physical_time(timestamp_ms),
+        causal,
     }
     .to_generic();
     let facts = vec![fact];

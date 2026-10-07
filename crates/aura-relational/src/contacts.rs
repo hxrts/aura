@@ -366,8 +366,8 @@ pub mod test_support {
 
     /// The clock `device` reaches after observing `observed`.
     #[must_use]
-    pub fn advance(device: u8, observed: &[TaggedContactFact]) -> LogicalTime {
-        let mut vector = observed_contact_vector(observed);
+    pub fn advance<F: CausalFact>(device: u8, observed: &[F]) -> LogicalTime {
+        let mut vector = merged_vector(observed.iter().map(|fact| &fact.causal_metadata().clock));
         let id = DeviceId(uuid::Uuid::from_bytes([device; 16]));
         let next = vector.get(&id).copied().unwrap_or(0) + 1;
         vector.insert(id, next);
@@ -399,7 +399,7 @@ pub mod test_support {
         CausalMetadata {
             revokes: Vec::new(),
             supersedes: Vec::new(),
-            clock: CausalClock::from_logical(&advance(device, &[])),
+            clock: CausalClock::from_logical(&advance::<TaggedContactFact>(device, &[])),
         }
     }
 

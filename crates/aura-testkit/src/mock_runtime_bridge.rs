@@ -653,6 +653,24 @@ impl RuntimeBridge for MockRuntimeBridge {
                     0x4d, key, &observed,
                 ));
             }
+            aura_app::runtime_bridge::CausalStampKey::Friendship(key) => {
+                let observed: Vec<_> = self
+                    .facts
+                    .read()
+                    .await
+                    .iter()
+                    .filter_map(|fact| match fact {
+                        RelationalFact::Generic { envelope, .. } => {
+                            aura_relational::FriendshipFact::from_envelope(envelope)
+                                .map(aura_relational::TaggedFriendshipFact::new)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                return Ok(aura_relational::wot::test_support::friendship_causal_after(
+                    0x4d, key, &observed,
+                ));
+            }
         };
         let observed: Vec<_> = self
             .facts

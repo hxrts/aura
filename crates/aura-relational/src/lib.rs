@@ -125,9 +125,11 @@ pub use guardian_request::{
 };
 pub use guardian_service::GuardianService;
 pub use wot::{
-    FriendshipFact, FriendshipFactReducer, FriendshipState, TrustIntroductionFact,
-    TrustIntroductionFactReducer, WebOfTrustEvidence, WebOfTrustIndex, FRIENDSHIP_FACT_TYPE_ID,
-    TRUST_INTRODUCTION_FACT_TYPE_ID,
+    friendship_causal, trust_introduction_causal, FriendshipCausalKey, FriendshipFact,
+    FriendshipFactReducer, FriendshipLog, FriendshipPair, FriendshipState, FriendshipStatus,
+    TaggedFriendshipFact, TaggedTrustIntroductionFact, TaggedWotFact, TrustIntroductionFact,
+    TrustIntroductionFactReducer, WebOfTrustEvidence, WebOfTrustIndex, WotFact,
+    FRIENDSHIP_FACT_TYPE_ID, TRUST_INTRODUCTION_FACT_TYPE_ID,
 };
 
 /// RelationalContext manages cross-authority relationships

@@ -1223,6 +1223,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await
                 .map_err(|error| bridge_internal("Stamp contact fact failed", error));
             }
+            CausalStampKey::Friendship(key) => {
+                return crate::handlers::shared::stamp_friendship_causal(
+                    &effects,
+                    self.agent.authority_id(),
+                    key,
+                )
+                .await
+                .map_err(|error| bridge_internal("Stamp friendship fact failed", error));
+            }
         };
         let committed = effects
             .load_committed_facts(self.agent.authority_id())

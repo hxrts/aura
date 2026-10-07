@@ -46,7 +46,8 @@ use aura_invitation::{
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
-    ContactFact, FriendshipFact, TaggedContactFact, CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
+    ContactFact, FriendshipFact, FriendshipLog, FriendshipStatus, TaggedContactFact,
+    CONTACT_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
 };
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
@@ -790,6 +791,7 @@ pub struct ContactsSignalView {
     state: Mutex<ContactsState>,
     pending_relationships: Mutex<HashMap<AuthorityId, ContactRelationshipState>>,
     contact_log: Mutex<ContactFactLog>,
+    friendship_log: Mutex<FriendshipLog>,
 }
 
 impl ContactsSignalView {
@@ -800,6 +802,7 @@ impl ContactsSignalView {
             state: Mutex::new(ContactsState::default()),
             pending_relationships: Mutex::new(HashMap::new()),
             contact_log: Mutex::new(ContactFactLog::default()),
+            friendship_log: Mutex::new(FriendshipLog::default()),
         }
     }
 
@@ -807,19 +810,23 @@ impl ContactsSignalView {
         &self,
         state: &mut ContactsState,
         pending: &mut HashMap<AuthorityId, ContactRelationshipState>,
-        fact: &FriendshipFact,
+        friendship_log: &mut FriendshipLog,
+        fact: FriendshipFact,
     ) -> bool {
         let Some(other) = fact.other_participant(self.own_authority) else {
             return false;
         };
 
-        let relationship_state = match fact {
-            FriendshipFact::Proposed { requester, .. } if *requester == self.own_authority => {
+        // Friendship reduces from the whole friendship fact set
+        // (docs/105 §4.2.1), not from arrival order.
+        friendship_log.insert(fact);
+        let relationship_state = match friendship_log.status(self.own_authority, other) {
+            Some(FriendshipStatus::Friends { .. }) => ContactRelationshipState::Friend,
+            Some(FriendshipStatus::Pending { requester }) if requester == self.own_authority => {
                 ContactRelationshipState::PendingOutbound
             }
-            FriendshipFact::Proposed { .. } => ContactRelationshipState::PendingInbound,
-            FriendshipFact::Accepted { .. } => ContactRelationshipState::Friend,
-            FriendshipFact::Revoked { .. } => ContactRelationshipState::Contact,
+            Some(FriendshipStatus::Pending { .. }) => ContactRelationshipState::PendingInbound,
+            None => ContactRelationshipState::Contact,
         };
         if state.set_relationship_state(other, relationship_state) {
             pending.remove(&other);
@@ -843,6 +850,7 @@ impl ReactiveView for ContactsSignalView {
                 let mut state = self.state.lock().await;
                 let mut pending = self.pending_relationships.lock().await;
                 let mut contact_log = self.contact_log.lock().await;
+                let mut friendship_log = self.friendship_log.lock().await;
                 *state = current.value;
                 let mut changed = false;
 
@@ -879,7 +887,8 @@ impl ReactiveView for ContactsSignalView {
                             changed |= self.apply_friendship_fact(
                                 &mut state,
                                 &mut pending,
-                                &friendship_fact,
+                                &mut friendship_log,
+                                friendship_fact,
                             );
                         }
                         FactContent::Relational(RelationalFact::Protocol(
@@ -2554,7 +2563,7 @@ mod tests {
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
-    use aura_relational::{ContactFact, FriendshipFact};
+    use aura_relational::{ContactFact, FriendshipCausalKey, FriendshipFact, TaggedFriendshipFact};
     use aura_social::moderation::facts::{
         HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
     };
@@ -4188,6 +4197,14 @@ mod tests {
             Some(ContactRelationshipState::Contact)
         );
 
+        let stamp = |device: u8, key: FriendshipCausalKey, observed: &[&FriendshipFact]| {
+            let observed: Vec<_> = observed
+                .iter()
+                .map(|fact| TaggedFriendshipFact::new((*fact).clone()))
+                .collect();
+            aura_relational::wot::test_support::friendship_causal_after(device, key, &observed)
+        };
+        let (a, b) = (own_authority, peer);
         let outbound_proposed = FriendshipFact::Proposed {
             context_id: friendship_context,
             requester: own_authority,
@@ -4196,9 +4213,9 @@ mod tests {
                 ts_ms: 11,
                 uncertainty: None,
             },
-        }
-        .to_generic();
-        view.update(&[fact_from_relational(outbound_proposed)])
+            causal: stamp(1, FriendshipCausalKey::Propose { a, b }, &[]),
+        };
+        view.update(&[fact_from_relational(outbound_proposed.to_generic())])
             .await
             .expect("required fixture projection succeeds");
 
@@ -4221,9 +4238,13 @@ mod tests {
                 ts_ms: 12,
                 uncertainty: None,
             },
-        }
-        .to_generic();
-        view.update(&[fact_from_relational(accepted)])
+            causal: stamp(
+                2,
+                FriendshipCausalKey::Accept { a, b },
+                &[&outbound_proposed],
+            ),
+        };
+        view.update(&[fact_from_relational(accepted.to_generic())])
             .await
             .expect("required fixture projection succeeds");
 
@@ -4246,6 +4267,11 @@ mod tests {
                 ts_ms: 13,
                 uncertainty: None,
             },
+            causal: stamp(
+                1,
+                FriendshipCausalKey::Revoke { a, b },
+                &[&outbound_proposed, &accepted],
+            ),
         }
         .to_generic();
         view.update(&[fact_from_relational(revoked)])
@@ -4271,6 +4297,14 @@ mod tests {
                 ts_ms: 14,
                 uncertainty: None,
             },
+            causal: stamp(
+                3,
+                FriendshipCausalKey::Propose {
+                    a: inbound_peer,
+                    b: own_authority,
+                },
+                &[],
+            ),
         }
         .to_generic();
         view.update(&[fact_from_relational(inbound_proposed)])
@@ -4330,6 +4364,7 @@ mod tests {
                 requester: own,
                 accepter: peer,
                 accepted_at: at.clone(),
+                causal: aura_relational::contacts::test_support::fresh(2),
             }
             .to_generic(),
         );

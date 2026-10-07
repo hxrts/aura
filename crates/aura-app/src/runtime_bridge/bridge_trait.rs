@@ -42,6 +42,8 @@ pub enum CausalStampKey {
     },
     /// A contact fact of the runtime authority's contact list.
     Contact(aura_relational::ContactCausalKey),
+    /// A friendship fact between the runtime authority and a peer.
+    Friendship(aura_relational::FriendshipCausalKey),
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]

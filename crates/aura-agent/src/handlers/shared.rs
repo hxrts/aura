@@ -218,24 +218,40 @@ pub async fn advance_clock_past<F: aura_journal::causal_reduction::CausalFact>(
         .map_err(|source| stamping_failure("advance logical clock", source))
 }
 
+/// Every committed fact of `type_id` in `authority`'s journal, decoded.
+async fn load_decoded_facts<T, E>(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    type_id: &'static str,
+    decode: impl Fn(&aura_core::types::facts::FactEnvelope) -> Result<T, E>,
+) -> AgentResult<Vec<T>>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    load_relational_fact_envelopes_by_type(effects, authority, type_id)
+        .await?
+        .iter()
+        .map(|envelope| {
+            decode(envelope).map_err(|source| stamping_failure("decode committed fact", source))
+        })
+        .collect()
+}
+
 /// Every committed contact fact of `authority`, tagged.
 pub async fn load_tagged_contact_facts(
     effects: &AuraEffectSystem,
     authority: AuthorityId,
 ) -> AgentResult<Vec<aura_relational::TaggedContactFact>> {
-    load_relational_fact_envelopes_by_type(
+    load_decoded_facts(
         effects,
         authority,
         aura_relational::CONTACT_FACT_TYPE_ID,
+        |envelope| {
+            aura_relational::ContactFact::try_from_envelope(envelope)
+                .map(aura_relational::TaggedContactFact::new)
+        },
     )
-    .await?
-    .iter()
-    .map(|envelope| {
-        aura_relational::ContactFact::try_from_envelope(envelope)
-            .map(aura_relational::TaggedContactFact::new)
-            .map_err(|source| stamping_failure("decode committed contact fact", source))
-    })
-    .collect()
+    .await
 }
 
 /// Causal metadata for a new contact fact about `key` in `authority`'s
@@ -248,4 +264,25 @@ pub async fn stamp_contact_causal(
     let observed = load_tagged_contact_facts(effects, authority).await?;
     let clock = advance_clock_past(effects, &observed).await?;
     Ok(aura_relational::contact_causal(key, &observed, &clock))
+}
+
+/// Causal metadata for a new friendship fact about `key`, observing every
+/// friendship fact committed in `authority`'s journal.
+pub async fn stamp_friendship_causal(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    key: aura_relational::FriendshipCausalKey,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    let observed = load_decoded_facts(
+        effects,
+        authority,
+        aura_relational::FRIENDSHIP_FACT_TYPE_ID,
+        |envelope| {
+            aura_relational::FriendshipFact::try_from_envelope(envelope)
+                .map(aura_relational::TaggedFriendshipFact::new)
+        },
+    )
+    .await?;
+    let clock = advance_clock_past(effects, &observed).await?;
+    Ok(aura_relational::friendship_causal(key, &observed, &clock))
 }

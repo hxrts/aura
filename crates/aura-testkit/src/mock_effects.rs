@@ -160,15 +160,14 @@ impl AmpChannelEffects for MockEffects {
         if state.amp_channels.contains_key(&(context, channel)) {
             return Err(AmpChannelError::AlreadyExists { context, channel });
         }
-        let entry = state
-            .amp_channels
-            .entry((context, channel))
-            .or_insert(AmpChanState {
+        state.amp_channels.insert(
+            (context, channel),
+            AmpChanState {
                 epoch: 0,
                 gen: 0,
                 closed: false,
-            });
-        entry.closed = false;
+            },
+        );
         Ok(channel)
     }
 
