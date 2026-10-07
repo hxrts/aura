@@ -98,6 +98,7 @@ impl ModeratorPlan {
             command,
             ResolvedCommand::Op { .. }
                 | ResolvedCommand::Deop { .. }
+                | ResolvedCommand::Admit { .. }
                 | ResolvedCommand::Mode { .. }
         ) {
             return Ok(Self { command });

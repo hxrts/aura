@@ -3,7 +3,7 @@
 #[cfg(feature = "signals")]
 use super::consistency::scope_channel_id;
 #[cfg(feature = "signals")]
-use super::plan::{CommandPlan, CommandScope, MembershipPlan, ModerationPlan, ModeratorPlan};
+use super::plan::{CommandPlan, MembershipPlan, ModerationPlan, ModeratorPlan};
 #[cfg(feature = "signals")]
 use super::resolved_refs::ResolvedCommand;
 #[cfg(feature = "signals")]
@@ -12,8 +12,6 @@ use crate::workflows::{context, invitation, messaging, moderation, moderator, qu
 use crate::AppCore;
 #[cfg(feature = "signals")]
 use async_lock::RwLock;
-#[cfg(feature = "signals")]
-use aura_core::types::identifiers::ChannelId;
 #[cfg(feature = "signals")]
 use aura_core::AuraError;
 #[cfg(feature = "signals")]
@@ -136,21 +134,19 @@ pub(super) async fn execute_moderator(
 ) -> Result<Option<String>, AuraError> {
     match &plan.operation.command {
         ResolvedCommand::Op { target } => {
-            moderator::grant_moderator_resolved(
-                app_core,
-                optional_scope_channel_id(&plan.scope),
-                target.0,
-            )
-            .await?;
+            // Moderator workflows act on the selected home; the command's
+            // channel scope is only where it was typed.
+            moderator::grant_moderator_resolved(app_core, target.0).await?;
             Ok(Some("moderator granted".to_string()))
         }
-        ResolvedCommand::Deop { target } => moderator::revoke_moderator_resolved(
-            app_core,
-            optional_scope_channel_id(&plan.scope),
-            target.0,
-        )
-        .await
-        .map(|_| Some("moderator revoked".to_string())),
+        ResolvedCommand::Deop { target } => {
+            moderator::revoke_moderator_resolved(app_core, target.0)
+                .await
+                .map(|_| Some("moderator revoked".to_string()))
+        }
+        ResolvedCommand::Admit { target } => moderator::admit_member_resolved(app_core, target.0)
+            .await
+            .map(|_| Some("member admitted".to_string())),
         ResolvedCommand::Mode { channel, flags, .. } => {
             settings::set_channel_mode_resolved(app_core, channel.channel_id().0, flags.clone())
                 .await
@@ -287,19 +283,12 @@ pub(super) async fn execute_general(
         | ResolvedCommand::Invite { .. }
         | ResolvedCommand::Op { .. }
         | ResolvedCommand::Deop { .. }
+        | ResolvedCommand::Admit { .. }
         | ResolvedCommand::Mode { .. } => Err(
             super::execution_model::CommandExecutionFailure::InvalidPlan {
                 family: super::execution_model::InvalidCommandPlanFamily::Specialized,
             }
             .into(),
         ),
-    }
-}
-
-#[cfg(feature = "signals")]
-fn optional_scope_channel_id(scope: &CommandScope) -> Option<ChannelId> {
-    match scope {
-        CommandScope::Channel { channel_id, .. } => Some(channel_id.0),
-        _ => None,
     }
 }

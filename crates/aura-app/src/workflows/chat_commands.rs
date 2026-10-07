@@ -261,6 +261,12 @@ pub enum ChatCommand {
         target: String,
     },
 
+    /// `/admit <user>` - Admit a home participant as a member
+    Admit {
+        /// Participant to admit
+        target: String,
+    },
+
     /// `/mode <channel> <flags>` - Set channel mode
     Mode {
         /// Target channel
@@ -294,7 +300,9 @@ impl ChatCommand {
             Self::Invite { .. } => CommandCapability::Invite,
             Self::Topic { .. } => CommandCapability::ManageChannel,
             Self::Pin { .. } | Self::Unpin { .. } => CommandCapability::PinContent,
-            Self::Op { .. } | Self::Deop { .. } => CommandCapability::GrantModerator,
+            Self::Op { .. } | Self::Deop { .. } | Self::Admit { .. } => {
+                CommandCapability::GrantModerator
+            }
             Self::Mode { .. } => CommandCapability::ManageChannel,
         }
     }
@@ -327,6 +335,7 @@ impl ChatCommand {
             Self::Unpin { .. } => "unpin",
             Self::Op { .. } => "op",
             Self::Deop { .. } => "deop",
+            Self::Admit { .. } => "admit",
             Self::Mode { .. } => "mode",
         }
     }
@@ -374,7 +383,7 @@ impl ChatCommand {
     pub fn is_admin_command(&self) -> bool {
         matches!(
             self,
-            Self::Op { .. } | Self::Deop { .. } | Self::Mode { .. }
+            Self::Op { .. } | Self::Deop { .. } | Self::Admit { .. } | Self::Mode { .. }
         )
     }
 
@@ -741,6 +750,18 @@ pub fn parse_chat_command(input: &str) -> Result<ChatCommand, CommandError> {
             })
         }
 
+        "admit" => {
+            if args.is_empty() {
+                return Err(CommandError::MissingArgument {
+                    command: "admit".to_string(),
+                    argument: "user".to_string(),
+                });
+            }
+            Ok(ChatCommand::Admit {
+                target: args.to_string(),
+            })
+        }
+
         "mode" => {
             let mut arg_parts = args.splitn(2, ' ');
             let channel = arg_parts
@@ -1012,6 +1033,15 @@ mod tests {
                 target: "alice".to_string()
             }
         );
+
+        let cmd = parse_chat_command("/admit alice").unwrap();
+        assert_eq!(
+            cmd,
+            ChatCommand::Admit {
+                target: "alice".to_string()
+            }
+        );
+        assert!(parse_chat_command("/admit").is_err());
     }
 
     #[test]

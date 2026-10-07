@@ -140,6 +140,9 @@ impl CommandResolver {
             ParsedCommand::Deop { target } => Ok(ResolvedCommand::Deop {
                 target: self.resolve_authority(snapshot.state(), &target)?,
             }),
+            ParsedCommand::Admit { target } => Ok(ResolvedCommand::Admit {
+                target: self.resolve_authority(snapshot.state(), &target)?,
+            }),
             ParsedCommand::Mode { channel, flags } => {
                 let channel_name = normalize_channel_name(&channel);
                 let channel = self.resolve_existing_channel(snapshot.state(), &channel)?;
@@ -363,6 +366,26 @@ impl CommandResolver {
                     preconditions: vec![PlanPrecondition::TargetExists(target)],
                     operation: ModeratorPlan {
                         command: ResolvedCommand::Deop { target },
+                    },
+                }))
+            }
+            ResolvedCommand::Admit { target } => {
+                let scope = if let Some(hint) = current_channel_hint {
+                    let channel = self.resolve_current_channel(snapshot, Some(hint), "admit")?;
+                    CommandScope::Channel {
+                        channel_id: channel.channel_id(),
+                        context_id: channel.context_id(),
+                    }
+                } else {
+                    CommandScope::Global
+                };
+
+                Ok(PlannedCommand::Moderator(CommandPlan {
+                    actor,
+                    scope,
+                    preconditions: vec![PlanPrecondition::TargetExists(target)],
+                    operation: ModeratorPlan {
+                        command: ResolvedCommand::Admit { target },
                     },
                 }))
             }
@@ -677,6 +700,7 @@ pub(super) fn command_name(command: &ResolvedCommand) -> &'static str {
         ResolvedCommand::Unpin { .. } => "unpin",
         ResolvedCommand::Op { .. } => "op",
         ResolvedCommand::Deop { .. } => "deop",
+        ResolvedCommand::Admit { .. } => "admit",
         ResolvedCommand::Mode { .. } => "mode",
     }
 }

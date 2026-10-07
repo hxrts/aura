@@ -308,6 +308,10 @@ pub const COMMAND_CONSISTENCY_TABLE: &[CommandConsistencySpec] = &[
         requirement: ConsistencyRequirement::Enforced,
     },
     CommandConsistencySpec {
+        command: "admit",
+        requirement: ConsistencyRequirement::Enforced,
+    },
+    CommandConsistencySpec {
         command: "mode",
         requirement: ConsistencyRequirement::Enforced,
     },

@@ -595,10 +595,7 @@ impl NeighborhoodCallbacks {
 
     fn make_set_moderator(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SetModeratorCallback {
         Arc::new(
-            move |home_id: Option<String>,
-                  target_id: String,
-                  assign: bool,
-                  operation: LocalTerminalOperationOwner| {
+            move |target_id: String, assign: bool, operation: LocalTerminalOperationOwner| {
                 let success_target_id = target_id.clone();
                 spawn_local_terminal_result_callback(
                     ctx.clone(),
@@ -609,16 +606,12 @@ impl NeighborhoodCallbacks {
                         let app_core = ctx.app_core_raw().clone();
                         if assign {
                             aura_app::ui::workflows::moderator::grant_moderator(
-                                &app_core,
-                                home_id.as_deref(),
-                                &target_id,
+                                &app_core, &target_id,
                             )
                             .await
                         } else {
                             aura_app::ui::workflows::moderator::revoke_moderator(
-                                &app_core,
-                                home_id.as_deref(),
-                                &target_id,
+                                &app_core, &target_id,
                             )
                             .await
                         }

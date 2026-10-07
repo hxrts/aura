@@ -36,6 +36,7 @@ pub(crate) const REVERSIBLE_FAMILIES: &[ReversibleFamily] = &[
             "HomeKickFact",
             "HomeGrantModeratorFact",
             "HomeRevokeModeratorFact",
+            "HomeAdmitMemberFact",
         ],
         permutation_tests: &["crates/aura-social/src/moderation/governance.rs"],
     },

@@ -95,13 +95,14 @@ Joining a home follows a defined sequence. The authority requests capability. Ho
 
 ### 3.3 Moderator Designation
 
-Moderators are designated via governance decisions in the home. A moderator must also be a member. Moderator capability bundles include moderation, pin and unpin operations, and governance facilitation. Moderator designation is auditable because capability issuance is visible via relational facts.
+Moderators are designated via governance decisions in the home. A moderator must also be a member. A home invitation grants participant access; a moderator holding `grant_moderator` admits a participant to the member set with `HomeAdmitMemberFact` (the `/admit <user>` command), after which the member can be designated moderator. Moderator capability bundles include moderation, pin and unpin operations, and governance facilitation. Moderator designation is auditable because capability issuance is visible via relational facts.
 
 ### 3.4 Order-Independent Governance Reduction
 
 Home governance facts are bans, unbans, mutes, unmutes, kicks, moderator grants and revocations, access overrides, the capability configuration, and member joins and leaves. They follow the canonical domain fact model of docs/105 §4.2.1 (schema 3; kicks schema 4; social facts schema 5). The writer obtains the fact's `CausalMetadata` from the runtime (`RuntimeBridge::causal_stamp` with `CausalStampKey::HomeGovernance`), which advances its logical clock past every governance fact it holds for the home.
 
 - Bans and mutes are tagged observed-remove sets keyed by target and channel scope. An unban or unmute revokes the bans or mutes of that key its writer observed. A concurrent ban the writer did not observe stays in force.
+- Member admissions are a tagged observed-remove set keyed by target: an admission by a moderator holding `grant_moderator` makes a joined participant a member until a kick or leave of that target that observed it. An admission that arrives before the join takes effect when the member joins.
 - Moderator designations are a tagged observed-remove set keyed by target. The creator is a permanent moderator. Roles are derived from the whole set, so a grant that arrives before the member joins takes effect when the member joins.
 - Access overrides are a multi-value register per target. Concurrent surviving overrides resolve to the most restrictive level, then the later in causal order. The capability configuration is a multi-value register per home; concurrent survivors combine by per-level intersection.
 - Membership is a tagged observed-remove set of episodes. Each `MemberJoined` starts the episode named by its member, context and `episode` (the accepted invitation id, or a fixed label for the creator); the inviter and the invitee commit the same join under that id, so their copies are one episode. A kick, and a `MemberLeft` (schema 4), revoke the episodes of that member the writer observed. A member stays in the roster while any episode is live, so a later rejoin, or one concurrent with the kick, survives in every delivery order, including a reinstalled member that rejoins and then pulls the old kick through relational-context sync ([Transport](111_transport_and_information_flow.md) §11.4). A kick the writer issued without observing any join of the target removes nothing.
@@ -122,7 +123,7 @@ The remaining `SocialFact` pairs (schema 5) reduce in `aura_social::lifecycle` o
 - Storage readings (`StorageUpdated`) are a multi-value register per home. A write supersedes the writes its writer observed; concurrent survivors resolve to the largest usage, then the largest capacity, then the later write in causal order.
 - Neighborhood names come from `NeighborhoodCreated`; duplicate creations of one id resolve to the smallest name.
 
-`SocialFact` is registered in the agent `FactRegistry` with `SocialFactReducer`, which decodes through `SocialFact::try_from_envelope`. Moderator designations are `HomeGrantModeratorFact` and `HomeRevokeModeratorFact` only.
+`SocialFact` is registered in the agent `FactRegistry` with `SocialFactReducer`, which decodes through `SocialFact::try_from_envelope`. Moderator designations are `HomeGrantModeratorFact` and `HomeRevokeModeratorFact` only; member admissions are `HomeAdmitMemberFact`.
 
 ## 4. Neighborhood Architecture
 

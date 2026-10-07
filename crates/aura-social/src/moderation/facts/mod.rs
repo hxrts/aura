@@ -6,15 +6,16 @@ mod reducers;
 
 // Re-export constants
 pub use constants::{
-    HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID,
-    HOME_MUTE_FACT_TYPE_ID, HOME_PIN_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
-    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
+    HOME_ADMIT_MEMBER_FACT_TYPE_ID, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_PIN_FACT_TYPE_ID,
+    HOME_REVOKE_MODERATOR_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
+    HOME_UNPIN_FACT_TYPE_ID,
 };
 
 // Re-export fact types
 pub use fact_types::{
-    HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomePinFact,
-    HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, HomeUnpinFact,
+    HomeAdmitMemberFact, HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact,
+    HomePinFact, HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, HomeUnpinFact,
 };
 
 // Re-export registration function
@@ -46,6 +47,9 @@ pub fn claimed_moderation_actor(
         }
         HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
             HomeRevokeModeratorFact::from_envelope(envelope).map(|f| f.actor_authority)
+        }
+        HOME_ADMIT_MEMBER_FACT_TYPE_ID => {
+            HomeAdmitMemberFact::from_envelope(envelope).map(|f| f.actor_authority)
         }
         crate::facts::SOCIAL_FACT_TYPE_ID => {
             match crate::facts::SocialFact::try_from_envelope(envelope).ok() {

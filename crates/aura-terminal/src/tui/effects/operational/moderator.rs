@@ -22,17 +22,17 @@ pub async fn handle_moderator(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
-        EffectCommand::GrantModerator { channel, target } => {
-            // Delegate to workflow
-            match grant_moderator(app_core, channel.as_deref(), target).await {
+        // The workflows act on the selected home; `channel` scopes only the
+        // command's authorization check.
+        EffectCommand::GrantModerator { target, .. } => {
+            match grant_moderator(app_core, target).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 
-        EffectCommand::RevokeModerator { channel, target } => {
-            // Delegate to workflow
-            match revoke_moderator(app_core, channel.as_deref(), target).await {
+        EffectCommand::RevokeModerator { target, .. } => {
+            match revoke_moderator(app_core, target).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }

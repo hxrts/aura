@@ -1311,11 +1311,9 @@ fn submit_simple_modal_action(
             let rerender_for_moderator = rerender.clone();
             spawn_ui(async move {
                 let result = if member.is_moderator {
-                    moderator_workflows::revoke_moderator(&app_core, None, &member.authority_id)
-                        .await
+                    moderator_workflows::revoke_moderator(&app_core, &member.authority_id).await
                 } else {
-                    moderator_workflows::grant_moderator(&app_core, None, &member.authority_id)
-                        .await
+                    moderator_workflows::grant_moderator(&app_core, &member.authority_id).await
                 };
 
                 match result {

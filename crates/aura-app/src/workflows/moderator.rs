@@ -5,7 +5,9 @@
 
 #[cfg(test)]
 use crate::workflows::home_scope::best_home_for_context_by;
-use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_target_authority};
+#[cfg(test)]
+use crate::workflows::home_scope::identify_materialized_channel_hint;
+use crate::workflows::home_scope::resolve_target_authority;
 use crate::workflows::moderation::governance_causal;
 use crate::workflows::observed_projection::{
     homes_signal_snapshot, try_update_homes_projection_observed,
@@ -16,7 +18,9 @@ use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::AuraError;
 use aura_journal::DomainFact;
-use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};
+use aura_social::moderation::facts::{
+    HomeAdmitMemberFact, HomeGrantModeratorFact, HomeRevokeModeratorFact,
+};
 use aura_social::HomeGovernanceKey;
 use std::sync::Arc;
 use std::time::Duration;
@@ -195,46 +199,81 @@ async fn current_moderator_scope(
     ))
 }
 
-/// Grant moderator designation to a home member.
+/// Grant moderator designation to a member of the selected home, named by
+/// contact name or authority id.
 ///
 /// Authorization: elevated home privileges required.
 pub async fn grant_moderator(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = match channel_hint {
-        Some(hint) => Some(
-            identify_materialized_channel_hint(
-                app_core,
-                hint,
-                "identify_materialized_channel_hint",
-                "resolve moderator channel",
-                MODERATOR_RUNTIME_TIMEOUT,
-            )
-            .await?
-            .channel_id,
-        ),
-        None => None,
-    };
-    grant_moderator_resolved(app_core, channel_id, target_id).await
+    grant_moderator_resolved(app_core, target_id).await
 }
 
-/// Grant moderator role to a canonical authority.
+/// Commit a home role governance fact (moderator designation or member
+/// admission) and send it to the home's peers. Relational-context sync
+/// delivers it to any peer whose send is lost.
+async fn commit_role_fact(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    operation: &'static str,
+    mut scope: ModeratorScope,
+    target_id: AuthorityId,
+    fact: aura_journal::fact::RelationalFact,
+) -> Result<(), AuraError> {
+    if !scope.peers.contains(&target_id) {
+        scope.peers.push(target_id);
+    }
+    timeout_runtime_call(
+        runtime,
+        operation,
+        "commit_relational_facts",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Commit home role fact", e))?
+    .map_err(|e| super::error::runtime_call("Commit home role fact", e))?;
+    let actor = runtime.authority_id();
+    for peer in scope.peers {
+        if peer == actor {
+            continue;
+        }
+        let _ = send_committed_fact(
+            runtime,
+            "moderator_fact_send",
+            peer,
+            scope.context_id,
+            &fact,
+        )
+        .await;
+    }
+    Ok(())
+}
+
+async fn role_fact_time_ms(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    operation: &'static str,
+) -> Result<u64, AuraError> {
+    let now_ms = timeout_runtime_call(
+        runtime,
+        operation,
+        "current_time_ms",
+        MODERATOR_RUNTIME_TIMEOUT,
+        || runtime.current_time_ms(),
+    )
+    .await
+    .map_err(|e| super::error::runtime_call("Home role timestamp", e))?
+    .map_err(|e| super::error::runtime_call("Home role timestamp", e))?;
+    Ok(now_ms)
+}
+
+/// Grant moderator role to a canonical authority in the selected home.
 pub async fn grant_moderator_resolved(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<ChannelId>,
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    // Validate current view and collect context/peer fanout.
-    if channel_hint.is_some() {
-        return Err(AuraError::invalid(
-            "explicit moderator scope hints are no longer supported; select the target home first",
-        ));
-    }
-
-    let mut scope = current_moderator_scope(app_core).await?;
+    let scope = current_moderator_scope(app_core).await?;
     let runtime = require_runtime(app_core).await?;
 
     if !scope.home_state.is_admin() {
@@ -258,20 +297,7 @@ pub async fn grant_moderator_resolved(
         return Err(AuraError::not_found(target_id.to_string()));
     }
 
-    if !scope.peers.contains(&target_id) {
-        scope.peers.push(target_id);
-    }
-
-    let now_ms = timeout_runtime_call(
-        &runtime,
-        "grant_moderator_resolved",
-        "current_time_ms",
-        MODERATOR_RUNTIME_TIMEOUT,
-        || runtime.current_time_ms(),
-    )
-    .await
-    .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?
-    .map_err(|e| super::error::runtime_call("Grant moderator timestamp", e))?;
+    let now_ms = role_fact_time_ms(&runtime, "grant_moderator_resolved").await?;
     let actor = runtime.authority_id();
     let causal = governance_causal(
         &runtime,
@@ -282,78 +308,89 @@ pub async fn grant_moderator_resolved(
     .await?;
     let fact = HomeGrantModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
         .to_generic();
-
-    timeout_runtime_call(
-        &runtime,
-        "grant_moderator_resolved",
-        "commit_relational_facts",
-        MODERATOR_RUNTIME_TIMEOUT,
-        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
-    )
-    .await
-    .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?
-    .map_err(|e| super::error::runtime_call("Commit moderator grant fact", e))?;
-
-    for peer in scope.peers {
-        if peer == actor {
-            continue;
-        }
-        // Committed above. One send for latency; relational-context sync
-        // delivers it if this send is lost.
-        let _ = send_committed_fact(
-            &runtime,
-            "moderator_fact_send",
-            peer,
-            scope.context_id,
-            &fact,
-        )
-        .await;
-    }
+    let home_id = scope.home_id;
+    commit_role_fact(&runtime, "grant_moderator_resolved", scope, target_id, fact).await?;
 
     // Observed UI mirror.
     try_update_homes_projection_observed(app_core, |homes| {
-        apply_moderator_role_to_materialized_home(homes, scope.home_id, target_id, actor, true)
+        apply_moderator_role_to_materialized_home(homes, home_id, target_id, actor, true)
     })
     .await
 }
 
-/// Revoke moderator designation from a home member.
+/// Admit a home participant to the home's member set (Task 62; docs/115
+/// §3.2). Members, unlike participants, can be designated moderators.
+///
+/// Authorization: the actor must be a moderator of the selected home.
+pub async fn admit_member_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let scope = current_moderator_scope(app_core).await?;
+    let runtime = require_runtime(app_core).await?;
+
+    if !scope.home_state.is_admin() {
+        return Err(AuraError::permission_denied(
+            "Only moderators can admit members",
+        ));
+    }
+    match scope.home_state.member(&target_id) {
+        Some(member) if member.role.is_threshold_member() => {
+            return Err(AuraError::invalid("Target is already a member"));
+        }
+        Some(_) => {}
+        None => return Err(AuraError::not_found(target_id.to_string())),
+    }
+
+    let now_ms = role_fact_time_ms(&runtime, "admit_member_resolved").await?;
+    let actor = runtime.authority_id();
+    let causal = governance_causal(
+        &runtime,
+        "admit_member_resolved",
+        scope.context_id,
+        HomeGovernanceKey::AdmitMember { target: target_id },
+    )
+    .await?;
+    let fact = HomeAdmitMemberFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
+        .to_generic();
+    let home_id = scope.home_id;
+    commit_role_fact(&runtime, "admit_member_resolved", scope, target_id, fact).await?;
+
+    try_update_homes_projection_observed(app_core, |homes| {
+        let member = homes
+            .home_mut(&home_id)
+            .and_then(|home| home.member_mut(&target_id))
+            .ok_or_else(|| AuraError::not_found(target_id.to_string()))?;
+        if member.role.is_participant() {
+            member.role = HomeRole::Member;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Admit a home participant, named by contact name or authority id.
+pub async fn admit_member(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
+    let target_id = resolve_target_authority(app_core, target).await?;
+    admit_member_resolved(app_core, target_id).await
+}
+
+/// Revoke moderator designation from a member of the selected home, named by
+/// contact name or authority id.
 pub async fn revoke_moderator(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
-    let channel_id = match channel_hint {
-        Some(hint) => Some(
-            identify_materialized_channel_hint(
-                app_core,
-                hint,
-                "identify_materialized_channel_hint",
-                "resolve moderator channel",
-                MODERATOR_RUNTIME_TIMEOUT,
-            )
-            .await?
-            .channel_id,
-        ),
-        None => None,
-    };
-    revoke_moderator_resolved(app_core, channel_id, target_id).await
+    revoke_moderator_resolved(app_core, target_id).await
 }
 
-/// Revoke moderator role from a canonical authority.
+/// Revoke moderator role from a canonical authority in the selected home.
 pub async fn revoke_moderator_resolved(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_hint: Option<ChannelId>,
     target_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    if channel_hint.is_some() {
-        return Err(AuraError::invalid(
-            "explicit moderator scope hints are no longer supported; select the target home first",
-        ));
-    }
-
-    let mut scope = current_moderator_scope(app_core).await?;
+    let scope = current_moderator_scope(app_core).await?;
     let runtime = require_runtime(app_core).await?;
 
     if !scope.home_state.is_admin() {
@@ -370,20 +407,7 @@ pub async fn revoke_moderator_resolved(
         return Err(AuraError::not_found(target_id.to_string()));
     }
 
-    if !scope.peers.contains(&target_id) {
-        scope.peers.push(target_id);
-    }
-
-    let now_ms = timeout_runtime_call(
-        &runtime,
-        "revoke_moderator_resolved",
-        "current_time_ms",
-        MODERATOR_RUNTIME_TIMEOUT,
-        || runtime.current_time_ms(),
-    )
-    .await
-    .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?
-    .map_err(|e| super::error::runtime_call("Revoke moderator timestamp", e))?;
+    let now_ms = role_fact_time_ms(&runtime, "revoke_moderator_resolved").await?;
     let actor = runtime.authority_id();
     let causal = governance_causal(
         &runtime,
@@ -394,36 +418,18 @@ pub async fn revoke_moderator_resolved(
     .await?;
     let fact = HomeRevokeModeratorFact::new_ms(scope.context_id, target_id, actor, now_ms, causal)
         .to_generic();
-
-    timeout_runtime_call(
+    let home_id = scope.home_id;
+    commit_role_fact(
         &runtime,
         "revoke_moderator_resolved",
-        "commit_relational_facts",
-        MODERATOR_RUNTIME_TIMEOUT,
-        || runtime.commit_relational_facts(std::slice::from_ref(&fact)),
+        scope,
+        target_id,
+        fact,
     )
-    .await
-    .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?
-    .map_err(|e| super::error::runtime_call("Commit moderator revoke fact", e))?;
-
-    for peer in scope.peers {
-        if peer == actor {
-            continue;
-        }
-        // Committed above. One send for latency; relational-context sync
-        // delivers it if this send is lost.
-        let _ = send_committed_fact(
-            &runtime,
-            "moderator_fact_send",
-            peer,
-            scope.context_id,
-            &fact,
-        )
-        .await;
-    }
+    .await?;
 
     try_update_homes_projection_observed(app_core, |homes| {
-        apply_moderator_role_to_materialized_home(homes, scope.home_id, target_id, actor, false)
+        apply_moderator_role_to_materialized_home(homes, home_id, target_id, actor, false)
     })
     .await
 }
@@ -482,7 +488,7 @@ mod tests {
         let config = AppConfig::default();
         let app_core = crate::testing::test_app_core(config);
 
-        let result = grant_moderator(&app_core, None, "user-123").await;
+        let result = grant_moderator(&app_core, "user-123").await;
         assert!(result.is_err());
     }
 
@@ -491,7 +497,7 @@ mod tests {
         let config = AppConfig::default();
         let app_core = crate::testing::test_app_core(config);
 
-        let result = revoke_moderator(&app_core, None, "user-123").await;
+        let result = revoke_moderator(&app_core, "user-123").await;
         assert!(result.is_err());
     }
 

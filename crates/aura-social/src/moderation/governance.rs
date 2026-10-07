@@ -19,10 +19,11 @@
 //! binds them to the home governance fact family.
 
 use super::facts::{
-    HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact,
-    HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
-    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
+    HomeAdmitMemberFact, HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact,
+    HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, HOME_ADMIT_MEMBER_FACT_TYPE_ID,
+    HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID,
+    HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
+    HOME_UNMUTE_FACT_TYPE_ID,
 };
 use super::query::RequiredModerationQueryError;
 use crate::facts::{AccessLevel, AccessLevelCapabilityConfig, SocialFact, SOCIAL_FACT_TYPE_ID};
@@ -68,6 +69,8 @@ pub enum HomeGovernanceEvent {
     GrantModerator(HomeGrantModeratorFact),
     /// Moderator designation reversal.
     RevokeModerator(HomeRevokeModeratorFact),
+    /// Member admission add (participant to member).
+    AdmitMember(HomeAdmitMemberFact),
     /// Access override register write (`SocialFact::AccessOverrideSet`).
     AccessOverride(SocialFact),
     /// Capability configuration register write
@@ -140,6 +143,11 @@ pub enum HomeGovernanceKey {
         /// Authority losing the designation.
         target: AuthorityId,
     },
+    /// Admit participant `target` to the home's member set.
+    AdmitMember {
+        /// Admitted authority.
+        target: AuthorityId,
+    },
     /// Set `target`'s access override.
     AccessOverride {
         /// Authority receiving the override.
@@ -164,6 +172,7 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => Some(&f.causal),
             Self::GrantModerator(f) => Some(&f.causal),
             Self::RevokeModerator(f) => Some(&f.causal),
+            Self::AdmitMember(f) => Some(&f.causal),
             Self::AccessOverride(SocialFact::AccessOverrideSet { causal, .. })
             | Self::CapabilityConfig(SocialFact::AccessLevelCapabilitiesConfigured {
                 causal,
@@ -189,6 +198,7 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => Some(f.actor_authority),
             Self::GrantModerator(f) => Some(f.actor_authority),
             Self::RevokeModerator(f) => Some(f.actor_authority),
+            Self::AdmitMember(f) => Some(f.actor_authority),
             Self::AccessOverride(SocialFact::AccessOverrideSet { actor_id, .. })
             | Self::CapabilityConfig(SocialFact::AccessLevelCapabilitiesConfigured {
                 actor_id,
@@ -214,6 +224,7 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => f.context_id,
             Self::GrantModerator(f) => f.context_id,
             Self::RevokeModerator(f) => f.context_id,
+            Self::AdmitMember(f) => f.context_id,
             Self::AccessOverride(fact)
             | Self::CapabilityConfig(fact)
             | Self::MemberJoined(fact)
@@ -232,6 +243,7 @@ impl HomeGovernanceEvent {
             Self::Kick(f) => f.to_generic(),
             Self::GrantModerator(f) => f.to_generic(),
             Self::RevokeModerator(f) => f.to_generic(),
+            Self::AdmitMember(f) => f.to_generic(),
             Self::AccessOverride(fact)
             | Self::CapabilityConfig(fact)
             | Self::MemberJoined(fact)
@@ -275,6 +287,20 @@ impl HomeGovernanceEvent {
             }
             _ => None,
         }
+    }
+
+    /// Participant this fact admits as a member.
+    fn admission_add(&self) -> Option<(AuthorityId, Option<ChannelId>)> {
+        match self {
+            Self::AdmitMember(f) => Some((f.target_authority, None)),
+            _ => None,
+        }
+    }
+
+    /// Member whose admissions this kick or leave ends (the ones its writer
+    /// observed).
+    fn admission_end(&self) -> Option<(AuthorityId, Option<ChannelId>)> {
+        self.episode_end().map(|member| (member, None))
     }
 
     /// Member whose observed episodes this kick or leave ends.
@@ -345,6 +371,9 @@ impl TaggedHomeGovernanceEvent {
             ),
             HOME_REVOKE_MODERATOR_FACT_TYPE_ID => HomeGovernanceEvent::RevokeModerator(
                 HomeRevokeModeratorFact::try_from_envelope_in_context(envelope, outer)?,
+            ),
+            HOME_ADMIT_MEMBER_FACT_TYPE_ID => HomeGovernanceEvent::AdmitMember(
+                HomeAdmitMemberFact::try_from_envelope_in_context(envelope, outer)?,
             ),
             SOCIAL_FACT_TYPE_ID => {
                 let fact = SocialFact::try_from_envelope(envelope)?;
@@ -463,12 +492,15 @@ pub fn home_governance_causal(
             tags_where(&|event| matches!(event, HomeGovernanceEvent::CapabilityConfig(_))),
         ),
         HomeGovernanceKey::Kick { target, .. } | HomeGovernanceKey::Leave { target } => (
-            tags_where(&|event| event.join_add() == Some(target)),
+            tags_where(&|event| {
+                event.join_add() == Some(target) || event.admission_add() == Some((target, None))
+            }),
             Vec::new(),
         ),
         HomeGovernanceKey::Ban { .. }
         | HomeGovernanceKey::Mute { .. }
-        | HomeGovernanceKey::GrantModerator { .. } => (Vec::new(), Vec::new()),
+        | HomeGovernanceKey::GrantModerator { .. }
+        | HomeGovernanceKey::AdmitMember { .. } => (Vec::new(), Vec::new()),
     };
     CausalMetadata {
         revokes,
@@ -520,6 +552,18 @@ pub fn live_moderator_grant_tags(events: &[&TaggedHomeGovernanceEvent]) -> BTree
         events,
         HomeGovernanceEvent::grant_add,
         HomeGovernanceEvent::grant_remove,
+    )
+}
+
+/// Live member admissions (tags) among `events`: an admission is live until
+/// a kick or leave of its target that observed it. Callers pass only
+/// authorized admissions and kicks.
+#[must_use]
+pub fn live_member_admission_tags(events: &[&TaggedHomeGovernanceEvent]) -> BTreeSet<CausalTag> {
+    live_or_set(
+        events,
+        HomeGovernanceEvent::admission_add,
+        HomeGovernanceEvent::admission_end,
     )
 }
 
@@ -765,6 +809,71 @@ mod tests {
         let again = ban(1, 1, 2, 5, &[first.clone(), lift.clone()]);
         let banned = assert_permutation_invariant(&[first, lift, again], live_targets);
         assert_eq!(banned, BTreeSet::from([who(2)]));
+    }
+
+    fn admit(
+        device: u8,
+        target: u8,
+        observed: &[TaggedHomeGovernanceEvent],
+    ) -> TaggedHomeGovernanceEvent {
+        let key = HomeGovernanceKey::AdmitMember {
+            target: who(target),
+        };
+        tagged(HomeGovernanceEvent::AdmitMember(
+            HomeAdmitMemberFact::new_ms(
+                ctx(),
+                who(target),
+                who(1),
+                1,
+                causal(device, key, observed),
+            ),
+        ))
+    }
+
+    fn kick(
+        device: u8,
+        target: u8,
+        observed: &[TaggedHomeGovernanceEvent],
+    ) -> TaggedHomeGovernanceEvent {
+        let channel = ChannelId::from_bytes([8; 32]);
+        let key = HomeGovernanceKey::Kick {
+            target: who(target),
+            channel,
+        };
+        tagged(HomeGovernanceEvent::Kick(HomeKickFact::new_ms(
+            ctx(),
+            channel,
+            who(target),
+            who(1),
+            "r".into(),
+            1,
+            causal(device, key, observed),
+        )))
+    }
+
+    fn admitted(events: &[TaggedHomeGovernanceEvent]) -> BTreeSet<AuthorityId> {
+        let refs: Vec<_> = events.iter().collect();
+        let live = live_member_admission_tags(&refs);
+        events
+            .iter()
+            .filter(|event| live.contains(&event.tag))
+            .filter_map(|event| event.event.admission_add().map(|(target, _)| target))
+            .collect()
+    }
+
+    // Task 62: an admission holds until a kick of its target that observed
+    // it; a re-admission the kicker did not observe survives, in every order.
+    #[test]
+    fn member_admission_ends_with_an_observing_kick_in_every_arrival_order() {
+        let first = admit(1, 2, &[]);
+        let removed = kick(1, 2, std::slice::from_ref(&first));
+        let none = assert_permutation_invariant(&[first.clone(), removed.clone()], admitted);
+        assert!(none.is_empty());
+
+        let concurrent = admit(2, 2, &[]);
+        let again = admit(1, 2, &[first.clone(), removed.clone()]);
+        let live = assert_permutation_invariant(&[first, removed, concurrent, again], admitted);
+        assert_eq!(live, BTreeSet::from([who(2)]));
     }
 
     #[test]

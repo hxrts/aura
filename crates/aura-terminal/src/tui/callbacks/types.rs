@@ -145,9 +145,9 @@ pub(crate) type CreateHomeCallback = StringOptStringLocalOwnedCallback;
 pub(crate) type CreateNeighborhoodCallback = StringLocalOwnedCallback;
 /// Neighborhood home operation callback: (home_id)
 pub(crate) type NeighborhoodHomeCallback = IdLocalOwnedCallback;
-/// Set moderator callback: (optional_home_id, target_authority_id, assign)
+/// Set moderator callback for the selected home: (target_authority_id, assign)
 pub(crate) type SetModeratorCallback =
-    Arc<dyn Fn(Option<String>, String, bool, LocalTerminalOperationOwner) + Send + Sync>;
+    Arc<dyn Fn(String, bool, LocalTerminalOperationOwner) + Send + Sync>;
 
 // --- App Screen ---
 #[doc(hidden)]

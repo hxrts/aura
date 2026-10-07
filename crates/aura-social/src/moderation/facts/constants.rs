@@ -22,3 +22,5 @@ pub const HOME_REVOKE_MODERATOR_FACT_TYPE_ID: &str = "moderation:home-revoke-mod
 pub const HOME_PIN_FACT_TYPE_ID: &str = "moderation:home-pin";
 /// Fact type ID for unpinning a message
 pub const HOME_UNPIN_FACT_TYPE_ID: &str = "moderation:home-unpin";
+/// Fact type ID for admitting a home participant as a member
+pub const HOME_ADMIT_MEMBER_FACT_TYPE_ID: &str = "moderation:home-admit-member";

@@ -121,7 +121,8 @@ pub(super) fn submit_chat_input(model: &mut UiModel, text: &str) {
                     | aura_app::ui::types::ChatCommand::Pin { .. }
                     | aura_app::ui::types::ChatCommand::Unpin { .. }
                     | aura_app::ui::types::ChatCommand::Op { .. }
-                    | aura_app::ui::types::ChatCommand::Deop { .. } => {
+                    | aura_app::ui::types::ChatCommand::Deop { .. }
+                    | aura_app::ui::types::ChatCommand::Admit { .. } => {
                         model.toast = Some(command_toast(
                             '✗',
                             "denied",
