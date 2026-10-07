@@ -170,4 +170,14 @@ export NO_DOWNLOADS=1
 # Ensure cargo uses the workspace root target directory
 export CARGO_TARGET_DIR="$repo_root/target"
 
-exec "$dx_bin" "$@"
+if [[ "${1:-}" != build ]]; then
+  exec "$dx_bin" "$@"
+fi
+
+# Builds leave a new content-hashed bundle behind each time; keep the newest.
+status=0
+"$dx_bin" "$@" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  bash "$script_dir/prune-dx-assets.sh" "$CARGO_TARGET_DIR"
+fi
+exit "$status"

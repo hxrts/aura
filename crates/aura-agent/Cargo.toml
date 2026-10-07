@@ -11,6 +11,7 @@ description = "Capability-based agents with clean service layer architecture for
 keywords = ["identity", "capability", "agent", "threshold", "cryptography"]
 categories = ["cryptography", "authentication"]
 include = ["src/**", "Cargo.toml"]
+autotests = false
 
 [lib]
 name = "aura_agent"
@@ -131,3 +132,39 @@ required-features = ["choreo-backend-telltale-machine"]
 
 [lints]
 workspace = true
+
+# Integration tests are aggregated into a few binaries so the crate is linked
+# once per binary instead of once per file. Module files live in tests/*.rs;
+# add a new test file as a `mod` of the matching aggregate root below.
+[[test]]
+name = "runtime_integration"
+path = "tests/runtime_integration.rs"
+
+# Multi-runtime home flows; also the reduced-stack accept-chain lane.
+[[test]]
+name = "home_flows"
+path = "tests/home_flows.rs"
+
+[[test]]
+name = "telltale_machine"
+path = "tests/telltale_machine.rs"
+
+# Separate: LAN lane with ignored network tests.
+[[test]]
+name = "lan_integration"
+path = "tests/lan_integration.rs"
+
+# Separate: trybuild compile-fail harness (required ownership inventory).
+[[test]]
+name = "compile_fail"
+path = "tests/compile_fail.rs"
+
+# Separate: required ownership harness, discovered and executed by exact name.
+[[test]]
+name = "custom_provider_fidelity"
+path = "tests/custom_provider_fidelity.rs"
+
+# Separate: wasm32-only browser runtime bridge.
+[[test]]
+name = "web_runtime_bridge_wasm"
+path = "tests/web_runtime_bridge_wasm.rs"

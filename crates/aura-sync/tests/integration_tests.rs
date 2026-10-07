@@ -71,7 +71,7 @@ mod integration_test_examples {
         Ok(())
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn example_network_simulation() -> AuraResult<()> {
         // Example showing network simulation capabilities
         let mut fixture = test_utils::MultiDeviceTestFixture::trio().await?;

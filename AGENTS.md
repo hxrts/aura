@@ -436,6 +436,28 @@ Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 - Use `.claude/skills/` for project-specific knowledge
 - Batch operations and parallel tool calls when possible
 
+### Build and caching
+
+See `docs/804_testing_guide.md` "Build and Caching" for details.
+
+- All worktrees share one sccache store (`RUSTC_WRAPPER=sccache`,
+  `SCCACHE_DIR=~/.cache/aura-sccache`, 10G cap), so dependencies compile once.
+  Opt out with `AURA_NO_SCCACHE=1` (shell entry or a single cargo command).
+- `scripts/dev/build-budget.sh` builds into the checkout's own `target/`,
+  sweeps it to a per-checkout cap (10 GiB default) automatically, and admits a
+  build only if the volume stays above a shared 15 GiB floor after other
+  admitted builds' reservations. Do not run `cargo sweep` by hand.
+- Two worktrees can build at once: `git worktree add ../aura-wt2 <branch>`,
+  enter `nix develop` there, and build in one while editing the other.
+- While iterating, build narrowly (`-p <crate>`, one `--test` binary, a lib
+  filter). For local `aura-agent` loops use `CARGO_INCREMENTAL=1` (sccache
+  passes those through); CI and gates stay non-incremental.
+- `aura-agent` integration tests are aggregated binaries (`autotests = false`);
+  add new test files as a `mod` of the matching root in `crates/aura-agent/tests/`.
+- Run `just web-check` in pre-ship batches. `scripts/harness/lan/ship.sh`
+  builds from a clean commit; do not edit that checkout while a ship build
+  runs.
+
 ### Durable enrollment window discipline
 
 Production enrollment uses the runtime-private sealed `EnrollmentWindowCapability` for execution, children, retries, and required observation acknowledgment. Do not introduce raw/no-op timeout executors, aliases, fresh duration reconstruction, or weaker budget parameters on that path. The Rust-native `async-session-ownership` lane requires sealed window inputs on attempt functions and methods regardless of parameter name; explicit test-only fixtures must use a positive test predicate. Required maintenance uses fallible owned interval outcomes and preserves concrete sources through service supervision. Run ownership and annotation gates when changing these APIs.

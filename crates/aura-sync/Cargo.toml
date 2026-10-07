@@ -56,7 +56,7 @@ curve25519-dalek = { workspace = true }
 [dev-dependencies]
 aura-testkit = { package = "aura-testkit", path = "../aura-testkit" }
 aura-macros = { package = "hxrts-aura-macros", version = "=0.2.0", path = "../aura-macros" }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-time = "1"

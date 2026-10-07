@@ -13,11 +13,12 @@ mkdir -p "$project/target/debug" "$project/target/wasm32-unknown-unknown/debug" 
 : > "$project/target/wasm32-unknown-unknown/debug/data"
 : > "$project/target/release/keep"
 export ACTIVE_FILE="$test_root/active"
+export PROJECT_ROOT="$project"
 export OPEN_FILE="$test_root/open"
 export PATH="$fakebin:$PATH"
 cat > "$fakebin/ps" <<'EOF'
 #!/usr/bin/env bash
-[[ ! -f "$ACTIVE_FILE" ]] || printf '123 %s\n' "$(cat "$ACTIVE_FILE")"
+[[ ! -f "$ACTIVE_FILE" ]] || printf '123 %s --out-dir %s/target/debug/deps\n' "$(cat "$ACTIVE_FILE")" "${ACTIVE_ROOT:-$PROJECT_ROOT}"
 EOF
 cat > "$fakebin/lsof" <<'EOF'
 #!/usr/bin/env bash
@@ -124,4 +125,26 @@ expect_status 1 prune --lane release --apply
 rm "$OPEN_FILE"
 expect_status 0 prune --lane release --apply
 [[ ! -e "$project/target/release" && -L "$project/target/debug" && -d "$test_root" ]]
+
+# Kani is an idle whole lane; a running kani driver blocks its removal.
+mkdir -p "$project/target/kani"
+: > "$project/target/kani/data"
+printf 'kani-driver\n' > "$ACTIVE_FILE"
+expect_status 1 prune --lane kani --apply
+rm "$ACTIVE_FILE"
+# A builder of a sibling worktree does not block this checkout's lane.
+printf 'rustc\n' > "$ACTIVE_FILE"
+ACTIVE_ROOT="$test_root/sibling-worktree" expect_status 0 prune --lane kani --apply
+rm "$ACTIVE_FILE"
+[[ ! -e "$project/target/kani" ]]
+mkdir -p "$project/target/kani"
+expect_status 0 prune --lane kani --apply
+[[ ! -e "$project/target/kani" ]]
+
+# The host-triple trybuild tree is removed without the default tree.
+mkdir -p "$project/target/tests/trybuild/test-host-triple" "$project/target/tests/trybuild/debug"
+: > "$project/target/tests/trybuild/debug/keep"
+AURA_BUILD_TARGET_TRIPLE='bad/triple' expect_status 2 prune --lane trybuild-host-triple --dry-run
+AURA_BUILD_TARGET_TRIPLE=test-host-triple expect_status 0 prune --lane trybuild-host-triple --apply
+[[ ! -e "$project/target/tests/trybuild/test-host-triple" && -f "$project/target/tests/trybuild/debug/keep" ]]
 echo 'prune-inactive-lane safety tests passed'

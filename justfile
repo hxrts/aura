@@ -661,24 +661,26 @@ ci-choreo-parity:
     mkdir -p artifacts/choreo-parity
     AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
     AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-parity" \
-    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -q
-    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --lib parity_policy::tests -q
+    cargo test -p hxrts-aura-agent --test telltale_machine -q telltale_machine_parity::
+    cargo test -p hxrts-aura-agent --lib parity_policy::tests -q
 
 # Choreography concurrency contract gates (link/delegate coherence + canonical fallback)
 ci-choreo-concurrency-contracts:
     mkdir -p artifacts/choreo-concurrency-contracts
     AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
     AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-concurrency-contracts" \
-    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_concurrent_contracts -- --nocapture
+    cargo test -p hxrts-aura-agent --test telltale_machine telltale_machine_concurrent_contracts:: -- --nocapture
 
 # WASM runtime backend matrix and browser harness compilation
 
 # Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
+# The telltale backend is a default feature, so `--features web` covers it.
+# Warnings are denied by clippy or cargo-check-no-warnings.sh rather than
+# RUSTFLAGS, so these lanes reuse the dependency builds of every other lane.
 ci-agent-wasm:
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p hxrts-aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-machine"
-    CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo check -p aura-web --target wasm32-unknown-unknown --features "web,harness"
+    cargo clippy -p hxrts-aura-effects --target wasm32-unknown-unknown --lib -- -D warnings
+    bash scripts/dev/cargo-check-no-warnings.sh -p hxrts-aura-agent --target wasm32-unknown-unknown --features web
+    bash scripts/dev/cargo-check-no-warnings.sh -p aura-web --target wasm32-unknown-unknown --features "web,harness"
 
 # WASM workspace test matrix for crates currently supported on WASM
 # Excludes native-only/runtime-heavy crates:
@@ -695,7 +697,7 @@ ci-workspace-wasm-test:
     set -euo pipefail
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
-      CARGO_INCREMENTAL=0 RUSTFLAGS="-C debuginfo=0 -D warnings" cargo test --workspace --target wasm32-unknown-unknown \
+      cargo test --workspace --target wasm32-unknown-unknown \
         --exclude aura-terminal \
         --exclude aura-simulator \
         --exclude aura-quint \
@@ -1034,14 +1036,14 @@ ci-conformance-strict:
     export AURA_CONFORMANCE_ITF_SEED_WINDOW="${AURA_CONFORMANCE_ITF_SEED_WINDOW:-8}"
 
     echo "Running native/threaded parity lane..."
-    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity -- --nocapture
+    cargo test -p hxrts-aura-agent --test telltale_machine telltale_machine_parity:: -- --nocapture
 
     echo "Running strict native/wasm parity lane..."
     : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/verify/wasm-bindgen.sh}"
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
       cargo test -p hxrts-aura-agent --target wasm32-unknown-unknown \
       --features web,choreo-backend-telltale-machine \
-      --test telltale_machine_parity -- --nocapture
+      --test telltale_machine telltale_machine_parity:: -- --nocapture
 
 # Scenario contract bundles (consensus/sync/recovery/reconfiguration)
 ci-conformance-contracts:
@@ -1049,7 +1051,7 @@ ci-conformance-contracts:
     set -euo pipefail
     export AURA_CONFORMANCE_ARTIFACT_DIR="${AURA_CONFORMANCE_ARTIFACT_DIR:-artifacts/conformance}"
     export AURA_SCENARIO_CONTRACT_ARTIFACT="${AURA_SCENARIO_CONTRACT_ARTIFACT:-$(pwd)/$AURA_CONFORMANCE_ARTIFACT_DIR/scenario_contracts.json}"
-    cargo test -p hxrts-aura-agent --features choreo-backend-telltale-machine --test telltale_machine_scenario_contracts -- --nocapture
+    cargo test -p hxrts-aura-agent --test telltale_machine telltale_machine_scenario_contracts:: -- --nocapture
 
 # Policy check: protected-branch CI must keep conformance gate job wired
 ci-conformance-policy:

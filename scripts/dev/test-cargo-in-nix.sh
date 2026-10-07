@@ -30,4 +30,18 @@ cmp "$fixture_root/expected" "$DISPATCH_CAPTURE"
 bash "$repo_root/scripts/dev/cargo-in-nix.sh" test --manifest-path 'path with spaces/Cargo.toml'
 printf '%s\n' test --manifest-path 'path with spaces/Cargo.toml' > "$fixture_root/expected"
 cmp "$fixture_root/expected" "$DISPATCH_CAPTURE"
-echo 'cargo-in-nix: pinned Clippy dispatch, argument boundaries and exit status passed'
+# The shared sccache wrapper passes through by default and AURA_NO_SCCACHE=1
+# removes it for one command; a non-sccache wrapper is never touched.
+cat > "$fixture_root/cargo" <<'TOOL'
+#!/usr/bin/env bash
+printf '%s\n' "${RUSTC_WRAPPER:-<none>}" > "$DISPATCH_CAPTURE"
+TOOL
+RUSTC_WRAPPER=sccache bash "$repo_root/scripts/dev/cargo-in-nix.sh" build
+[[ "$(cat "$DISPATCH_CAPTURE")" == sccache ]] || { echo 'sccache wrapper was dropped' >&2; exit 1; }
+AURA_NO_SCCACHE=1 RUSTC_WRAPPER=sccache bash "$repo_root/scripts/dev/cargo-in-nix.sh" build
+[[ "$(cat "$DISPATCH_CAPTURE")" == '<none>' ]] || { echo 'AURA_NO_SCCACHE=1 kept sccache' >&2; exit 1; }
+CARGO_INCREMENTAL=1 RUSTC_WRAPPER=sccache bash "$repo_root/scripts/dev/cargo-in-nix.sh" build
+[[ "$(cat "$DISPATCH_CAPTURE")" == '<none>' ]] || { echo 'incremental build kept sccache' >&2; exit 1; }
+AURA_NO_SCCACHE=1 RUSTC_WRAPPER=other-wrapper bash "$repo_root/scripts/dev/cargo-in-nix.sh" build
+[[ "$(cat "$DISPATCH_CAPTURE")" == other-wrapper ]] || { echo 'unrelated wrapper removed' >&2; exit 1; }
+echo 'cargo-in-nix: pinned Clippy dispatch, argument boundaries, exit status and sccache opt-out passed'
