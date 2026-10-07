@@ -41,7 +41,11 @@ fn sibling_tree_error(stage: &'static str, source: crate::core::AgentError) -> A
 enum SiblingFactsFrame {
     Digest([u8; 32]),
     Index(Vec<Vec<u8>>),
-    Facts(Vec<TypedFact>),
+    /// One bounded batch of missing facts; `more` announces another batch.
+    Facts {
+        batch: Vec<TypedFact>,
+        more: bool,
+    },
     JournalFacts(aura_core::Fact),
     TreeOps(Vec<aura_core::AttestedOp>),
     AmpKeys(Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>),
@@ -261,19 +265,61 @@ pub(crate) async fn exchange_facts_with_sibling(
         .filter(|(key, _)| !peer_keys.contains(key))
         .map(|(_, fact)| fact)
         .collect();
+    exchange_fact_batches(effects, peer, missing).await
+}
 
-    send_frame(effects, peer, &SiblingFactsFrame::Facts(missing)).await?;
-    let SiblingFactsFrame::Facts(received) = receive_expected(
-        effects,
-        peer,
-        |frame| matches!(frame, SiblingFactsFrame::Facts(_)),
-        "facts",
-    )
-    .await?
-    else {
-        return Err(protocol_error("facts"));
-    };
-    let imported = effects.import_committed_facts(received).await?;
+/// Facts carried per frame, so a large account never sends its whole store
+/// in one message.
+const MAX_FACTS_PER_FRAME: usize = 256;
+
+/// Exchange the missing facts in bounded batches, in lockstep. Each received
+/// batch is persisted before the next one is read: an interrupted transfer
+/// keeps what arrived, and the next exchange's index excludes it, so the
+/// transfer resumes where it stopped. Import is idempotent.
+async fn exchange_fact_batches(
+    effects: &AuraEffectSystem,
+    peer: DeviceId,
+    missing: Vec<TypedFact>,
+) -> Result<usize, AuraError> {
+    let mut outgoing = missing.into_iter().peekable();
+    // Both sides start by sending one (possibly empty) batch, and each side
+    // sends or reads a further batch only while the announcing side said
+    // `more`, so the two sides always agree on which frames are in flight.
+    let mut self_more = true;
+    let mut peer_more = true;
+    let mut imported = 0;
+    while self_more || peer_more {
+        if self_more {
+            let batch: Vec<TypedFact> = outgoing.by_ref().take(MAX_FACTS_PER_FRAME).collect();
+            self_more = outgoing.peek().is_some();
+            send_frame(
+                effects,
+                peer,
+                &SiblingFactsFrame::Facts {
+                    batch,
+                    more: self_more,
+                },
+            )
+            .await?;
+        }
+        if peer_more {
+            let SiblingFactsFrame::Facts {
+                batch: received,
+                more: received_more,
+            } = receive_expected(
+                effects,
+                peer,
+                |frame| matches!(frame, SiblingFactsFrame::Facts { .. }),
+                "facts",
+            )
+            .await?
+            else {
+                return Err(protocol_error("facts"));
+            };
+            imported += effects.import_committed_facts(received).await?;
+            peer_more = received_more;
+        }
+    }
     Ok(imported)
 }
 
@@ -448,14 +494,14 @@ mod tests {
         .expect("simulation effect system")
     }
 
-    fn generic_fact(n: u8) -> RelationalFact {
+    fn generic_fact(n: u32) -> RelationalFact {
         RelationalFact::Generic {
-            context_id: ContextId::new_from_entropy([n; 32]),
+            context_id: ContextId::new_from_entropy([n.to_le_bytes()[0]; 32]),
             envelope: aura_core::types::facts::FactEnvelope {
                 type_id: aura_core::types::facts::FactTypeId::from("test/sibling"),
                 schema_version: 1,
                 encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                payload: vec![n],
+                payload: n.to_be_bytes().to_vec(),
             },
         }
     }
@@ -606,5 +652,50 @@ mod tests {
             exchange_facts_with_sibling(&joined, existing.device_id(), None),
         );
         assert_eq!((again_a.expect("a"), again_b.expect("b")), (0, 0));
+    }
+
+    // Task 32: a large store moves in bounded batches in both directions,
+    // and a transfer interrupted after some batches resumes with only the
+    // facts the peer still lacks.
+    #[tokio::test]
+    async fn large_sibling_transfer_is_batched_and_resumes() {
+        let shared = crate::SharedTransport::new();
+        let authority = AuthorityId::new_from_entropy([0x5C; 32]);
+        let existing = device(&shared, authority, 0x69);
+        let joined = device(&shared, authority, 0x6B);
+        let total = 2 * MAX_FACTS_PER_FRAME + 17;
+        existing
+            .commit_relational_facts((1..=total as u32).map(generic_fact).collect())
+            .await
+            .expect("commit facts");
+        joined
+            .commit_relational_facts(vec![generic_fact(9_999)])
+            .await
+            .expect("joined-only fact");
+        let originals = existing
+            .load_committed_facts(authority)
+            .await
+            .expect("load original facts");
+        // An earlier exchange was cut off after its first batch landed.
+        let delivered = joined
+            .import_committed_facts(originals[..MAX_FACTS_PER_FRAME].to_vec())
+            .await
+            .expect("first batch");
+        assert_eq!(delivered, MAX_FACTS_PER_FRAME);
+
+        let (from_existing, from_joined) = tokio::join!(
+            exchange_facts_with_sibling(&existing, joined.device_id(), None),
+            exchange_facts_with_sibling(&joined, existing.device_id(), None),
+        );
+        assert_eq!(from_existing.expect("existing side"), 1);
+        assert_eq!(
+            from_joined.expect("joined side"),
+            originals.len() - MAX_FACTS_PER_FRAME
+        );
+        let mut on_existing = existing.load_committed_facts(authority).await.unwrap();
+        let mut on_joined = joined.load_committed_facts(authority).await.unwrap();
+        on_existing.sort_by(|a, b| a.order.cmp(&b.order));
+        on_joined.sort_by(|a, b| a.order.cmp(&b.order));
+        assert_eq!(on_existing, on_joined);
     }
 }
