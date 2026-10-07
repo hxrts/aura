@@ -1486,6 +1486,13 @@ pub enum MessageDropReason {
     /// Intake: a moderation or channel membership fact names an author
     /// other than its sender.
     AuthorMismatch { claimed_author: AuthorityId },
+    /// Intake: a channel membership event written for another participant
+    /// by an author without standing (not an admitted member for a join,
+    /// not a home moderator for a departure).
+    MembershipAuthorWithoutStanding {
+        author: AuthorityId,
+        participant: AuthorityId,
+    },
     /// Outbound: the message could not be delivered to the peer.
     OutboundDelivery(aura_app::runtime_bridge::OutboundDeliveryFailureCause),
 }
@@ -1540,6 +1547,13 @@ impl std::fmt::Display for MessageDropReason {
             Self::InvalidPayload { detail } => write!(f, "invalid_payload: {detail}"),
             Self::UnverifiedEnvelope { detail } => write!(f, "unverified_envelope: {detail}"),
             Self::PeerFactRejected { detail } => write!(f, "peer_fact_rejected: {detail}"),
+            Self::MembershipAuthorWithoutStanding {
+                author,
+                participant,
+            } => write!(
+                f,
+                "membership_author_without_standing author={author} participant={participant}"
+            ),
             Self::AuthorMismatch { claimed_author } => {
                 write!(f, "author_mismatch claimed_author={claimed_author}")
             }

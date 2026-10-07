@@ -210,6 +210,66 @@ pub(super) fn claimed_fact_author(
     })
 }
 
+/// Why the author of an AMP membership event written for another participant
+/// has no standing here, or `None` when it has (or the fact is not such an
+/// event). A join must come from an admitted member (the inviter of an
+/// accepted invitation, or the creator adding a direct-chat peer); a
+/// departure (a kick) must come from a moderator of the context's home with
+/// the kick capability. An event refused now is offered again by a later
+/// sync round, so standing that arrives later still converges.
+pub(super) async fn membership_standing_refusal(
+    effects: &AuraEffectSystem,
+    envelope: &aura_core::types::facts::FactEnvelope,
+) -> AgentResult<Option<crate::reactive::MessageDropReason>> {
+    use crate::reactive::MessageDropReason;
+    use aura_core::effects::reactive::ReactiveEffects;
+    use aura_journal::DomainFact;
+    if !is_channel_membership_envelope(envelope) {
+        return Ok(None);
+    }
+    let Some(membership) = aura_amp::ChannelMembershipFact::from_envelope(envelope) else {
+        return Ok(None);
+    };
+    let author = membership.author();
+    if author == membership.participant() {
+        return Ok(None);
+    }
+    let refusal = || MessageDropReason::MembershipAuthorWithoutStanding {
+        author,
+        participant: membership.participant(),
+    };
+    let observations = aura_amp::channel_membership_observations(
+        effects,
+        membership.context(),
+        membership.channel(),
+    )
+    .await
+    .map_err(|error| AgentError::effects(error.to_string()))?;
+    if !observations.has_standing(author) {
+        return Ok(Some(refusal()));
+    }
+    if matches!(membership.event(), aura_amp::ChannelParticipantEvent::Left) {
+        let Ok(homes) = effects
+            .reactive_handler()
+            .read(&*aura_app::signal_defs::HOMES_SIGNAL)
+            .await
+        else {
+            return Ok(Some(MessageDropReason::HomesUnavailable));
+        };
+        let moderates = crate::reactive::app_signal_projection::collect_moderation_homes(
+            &homes,
+            membership.context(),
+            membership.channel(),
+        )
+        .iter()
+        .any(|home| home.actor_may_moderate(&author, "moderate:kick"));
+        if !moderates {
+            return Ok(Some(refusal()));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether `own_authority` may serve `envelope` to a syncing member: a fact
 /// claiming an author is served only by that author.
 fn may_serve_context_fact(
