@@ -262,10 +262,18 @@ async fn demo_mode_sequential_device_enrollments() {
     )
     .await
     .expect("cancel the pending first enrollment");
-    // The cancelled generation is released once its signed cancellation
-    // notice is handled (work/8.md Task 77); starting a new enrollment while
-    // that notice is still pending is tracked as Task 80.
-    drop(setup_code_11);
+    // Cancelling signs the cancellation notice once and retires the pending
+    // generation immediately, so a new enrollment starts without a restart
+    // while the notice is still being delivered.
+    let result2 = env
+        .ctx
+        .start_device_enrollment("Tablet", setup_code_11)
+        .await;
+    assert!(
+        result2.is_ok(),
+        "an enrollment started after cancelling the first should succeed: {:?}",
+        result2.err()
+    );
 }
 
 /// Test that device enrollment works immediately after account creation.
