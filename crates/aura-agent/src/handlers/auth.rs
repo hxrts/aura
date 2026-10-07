@@ -5,10 +5,10 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::fact_types::AUTH_AUTHENTICATED_FACT_TYPE_ID;
 use crate::runtime::services::{AuthManager, TrustedKeyResolutionService};
 use crate::runtime::AuraEffectSystem;
 use aura_authentication::capabilities::AuthenticationCapability;
+use aura_authentication::AuthFact;
 #[cfg(test)]
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::{CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects};
@@ -190,15 +190,6 @@ pub struct AuthenticationStatus {
     pub device_id: DeviceId,
 }
 
-/// Fact recorded when authentication succeeds
-#[derive(Debug, Serialize)]
-struct AuthenticatedFact {
-    authority_id: AuthorityId,
-    device_id: DeviceId,
-    auth_method: AuthMethod,
-    challenge_id: String,
-}
-
 /// Authentication handler
 #[derive(Clone)]
 pub struct AuthHandler {
@@ -329,18 +320,20 @@ impl AuthHandler {
                 .remove_challenge(&response.challenge_id)
                 .await;
 
-            // Journal authentication fact
+            // Journal the typed authentication fact
             let device_id = self.device_id();
-            HandlerUtilities::append_relational_fact(
+            let context_id = self.context.effect_context.context_id();
+            HandlerUtilities::append_domain_fact(
                 &self.context.authority,
                 effects,
-                self.context.effect_context.context_id(),
-                AUTH_AUTHENTICATED_FACT_TYPE_ID,
-                &AuthenticatedFact {
+                context_id,
+                &AuthFact::AuthVerified {
+                    context_id,
+                    session_id: response.challenge_id.clone(),
                     authority_id: self.context.authority.authority_id(),
-                    device_id,
-                    auth_method: response.auth_method.clone(),
-                    challenge_id: response.challenge_id.clone(),
+                    device_id: Some(device_id),
+                    verified_at_ms: current_time,
+                    message_hash: aura_core::hash::hash(&challenge.challenge_bytes),
                 },
             )
             .await?;

@@ -1336,15 +1336,16 @@ mod tests {
             // A non-chat fact that should be ignored
             make_test_fact(
                 3,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    envelope: aura_core::types::facts::FactEnvelope {
-                        type_id: aura_core::types::facts::FactTypeId::from("other_action"),
-                        schema_version: 1,
-                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                        payload: vec![7, 8, 9],
-                    },
-                }),
+                FactContent::Relational(
+                    aura_recovery::RecoveryFact::membership_change_completed_ms(
+                        test_context_id(),
+                        aura_core::Hash32([7u8; 32]),
+                        vec![AuthorityId::new_from_entropy([2u8; 32])],
+                        1,
+                        1_000,
+                    )
+                    .to_generic(),
+                ),
             ),
         ];
 
@@ -1459,15 +1460,20 @@ mod tests {
             ),
             make_test_fact(
                 2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    envelope: aura_core::types::facts::FactEnvelope {
-                        type_id: aura_core::types::facts::FactTypeId::from("threshold_updated"),
-                        schema_version: 1,
-                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                        payload: vec![2, 3],
-                    },
-                }),
+                FactContent::Relational(
+                    aura_recovery::RecoveryFact::membership_change_completed_ms(
+                        test_context_id(),
+                        Hash32([7u8; 32]),
+                        vec![
+                            AuthorityId::new_from_entropy([2u8; 32]),
+                            AuthorityId::new_from_entropy([3u8; 32]),
+                            AuthorityId::new_from_entropy([4u8; 32]),
+                        ],
+                        2,
+                        1_000,
+                    )
+                    .to_generic(),
+                ),
             ),
         ];
 

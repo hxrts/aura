@@ -253,6 +253,30 @@ pub struct RendezvousDescriptor {
     pub nickname_suggestion: Option<String>,
 }
 
+/// Explicit validity input for descriptor selection queries.
+///
+/// Reduction never reads the clock; a caller that selects descriptors names
+/// the validity it wants, either an observed physical time or every cached
+/// descriptor regardless of its window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DescriptorValidity {
+    /// Only descriptors whose window contains this time (ms since epoch).
+    ValidAt(u64),
+    /// Every descriptor, independent of its validity window.
+    Any,
+}
+
+impl DescriptorValidity {
+    /// Whether `descriptor` satisfies this validity query.
+    #[must_use]
+    pub fn admits(self, descriptor: &RendezvousDescriptor) -> bool {
+        match self {
+            Self::ValidAt(now_ms) => descriptor.is_valid(now_ms),
+            Self::Any => true,
+        }
+    }
+}
+
 impl RendezvousDescriptor {
     /// Check if descriptor is currently valid
     pub fn is_valid(&self, now_ms: u64) -> bool {
@@ -1007,6 +1031,11 @@ mod tests {
         assert!(descriptor.is_valid(1500)); // In range
         assert!(!descriptor.is_valid(2000)); // At valid_until (exclusive)
         assert!(!descriptor.is_valid(2500)); // After valid_until
+
+        // Selection takes validity as an explicit query input.
+        assert!(DescriptorValidity::ValidAt(1500).admits(&descriptor));
+        assert!(!DescriptorValidity::ValidAt(2500).admits(&descriptor));
+        assert!(DescriptorValidity::Any.admits(&descriptor));
     }
 
     #[test]

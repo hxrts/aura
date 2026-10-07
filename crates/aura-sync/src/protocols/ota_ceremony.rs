@@ -155,11 +155,13 @@ impl UpgradeProposal {
         Ok(SemanticVersion::new(major, minor, patch))
     }
 
-    /// Compute hash of the upgrade proposal.
-    #[allow(clippy::expect_used)] // serde_json serialization of simple structs is infallible
+    /// Compute the canonical (DAG-CBOR) hash of the upgrade proposal.
+    #[allow(clippy::expect_used)] // DAG-CBOR of this map-free plain struct is infallible
     pub fn compute_hash(&self) -> Hash32 {
-        let bytes = serde_json::to_vec(self).expect("UpgradeProposal should serialize");
-        Hash32::from_bytes(&bytes)
+        Hash32::new(
+            aura_core::util::serialization::hash_canonical(self)
+                .expect("UpgradeProposal should encode canonically"),
+        )
     }
 }
 
@@ -478,7 +480,36 @@ pub enum OTACeremonyFact {
     },
 }
 
+aura_core::define_fact_type_id!(ota_ceremony, "ota_ceremony", 1);
+
 impl OTACeremonyFact {
+    /// Encode with the canonical DAG-CBOR fact envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_encode_fact(
+            ota_ceremony_fact_type_id(),
+            OTA_CEREMONY_FACT_SCHEMA_VERSION,
+            self,
+        )
+    }
+
+    /// Decode from the canonical DAG-CBOR fact envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` on type, schema or payload mismatch.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, aura_core::types::facts::FactError> {
+        aura_core::types::facts::try_decode_fact(
+            ota_ceremony_fact_type_id(),
+            OTA_CEREMONY_FACT_SCHEMA_VERSION,
+            OTA_CEREMONY_FACT_SCHEMA_VERSION,
+            bytes,
+        )
+    }
+
     /// Get the ceremony ID from any fact variant (returns superseded ID for supersession facts).
     pub fn ceremony_id(&self) -> &str {
         match self {
@@ -595,9 +626,19 @@ where
     E: JournalEffects + ?Sized,
 {
     let journal = effects.get_journal().await?;
-    let journal_bytes =
-        serde_json::to_vec(&journal.facts).map_err(|e| AuraError::serialization(e.to_string()))?;
-    Ok(Hash32::from_bytes(&journal_bytes))
+    ota_ceremony_prestate_hash(&journal.facts)
+}
+
+/// Canonical prestate hash of a fact set.
+///
+/// Hashes the DAG-CBOR encoding of the visible `(key, value)` entries in key
+/// order, so the result is independent of insertion order and of CRDT
+/// bookkeeping (operation timestamps, actors).
+pub fn ota_ceremony_prestate_hash(facts: &aura_core::journal::Fact) -> AuraResult<Hash32> {
+    let entries: Vec<_> = facts.iter().collect();
+    aura_core::util::serialization::hash_canonical(&entries)
+        .map(Hash32::new)
+        .map_err(|e| AuraError::serialization(e.to_string()))
 }
 
 /// Build the deterministic certificate set persisted for a committed OTA activation.

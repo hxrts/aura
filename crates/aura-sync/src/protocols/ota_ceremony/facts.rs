@@ -37,8 +37,9 @@ where
     E: JournalEffects + ?Sized,
 {
     let mut journal = effects.get_journal().await?;
-    let fact_bytes =
-        serde_json::to_vec(fact).map_err(|err| AuraError::serialization(err.to_string()))?;
+    let fact_bytes = fact
+        .to_bytes()
+        .map_err(|err| AuraError::serialization(err.to_string()))?;
     journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
     effects.persist_journal(&journal).await
 }

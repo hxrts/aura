@@ -1456,7 +1456,10 @@ mod tests {
         assert_eq!(
             manager
                 .registry()
-                .projection(Some(context_id), 1)
+                .projection(
+                    Some(context_id),
+                    aura_rendezvous::DescriptorValidity::ValidAt(1)
+                )
                 .await
                 .descriptors
                 .len(),

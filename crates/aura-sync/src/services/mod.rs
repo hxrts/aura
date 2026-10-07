@@ -54,6 +54,7 @@
 
 pub mod ack_routing;
 pub mod maintenance;
+pub mod maintenance_facts;
 pub mod ota_distribution;
 pub mod ota_policy;
 pub mod ota_transition;
@@ -67,6 +68,9 @@ pub use aura_maintenance::{
     UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
+pub use maintenance_facts::{
+    maintenance_journal_fact_type_id, MaintenanceJournalFact, MaintenanceJournalFactReducer,
+};
 pub use ota_distribution::{OtaDistributionService, ReleaseBundlePublication};
 pub use ota_policy::{
     ActivationCandidate, ActivationDecision, ActivationDecisionReason, DiscoveryCandidate,

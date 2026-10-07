@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use crate::guards::RecoveryOperationType;
 
 /// Fact type identifier for authentication facts
-pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate.v1";
+pub const AUTH_FACT_TYPE_ID: &str = "aura.authenticate";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthFactKey {
@@ -53,7 +53,7 @@ pub struct AuthFactKey {
 /// They are designed to be immutable and append-only.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "aura.authenticate.v1",
+    type_id = "aura.authenticate",
     schema_version = 1,
     context_fn = "context_id"
 )]

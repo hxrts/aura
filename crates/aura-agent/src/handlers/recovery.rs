@@ -5,10 +5,6 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::fact_types::{
-    RECOVERY_CANCELLED_FACT_TYPE_ID, RECOVERY_COMPLETED_FACT_TYPE_ID,
-    RECOVERY_GUARDIAN_APPROVED_FACT_TYPE_ID, RECOVERY_INITIATED_FACT_TYPE_ID,
-};
 use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{RandomExtendedEffects, StorageCoreEffects};
@@ -325,23 +321,6 @@ impl RecoveryHandler {
             expires_at,
         };
 
-        // Journal the recovery initiation fact
-        HandlerUtilities::append_relational_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            RECOVERY_INITIATED_FACT_TYPE_ID,
-            &serde_json::json!({
-                "recovery_id": recovery_id,
-                "account_authority": self.context.authority.authority_id(),
-                "guardians": guardians,
-                "threshold": threshold,
-                "requested_at": current_time,
-                "prestate_hash": prestate_hash,
-            }),
-        )
-        .await?;
-
         // Store active recovery
         let active_recovery = ActiveRecovery {
             request: request.clone(),
@@ -422,21 +401,6 @@ impl RecoveryHandler {
 
         self.verify_guardian_approval_signature(effects, &recovery.request, &approval)
             .await?;
-
-        // Journal the approval
-        HandlerUtilities::append_relational_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            RECOVERY_GUARDIAN_APPROVED_FACT_TYPE_ID,
-            &serde_json::json!({
-                "recovery_id": approval.recovery_id,
-                "guardian_id": approval.guardian_id,
-                "approved_at": approval.approved_at,
-                "prestate_hash": approval.prestate_hash,
-            }),
-        )
-        .await?;
 
         let updated_state = self
             .recovery_manager
@@ -608,20 +572,6 @@ impl RecoveryHandler {
 
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
-        // Journal completion
-        HandlerUtilities::append_relational_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            RECOVERY_COMPLETED_FACT_TYPE_ID,
-            &serde_json::json!({
-                "recovery_id": recovery_id,
-                "approvals_count": collected,
-                "completed_at": current_time,
-            }),
-        )
-        .await?;
-
         let completed_state = RecoveryState::Complete {
             recovery_id: recovery_id.clone(),
             completed_at: current_time,
@@ -685,19 +635,6 @@ impl RecoveryHandler {
             .ok_or_else(|| {
                 AgentError::runtime(format!("Recovery ceremony not found: {}", recovery_id))
             })?;
-
-        // Journal cancellation
-        HandlerUtilities::append_relational_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            RECOVERY_CANCELLED_FACT_TYPE_ID,
-            &serde_json::json!({
-                "recovery_id": recovery_id,
-                "reason": reason,
-            }),
-        )
-        .await?;
 
         let failed_state = RecoveryState::Failed {
             recovery_id: recovery_id.clone(),

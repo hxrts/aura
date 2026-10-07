@@ -6,6 +6,8 @@
 use crate::reactive::scheduler::ViewReduction;
 use aura_core::types::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
+use aura_journal::DomainFact;
+use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 
 /// Delta type for guardians view
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +19,6 @@ pub enum GuardianDelta {
         added_at: u64,
         share_index: Option<u32>,
     },
-    /// A guardian was removed
-    GuardianRemoved { authority_id: String },
     /// A guardian's status changed
     GuardianStatusChanged {
         authority_id: String,
@@ -46,18 +46,19 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
                     added_at: 0,
                     share_index: None,
                 }),
-                FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
-                    if envelope.type_id.as_str() == "guardian_removed" {
-                        Some(GuardianDelta::GuardianRemoved {
-                            authority_id: "unknown".to_string(),
-                        })
-                    } else if envelope.type_id.as_str() == "threshold_updated" {
-                        Some(GuardianDelta::ThresholdUpdated {
-                            threshold: 2,
-                            total: 3,
-                        })
-                    } else {
-                        None
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
+                {
+                    match RecoveryFact::from_envelope(envelope)? {
+                        RecoveryFact::MembershipChangeCompleted {
+                            new_guardian_ids,
+                            new_threshold,
+                            ..
+                        } => Some(GuardianDelta::ThresholdUpdated {
+                            threshold: u32::from(new_threshold),
+                            total: u32::try_from(new_guardian_ids.len()).unwrap_or(u32::MAX),
+                        }),
+                        _ => None,
                     }
                 }
                 _ => None,
@@ -104,15 +105,20 @@ mod tests {
             ),
             make_test_fact(
                 2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    envelope: aura_core::types::facts::FactEnvelope {
-                        type_id: aura_core::types::facts::FactTypeId::from("threshold_updated"),
-                        schema_version: 1,
-                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
-                        payload: vec![2, 3],
-                    },
-                }),
+                FactContent::Relational(
+                    aura_recovery::RecoveryFact::membership_change_completed_ms(
+                        test_context_id(),
+                        Hash32([7u8; 32]),
+                        vec![
+                            AuthorityId::new_from_entropy([2u8; 32]),
+                            AuthorityId::new_from_entropy([3u8; 32]),
+                            AuthorityId::new_from_entropy([4u8; 32]),
+                        ],
+                        2,
+                        1_000,
+                    )
+                    .to_generic(),
+                ),
             ),
         ];
 

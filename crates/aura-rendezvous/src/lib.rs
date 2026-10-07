@@ -100,9 +100,9 @@ pub use facts::{
     bootstrap_contact_hint_key, bootstrap_introduction_hint_key, neighborhood_reentry_hint_key,
     validate_bootstrap_contact_hint, validate_bootstrap_introduction_hint,
     validate_neighborhood_reentry_hint, BootstrapHintKey, BootstrapHintValidationError,
-    BoundLocalAddr, LocalInterfaces, ReflexiveAddr, RelayAddr, RemoteCandidateAddr,
-    RendezvousDescriptor, RendezvousFact, RendezvousFactReducer, TransportAddress,
-    TransportAddressError, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
+    BoundLocalAddr, DescriptorValidity, LocalInterfaces, ReflexiveAddr, RelayAddr,
+    RemoteCandidateAddr, RendezvousDescriptor, RendezvousFact, RendezvousFactReducer,
+    TransportAddress, TransportAddressError, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
 
 // Re-export protocol types

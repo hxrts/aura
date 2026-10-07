@@ -670,7 +670,13 @@ impl SelectionManagerService {
             return Err(SelectionManagerError::NoReachableCandidates { family });
         }
 
-        let projection = self.registry.projection(Some(scope), u64::MAX).await;
+        let projection = self
+            .registry
+            .projection(
+                Some(scope),
+                aura_rendezvous::DescriptorValidity::ValidAt(now_ms),
+            )
+            .await;
         let state = self.state.read().await;
         let residency = state.residency.clone();
         let bootstrap_scope = state.bootstrap.get(&scope).cloned().unwrap_or_default();

@@ -5,8 +5,7 @@
 use super::capabilities::SessionCoordinationCapability;
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::fact_types::{SESSION_CREATED_FACT_TYPE_ID, SESSION_INVITATION_SENT_FACT_TYPE_ID};
-use crate::handlers::shared::{build_string_metadata, HandlerUtilities};
+use crate::handlers::shared::build_string_metadata;
 use crate::runtime::services::SessionManager;
 use crate::runtime::transport_boundary::send_guarded_transport_envelope;
 use crate::runtime::vm_host_bridge::{AuraVmHostWaitStatus, AuraVmRoundDisposition};
@@ -78,22 +77,6 @@ pub struct SessionCreated {
     pub session_id: SessionId,
     pub session_handle: SessionHandle,
     pub created_at: u64,
-}
-
-#[derive(Debug, Serialize)]
-struct SessionCreatedFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    session_type: SessionType,
-    participants: Vec<DeviceId>,
-    initiator: DeviceId,
-}
-
-#[derive(Debug, Serialize)]
-struct SessionInvitationFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    participant: DeviceId,
 }
 
 /// Session creation failure message
@@ -313,19 +296,6 @@ impl SessionOperations {
                     .register_session(session_id, participants.clone())
                     .await;
                 self.persist_session_handle(&session_handle).await?;
-                HandlerUtilities::append_relational_fact(
-                    &self.authority_context,
-                    &self.effects,
-                    self.guard_context(),
-                    SESSION_CREATED_FACT_TYPE_ID,
-                    &SessionCreatedFact {
-                        session_id,
-                        session_type,
-                        participants: participants.clone(),
-                        initiator: device_id,
-                    },
-                )
-                .await?;
                 tracing::info!(
                     "Session created successfully using choreography: {}",
                     session_id
@@ -469,18 +439,6 @@ impl SessionOperations {
                 }
             }
 
-            HandlerUtilities::append_relational_fact(
-                &self.authority_context,
-                effects,
-                self.guard_context(),
-                SESSION_INVITATION_SENT_FACT_TYPE_ID,
-                &SessionInvitationFact {
-                    session_id: request.session_id,
-                    participant: *participant_id,
-                },
-            )
-            .await?;
-
             responses.push(ParticipantResponse {
                 participant_id: *participant_id,
                 accepted: true,
@@ -518,8 +476,6 @@ impl SessionOperations {
             metadata: request.metadata.clone(),
         };
 
-        // Session journaling happens in the caller (create_session_choreography_with_metadata)
-        // via HandlerUtilities::append_relational_fact after the handle is created
         tracing::info!("Session handle created for session {}", request.session_id);
 
         Ok(session_handle)

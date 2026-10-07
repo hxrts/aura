@@ -713,14 +713,22 @@ impl MaintenanceFact {
                     scope,
                     to_release_id,
                     ..
-                }
-                | UpgradeExecutionFact::RollbackExecuted {
-                    scope,
-                    to_release_id,
-                    ..
                 } => (
                     "upgrade-execution",
                     Self::scope_release_binding_key(scope, to_release_id),
+                ),
+                // A rollback names the explicit (from -> to) pair it reverts,
+                // so it never shares a key with the staging/cutover of
+                // `to_release_id` and reduction does not depend on which of
+                // the two facts arrives last.
+                UpgradeExecutionFact::RollbackExecuted {
+                    scope,
+                    from_release_id,
+                    to_release_id,
+                    ..
+                } => (
+                    "upgrade-rollback",
+                    Self::binding_key_data(&(scope, from_release_id, to_release_id)),
                 ),
                 UpgradeExecutionFact::ScopeEntered {
                     scope, release_id, ..
@@ -804,13 +812,27 @@ impl MaintenanceFact {
     ///
     /// Returns `FactError` if serialization fails.
     pub fn to_envelope(&self) -> Result<aura_core::types::facts::FactEnvelope, FactError> {
-        let payload = aura_core::util::serialization::to_vec(self)?;
-        Ok(aura_core::types::facts::FactEnvelope {
-            type_id: maintenance_fact_type_id().clone(),
-            schema_version: MAINTENANCE_FACT_SCHEMA_VERSION,
-            encoding: aura_core::types::facts::FactEncoding::DagCbor,
-            payload,
-        })
+        aura_core::types::facts::try_encode_envelope(
+            maintenance_fact_type_id(),
+            MAINTENANCE_FACT_SCHEMA_VERSION,
+            self,
+        )
+    }
+
+    /// Decode a fact from a `FactEnvelope` (the shared registry decode path).
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if the type, schema range or payload is invalid.
+    pub fn from_envelope(
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Result<Self, FactError> {
+        aura_core::types::facts::try_decode_envelope(
+            maintenance_fact_type_id(),
+            MAINTENANCE_FACT_SCHEMA_VERSION,
+            MAINTENANCE_FACT_SCHEMA_VERSION,
+            envelope,
+        )
     }
 
     /// Produce a human-readable summary for logs.
@@ -1052,6 +1074,55 @@ mod tests {
         let bytes = fact.to_bytes().expect("encoding should succeed");
         let restored = MaintenanceFact::from_bytes(&bytes).expect("decoding should succeed");
         assert_eq!(fact, restored);
+    }
+
+    #[test]
+    fn envelope_round_trip_uses_canonical_codec() {
+        let fact = MaintenanceFact::CacheInvalidated(CacheInvalidated::new(
+            authority(4),
+            vec![CacheKey("k".to_string())],
+            Epoch::new(1),
+        ));
+        let envelope = fact.to_envelope().expect("envelope");
+        assert_eq!(
+            envelope.encoding,
+            aura_core::types::facts::FactEncoding::DagCbor
+        );
+        assert_eq!(
+            aura_core::util::serialization::to_vec(&envelope).expect("encode"),
+            fact.to_bytes().expect("bytes"),
+        );
+        assert_eq!(
+            MaintenanceFact::from_envelope(&envelope).expect("decode"),
+            fact
+        );
+    }
+
+    #[test]
+    fn rollback_binding_key_names_explicit_pair() {
+        let scope = AuraActivationScope::AuthorityLocal {
+            authority_id: authority(5),
+        };
+        let cutover = MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::CutoverApproved {
+            authority_id: authority(5),
+            scope: scope.clone(),
+            from_release_id: release_id(1),
+            to_release_id: release_id(2),
+            approved_at: ts(1),
+        });
+        let rollback = MaintenanceFact::UpgradeExecution(UpgradeExecutionFact::RollbackExecuted {
+            authority_id: authority(5),
+            scope,
+            from_release_id: release_id(1),
+            to_release_id: release_id(2),
+            failure: AuraUpgradeFailure::new(
+                AuraUpgradeFailureClass::ManualRollbackRequested,
+                "manual",
+            ),
+            rolled_back_at: ts(2),
+        });
+        assert_ne!(cutover.binding_key(), rollback.binding_key());
+        assert_eq!(rollback.binding_key().sub_type, "upgrade-rollback");
     }
 
     #[test]

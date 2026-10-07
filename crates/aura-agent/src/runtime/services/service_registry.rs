@@ -9,7 +9,7 @@ use super::invariant::InvariantViolation;
 use super::state::with_state_mut_validated;
 use aura_core::service::{Route, SelectionState, ServiceFamily};
 use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
-use aura_rendezvous::RendezvousDescriptor;
+use aura_rendezvous::{DescriptorValidity, RendezvousDescriptor};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -546,13 +546,13 @@ impl ServiceRegistryService {
     pub async fn projection(
         &self,
         scope: Option<ContextId>,
-        now_ms: u64,
+        validity: DescriptorValidity,
     ) -> ServiceRegistryProjection {
         let state = self.state.read().await;
         let mut descriptors = state
             .descriptors
             .values()
-            .filter(|descriptor| descriptor.is_valid(now_ms))
+            .filter(|descriptor| validity.admits(descriptor))
             .filter(|descriptor| scope.map_or(true, |value| descriptor.context_id == value))
             .cloned()
             .collect::<Vec<_>>();
@@ -759,7 +759,7 @@ mod tests {
             .is_none());
         assert!(registry.hold_observations(ctx).await.is_empty());
         assert!(registry
-            .projection(Some(ctx), 0)
+            .projection(Some(ctx), DescriptorValidity::Any)
             .await
             .pending_routes
             .is_empty());

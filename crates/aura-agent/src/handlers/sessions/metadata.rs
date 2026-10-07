@@ -4,40 +4,8 @@
 
 use super::coordination::SessionOperations;
 use crate::core::{AgentError, AgentResult};
-use crate::fact_types::{
-    SESSION_METADATA_UPDATED_FACT_TYPE_ID, SESSION_PARTICIPANT_ADDED_FACT_TYPE_ID,
-    SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID,
-};
-use crate::handlers::shared::HandlerUtilities;
 use aura_core::types::identifiers::{DeviceId, SessionId};
-use serde::Serialize;
 use std::collections::HashMap;
-
-#[derive(Debug, Serialize)]
-struct SessionParticipantsFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    participants: Vec<DeviceId>,
-}
-
-#[derive(Debug, Serialize)]
-struct SessionMetadataFact {
-    #[serde(with = "session_id_serde")]
-    session_id: SessionId,
-    metadata: HashMap<String, serde_json::Value>,
-}
-
-mod session_id_serde {
-    use aura_core::types::identifiers::SessionId;
-    use serde::Serializer;
-
-    pub fn serialize<S>(session_id: &SessionId, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&session_id.to_string())
-    }
-}
 
 impl SessionOperations {
     fn session_id_from_str(session_id: &str) -> AgentResult<SessionId> {
@@ -59,18 +27,6 @@ impl SessionOperations {
             .update_metadata(session_id, metadata)
             .await;
         self.persist_metadata(session_id, &updated).await?;
-        HandlerUtilities::append_relational_fact(
-            &self.authority_context,
-            self.effects(),
-            self.guard_context(),
-            SESSION_METADATA_UPDATED_FACT_TYPE_ID,
-            &SessionMetadataFact {
-                session_id,
-                metadata: updated.clone(),
-            },
-        )
-        .await?;
-
         Ok(())
     }
 
@@ -95,18 +51,6 @@ impl SessionOperations {
             .add_participant(session_id, device_id)
             .await;
         self.persist_participants(session_id, &participants).await?;
-        HandlerUtilities::append_relational_fact(
-            &self.authority_context,
-            self.effects(),
-            self.guard_context(),
-            SESSION_PARTICIPANT_ADDED_FACT_TYPE_ID,
-            &SessionParticipantsFact {
-                session_id,
-                participants: participants.clone(),
-            },
-        )
-        .await?;
-
         Ok(())
     }
 
@@ -122,17 +66,6 @@ impl SessionOperations {
             .await
         {
             self.persist_participants(session_id, &participants).await?;
-            HandlerUtilities::append_relational_fact(
-                &self.authority_context,
-                self.effects(),
-                self.guard_context(),
-                SESSION_PARTICIPANT_REMOVED_FACT_TYPE_ID,
-                &SessionParticipantsFact {
-                    session_id,
-                    participants: participants.clone(),
-                },
-            )
-            .await?;
         }
 
         Ok(())

@@ -5,13 +5,10 @@
 use crate::core::{default_context_id_for_authority, AgentResult, AuthorityContext};
 use crate::runtime::{AuraEffectSystem, EffectContext};
 use aura_core::types::facts::FactEnvelope;
-use aura_core::types::facts::FactTypeId;
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::FactJournal;
-use serde::Serialize;
-use serde_json;
 use std::collections::HashMap;
 use std::fmt::Display;
 
@@ -43,43 +40,10 @@ impl HandlerContext {
     }
 }
 
-/// Schema version of the agent-local JSON records journaled by
-/// [`HandlerUtilities::append_relational_fact`] (session, auth and recovery
-/// records). These are not `DomainFact`s; bump on a breaking payload change.
-pub(crate) const AGENT_RECORD_SCHEMA_VERSION: u16 = 1;
-
 /// Shared handler utilities
 pub struct HandlerUtilities;
 
 impl HandlerUtilities {
-    /// Append a relational fact into the authority-scoped journal.
-    pub async fn append_relational_fact<T: Serialize>(
-        authority: &AuthorityContext,
-        effects: &AuraEffectSystem,
-        context_id: ContextId,
-        binding_type: FactTypeId,
-        payload: &T,
-    ) -> AgentResult<()> {
-        let _ = authority; // Authority is implied by the effect system's configured identity.
-        let binding_data = serde_json::to_vec(payload).map_err(|source| {
-            crate::core::AgentError::from(aura_core::AuraError::Serialization {
-                message: format!("serialize fact payload: {source}"),
-                source: Some(std::sync::Arc::new(source)),
-            })
-        })?;
-        let envelope = FactEnvelope {
-            type_id: binding_type,
-            schema_version: AGENT_RECORD_SCHEMA_VERSION,
-            encoding: aura_core::types::facts::FactEncoding::Json,
-            payload: binding_data,
-        };
-        effects
-            .commit_generic_envelope(context_id, envelope)
-            .await
-            .map(|_| ())
-            .map_err(crate::core::AgentError::from)
-    }
-
     /// Append a domain fact (e.g. `InvitationFact`) into the authority-scoped
     /// journal under its own type id and schema version.
     pub async fn append_domain_fact<F: aura_journal::DomainFact>(

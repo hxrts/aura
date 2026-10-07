@@ -328,6 +328,25 @@ pub fn try_encode_fact<T: Serialize>(
     schema_version: u16,
     value: &T,
 ) -> Result<Vec<u8>, FactError> {
+    let envelope = try_encode_envelope(type_id, schema_version, value)?;
+    let bytes = crate::util::serialization::to_vec(&envelope)?;
+    Ok(bytes)
+}
+
+/// Build the canonical DAG-CBOR `FactEnvelope` for a domain fact.
+///
+/// Shared by `try_encode_fact` and Layer 2 crates that hand the envelope to a
+/// `RelationalFact::Generic` without re-encoding it.
+///
+/// # Errors
+///
+/// Returns `FactError::Serialization` if the value fails to serialize, or
+/// `FactError::PayloadTooLarge` if the payload exceeds the bound.
+pub fn try_encode_envelope<T: Serialize>(
+    type_id: &FactTypeId,
+    schema_version: u16,
+    value: &T,
+) -> Result<FactEnvelope, FactError> {
     let payload = crate::util::serialization::to_vec(value)?;
     if payload.len() > MAX_FACT_PAYLOAD_BYTES {
         return Err(FactError::PayloadTooLarge {
@@ -335,14 +354,12 @@ pub fn try_encode_fact<T: Serialize>(
             max: MAX_FACT_PAYLOAD_BYTES as u64,
         });
     }
-    let envelope = FactEnvelope {
+    Ok(FactEnvelope {
         type_id: type_id.clone(),
         schema_version,
         encoding: FactEncoding::DagCbor,
         payload,
-    };
-    let bytes = crate::util::serialization::to_vec(&envelope)?;
-    Ok(bytes)
+    })
 }
 
 /// Decode a domain fact with proper error handling.

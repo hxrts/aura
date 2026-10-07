@@ -397,11 +397,43 @@ fn test_ota_ceremony_fact_serialization() {
         timestamp_ms: 12345,
     };
 
-    let bytes = serde_json::to_vec(&fact).unwrap();
-    let restored: OTACeremonyFact = serde_json::from_slice(&bytes).unwrap();
+    let bytes = fact.to_bytes().unwrap();
+    let restored = OTACeremonyFact::from_bytes(&bytes).unwrap();
 
+    assert_eq!(restored, fact);
     assert_eq!(restored.ceremony_id(), "abc123");
     assert_eq!(restored.timestamp_ms(), 12345);
+    // Envelope carries the ceremony type id; other envelopes are rejected.
+    let foreign = aura_core::types::facts::try_encode_fact(
+        &aura_core::types::facts::FactTypeId::new("other"),
+        OTA_CEREMONY_FACT_SCHEMA_VERSION,
+        &fact,
+    )
+    .unwrap();
+    assert!(OTACeremonyFact::from_bytes(&foreign).is_err());
+}
+
+#[test]
+fn test_prestate_hash_stable_across_fact_permutations() {
+    use aura_core::domain::FactValue;
+    use aura_core::journal::Fact;
+
+    let entries: Vec<(String, FactValue)> = (0u8..5)
+        .map(|i| (format!("fact-{i}"), FactValue::Bytes(vec![i; 4])))
+        .collect();
+    let build = |order: &[usize]| {
+        let mut facts = Fact::new();
+        for &i in order {
+            let (key, value) = entries[i].clone();
+            facts.insert(key, value).unwrap();
+        }
+        ota_ceremony_prestate_hash(&facts).unwrap()
+    };
+    let baseline = build(&[0, 1, 2, 3, 4]);
+    for order in [[4, 3, 2, 1, 0], [2, 0, 4, 1, 3], [1, 3, 0, 4, 2]] {
+        assert_eq!(build(&order), baseline);
+    }
+    assert_ne!(build(&[0, 1, 2, 3]), baseline);
 }
 
 #[test]
