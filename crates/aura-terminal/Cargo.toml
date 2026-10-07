@@ -77,7 +77,7 @@ hex = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
 bpaf = "0.9"
-tokio = { workspace = true, features = ["fs", "signal", "rt-multi-thread", "io-std"] }
+tokio = { workspace = true, features = ["fs", "signal", "rt-multi-thread", "io-std", "net"] }
 async-lock = "3"
 futures = { workspace = true }
 parking_lot = { workspace = true }
@@ -86,6 +86,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
+schemars = { version = "1", features = ["derive"] }
 serde_cbor = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }

@@ -6,10 +6,11 @@
 //! and are parsed by the executor, so CLI and RPC reject bad input the same
 //! way.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Role granted by `invite create`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InviteRole {
     /// Become a contact.
@@ -37,7 +38,7 @@ impl std::str::FromStr for InviteRole {
 }
 
 /// Format of `chat export`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportFormat {
     /// A JSON array of messages.
@@ -69,7 +70,7 @@ fn default_search_limit() -> usize {
 }
 
 /// A command against the account's runtime.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Request {
     /// Account identity, threshold, devices and contacts.

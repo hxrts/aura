@@ -386,6 +386,10 @@ aura rpc
 {"id":2,"method":"subscribe","params":{"topics":["messages"]}}
 ```
 
+A running node, the TUI or `aura serve`, also listens on the owner-only local socket `<data-dir>/aura.sock` (mode `0600`, same-user connections only, no network listener). Every `aura` account command and `aura rpc` first try that socket, so they work while the TUI holds the account. With no node running, the CLI opens the account's production runtime itself under the profile's exclusive lease.
+
+The protocol schema is published at `crates/aura-terminal/schema/aura-rpc-v1.json`, generated from the request and response types and kept in sync by `just ci-rpc-schema`.
+
 The first line written is a hello line with the protocol version, methods and event topics. Each response carries the request's `id` and the same `result` or `error` that `aura --json` prints. After `subscribe`, event lines (`{"type":"event","topic":"messages",...}`) interleave with responses; a subscriber that falls behind gets one `resync` event with a fresh snapshot. The session ends on EOF or `{"method":"shutdown"}`.
 
 Command output is printed plainly. Add `-v` to also print runtime diagnostics.

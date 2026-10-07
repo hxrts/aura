@@ -256,6 +256,22 @@ impl RuntimeLaunchSpec<'_> {
         Ok(config)
     }
 
+    /// The production runtime of this launch, as the TUI runs it.
+    async fn build_production_agent(&self) -> Result<AuraAgent, AuraError> {
+        let config = self.agent_config()?;
+        AgentBuilder::new()
+            .with_config(config.clone())
+            .with_authority(self.authority)
+            .with_sync_config(self.sync_config())
+            .with_rendezvous_config(config.rendezvous_config())
+            .build_production(&self.effect_context())
+            .await
+            .map_err(|error| AuraError::Internal {
+                message: "Failed to create agent".into(),
+                source: Some(std::sync::Arc::new(error)),
+            })
+    }
+
     fn effect_context(&self) -> EffectContext {
         EffectContext::new(
             self.authority,
@@ -444,6 +460,69 @@ fn build_standard_io_context(
         })
 }
 
+/// Serve `aura rpc` sessions on the account's node socket for as long as
+/// the TUI's startup task owner lives. A socket already answered by another
+/// node is left alone.
+async fn host_node_socket(
+    tasks: &UiTaskOwner,
+    base_path: &std::path::Path,
+    ctx: crate::command::CommandContext,
+) {
+    let socket = crate::rpc_socket::socket_path(base_path);
+    match crate::rpc_socket::bind(&socket).await {
+        Ok(listener) => tasks.spawn_cancellable(async move {
+            if let Err(error) =
+                crate::rpc_socket::serve(&ctx, listener, &socket, std::future::pending()).await
+            {
+                tracing::warn!(%error, "node socket stopped");
+            }
+        }),
+        Err(error) => tracing::warn!(%error, "node socket not hosted"),
+    }
+}
+
+/// The account's production runtime, opened the way the TUI opens it.
+pub struct ProductionRuntime {
+    pub agent: Arc<AuraAgent>,
+    pub authority: AuthorityId,
+    pub context: ContextId,
+}
+
+/// Open the production runtime of the account stored at `base_path`, under
+/// the profile's exclusive lease (fails while another process holds it).
+/// Returns `Ok(None)` when no account exists there.
+pub async fn open_production_runtime(
+    base_path: &std::path::Path,
+) -> Result<Option<ProductionRuntime>, AuraError> {
+    let launch = TuiLaunchRequest {
+        data_dir: base_path.to_str(),
+        requested_device_id: None,
+        bind_address: None,
+        mode: TuiMode::Production,
+    }
+    .resolve();
+    let storage = open_bootstrap_storage(&launch.base_path);
+    let AccountLoadResult::Loaded {
+        authority, context, ..
+    } = try_load_account(&storage).await?
+    else {
+        return Ok(None);
+    };
+    let device_id = load_selected_runtime_identity(&storage)
+        .await?
+        .map(|identity| identity.device_id)
+        .unwrap_or(launch.configured_device_id);
+    let agent = launch
+        .runtime_spec(authority, context, device_id)
+        .build_production_agent()
+        .await?;
+    Ok(Some(ProductionRuntime {
+        agent: Arc::new(agent),
+        authority,
+        context,
+    }))
+}
+
 /// Handle TUI launch.
 pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
     let stdio = PreFullscreenStdio::new();
@@ -538,17 +617,7 @@ async fn handle_tui_launch_with_bootstrap(
             };
 
             let agent = match launch.mode {
-                TuiMode::Production => AgentBuilder::new()
-                    .with_config(runtime_spec.agent_config()?)
-                    .with_authority(authority)
-                    .with_sync_config(runtime_spec.sync_config())
-                    .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())
-                    .build_production(&runtime_spec.effect_context())
-                    .await
-                    .map_err(|error| AuraError::Internal {
-                        message: "Failed to create agent".into(),
-                        source: Some(std::sync::Arc::new(error)),
-                    })?,
+                TuiMode::Production => runtime_spec.build_production_agent().await?,
                 TuiMode::Demo { seed } => {
                     stdio.println(format_args!("Using simulation agent with seed: {seed}"));
 
@@ -683,6 +752,21 @@ async fn handle_tui_launch_with_bootstrap(
             stdio.println(format_args!(
                 "AppCore initialized (with runtime bridge and reactive signals)"
             ));
+
+            // Host the node socket so `aura ...` commands reach this runtime
+            // while the TUI holds the profile.
+            if matches!(launch.mode, TuiMode::Production) {
+                host_node_socket(
+                    &startup_tasks,
+                    &launch.base_path,
+                    crate::command::CommandContext::new(
+                        app_core.raw().clone(),
+                        agent.runtime().effects(),
+                        authority,
+                    ),
+                )
+                .await;
+            }
 
             if let Some(device_enrollment_code) = pending_device_enrollment_code {
                 let startup_core = app_core.raw().clone();
@@ -828,17 +912,7 @@ async fn handle_tui_launch_with_bootstrap(
                     ));
 
                 let agent = match launch.mode {
-                    TuiMode::Production => AgentBuilder::new()
-                        .with_config(runtime_spec.agent_config()?)
-                        .with_authority(runtime_authority)
-                        .with_sync_config(runtime_spec.sync_config())
-                        .with_rendezvous_config(runtime_spec.agent_config()?.rendezvous_config())
-                        .build_production(&runtime_spec.effect_context())
-                        .await
-                        .map_err(|error| AuraError::Internal {
-                            message: "Failed to create provisional runtime agent".into(),
-                            source: Some(std::sync::Arc::new(error)),
-                        })?,
+                    TuiMode::Production => runtime_spec.build_production_agent().await?,
                     TuiMode::Demo { seed } => AgentBuilder::new()
                         .with_config(runtime_spec.agent_config()?)
                         .with_authority(runtime_authority)

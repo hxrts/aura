@@ -7,14 +7,20 @@
 use aura_app::ui::contract::{
     SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, WorkflowTerminalStatus,
 };
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Terminal lifecycle of the semantic operation a command ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct OperationView {
+    /// snake_case `SemanticOperationKind`.
+    #[schemars(with = "String")]
     pub kind: SemanticOperationKind,
+    /// snake_case `SemanticOperationPhase`.
+    #[schemars(with = "String")]
     pub phase: SemanticOperationPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub error: Option<SemanticOperationError>,
 }
 
@@ -28,7 +34,7 @@ impl From<WorkflowTerminalStatus> for OperationView {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AccountView {
     pub authority_id: String,
     pub nickname: String,
@@ -38,14 +44,14 @@ pub struct AccountView {
     pub contacts: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AuthorityView {
     pub authority_id: String,
     pub nickname: String,
     pub current: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ContactView {
     pub authority_id: String,
     pub nickname: String,
@@ -53,7 +59,7 @@ pub struct ContactView {
     pub is_member: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelView {
     pub channel_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -68,7 +74,7 @@ pub struct ChannelView {
     pub members: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageView {
     pub message_id: String,
     pub channel_id: String,
@@ -79,7 +85,7 @@ pub struct MessageView {
     pub is_own: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct InvitationView {
     pub invitation_id: String,
     pub kind: String,
@@ -92,7 +98,7 @@ pub struct InvitationView {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RecoveryView {
     pub guardians: Vec<String>,
     pub threshold: u32,
@@ -102,7 +108,7 @@ pub struct RecoveryView {
     pub approvals: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AmpChannelView {
     pub context_id: String,
     pub channel_id: String,
@@ -115,7 +121,7 @@ pub struct AmpChannelView {
 }
 
 /// The successful outcome of a request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Response {
     Account(AccountView),

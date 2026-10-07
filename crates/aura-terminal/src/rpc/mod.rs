@@ -29,6 +29,7 @@
 //! [`events`] adds `subscribe`/`unsubscribe` and event lines.
 
 pub mod events;
+pub mod schema;
 
 use crate::command::{execute, CommandContext, CommandError, Request, Response};
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -82,7 +83,12 @@ pub fn response_line(id: &Value, outcome: &Result<Response, CommandError>) -> Va
 #[derive(Debug)]
 pub enum Incoming {
     /// A command request.
-    Request { id: Value, request: Request },
+    Request {
+        id: Value,
+        request: Request,
+        /// Optional deadline (`timeout_secs`), on the runtime clock.
+        timeout_secs: Option<u64>,
+    },
     /// End the session.
     Shutdown { id: Value },
     /// Start streaming events.
@@ -110,6 +116,7 @@ pub fn parse_line(line: &str) -> Result<Incoming, (Value, CommandError)> {
         ));
     };
     let id = object.remove("id").unwrap_or(Value::Null);
+    let timeout_secs = object.remove("timeout_secs").and_then(|v| v.as_u64());
     let method = object
         .get("method")
         .and_then(Value::as_str)
@@ -138,6 +145,7 @@ pub fn parse_line(line: &str) -> Result<Incoming, (Value, CommandError)> {
             .map(|request| Incoming::Request {
                 id: id.clone(),
                 request,
+                timeout_secs,
             })
             .map_err(|e| {
                 (
@@ -152,7 +160,9 @@ pub fn parse_line(line: &str) -> Result<Incoming, (Value, CommandError)> {
 /// are not handled here; [`serve`] handles them.
 pub async fn handle_line(ctx: &CommandContext, line: &str) -> Value {
     match parse_line(line) {
-        Ok(Incoming::Request { id, request }) => response_line(&id, &execute(ctx, request).await),
+        Ok(Incoming::Request { id, request, .. }) => {
+            response_line(&id, &execute(ctx, request).await)
+        }
         Ok(Incoming::Shutdown { id })
         | Ok(Incoming::Subscribe { id, .. })
         | Ok(Incoming::Unsubscribe { id, .. }) => response_line(
@@ -172,7 +182,7 @@ async fn write_line<W: AsyncWrite + Unpin>(writer: &mut W, value: &Value) -> std
     writer.flush().await
 }
 
-type Pending<'a> = Pin<Box<dyn Future<Output = Value> + 'a>>;
+type Pending<'a> = Pin<Box<dyn Future<Output = Value> + Send + 'a>>;
 
 /// Run one session: hello, then requests until EOF or `shutdown`, with
 /// subscribed events interleaved.
@@ -197,9 +207,14 @@ where
                     None => reading = false,
                     Some(line) if line.trim().is_empty() => {}
                     Some(line) => match parse_line(&line) {
-                        Ok(Incoming::Request { id, request }) => {
+                        Ok(Incoming::Request { id, request, timeout_secs }) => {
                             inflight.push(Box::pin(async move {
-                                response_line(&id, &execute(ctx, request).await)
+                                let timeout = timeout_secs.map(std::time::Duration::from_secs);
+                                let outcome = crate::command::with_timeout(ctx.app_core(), timeout, || {
+                                    execute(ctx, request)
+                                })
+                                .await;
+                                response_line(&id, &outcome)
                             }));
                         }
                         Ok(Incoming::Shutdown { id }) => {
@@ -244,7 +259,7 @@ mod tests {
 
     #[test]
     fn request_lines_carry_ids_and_typed_requests() {
-        let Ok(Incoming::Request { id, request }) =
+        let Ok(Incoming::Request { id, request, .. }) =
             parse_line(r#"{"id":"a","method":"chat_send","params":{"channel":"c","message":"m"}}"#)
         else {
             panic!("expected a request");

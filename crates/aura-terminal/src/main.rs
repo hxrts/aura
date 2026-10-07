@@ -17,8 +17,12 @@ use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs,
 use aura_terminal::command::{
     confirm, execute, with_timeout, CommandContext, CommandError, ErrorCode, Outcome, OutputMode,
 };
-use aura_terminal::handlers::{tui::try_load_account_from_path, CliOutput};
+use aura_terminal::handlers::{
+    tui::{open_production_runtime, try_load_account_from_path},
+    CliOutput,
+};
 use aura_terminal::ids;
+use aura_terminal::rpc_socket;
 use aura_terminal::CliHandler;
 use bpaf::{Args, Parser};
 use std::path::PathBuf;
@@ -159,9 +163,11 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
                 aura_terminal::handlers::tui::TuiMode::Production,
             )
         });
-    // Seam for Task 160: when a node (TUI or `aura serve`) already runs on
-    // this data directory, account requests go to it over its local RPC
-    // socket instead of opening the profile here.
+    init_tracing(verbose, json);
+    if matches!(command, Commands::Run(_) | Commands::Rpc | Commands::Serve) {
+        return run_account_command(command, &storage_base_path, timeout).await;
+    }
+
     let loaded_account = try_load_account_from_path(&storage_base_path)
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
@@ -205,8 +211,20 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
         .map_err(|e| AuraError::agent(format!("{e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
-    // Runtime console messages go to stdout in text mode; with --json, stdout
-    // carries only the result document, so they go to stderr.
+    let timeout = timeout.map(Duration::from_secs);
+    let cli_handler = CliHandler::with_agent(app_core.clone(), agent, device_id, effect_context);
+    with_timeout(&app_core, timeout, || async {
+        dispatch(&cli_handler, command)
+            .await
+            .map_err(CommandError::from)
+    })
+    .await
+    .map(Outcome::from)
+}
+
+/// Runtime console messages go to stdout in text mode; with --json, stdout
+/// carries only the result document, so they go to stderr.
+fn init_tracing(verbose: bool, json: bool) {
     let filter = if verbose {
         "debug".to_string()
     } else {
@@ -223,47 +241,100 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
     } else {
         subscriber.with_writer(std::io::stdout).try_init()
     };
+}
 
-    let timeout = timeout.map(Duration::from_secs);
-    if matches!(command, Commands::Run(_) | Commands::Rpc | Commands::Serve) {
-        // Workflow-backed account commands: the same observed state the TUI
-        // reads, then the shared command model.
-        AppCore::init_signals_with_hooks(&app_core)
-            .await
-            .map_err(|e| AuraError::agent(format!("initialize app signals: {e}")))?;
-        let ctx = CommandContext::new(app_core.clone(), agent.runtime().effects(), authority_id);
-        return match command {
-            Commands::Run(request) => {
-                let response = with_timeout(&app_core, timeout, || execute(&ctx, request)).await?;
-                Ok(Outcome::from_response(&response))
+/// Account commands (`Run`, `rpc`, `serve`). A node already running on this
+/// data directory (the TUI or `aura serve`) answers over its socket;
+/// otherwise this process opens the account's production runtime under the
+/// profile's exclusive lease, exactly as the TUI does.
+async fn run_account_command(
+    command: Commands,
+    base_path: &std::path::Path,
+    timeout: Option<u64>,
+) -> Result<Outcome, CommandError> {
+    let socket = rpc_socket::socket_path(base_path);
+    match &command {
+        Commands::Run(request) => {
+            if let Some(result) = rpc_socket::call(&socket, request, timeout).await? {
+                return Ok(Outcome::from_response(&result?));
             }
-            Commands::Rpc => {
-                let stdin = tokio::io::BufReader::new(tokio::io::stdin());
-                aura_terminal::rpc::serve(&ctx, stdin, tokio::io::stdout())
-                    .await
-                    .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("rpc: {e}")))?;
-                Ok(Outcome::quiet())
+        }
+        Commands::Rpc => {
+            let attached = rpc_socket::attach_stdio(&socket)
+                .await
+                .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("rpc: {e}")))?;
+            if attached {
+                return Ok(Outcome::quiet());
             }
-            _ => {
-                eprintln!("aura serve: {authority_id} online; Ctrl+C to stop");
-                tokio::signal::ctrl_c()
-                    .await
-                    .map_err(|e| CommandError::new(ErrorCode::Failed, format!("serve: {e}")))?;
-                let mut summary = CliOutput::new();
-                summary.kv("Stopped", authority_id.to_string());
-                Ok(summary.into())
-            }
-        };
+        }
+        _ => {}
     }
 
-    let cli_handler = CliHandler::with_agent(app_core.clone(), agent, device_id, effect_context);
-    with_timeout(&app_core, timeout, || async {
-        dispatch(&cli_handler, command)
-            .await
-            .map_err(CommandError::from)
-    })
-    .await
-    .map(Outcome::from)
+    let runtime = open_production_runtime(base_path)
+        .await
+        .map_err(|e| {
+            let mut error = CommandError::from(e);
+            error.message = format!(
+                "Could not open the account at {} ({}). If another process holds it, run `aura serve` or the TUI there and retry.",
+                base_path.display(),
+                error.detail.as_deref().unwrap_or(&error.message)
+            );
+            error
+        })?
+        .ok_or_else(|| {
+            CommandError::not_found(format!(
+                "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
+                base_path.display()
+            ))
+        })?;
+    let app_core = AppCore::with_runtime(
+        AppConfig::default(),
+        runtime.agent.clone().as_runtime_bridge(),
+    )
+    .map_err(|e| AuraError::agent(format!("{e}")))?;
+    let app_core = Arc::new(RwLock::new(app_core));
+    // The same observed state the TUI reads.
+    AppCore::init_signals_with_hooks(&app_core)
+        .await
+        .map_err(|e| AuraError::agent(format!("initialize app signals: {e}")))?;
+    let ctx = CommandContext::new(
+        app_core.clone(),
+        runtime.agent.runtime().effects(),
+        runtime.authority,
+    );
+    match command {
+        Commands::Run(request) => {
+            let timeout = timeout.map(Duration::from_secs);
+            let response = with_timeout(&app_core, timeout, || execute(&ctx, request)).await?;
+            Ok(Outcome::from_response(&response))
+        }
+        Commands::Rpc => {
+            let stdin = tokio::io::BufReader::new(tokio::io::stdin());
+            aura_terminal::rpc::serve(&ctx, stdin, tokio::io::stdout())
+                .await
+                .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("rpc: {e}")))?;
+            Ok(Outcome::quiet())
+        }
+        _ => {
+            let listener = rpc_socket::bind(&socket)
+                .await
+                .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("serve: {e}")))?;
+            eprintln!(
+                "aura serve: {} online at {}; Ctrl+C to stop",
+                runtime.authority,
+                socket.display()
+            );
+            let stop = async {
+                let _ = tokio::signal::ctrl_c().await;
+            };
+            rpc_socket::serve(&ctx, listener, &socket, stop)
+                .await
+                .map_err(|e| CommandError::new(ErrorCode::Failed, format!("serve: {e}")))?;
+            let mut summary = CliOutput::new();
+            summary.kv("Stopped", runtime.authority.to_string());
+            Ok(summary.into())
+        }
+    }
 }
 
 /// Execute an offline tool or long-running mode.

@@ -1,0 +1,2168 @@
+{
+  "$id": "aura-rpc/v1",
+  "client_line": {
+    "oneOf": [
+      {
+        "$defs": {
+          "ExportFormat": {
+            "description": "Format of `chat export`.",
+            "oneOf": [
+              {
+                "const": "json",
+                "description": "A JSON array of messages.",
+                "type": "string"
+              },
+              {
+                "const": "csv",
+                "description": "CSV with a header row.",
+                "type": "string"
+              },
+              {
+                "const": "text",
+                "description": "One line per message.",
+                "type": "string"
+              }
+            ]
+          },
+          "InviteRole": {
+            "description": "Role granted by `invite create`.",
+            "oneOf": [
+              {
+                "const": "contact",
+                "description": "Become a contact.",
+                "type": "string"
+              },
+              {
+                "const": "guardian",
+                "description": "Become one of this account's guardians.",
+                "type": "string"
+              },
+              {
+                "const": "channel",
+                "description": "Join a channel (requires `channel`).",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "A client line: a request plus its echoed id and optional deadline.",
+        "oneOf": [
+          {
+            "description": "Account identity, threshold, devices and contacts.",
+            "properties": {
+              "method": {
+                "const": "status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Authorities known to this runtime.",
+            "properties": {
+              "method": {
+                "const": "authority_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "This account's contacts.",
+            "properties": {
+              "method": {
+                "const": "contact_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Channels this account has joined.",
+            "properties": {
+              "method": {
+                "const": "chat_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "One channel's details and members.",
+            "properties": {
+              "method": {
+                "const": "chat_show",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A channel's messages, oldest first.",
+            "properties": {
+              "method": {
+                "const": "chat_history",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "default": null,
+                    "format": "uint",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sender": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Send a message.",
+            "properties": {
+              "method": {
+                "const": "chat_send",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "message"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Create a channel.",
+            "properties": {
+              "method": {
+                "const": "chat_create",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "members": {
+                    "default": [],
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "topic": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Invite an authority into a channel.",
+            "properties": {
+              "method": {
+                "const": "chat_invite",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "authority": {
+                    "type": "string"
+                  },
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "authority"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Leave a channel.",
+            "properties": {
+              "method": {
+                "const": "chat_leave",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Rename a channel or set its topic.",
+            "properties": {
+              "method": {
+                "const": "chat_update",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "topic": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Find messages containing a text.",
+            "properties": {
+              "method": {
+                "const": "chat_search",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "limit": {
+                    "default": 20,
+                    "format": "uint",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "query": {
+                    "type": "string"
+                  },
+                  "sender": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A channel's history in a portable format.",
+            "properties": {
+              "method": {
+                "const": "chat_export",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "$ref": "#/$defs/ExportFormat",
+                    "default": "json"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Create an invitation and its shareable code.",
+            "properties": {
+              "method": {
+                "const": "invite_create",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "invitee": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "$ref": "#/$defs/InviteRole",
+                    "default": "contact"
+                  },
+                  "ttl_secs": {
+                    "default": null,
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "invitee"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Accept a received invitation.",
+            "properties": {
+              "method": {
+                "const": "invite_accept",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Decline a received invitation.",
+            "properties": {
+              "method": {
+                "const": "invite_decline",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Cancel an invitation this account sent.",
+            "properties": {
+              "method": {
+                "const": "invite_cancel",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Pending invitations.",
+            "properties": {
+              "method": {
+                "const": "invite_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The shareable code of an invitation.",
+            "properties": {
+              "method": {
+                "const": "invite_export",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Import a shareable code so it can be accepted.",
+            "properties": {
+              "method": {
+                "const": "invite_import",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Create a home.",
+            "properties": {
+              "method": {
+                "const": "home_create",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "name": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Invite an authority into the current home.",
+            "properties": {
+              "method": {
+                "const": "home_invite",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "authority": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "authority"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Accept the pending home or channel invitation.",
+            "properties": {
+              "method": {
+                "const": "home_accept",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Run a chat slash command (`/kick bob`, `/topic ..`), as typed in the\nTUI's chat input, optionally in a given channel.",
+            "properties": {
+              "method": {
+                "const": "slash",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "command": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "command"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Start guardian recovery.",
+            "properties": {
+              "method": {
+                "const": "recovery_start",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "guardians": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "threshold": {
+                    "format": "uint16",
+                    "maximum": 65535,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "guardians",
+                  "threshold"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Approve a recovery ceremony as a guardian.",
+            "properties": {
+              "method": {
+                "const": "recovery_approve",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Dispute a recovery ceremony as a guardian.",
+            "properties": {
+              "method": {
+                "const": "recovery_dispute",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id",
+                  "reason"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Guardians and recovery progress.",
+            "properties": {
+              "method": {
+                "const": "recovery_status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Channels bound to a relational context.",
+            "properties": {
+              "method": {
+                "const": "context_inspect",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "context": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "context"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Journal sync status.",
+            "properties": {
+              "method": {
+                "const": "sync_status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Sync now: with the given peers, or with every peer.",
+            "properties": {
+              "method": {
+                "const": "sync_once",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "peers": {
+                    "default": [],
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Track a peer as connected.",
+            "properties": {
+              "method": {
+                "const": "peer_add",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "peer": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "peer"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Stop tracking a peer.",
+            "properties": {
+              "method": {
+                "const": "peer_remove",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "peer": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "peer"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "AMP channel epoch state.",
+            "properties": {
+              "method": {
+                "const": "amp_inspect",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "context": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "context",
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Propose an AMP channel epoch bump.",
+            "properties": {
+              "method": {
+                "const": "amp_bump",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "context": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "context",
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Emit an AMP checkpoint at the current generation.",
+            "properties": {
+              "method": {
+                "const": "amp_checkpoint",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "context": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "context",
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Record a snapshot proposal.",
+            "properties": {
+              "method": {
+                "const": "snapshot_propose",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Record an admin replacement.",
+            "properties": {
+              "method": {
+                "const": "admin_replace",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "account": {
+                    "type": "string"
+                  },
+                  "activation_epoch": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "new_admin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "account",
+                  "new_admin",
+                  "activation_epoch"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          }
+        ],
+        "properties": {
+          "id": {
+            "description": "Any JSON value; echoed in the response."
+          },
+          "timeout_secs": {
+            "description": "Fail with `timeout` when the request takes longer, on the runtime clock.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "RequestLine",
+        "type": "object"
+      },
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "description": "A control line: `shutdown`, `subscribe` (`params.topics`) or\n`unsubscribe` (`params.subscription`).",
+        "properties": {
+          "id": true,
+          "method": {
+            "description": "`shutdown`, `subscribe` or `unsubscribe`.",
+            "type": "string"
+          },
+          "params": true
+        },
+        "required": [
+          "id",
+          "method"
+        ],
+        "title": "ControlLine",
+        "type": "object"
+      }
+    ]
+  },
+  "server_line": {
+    "$defs": {
+      "AccountView": {
+        "properties": {
+          "authority_id": {
+            "type": "string"
+          },
+          "contacts": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "devices": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "threshold_k": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "threshold_n": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "authority_id",
+          "nickname",
+          "threshold_k",
+          "threshold_n",
+          "devices",
+          "contacts"
+        ],
+        "type": "object"
+      },
+      "AmpChannelView": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "context_id": {
+            "type": "string"
+          },
+          "epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "generation": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_checkpoint_generation": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pending_bump": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skip_window": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "context_id",
+          "channel_id",
+          "epoch",
+          "generation",
+          "last_checkpoint_generation",
+          "skip_window"
+        ],
+        "type": "object"
+      },
+      "AuthorityView": {
+        "properties": {
+          "authority_id": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "nickname": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "authority_id",
+          "nickname",
+          "current"
+        ],
+        "type": "object"
+      },
+      "ChannelView": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "context_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_dm": {
+            "type": "boolean"
+          },
+          "member_count": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unread": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "channel_id",
+          "name",
+          "is_dm",
+          "member_count",
+          "unread"
+        ],
+        "type": "object"
+      },
+      "CommandError": {
+        "description": "A typed command failure.",
+        "properties": {
+          "code": {
+            "$ref": "#/$defs/ErrorCode",
+            "description": "Failure class; fixes the CLI exit code."
+          },
+          "detail": {
+            "description": "The raw error chain, when it says more than `message`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure": {
+            "description": "The typed semantic failure the workflow published, if any."
+          },
+          "message": {
+            "description": "User-facing sentence.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ContactView": {
+        "properties": {
+          "authority_id": {
+            "type": "string"
+          },
+          "is_guardian": {
+            "type": "boolean"
+          },
+          "is_member": {
+            "type": "boolean"
+          },
+          "nickname": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "authority_id",
+          "nickname",
+          "is_guardian",
+          "is_member"
+        ],
+        "type": "object"
+      },
+      "ErrorCode": {
+        "description": "Stable failure classes shared by CLI exit codes and RPC error payloads.",
+        "oneOf": [
+          {
+            "const": "failed",
+            "description": "The operation ran and failed.",
+            "type": "string"
+          },
+          {
+            "const": "invalid_input",
+            "description": "Arguments or request parameters were invalid, or a required\nconfirmation was not given.",
+            "type": "string"
+          },
+          {
+            "const": "not_found",
+            "description": "The account, channel, contact or invitation does not exist.",
+            "type": "string"
+          },
+          {
+            "const": "permission_denied",
+            "description": "The caller lacks the capability for the operation.",
+            "type": "string"
+          },
+          {
+            "const": "timeout",
+            "description": "The operation did not finish within `--timeout`.",
+            "type": "string"
+          },
+          {
+            "const": "unavailable",
+            "description": "A peer, the network or a feature is unavailable.",
+            "type": "string"
+          }
+        ]
+      },
+      "ExportFormat": {
+        "description": "Format of `chat export`.",
+        "oneOf": [
+          {
+            "const": "json",
+            "description": "A JSON array of messages.",
+            "type": "string"
+          },
+          {
+            "const": "csv",
+            "description": "CSV with a header row.",
+            "type": "string"
+          },
+          {
+            "const": "text",
+            "description": "One line per message.",
+            "type": "string"
+          }
+        ]
+      },
+      "InvitationView": {
+        "properties": {
+          "expires_at_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "invitation_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "receiver_id": {
+            "type": "string"
+          },
+          "sender_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation_id",
+          "kind",
+          "sender_id",
+          "receiver_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "MessageView": {
+        "properties": {
+          "channel_id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "is_own": {
+            "type": "boolean"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "sender_id": {
+            "type": "string"
+          },
+          "sender_name": {
+            "type": "string"
+          },
+          "timestamp_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id",
+          "channel_id",
+          "sender_id",
+          "sender_name",
+          "content",
+          "timestamp_ms",
+          "is_own"
+        ],
+        "type": "object"
+      },
+      "OperationView": {
+        "description": "Terminal lifecycle of the semantic operation a command ran.",
+        "properties": {
+          "error": true,
+          "kind": {
+            "description": "snake_case `SemanticOperationKind`.",
+            "type": "string"
+          },
+          "phase": {
+            "description": "snake_case `SemanticOperationPhase`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "phase"
+        ],
+        "type": "object"
+      },
+      "RecoveryView": {
+        "properties": {
+          "active_ceremony": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "approvals": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guardians": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "threshold": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "guardians",
+          "threshold"
+        ],
+        "type": "object"
+      },
+      "Response": {
+        "description": "The successful outcome of a request.",
+        "oneOf": [
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/AccountView"
+              },
+              "type": {
+                "const": "account",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/AuthorityView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "authorities",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/ContactView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "contacts",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/ChannelView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "channels",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/ChannelView"
+              },
+              "type": {
+                "const": "channel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/MessageView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "messages",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "channel_id": {
+                    "type": "string"
+                  },
+                  "message_id": {
+                    "type": "string"
+                  },
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/OperationView"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "channel_id",
+                  "message_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "message_sent",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "channel_id": {
+                    "type": "string"
+                  },
+                  "context_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel_id",
+                  "context_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "channel_created",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id",
+                  "code"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "invitation_created",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/InvitationView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "invitations",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/InvitationView"
+              },
+              "type": {
+                "const": "invitation",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "invitation_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "invitation_id",
+                  "code"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "invitation_code",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "$ref": "#/$defs/ExportFormat"
+                  }
+                },
+                "required": [
+                  "format",
+                  "body"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "export",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "home_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "home_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "home_created",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "recovery_started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/RecoveryView"
+              },
+              "type": {
+                "const": "recovery",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "detail": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "sync",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "connected": {
+                    "format": "uint",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "connected"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "peers",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/AmpChannelView"
+              },
+              "type": {
+                "const": "amp_channel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "bump_id": {
+                    "type": "string"
+                  },
+                  "new_epoch": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "parent_epoch": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "parent_epoch",
+                  "new_epoch",
+                  "bump_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "amp_bump_proposed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "base_generation": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "epoch": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "epoch",
+                  "base_generation"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "amp_checkpoint",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "proposal_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "proposal_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "snapshot_proposed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The request ran; `summary` says what happened.",
+            "properties": {
+              "data": {
+                "properties": {
+                  "operation": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/OperationView"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "done",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "description": "A server line.",
+    "oneOf": [
+      {
+        "description": "First line of every session.",
+        "properties": {
+          "aura_version": {
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "control": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "methods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "const": "hello",
+            "type": "string"
+          },
+          "version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "protocol",
+          "version",
+          "aura_version",
+          "capabilities",
+          "methods",
+          "control",
+          "topics"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "The outcome of one request: `result` when `ok`, else `error`.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CommandError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": true,
+          "ok": {
+            "type": "boolean"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Response"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "const": "response",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "ok"
+        ],
+        "type": "object"
+      },
+      {
+        "description": "A subscription event; `topic` is `resync` when the subscriber fell\nbehind and `data` is a fresh snapshot.",
+        "properties": {
+          "data": true,
+          "kind": {
+            "type": "string"
+          },
+          "subscription": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "topic": {
+            "type": "string"
+          },
+          "type": {
+            "const": "event",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "subscription",
+          "topic",
+          "kind",
+          "data"
+        ],
+        "type": "object"
+      }
+    ],
+    "title": "ServerLine"
+  },
+  "title": "aura rpc",
+  "topics": [
+    "operations",
+    "messages",
+    "invitations",
+    "membership",
+    "sync",
+    "drops",
+    "task_failures"
+  ],
+  "version": 1
+}

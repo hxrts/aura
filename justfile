@@ -943,9 +943,14 @@ ci-owner-issued-readiness-boundary:
 ci-observed-layer-boundaries:
     just _policy-check check observed-layer-boundaries
 
+# The published `aura rpc` JSON Schema matches the request/response types.
+ci-rpc-schema:
+    cargo test -p aura-terminal --lib rpc::schema
+
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
     just _policy-check check cli-workflow-facade
+    just ci-rpc-schema
 
 ci-parity-critical-callback-settlement:
     just _ownership-lint parity-critical-callback-settlement crates/aura-terminal/src/tui/callbacks

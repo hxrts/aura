@@ -2525,6 +2525,11 @@ with optional architecture-specific hardware acceleration
             packageId = "parking_lot 0.12.5";
           }
           {
+            name = "schemars";
+            packageId = "schemars 1.2.2";
+            features = [ "derive" ];
+          }
+          {
             name = "serde";
             packageId = "serde";
             features = [ "derive" "rc" ];
@@ -2545,7 +2550,7 @@ with optional architecture-specific hardware acceleration
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" "fs" "signal" "rt-multi-thread" ];
+            features = [ "io-util" "macros" "rt" "sync" "time" "fs" "signal" "rt-multi-thread" "io-std" "net" ];
           }
           {
             name = "toml";
@@ -2602,6 +2607,12 @@ with optional architecture-specific hardware acceleration
           {
             name = "tempfile";
             packageId = "tempfile";
+          }
+          {
+            name = "tokio";
+            packageId = "tokio";
+            usesDefaultFeatures = false;
+            features = [ "io-util" "macros" "rt" "sync" "time" "test-util" ];
           }
           {
             name = "trybuild";
@@ -24638,6 +24649,11 @@ finite automata and guarantees linear time matching on all inputs.
             packageId = "ref-cast";
           }
           {
+            name = "schemars_derive";
+            packageId = "schemars_derive";
+            optional = true;
+          }
+          {
             name = "serde";
             packageId = "serde";
             usesDefaultFeatures = false;
@@ -24678,7 +24694,44 @@ finite automata and guarantees linear time matching on all inputs.
           "url2" = [ "dep:url2" ];
           "uuid1" = [ "dep:uuid1" ];
         };
-        resolvedDefaultFeatures = [ "std" ];
+        resolvedDefaultFeatures = [ "default" "derive" "schemars_derive" "std" ];
+      };
+      "schemars_derive" = rec {
+        crateName = "schemars_derive";
+        version = "1.2.2";
+        edition = "2021";
+        description = "Macros for #[derive(JsonSchema)], for use with schemars";
+        sha256 = "1fp2wkdk32nv66swy7k7pz7sxygn634snlppih5jzbs6ddqng36r";
+        procMacro = true;
+        authors = [
+          "Graham Esau <gesau@hotmail.co.uk>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "serde_derive_internals";
+            packageId = "serde_derive_internals";
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            features = [ "extra-traits" ];
+          }
+        ];
+
       };
       "scoped-tls" = rec {
         crateName = "scoped-tls";
@@ -25265,6 +25318,37 @@ a panic occurs.";
         features = {
         };
         resolvedDefaultFeatures = [ "default" ];
+      };
+      "serde_derive_internals" = rec {
+        crateName = "serde_derive_internals";
+        version = "0.30.0";
+        edition = "2021";
+        description = "AST representation used by Serde derive macros. Unstable.";
+        sha256 = "1gd9n45na7n79nr54ghfl79rygkbzw2ybk3wyr6nlp83rry16lpq";
+        libPath = "lib.rs";
+        authors = [
+          "Erick Tryzelaar <erick.tryzelaar@gmail.com>"
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+            usesDefaultFeatures = false;
+          }
+          {
+            name = "syn";
+            packageId = "syn 3.0.6";
+            usesDefaultFeatures = false;
+            features = [ "clone-impls" "derive" "parsing" "printing" ];
+          }
+        ];
+
       };
       "serde_json" = rec {
         crateName = "serde_json";

@@ -84,6 +84,7 @@ pub mod handlers;
 pub mod ids;
 pub mod local_store;
 pub mod rpc;
+pub mod rpc_socket;
 #[cfg(feature = "terminal")]
 pub mod tui;
 

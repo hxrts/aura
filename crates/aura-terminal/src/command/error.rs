@@ -10,10 +10,11 @@ use aura_app::ui::contract::SemanticOperationError;
 use aura_app::ui::types::ErrorCategory;
 use aura_app::ui::workflows::user_errors::{classify, UserFacingError};
 use aura_core::{AuraError, TimeoutBudgetError};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Stable failure classes shared by CLI exit codes and RPC error payloads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// The operation ran and failed.
@@ -70,7 +71,7 @@ impl ErrorCode {
 }
 
 /// A typed command failure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CommandError {
     /// Failure class; fixes the CLI exit code.
     pub code: ErrorCode,
@@ -81,6 +82,7 @@ pub struct CommandError {
     pub detail: Option<String>,
     /// The typed semantic failure the workflow published, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub failure: Option<SemanticOperationError>,
 }
 

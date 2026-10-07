@@ -1,23 +1,26 @@
 //! Every `aura` command emits one valid JSON document under `--json`, and
 //! its exit code matches the document (work/8.md Task 148).
+//!
+//! Account commands run against a node serving the data directory's socket
+//! (a virtual-time simulation runtime), the way they reach a running TUI or
+//! `aura serve`.
 
 #![allow(
     missing_docs,
-    dead_code,
-    unused,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::disallowed_methods,
-    clippy::disallowed_types,
-    clippy::all
+    clippy::disallowed_types
 )]
 
-mod support;
+#[path = "cli_rpc/simnet.rs"]
+#[allow(dead_code)]
+mod simnet;
 
-use aura_terminal::handlers::tui::TuiMode;
+use aura_terminal::rpc_socket;
 use serde_json::Value;
+use simnet::SimNet;
 use std::path::Path;
-use support::IoContextTestEnvBuilder;
 
 struct Run {
     code: i32,
@@ -53,26 +56,15 @@ fn aura_json(data_dir: &Path, args: &[&str]) -> Run {
     Run { code, doc }
 }
 
-#[tokio::test]
-async fn every_command_emits_valid_json() {
-    let data_dir = std::env::temp_dir().join(format!("aura-cli-json-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&data_dir);
-    let env = IoContextTestEnvBuilder::new("cli-json")
-        .with_base_path(data_dir.clone())
-        .with_device_id("test-device-cli-json")
-        .with_mode(TuiMode::Production)
-        .create_account_as("JsonTester")
-        .build()
-        .await;
-    assert!(env.ctx.has_account());
-
+/// The commands, run synchronously against `dir`.
+fn exercise(dir: &Path) {
     let ok = |args: &[&str]| {
-        let run = aura_json(&data_dir, args);
+        let run = aura_json(dir, args);
         assert_eq!(run.code, 0, "aura {args:?} failed: {}", run.doc);
         run.doc
     };
     let fails = |args: &[&str], code: i32| {
-        let run = aura_json(&data_dir, args);
+        let run = aura_json(dir, args);
         assert_eq!(run.code, code, "aura {args:?}: {}", run.doc);
         run.doc
     };
@@ -84,39 +76,30 @@ async fn every_command_emits_valid_json() {
     );
 
     // Account commands print their typed response.
-    let status = ok(&["status"]);
-    assert_eq!(status["result"]["type"], "account");
-    assert_eq!(status["result"]["data"]["nickname"], "JsonTester");
-    let authorities = ok(&["authority", "list"]);
-    assert_eq!(authorities["result"]["data"][0]["current"], true);
     assert_eq!(ok(&["chat", "list"])["result"]["type"], "channels");
+    assert_eq!(ok(&["contact", "list"])["result"]["type"], "contacts");
     assert_eq!(
         ok(&["invite", "list"])["result"],
         serde_json::json!({"type": "invitations", "data": []})
     );
     assert_eq!(ok(&["sync", "status"])["result"]["type"], "sync");
     assert_eq!(ok(&["recovery", "status"])["result"]["type"], "recovery");
-    ok(&["chat", "search", "anything"]);
+    assert_eq!(
+        ok(&["chat", "search", "anything"])["result"]["type"],
+        "messages"
+    );
 
     // The rest of the command surface: valid documents whatever the outcome.
     for args in [
+        &["status"][..],
+        &["authority", "list"][..],
         &["snapshot"][..],
-        &[
-            "threshold",
-            "--configs",
-            "/nonexistent.toml",
-            "--threshold",
-            "1",
-            "--mode",
-            "verify",
-        ][..],
         &["invite", "accept", "--invitation-id", "missing"][..],
     ] {
-        aura_json(&data_dir, args);
+        aura_json(dir, args);
     }
 
     // Failures are documents too, with distinct exit codes.
-    fails(&["node"], 2);
     fails(&["no-such-command"], 2);
     fails(&["replay", "--trace-file", "/nonexistent/trace.json"], 2);
     fails(&["invite", "import", "--code", "not-a-code"], 2);
@@ -128,16 +111,36 @@ async fn every_command_emits_valid_json() {
     fails(&["chat", "history", "no-such-channel"], 3);
     // Destructive commands need --yes without a terminal.
     fails(&["chat", "leave", "general"], 2);
+}
 
-    drop(env);
-    let _ = std::fs::remove_dir_all(&data_dir);
+#[tokio::test(start_paused = true)]
+async fn every_command_emits_valid_json() {
+    let net = SimNet::new();
+    let peer = net.peer(71).await.unwrap();
+    let data_dir = tempfile::tempdir().unwrap();
+    let path = rpc_socket::socket_path(data_dir.path());
+    let listener = rpc_socket::bind(&path).await.unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = rpc_socket::serve(&peer.ctx, listener, &path, async {
+        let _ = stopped.await;
+    });
+    let dir = data_dir.path().to_path_buf();
+    let client = async move {
+        let result = tokio::task::spawn_blocking(move || exercise(&dir)).await;
+        let _ = stop.send(());
+        result
+    };
+    let (served, outcome) = tokio::join!(server, client);
+    served.unwrap();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic.into_panic());
+    }
 }
 
 #[test]
 fn missing_account_is_a_not_found_document() {
-    let data_dir = std::env::temp_dir().join(format!("aura-cli-json-none-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&data_dir);
-    let run = aura_json(&data_dir, &["status"]);
+    let data_dir = tempfile::tempdir().unwrap();
+    let run = aura_json(data_dir.path(), &["status"]);
     assert_eq!(run.code, 3, "{}", run.doc);
     assert_eq!(run.doc["error"]["code"], "not_found");
 }

@@ -37,6 +37,15 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   local file access in `src/command`, `src/cli` and `src/rpc`, and any new
   module under `src/handlers` (offline tools and long-running modes only).
 
+- One process holds an account's profile. A node (the TUI in production
+  mode, or `aura serve`) hosts `rpc_socket` at `<data-dir>/aura.sock`: mode
+  `0600`, same-uid peers only, no network listener. Account commands and
+  `aura rpc` route to that socket first; otherwise the CLI opens the
+  production runtime itself through `handlers::tui::open_production_runtime`,
+  the TUI's own assembly. The published schema
+  (`schema/aura-rpc-v1.json`) is generated from the types and checked by
+  `just ci-rpc-schema`.
+
 - `aura rpc` keeps one runtime online across requests. RPC events derive
   from the reactive signals the TUI observes; each subscription has a bounded
   queue and a lagging subscriber receives one `resync` snapshot instead of
@@ -194,6 +203,7 @@ cargo test -p aura-terminal
 | ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
 | CLI `--json` output or exit codes wrong | `tests/cli_json.rs`, `src/command/error.rs` | Covered |
 | CLI and RPC drift, RPC flows or events broken, CLI send differs from TUI send | `tests/cli_rpc.rs` (virtual-time two-runtime fixture) | Covered |
+| CLI does not reach a running node, socket not owner-only, schema drift | `tests/cli_socket.rs`, `src/rpc/schema.rs` (`just ci-rpc-schema`) | Covered |
 | CLI bypasses the app workflows | `toolkit/xtask` `cli-workflow-facade` | Covered |
 
 ## References

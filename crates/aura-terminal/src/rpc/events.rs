@@ -450,8 +450,15 @@ impl Subscriptions {
         Ok(())
     }
 
-    async fn diagnostics(&self) -> (Vec<Value>, Vec<Value>) {
-        let Ok(runtime) = require_runtime(&self.app_core).await else {
+    /// The diagnostics read, as a future that does not borrow `self`.
+    fn diagnostics(&self) -> impl std::future::Future<Output = (Vec<Value>, Vec<Value>)> + Send {
+        diagnostics(self.app_core.clone())
+    }
+}
+
+async fn diagnostics(app_core: Arc<RwLock<AppCore>>) -> (Vec<Value>, Vec<Value>) {
+    {
+        let Ok(runtime) = require_runtime(&app_core).await else {
             return (Vec::new(), Vec::new());
         };
         let values = |items: Vec<Result<Value, serde_json::Error>>| {
@@ -477,7 +484,9 @@ impl Subscriptions {
             ),
         )
     }
+}
 
+impl Subscriptions {
     /// Start a subscription; returns its id and a snapshot of its topics.
     pub async fn subscribe(&mut self, topics: Vec<Topic>) -> Result<(u64, Value), CommandError> {
         self.open().await?;
