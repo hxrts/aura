@@ -75,6 +75,9 @@ pub enum ParsedCommand {
     Deop {
         target: String,
     },
+    Admit {
+        target: String,
+    },
     Mode {
         channel: String,
         flags: String,
@@ -115,6 +118,7 @@ impl From<ChatCommand> for ParsedCommand {
             ChatCommand::Unpin { message_id } => Self::Unpin { message_id },
             ChatCommand::Op { target } => Self::Op { target },
             ChatCommand::Deop { target } => Self::Deop { target },
+            ChatCommand::Admit { target } => Self::Admit { target },
             ChatCommand::Mode { channel, flags } => Self::Mode { channel, flags },
         }
     }

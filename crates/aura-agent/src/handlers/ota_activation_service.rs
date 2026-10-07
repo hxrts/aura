@@ -848,20 +848,25 @@ impl OtaActivationServiceApi {
                 devices,
                 command_rx,
             );
-            if let Err(error) = runtime.run_until_terminal().await {
-                tracing::error!(
-                    ceremony_id = %hex::encode(ceremony_id.0.as_bytes()),
-                    error = %error,
-                    "OTA coordinator protocol session failed"
-                );
-            }
+            // A failed session is a supervised task failure (Task 117), not
+            // only a log line.
+            runtime
+                .run_until_terminal()
+                .await
+                .map_err(|error| aura_core::AuraError::Internal {
+                    message: format!(
+                        "OTA coordinator protocol session {} failed",
+                        hex::encode(ceremony_id.0.as_bytes())
+                    ),
+                    source: Some(std::sync::Arc::new(error)),
+                })
         };
 
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = tasks.spawn_local_named("coordinator", fut);
+                let _task_handle = tasks.spawn_local_try_named("coordinator", fut);
             } else {
-                let _task_handle = tasks.spawn_named("coordinator", fut);
+                let _task_handle = tasks.spawn_try_named("coordinator", fut);
             }
         }
     }

@@ -23,7 +23,7 @@ type Point = <Ed25519Group as Group>::Element;
 const HASH_TO_POINT_DOMAIN: &[u8] = b"aura.threshold-prf.v1.point";
 const CHALLENGE_DOMAIN: &[u8] = b"aura.threshold-prf.v1.dleq";
 const KEY_DOMAIN: &[u8] = b"aura.threshold-prf.v1.key";
-const MAX_HASH_TO_POINT_ATTEMPTS: u32 = 1024;
+const HASH_TO_POINT_ATTEMPT_LIMIT: u32 = 1024;
 
 /// Errors from evaluating, verifying or combining partial evaluations.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -97,7 +97,7 @@ pub fn hash_to_point(input: &[u8]) -> Result<[u8; 32], ThresholdPrfError> {
 }
 
 fn hash_to_point_inner(input: &[u8]) -> Result<Point, ThresholdPrfError> {
-    for counter in 0..MAX_HASH_TO_POINT_ATTEMPTS {
+    for counter in 0..HASH_TO_POINT_ATTEMPT_LIMIT {
         let mut material = Vec::with_capacity(HASH_TO_POINT_DOMAIN.len() + input.len() + 4);
         material.extend_from_slice(HASH_TO_POINT_DOMAIN);
         material.extend_from_slice(&counter.to_le_bytes());
@@ -250,11 +250,15 @@ pub fn combine(
 
 /// The canonical PRF input for an AMP channel base key.
 #[must_use]
-pub fn channel_base_key_input(context: &[u8; 32], channel: &[u8; 32], epoch: u64) -> Vec<u8> {
-    let mut input = Vec::with_capacity(32 + 32 + 8 + 24);
+pub fn channel_base_key_input(
+    context: &crate::types::identifiers::ContextId,
+    channel: &crate::types::identifiers::ChannelId,
+    epoch: u64,
+) -> Vec<u8> {
+    let mut input = Vec::with_capacity(25 + 16 + 32 + 8);
     input.extend_from_slice(b"aura.amp.channel-base-key");
-    input.extend_from_slice(context);
-    input.extend_from_slice(channel);
+    input.extend_from_slice(context.as_bytes());
+    input.extend_from_slice(channel.as_bytes());
     input.extend_from_slice(&epoch.to_le_bytes());
     input
 }
@@ -270,6 +274,14 @@ mod tests {
         participant: u16,
         share: [u8; 32],
         verifying_share: [u8; 32],
+    }
+
+    fn ctx() -> crate::types::identifiers::ContextId {
+        crate::types::identifiers::ContextId::new_from_entropy([1; 32])
+    }
+
+    fn chan(byte: u8) -> crate::types::identifiers::ChannelId {
+        crate::types::identifiers::ChannelId::from_bytes([byte; 32])
     }
 
     fn dealt(threshold: u16, total: u16, seed: u64) -> Vec<Member> {
@@ -304,7 +316,7 @@ mod tests {
     #[test]
     fn any_threshold_subset_derives_the_same_key() {
         let members = dealt(2, 3, 7);
-        let input = channel_base_key_input(&[1; 32], &[2; 32], 1);
+        let input = channel_base_key_input(&ctx(), &chan(2), 1);
         let all: Vec<_> = members
             .iter()
             .enumerate()
@@ -321,7 +333,7 @@ mod tests {
     fn keys_differ_across_channels_and_epochs() {
         let members = dealt(2, 3, 8);
         let key = |channel: u8, epoch: u64| {
-            let input = channel_base_key_input(&[1; 32], &[channel; 32], epoch);
+            let input = channel_base_key_input(&ctx(), &chan(channel), epoch);
             let partials: Vec<_> = members[..2].iter().map(|m| partial(m, &input, 3)).collect();
             combine(2, &input, &partials).unwrap()
         };
@@ -332,7 +344,7 @@ mod tests {
     #[test]
     fn a_tampered_or_mismatched_partial_is_rejected() {
         let members = dealt(2, 3, 9);
-        let input = channel_base_key_input(&[1; 32], &[2; 32], 1);
+        let input = channel_base_key_input(&ctx(), &chan(2), 1);
         let honest = partial(&members[0], &input, 4);
         // Verified against another participant's share.
         assert_eq!(
@@ -340,7 +352,7 @@ mod tests {
             Err(ThresholdPrfError::InvalidProof(honest.participant))
         );
         // A partial for a different input does not verify for this one.
-        let other_input = channel_base_key_input(&[1; 32], &[2; 32], 2);
+        let other_input = channel_base_key_input(&ctx(), &chan(2), 2);
         assert!(verify_partial(&members[0].verifying_share, &other_input, &honest).is_err());
         // A substituted evaluation point fails.
         let forged = PartialEvaluation {
@@ -353,7 +365,7 @@ mod tests {
     #[test]
     fn fewer_than_threshold_partials_cannot_combine() {
         let members = dealt(3, 4, 10);
-        let input = channel_base_key_input(&[1; 32], &[2; 32], 1);
+        let input = channel_base_key_input(&ctx(), &chan(2), 1);
         let one = partial(&members[0], &input, 6);
         assert_eq!(
             combine(3, &input, &[one, one, partial(&members[1], &input, 7)]),
@@ -367,7 +379,7 @@ mod tests {
         // A non-member knows the verifying shares and the input; combining
         // public points as if they were partials yields a different key.
         let members = dealt(2, 3, 11);
-        let input = channel_base_key_input(&[1; 32], &[2; 32], 1);
+        let input = channel_base_key_input(&ctx(), &chan(2), 1);
         let honest: Vec<_> = members[..2].iter().map(|m| partial(m, &input, 8)).collect();
         let key = combine(2, &input, &honest).unwrap();
         let impostor: Vec<_> = members[..2]

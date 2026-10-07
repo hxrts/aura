@@ -111,4 +111,10 @@ pub fn register_moderation_facts(registry: &mut FactRegistry) {
             HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
         )),
     );
+    registry.register::<HomeAdmitMemberFact>(
+        HOME_ADMIT_MEMBER_FACT_TYPE_ID,
+        Box::new(ModerationFactReducer::<HomeAdmitMemberFact>::new(
+            HOME_ADMIT_MEMBER_FACT_TYPE_ID,
+        )),
+    );
 }

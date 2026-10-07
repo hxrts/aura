@@ -156,6 +156,7 @@ pub enum SemanticOperationKind {
     UpdateThreshold,
     GrantModerator,
     RevokeModerator,
+    AdmitMember,
     AddHomeToNeighborhood,
     LinkHomeOneHopLink,
     MovePosition,
@@ -883,6 +884,11 @@ impl OperationId {
     #[must_use]
     pub fn revoke_moderator() -> Self {
         Self("revoke_moderator".to_string())
+    }
+
+    #[must_use]
+    pub fn admit_member() -> Self {
+        Self("admit_member".to_string())
     }
 
     #[must_use]

@@ -9,5 +9,6 @@ mod support;
 
 mod context_sync_convergence;
 mod home_invitation_readiness_hook;
+mod home_membership;
 mod home_moderation_workflows;
 mod home_two_member_moderation;

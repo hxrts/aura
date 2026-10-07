@@ -51,12 +51,13 @@ pub enum SlashCommandKind {
     Unpin,
     Op,
     Deop,
+    Admit,
     Mode,
 }
 
 impl SlashCommandKind {
     /// All supported slash-command kinds.
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 26] = [
         Self::Msg,
         Self::Me,
         Self::Nick,
@@ -81,6 +82,7 @@ impl SlashCommandKind {
         Self::Unpin,
         Self::Op,
         Self::Deop,
+        Self::Admit,
         Self::Mode,
     ];
 
@@ -111,6 +113,7 @@ impl SlashCommandKind {
             Self::Unpin => "unpin",
             Self::Op => "op",
             Self::Deop => "deop",
+            Self::Admit => "admit",
             Self::Mode => "mode",
         }
     }
@@ -148,6 +151,7 @@ impl SlashCommandKind {
             | Self::Unpin
             | Self::Op
             | Self::Deop
+            | Self::Admit
             | Self::Mode => SlashCommandMetadata {
                 boundary: SlashCommandSemanticBoundary::CapabilityGatedSemanticMutation,
                 owner_model: SlashCommandOwnerModel::LocalTerminal,
@@ -491,6 +495,7 @@ impl SlashCommandKind {
             ResolvedCommand::Unpin { .. } => Self::Unpin,
             ResolvedCommand::Op { .. } => Self::Op,
             ResolvedCommand::Deop { .. } => Self::Deop,
+            ResolvedCommand::Admit { .. } => Self::Admit,
             ResolvedCommand::Mode { .. } => Self::Mode,
         }
     }
@@ -514,7 +519,9 @@ const fn slash_command_capability(kind: SlashCommandKind) -> CommandCapability {
         SlashCommandKind::Mute | SlashCommandKind::Unmute => CommandCapability::ModerateMute,
         SlashCommandKind::Topic | SlashCommandKind::Mode => CommandCapability::ManageChannel,
         SlashCommandKind::Pin | SlashCommandKind::Unpin => CommandCapability::PinContent,
-        SlashCommandKind::Op | SlashCommandKind::Deop => CommandCapability::GrantModerator,
+        SlashCommandKind::Op | SlashCommandKind::Deop | SlashCommandKind::Admit => {
+            CommandCapability::GrantModerator
+        }
     }
 }
 
@@ -601,6 +608,10 @@ fn slash_command_semantic_operation(
         SlashCommandKind::Deop => SlashCommandSemanticOperation {
             operation_id: OperationId::revoke_moderator(),
             kind: SemanticOperationKind::RevokeModerator,
+        },
+        SlashCommandKind::Admit => SlashCommandSemanticOperation {
+            operation_id: OperationId::admit_member(),
+            kind: SemanticOperationKind::AdmitMember,
         },
         SlashCommandKind::Mode => SlashCommandSemanticOperation {
             operation_id: OperationId::set_channel_mode(),

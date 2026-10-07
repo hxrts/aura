@@ -224,6 +224,13 @@ pub fn all_command_help() -> Vec<CommandHelp> {
             category: CommandCategory::Admin,
         },
         CommandHelp {
+            name: "admit",
+            syntax: "/admit <user>",
+            description: "Admit a home participant as a member (members can be made moderators)",
+            capability: CommandCapability::GrantModerator,
+            category: CommandCategory::Admin,
+        },
+        CommandHelp {
             name: "mode",
             syntax: "/mode <channel> <flags>",
             description: "Set channel mode (e.g., +i for invite-only)",

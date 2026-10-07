@@ -289,14 +289,8 @@ impl AmpChannelHarness {
             ));
         }
 
+        // Late joiners receive the existing epoch-0 key (docs/112 §1.2).
         if let Some(existing) = state.bootstrap.clone() {
-            let existing_recipients: BTreeSet<_> = existing.recipients.iter().copied().collect();
-            if !requested_recipients.is_subset(&existing_recipients) {
-                return Err(AuraError::invalid(
-                    "AMP bootstrap already exists; refusing to add new recipients".to_string(),
-                ));
-            }
-
             let location = SecureStorageLocation::amp_bootstrap_key(
                 &self.context_id,
                 &channel,

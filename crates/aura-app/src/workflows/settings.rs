@@ -234,6 +234,18 @@ pub async fn set_channel_mode(
     }
 }
 
+/// Channel modes are channel management: only a moderator of the home may
+/// set them (Task 11).
+fn require_mode_authority(home: &crate::views::home::HomeState) -> Result<(), AuraError> {
+    if home.is_admin() {
+        Ok(())
+    } else {
+        Err(AuraError::permission_denied(
+            "Only moderators can change channel mode",
+        ))
+    }
+}
+
 /// Set channel mode flags using a canonical channel ID.
 pub async fn set_channel_mode_resolved(
     app_core: &Arc<RwLock<AppCore>>,
@@ -274,6 +286,7 @@ pub async fn set_channel_mode_resolved(
         let home = homes.home_mut(&home_id).ok_or_else(|| {
             AuraError::permission_denied("Set channel mode requires a valid home context")
         })?;
+        require_mode_authority(home)?;
         home.mode_flags = Some(flags);
         Ok(())
     })
@@ -304,6 +317,7 @@ async fn set_channel_mode_bound(
         let home = homes.home_mut(&home_id).ok_or_else(|| {
             AuraError::permission_denied("Set channel mode requires a valid home context")
         })?;
+        require_mode_authority(home)?;
         home.context_id = Some(binding.context_id);
         home.mode_flags = Some(flags);
         Ok(())

@@ -135,6 +135,8 @@ If a migrated parity-critical flow needs both actor and move semantics, the spli
 
 A failed `OperationSnapshot` carries the owner-reported `failure_code` (a `SemanticFailureCode`, serialized in snake case and omitted when absent). Assert refusals on that code, for example `permission_denied` for a moderation command from an actor without the role or capability, not on toast text.
 
+Home role commands are tracked operations: `/op` and `/deop` publish `grant_moderator` and `revoke_moderator`, and `/admit` publishes `admit_member` (`SemanticOperationKind::AdmitMember`). A participant must be admitted before `/op` succeeds; `/op` on a participant fails with an invalid-target refusal. The multi-runtime regressions live in the `home_flows` binary (`home_membership`).
+
 `UiSnapshot.supervised_task_failures` lists dead runtime-supervised tasks (`group`, `task`, `cause`) from `RuntimeBridge::supervised_task_failures`. It is diagnostic only: excluded from parity comparison, readiness and quiescence, and never a wait condition. The TUI export populates it; the browser publishes it empty. On LAN runs, `deadtasks <inst>` in `scripts/harness/lan/lib.sh` prints it.
 
 Browser `ui_state` remains observation-only and must not perform implicit navigation or state recovery. Explicit recovery goes through `recover_ui_state` and `readStructuredUiStateWithNavigationRecovery(...)`. DOM and text fallback paths are diagnostics only and must not become success-path observation behavior.

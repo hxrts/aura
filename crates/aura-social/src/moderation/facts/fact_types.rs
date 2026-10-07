@@ -40,6 +40,7 @@ required_moderation_decoder!(
     HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
     3
 );
+required_moderation_decoder!(HomeAdmitMemberFact, HOME_ADMIT_MEMBER_FACT_TYPE_ID, 1);
 
 fn physical_time(ts_ms: u64) -> PhysicalTime {
     PhysicalTime {
@@ -441,6 +442,53 @@ impl HomeGrantModeratorFact {
             target_authority,
             actor_authority,
             granted_at: physical_time(granted_at_ms),
+            causal,
+        }
+    }
+}
+
+/// Fact admitting a home participant to the home's member set (docs/002:
+/// member = in the home's threshold set; docs/115 §3.2). Written by a
+/// moderator holding `grant_moderator`; a kick or leave of the target that
+/// observed the admission revokes it.
+#[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
+#[domain_fact(
+    type_id = "moderation:home-admit-member",
+    schema_version = 1,
+    context = "context_id"
+)]
+pub struct HomeAdmitMemberFact {
+    /// Home context the participant becomes a member of
+    pub context_id: ContextId,
+    /// Participant being admitted as a member
+    pub target_authority: AuthorityId,
+    /// Moderator performing the admission
+    pub actor_authority: AuthorityId,
+    /// When the admission was made
+    pub admitted_at: PhysicalTime,
+    /// Causal metadata: logical clock; the tag derives from content.
+    pub causal: CausalMetadata,
+}
+
+impl HomeAdmitMemberFact {
+    /// Accessor for admitted_at timestamp in milliseconds.
+    pub fn admitted_at_ms(&self) -> u64 {
+        self.admitted_at.ts_ms
+    }
+
+    /// Constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        target_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        admitted_at_ms: u64,
+        causal: CausalMetadata,
+    ) -> Self {
+        Self {
+            context_id,
+            target_authority,
+            actor_authority,
+            admitted_at: physical_time(admitted_at_ms),
             causal,
         }
     }

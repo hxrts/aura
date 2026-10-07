@@ -475,6 +475,16 @@ impl SecureStorageLocation {
             bootstrap_id.to_hex(),
         )
     }
+
+    /// Create a location for an AMP channel base key of epoch >= 1, derived
+    /// from the context threshold PRF (docs/112 §4).
+    pub fn amp_channel_base_key(context: &ContextId, channel: &ChannelId, epoch: u64) -> Self {
+        Self::with_sub_key(
+            "amp_channel_base_keys",
+            format!("{context}:{channel}"),
+            epoch.to_string(),
+        )
+    }
 }
 
 #[cfg(test)]

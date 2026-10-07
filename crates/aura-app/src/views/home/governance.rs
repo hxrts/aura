@@ -13,9 +13,9 @@ use super::state::HomeState;
 use aura_core::time::CausalTag;
 use aura_core::types::identifiers::AuthorityId;
 use aura_social::moderation::governance::{
-    live_ban_tags, live_moderator_grant_tags, live_mute_tags, membership_liveness,
-    resolved_access_overrides, resolved_capability_config, sort_causally, HomeGovernanceEvent,
-    TaggedHomeGovernanceEvent,
+    live_ban_tags, live_member_admission_tags, live_moderator_grant_tags, live_mute_tags,
+    membership_liveness, resolved_access_overrides, resolved_capability_config, sort_causally,
+    HomeGovernanceEvent, TaggedHomeGovernanceEvent,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -136,6 +136,59 @@ fn apply_moderator_designations(
     };
 }
 
+/// Promote participants holding a live admission to members (Task 62) and
+/// return whether any role changed. An admission counts when its writer is a
+/// moderator holding `grant_moderator` under the reduced moderator roster;
+/// it ends with a kick (by a moderator allowed to kick) or leave of its
+/// target that observed it. Promotion applies to the joined roster, so an
+/// admission that arrives before the join takes effect once the member joins.
+fn apply_member_admissions(
+    home: &mut HomeState,
+    events: &[&TaggedHomeGovernanceEvent],
+    own: &AuthorityId,
+) -> bool {
+    let relevant = of_kind(events, |event| {
+        matches!(
+            event,
+            HomeGovernanceEvent::AdmitMember(_)
+                | HomeGovernanceEvent::Kick(_)
+                | HomeGovernanceEvent::MemberLeft(_)
+        )
+    })
+    .into_iter()
+    .filter(|event| match (&event.event, event.event.actor()) {
+        (HomeGovernanceEvent::AdmitMember(_), Some(actor)) => {
+            home.actor_may_moderate(&actor, ACCESS_GOVERNANCE_CAPABILITY)
+        }
+        (HomeGovernanceEvent::Kick(_), Some(actor)) => {
+            home.actor_may_moderate(&actor, "moderate:kick")
+        }
+        (HomeGovernanceEvent::MemberLeft(_), Some(_)) => true,
+        _ => false,
+    })
+    .collect::<Vec<_>>();
+    let live = live_member_admission_tags(&relevant);
+    let admitted: BTreeSet<AuthorityId> = relevant
+        .iter()
+        .filter(|event| live.contains(&event.tag))
+        .filter_map(|event| match &event.event {
+            HomeGovernanceEvent::AdmitMember(admission) => Some(admission.target_authority),
+            _ => None,
+        })
+        .collect();
+    let mut changed = false;
+    for member in &mut home.members {
+        if member.role.is_participant() && admitted.contains(&member.id) {
+            member.role = HomeRole::Member;
+            changed = true;
+        }
+    }
+    if home.my_role.is_participant() && admitted.contains(own) && home.member(own).is_some() {
+        home.my_role = HomeRole::Member;
+    }
+    changed
+}
+
 /// Reduce the governance facts in `log` onto `home` for viewer `own`.
 /// Returns whether the home changed. The result depends only on the set of
 /// facts in `log` and the home's joined roster, never on insertion order.
@@ -198,6 +251,11 @@ pub fn reduce_home_governance(
     home.access_level_capabilities = capabilities;
     home.access_overrides = overrides.into_iter().collect();
     apply_moderator_designations(home, log.creator, &events, own);
+    // Admissions are authorized against that moderator roster; a newly
+    // admitted member may already hold a moderator designation.
+    if apply_member_admissions(home, &events, own) {
+        apply_moderator_designations(home, log.creator, &events, own);
+    }
 
     // Moderation acts, authorized against the reduced moderator roster.
     let authorized = |capability: &str, keep: &dyn Fn(&HomeGovernanceEvent) -> bool| {
@@ -483,6 +541,51 @@ mod tests {
                 causal(device, key, observed),
             ),
         ))
+    }
+
+    fn admit_by(device: u8, actor: u8, observed: &[Event]) -> Event {
+        let key = HomeGovernanceKey::AdmitMember {
+            target: who(TARGET),
+        };
+        tagged(HomeGovernanceEvent::AdmitMember(
+            aura_social::HomeAdmitMemberFact::new_ms(
+                ctx(),
+                who(TARGET),
+                who(actor),
+                1,
+                causal(device, key, observed),
+            ),
+        ))
+    }
+
+    fn role_of(observed: &Observed, byte: u8) -> Option<HomeRole> {
+        observed
+            .roles
+            .iter()
+            .find(|(id, _)| *id == who(byte))
+            .map(|(_, role)| *role)
+    }
+
+    // Task 62: a moderator admits a participant as a member, who can then be
+    // designated moderator; the outcome does not depend on arrival order.
+    // An admission written by a non-moderator member admits nobody.
+    #[test]
+    fn admitted_participant_becomes_member_then_moderator_in_every_order() {
+        let admission = admit_by(1, OWNER, &[]);
+        let admitted = assert_permutation_invariant(std::slice::from_ref(&admission), |order| {
+            reduce(order, TARGET)
+        });
+        assert_eq!(role_of(&admitted, TARGET), Some(HomeRole::Member));
+        assert_eq!(admitted.my_role, HomeRole::Member);
+
+        let designation = grant(1, TARGET, std::slice::from_ref(&admission));
+        let moderator =
+            assert_permutation_invariant(&[admission, designation], |order| reduce(order, TARGET));
+        assert_eq!(role_of(&moderator, TARGET), Some(HomeRole::Moderator));
+        assert_eq!(moderator.my_role, HomeRole::Moderator);
+
+        let unauthorized = reduce(&[admit_by(2, MEMBER, &[])], OWNER);
+        assert_eq!(role_of(&unauthorized, TARGET), Some(HomeRole::Participant));
     }
 
     #[test]

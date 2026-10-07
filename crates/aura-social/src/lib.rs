@@ -122,10 +122,10 @@ pub use moderation::governance::{
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_bans_in_live_channels,
     query_current_mutes, query_current_mutes_in_live_channels, query_kick_history,
-    register_moderation_facts, try_is_user_banned_and_muted, BanStatus, HomeBanFact,
-    HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact, HomeUnbanFact,
-    HomeUnmuteFact, KickRecord, ModerationQueryBound, ModerationScopeKey, MuteStatus,
-    RequiredModerationQueryError,
+    register_moderation_facts, try_is_user_banned_and_muted, BanStatus, HomeAdmitMemberFact,
+    HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact,
+    HomeUnbanFact, HomeUnmuteFact, KickRecord, ModerationQueryBound, ModerationScopeKey,
+    MuteStatus, RequiredModerationQueryError,
 };
 pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};

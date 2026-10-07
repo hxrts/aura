@@ -223,8 +223,11 @@ async fn consistency_invariant_holds(
                     matches!(member.role, crate::views::home::HomeRole::Moderator)
                 }),
                 ResolvedCommand::Deop { target } => home.member(&target.0).is_some_and(|member| {
-                    matches!(member.role, crate::views::home::HomeRole::Participant)
+                    matches!(member.role, crate::views::home::HomeRole::Member)
                 }),
+                ResolvedCommand::Admit { target } => home
+                    .member(&target.0)
+                    .is_some_and(|member| member.role.is_threshold_member()),
                 ResolvedCommand::Mode { flags, .. } => home.mode_flags.as_ref() == Some(flags),
                 _ => false,
             }

@@ -47,7 +47,8 @@ pub fn classify(raw: &str) -> UserFacingError {
     }
     if lowered.contains("only members can be designated as moderators") {
         return UserFacingError::Sentence(
-            "Only home members can be moderators; this person is a participant".to_string(),
+            "Only home members can be moderators; admit this participant first with /admit <name>"
+                .to_string(),
         );
     }
     if lowered.contains("home at member capacity") {
@@ -98,7 +99,7 @@ mod tests {
         assert_eq!(
             classify("Operation failed: Invalid: Only members can be designated as moderators"),
             UserFacingError::Sentence(
-                "Only home members can be moderators; this person is a participant".to_string()
+                "Only home members can be moderators; admit this participant first with /admit <name>".to_string()
             )
         );
     }

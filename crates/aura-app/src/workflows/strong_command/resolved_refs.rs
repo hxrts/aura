@@ -150,6 +150,9 @@ pub enum ResolvedCommand {
     Deop {
         target: ResolvedAuthorityId,
     },
+    Admit {
+        target: ResolvedAuthorityId,
+    },
     Mode {
         channel_name: String,
         channel: ExistingChannelResolution,
