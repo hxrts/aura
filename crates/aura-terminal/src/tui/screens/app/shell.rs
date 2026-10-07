@@ -97,7 +97,7 @@ use dispatch::{
     execute_harness_followup_command, handle_dispatch_command, terminal_error_to_toast_level,
     EventCommandLoopAction, EventDispatchContext, HarnessDispatchContext,
 };
-use events::{handle_channel_selection_change, resolve_committed_selected_channel_id};
+use events::{handle_channel_selection_change, resolve_send_target_channel};
 use input::transition_from_terminal_event;
 use props::{IoAppProps, RuntimeShellPropsSeed};
 use render::build_global_modals;

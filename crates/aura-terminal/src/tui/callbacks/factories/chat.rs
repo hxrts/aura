@@ -325,12 +325,6 @@ impl ChatCallbacks {
                     let transfer = operation
                         .handoff_to_app_workflow(SemanticOperationTransferScope::SendChatMessage);
 
-                    // Pre-settlement optimistic UI hint (best-effort).
-                    let _ = tx.try_send(UiUpdate::MessageSent {
-                        channel: channel_id_clone.clone(),
-                        content: content_clone.clone(),
-                    });
-
                     let target = match channel_id_clone.parse() {
                         Ok(channel_id) => {
                             aura_app::ui::workflows::messaging::handoff::SendChatTarget::ChannelId(

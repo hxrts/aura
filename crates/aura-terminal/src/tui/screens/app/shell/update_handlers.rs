@@ -352,46 +352,6 @@ pub(super) async fn process_ui_update_match(
         // =========================================================================
         // Chat / messaging
         // =========================================================================
-        UiUpdate::MessageSent { channel, content } => {
-            let mut appended = false;
-            let selected_channel = tui_selected_for_updates.read().clone();
-            let state_selected_channel = shared_channels_for_updates
-                .read()
-                .get(tui.read_clone().chat.selected_channel)
-                .map(|candidate| candidate.id.clone());
-            {
-                let mut messages = shared_messages_for_updates.write();
-                let should_append = selected_channel
-                    .as_ref()
-                    .map(CommittedChannelSelection::channel_id)
-                    == Some(channel.as_str())
-                    || state_selected_channel.as_deref() == Some(channel.as_str());
-                if should_append {
-                    let already_visible = messages.iter().any(|message| {
-                        message.channel_id == channel.as_str()
-                            && message.is_own
-                            && message.content == content
-                    });
-                    if !already_visible {
-                        let message_idx = messages.len();
-                        messages.push(crate::tui::types::Message::sending(
-                            format!("local-accepted-{channel}-{message_idx}"),
-                            channel,
-                            "You",
-                            content,
-                        ));
-                        appended = true;
-                    }
-                }
-            }
-            // Auto-scroll to bottom (show latest messages including the one just sent)
-            tui.with_mut(|state| {
-                if appended {
-                    state.chat.message_count = state.chat.message_count.saturating_add(1);
-                }
-                state.chat.message_scroll = 0;
-            });
-        }
         UiUpdate::MessageRetried { message_id: _ } => {
             enqueue_toast!(
                 "Retrying message…".to_string(),
@@ -535,10 +495,15 @@ pub(super) async fn process_ui_update_match(
                     state.chat.message_scroll = 0;
                 }
 
-                *tui_selected_for_updates.write() = shared_channels_for_updates
-                    .read()
-                    .get(state.chat.selected_channel)
-                    .map(authoritative_committed_selection);
+                // A committed selection that is transiently unlisted stays
+                // committed (Task 120); only an absent or listed selection is
+                // refreshed from the projection.
+                if committed_selection.is_none() || committed_index.is_some() {
+                    *tui_selected_for_updates.write() = shared_channels_for_updates
+                        .read()
+                        .get(state.chat.selected_channel)
+                        .map(authoritative_committed_selection);
+                }
 
                 // Auto-scroll to bottom when new messages arrive, but only if
                 // user was already at the bottom (hasn't scrolled up to read history)

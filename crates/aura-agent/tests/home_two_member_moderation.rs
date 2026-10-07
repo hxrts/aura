@@ -138,6 +138,14 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         "Alex's send at Limited must be refused: {limited_send:?}"
     );
     assert_tui_sends_refused(&alex.app, home, "access level").await;
+    // The live TUI refusal goes through the typed handoff (Task 120).
+    let limited_tui = tui_send(&alex.app, home, "limited tui send").await;
+    assert!(
+        limited_tui
+            .as_ref()
+            .is_err_and(|e| e.contains("access level")),
+        "Alex's TUI send at Limited must be refused: {limited_tui:?}"
+    );
 
     // Task 120: the same moderator raises Alex to Partial. The later write
     // supersedes the Limited one on both clients, so Alex's send is accepted
@@ -165,17 +173,8 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
     }
     // Send through the TUI submission path (the typed handoff with an id
     // target), which must succeed and actually reach Barbara.
-    let partial = messaging::handoff::send_chat_message(
-        &alex.app,
-        messaging::handoff::SendChatMessageRequest {
-            target: messaging::handoff::SendChatTarget::ChannelId(home),
-            content: "partial send".to_string(),
-            operation_instance_id: None,
-        },
-    )
-    .await;
-    partial
-        .result
+    tui_send(&alex.app, home, "partial send")
+        .await
         .map_err(|error| anyhow!("Alex's TUI send at Partial failed: {error}"))?;
     wait_until("Barbara receives Alex's Partial send", || async {
         let chat = barbara.app.read().await.read(&*CHAT_SIGNAL).await;
@@ -250,7 +249,52 @@ async fn moderation_reaches_member(fault: Option<LinkFault>) -> Result<()> {
         "Alex's send after the ban must be refused: {banned_send:?}"
     );
     assert_tui_sends_refused(&alex.app, home, "banned").await;
+    let banned_tui = tui_send(&alex.app, home, "banned tui send").await;
+    assert!(
+        banned_tui.as_ref().is_err_and(|e| e.contains("banned")),
+        "Alex's TUI send after the ban must be refused: {banned_tui:?}"
+    );
+    // Task 126: no refusal reason inserts a message into the sender's chat.
+    let chat = alex.app.read().await.read(&*CHAT_SIGNAL).await?;
+    let own: Vec<_> = chat
+        .messages_for_channel(&home)
+        .iter()
+        .filter(|m| m.sender_id == alex.id)
+        .map(|m| m.content.clone())
+        .collect();
+    for refused in [
+        "limited send",
+        "limited tui send",
+        "banned send",
+        "banned tui send",
+        "tui send by id",
+        "tui send by name",
+    ] {
+        assert!(
+            !own.iter().any(|content| content == refused),
+            "refused send {refused:?} must not appear in Alex's chat: {own:?}"
+        );
+    }
     net.finish().await
+}
+
+/// Send exactly as the TUI does: the typed handoff with an id target.
+async fn tui_send(
+    app: &Arc<RwLock<AppCore>>,
+    home: ChannelId,
+    content: &str,
+) -> std::result::Result<String, String> {
+    messaging::handoff::send_chat_message(
+        app,
+        messaging::handoff::SendChatMessageRequest {
+            target: messaging::handoff::SendChatTarget::ChannelId(home),
+            content: content.to_string(),
+            operation_instance_id: None,
+        },
+    )
+    .await
+    .result
+    .map_err(|error| error.to_string())
 }
 
 /// The TUI submits through the `*_now_with_instance` APIs (by channel id, or

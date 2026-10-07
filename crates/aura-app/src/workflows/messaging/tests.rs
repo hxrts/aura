@@ -2857,7 +2857,7 @@ fn send_message_publishes_success_before_remote_delivery_followups() {
         .find(".publish_success_with(issue_message_committed_proof(message_id.clone()))")
         .expect("message committed success publication");
     let followup_idx = body
-        .find("spawn_post_terminal_message_followups(&spawner, async move {")
+        .find("spawn_post_terminal_message_followups(&spawner, delivery)")
         .expect("post-terminal message followup spawn");
     assert!(
         success_idx < followup_idx,

@@ -620,20 +620,9 @@ pub(super) fn execute_harness_followup_command(
             };
             let is_slash_command = content.trim_start().starts_with('/');
             let channels = shared_channels.read().clone();
-            let committed_channel_id = selected_channel
-                .read()
-                .clone()
-                .filter(|selection| {
-                    channels.is_empty()
-                        || channels
-                            .iter()
-                            .any(|channel| channel.id == selection.channel_id())
-                })
-                .map(|selection| selection.channel_id().to_string())
-                .or_else(|| {
-                    resolve_committed_selected_channel_id(state, &channels)
-                        .map(|selection| selection.channel_id().to_string())
-                });
+            let committed_channel_id =
+                resolve_send_target_channel(selected_channel.read().clone(), state, &channels)
+                    .map(|selection| selection.channel_id().to_string());
             // Resolve the channel before allocating a send owner so a missing
             // channel never drops an unpublished owner.
             if is_slash_command {

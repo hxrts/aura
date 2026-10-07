@@ -440,20 +440,59 @@ async fn deliver_message_fact_remotely(
     Ok(())
 }
 
+/// Record a remote delivery that failed or never started: typed per-recipient
+/// diagnostics plus a committed `Failed` status on the message, so a
+/// committed send never stays silently at "sent".
+async fn record_remote_delivery_failure(
+    app_core: &Arc<RwLock<AppCore>>,
+    runtime: &Arc<dyn RuntimeBridge>,
+    error: &AuraError,
+    context_id: ContextId,
+    channel_id: ChannelId,
+    message_id: &str,
+    sender_id: AuthorityId,
+) {
+    tracing::warn!(
+        error = %error,
+        channel_id = %channel_id,
+        message_id,
+        "post-terminal remote message delivery failed"
+    );
+    for failure in outbound_delivery_failures(error, context_id, channel_id, message_id) {
+        runtime.record_outbound_message_delivery_failure(failure);
+    }
+    if let Err(mark_error) =
+        mark_message_delivery_failed(app_core, context_id, channel_id, message_id, sender_id).await
+    {
+        tracing::warn!(
+            delivery_error = %error,
+            mark_error = %mark_error,
+            message_id,
+            "post-terminal remote message delivery failed and mark-failed also failed"
+        );
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_post_terminal_message_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+fn spawn_post_terminal_message_followups<F>(
+    spawner: &aura_core::OwnedTaskSpawner,
+    fut: F,
+) -> Result<(), AuraError>
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = Result<(), AuraError>> + Send + 'static,
 {
-    spawner.spawn(Box::pin(fut));
+    spawner.spawn_fallible_cancellable("messaging.remote_delivery", Box::pin(fut))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn spawn_post_terminal_message_followups<F>(spawner: &aura_core::OwnedTaskSpawner, fut: F)
+fn spawn_post_terminal_message_followups<F>(
+    spawner: &aura_core::OwnedTaskSpawner,
+    fut: F,
+) -> Result<(), AuraError>
 where
-    F: Future<Output = ()> + 'static,
+    F: Future<Output = Result<(), AuraError>> + 'static,
 {
-    spawner.spawn_local(Box::pin(fut));
+    spawner.spawn_local_fallible_cancellable("messaging.remote_delivery", Box::pin(fut))
 }
 
 pub async fn send_message(
@@ -1117,57 +1156,50 @@ async fn send_message_ref_owned(
     )) = post_terminal_delivery
     {
         let spawner = runtime.task_spawner();
-        let app_core = app_core.clone();
-        spawn_post_terminal_message_followups(&spawner, async move {
-            let mut best_effort = workflow_best_effort();
-            let _ = best_effort
-                .capture(async {
-                    if let Err(error) = deliver_message_fact_remotely(
+        let delivery = {
+            let app_core = app_core.clone();
+            let runtime = runtime.clone();
+            let followup_message_id = followup_message_id.clone();
+            async move {
+                if let Err(error) = deliver_message_fact_remotely(
+                    &app_core,
+                    &runtime,
+                    authoritative_channel,
+                    sender_id,
+                    &fact,
+                )
+                .await
+                {
+                    record_remote_delivery_failure(
                         &app_core,
                         &runtime,
-                        authoritative_channel,
+                        &error,
+                        context_id,
+                        channel_id,
+                        &followup_message_id,
                         sender_id,
-                        &fact,
                     )
-                    .await
-                    {
-                        tracing::warn!(
-                            error = %error,
-                            channel_id = %channel_id,
-                            message_id = %followup_message_id,
-                            "post-terminal remote message delivery failed"
-                        );
-                        for failure in outbound_delivery_failures(
-                            &error,
-                            context_id,
-                            channel_id,
-                            &followup_message_id,
-                        ) {
-                            runtime.record_outbound_message_delivery_failure(failure);
-                        }
-                        if let Err(mark_error) = mark_message_delivery_failed(
-                            &app_core,
-                            context_id,
-                            channel_id,
-                            &followup_message_id,
-                            sender_id,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                delivery_error = %error,
-                                mark_error = %mark_error,
-                                message_id = %followup_message_id,
-                                "post-terminal remote message delivery failed and mark-failed also failed"
-                            );
-                        }
-                        return Err(error);
-                    }
-                    Ok(())
-                })
-                .await;
-            let _ = best_effort.finish();
-        });
+                    .await;
+                }
+                // The failure is recorded on the message and in the runtime's
+                // delivery diagnostics; it is not a supervised-task fault.
+                Ok(())
+            }
+        };
+        // A delivery task the runtime refuses to admit would otherwise leave
+        // the committed message at "sent" with nothing delivering it.
+        if let Err(error) = spawn_post_terminal_message_followups(&spawner, delivery) {
+            record_remote_delivery_failure(
+                app_core,
+                &runtime,
+                &error,
+                context_id,
+                channel_id,
+                &followup_message_id,
+                sender_id,
+            )
+            .await;
+        }
     }
 
     Ok(message_id)

@@ -721,20 +721,12 @@ pub(super) fn handle_dispatch_command_match(
         DispatchCommand::SendChatMessage { content } => {
             let is_slash_command = content.trim_start().starts_with('/');
             let channels = shared_channels_for_dispatch.read().clone();
-            let committed_channel_id = tui_selected_for_events
-                .read()
-                .clone()
-                .filter(|selection| {
-                    channels.is_empty()
-                        || channels
-                            .iter()
-                            .any(|channel| channel.id == selection.channel_id())
-                })
-                .map(|selection| selection.channel_id().to_string())
-                .or_else(|| {
-                    resolve_committed_selected_channel_id(new_state, &channels)
-                        .map(|selection| selection.channel_id().to_string())
-                });
+            let committed_channel_id = resolve_send_target_channel(
+                tui_selected_for_events.read().clone(),
+                new_state,
+                &channels,
+            )
+            .map(|selection| selection.channel_id().to_string());
             // Resolve the channel before allocating a send owner so a missing
             // channel never drops an unpublished owner.
             if is_slash_command {

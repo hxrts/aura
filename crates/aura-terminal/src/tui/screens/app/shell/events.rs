@@ -12,6 +12,26 @@ pub(super) fn resolve_committed_selected_channel_id(
         .map(authoritative_committed_selection)
 }
 
+/// The channel a send (or slash command) targets. A committed selection is
+/// authoritative: when it is not currently listed the send has no target,
+/// rather than being redirected to whatever channel now sits at the old
+/// index (Task 120: a transient projection redirected a home send to Note to
+/// Self). The index is consulted only when nothing is committed.
+pub(super) fn resolve_send_target_channel(
+    committed: Option<CommittedChannelSelection>,
+    state: &TuiState,
+    shared_channels: &[Channel],
+) -> Option<CommittedChannelSelection> {
+    match committed {
+        Some(selection) => (shared_channels.is_empty()
+            || shared_channels
+                .iter()
+                .any(|channel| channel.id == selection.channel_id()))
+        .then_some(selection),
+        None => resolve_committed_selected_channel_id(state, shared_channels),
+    }
+}
+
 pub(super) fn handle_channel_selection_change(
     current: &TuiState,
     new_state: &TuiState,
@@ -19,26 +39,27 @@ pub(super) fn handle_channel_selection_change(
     selected_channel_id: &SharedCommittedChannelSelection,
 ) {
     let idx = new_state.chat.selected_channel;
-
-    let channels = shared_channels.read().clone();
-    let next_selected = channels.get(idx).map(authoritative_committed_selection);
-    let current_selected = selected_channel_id.read().clone();
-
-    if new_state.chat.selected_channel == current.chat.selected_channel
-        && next_selected == current_selected
-    {
+    // Only a user-driven index change moves a committed selection. With the
+    // index unchanged, a reordered or transiently shrunk projection must not
+    // retarget (or clear) the selection the user committed to.
+    if idx == current.chat.selected_channel && selected_channel_id.read().is_some() {
         return;
     }
-
-    {
-        let mut guard = selected_channel_id.write();
-        *guard = next_selected;
+    let next_selected = shared_channels
+        .read()
+        .get(idx)
+        .map(authoritative_committed_selection);
+    if next_selected.is_some() {
+        *selected_channel_id.write() = next_selected;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{handle_channel_selection_change, resolve_committed_selected_channel_id};
+    use super::{
+        handle_channel_selection_change, resolve_committed_selected_channel_id,
+        resolve_send_target_channel,
+    };
     use crate::tui::channel_selection::CommittedChannelSelection;
     use crate::tui::state::TuiState;
     use crate::tui::types::Channel;
@@ -104,6 +125,60 @@ mod tests {
         );
     }
 
+    /// Task 120 (run 165): with BarbHome committed at index 1, the chat
+    /// projection transiently listed only Note to Self; a key event then
+    /// retargeted the selection by index and the next home send went to
+    /// Note to Self. The committed selection must survive, and a send must
+    /// never be redirected to another channel.
+    #[test]
+    fn transient_projection_does_not_retarget_committed_send_channel() {
+        let mut state = TuiState::new();
+        state.chat.selected_channel = 1;
+        let home = CommittedChannelSelection::new("channel-home");
+        let selected = Arc::new(parking_lot::RwLock::new(Some(home.clone())));
+        let transient = Arc::new(parking_lot::RwLock::new(vec![Channel::new(
+            "channel-note",
+            "Note to Self",
+        )]));
+
+        handle_channel_selection_change(&state, &state, &transient, &selected);
+        assert_eq!(*selected.read(), Some(home.clone()));
+        assert_eq!(
+            resolve_send_target_channel(selected.read().clone(), &state, &transient.read()),
+            None,
+            "an unlisted committed channel has no send target"
+        );
+
+        let listed = vec![
+            Channel::new("channel-note", "Note to Self"),
+            Channel::new("channel-home", "BarbHome"),
+        ];
+        state.chat.selected_channel = 0;
+        assert_eq!(
+            resolve_send_target_channel(selected.read().clone(), &state, &listed),
+            Some(home)
+        );
+    }
+
+    /// Task 126: a pre-settlement "sending" row is never resolved when the
+    /// send is refused, so the send callback inserts nothing; the chat shows
+    /// only the app projection's committed (or failed) message.
+    #[test]
+    fn send_callback_inserts_no_unsettled_pending_row() {
+        let chat_factory =
+            read_repo_source("crates/aura-terminal/src/tui/callbacks/factories/chat.rs");
+        let send_start = chat_factory
+            .find("fn make_send_owned")
+            .expect("send callback factory");
+        let send_end = chat_factory[send_start..]
+            .find("fn make_retry_message")
+            .map(|offset| send_start + offset)
+            .expect("retry callback factory");
+        let send_factory = &chat_factory[send_start..send_end];
+        assert!(!send_factory.contains("UiUpdate::Message"));
+        assert!(!send_factory.contains("Message::sending"));
+    }
+
     #[test]
     fn send_dispatch_does_not_background_retry_selection() {
         let shell_source = read_repo_source(
@@ -128,7 +203,7 @@ mod tests {
             .find("submit_workflow_handoff_operation")
             .expect("send branch allocates an owner");
         let channel_resolve = send_branch
-            .find("resolve_committed_selected_channel_id")
+            .find("resolve_send_target_channel")
             .expect("send branch resolves the channel");
         assert!(channel_resolve < owner_alloc);
     }
