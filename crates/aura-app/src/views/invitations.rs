@@ -488,6 +488,34 @@ impl InvitationsState {
         self.revoke_invitation(invitation_id)
     }
 
+    /// Apply the order-independent resolved outcome of an invitation
+    /// (`aura_invitation::InvitationLifecycleLog`). An open invitation moves to
+    /// history; a history entry is corrected when a newly observed outcome
+    /// changes the resolution. Returns whether the state changed.
+    pub fn resolve_invitation(&mut self, invitation_id: &str, status: InvitationStatus) -> bool {
+        let open = if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
+            Some(self.pending.remove(idx))
+        } else {
+            self.sent
+                .iter()
+                .position(|inv| inv.id == invitation_id)
+                .map(|idx| self.sent.remove(idx))
+        };
+        if let Some(mut inv) = open {
+            inv.status = status;
+            self.history.push(inv);
+            self.trim_history();
+            return true;
+        }
+        match self.history.iter_mut().find(|inv| inv.id == invitation_id) {
+            Some(inv) if inv.status != status => {
+                inv.status = status;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Mark an invitation as expired.
     ///
     /// Returns the expired invitation on success, or an error if not found.

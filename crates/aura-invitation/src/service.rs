@@ -24,7 +24,7 @@ use crate::guards::{
 };
 use crate::InvitationOperation;
 use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::time::PhysicalTime;
+use aura_core::time::{CausalMetadata, PhysicalTime};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId};
 use aura_core::{CapabilityName, DeviceId};
 use serde::{Deserialize, Serialize};
@@ -529,6 +529,7 @@ impl InvitationService {
         &self,
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
+        causal: CausalMetadata,
     ) -> GuardOutcome {
         self.prepare_lifecycle_transition(
             snapshot,
@@ -538,6 +539,7 @@ impl InvitationService {
                 invitation_id: invitation_id.clone(),
                 acceptor_id: snapshot.authority_id,
                 accepted_at: Self::exact_time(snapshot.now_ms),
+                causal,
             },
         )
     }
@@ -553,6 +555,7 @@ impl InvitationService {
         &self,
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
+        causal: CausalMetadata,
     ) -> GuardOutcome {
         self.prepare_lifecycle_transition(
             snapshot,
@@ -562,6 +565,7 @@ impl InvitationService {
                 invitation_id: invitation_id.clone(),
                 decliner_id: snapshot.authority_id,
                 declined_at: Self::exact_time(snapshot.now_ms),
+                causal,
             },
         )
     }
@@ -577,6 +581,7 @@ impl InvitationService {
         &self,
         snapshot: &GuardSnapshot,
         invitation_id: &InvitationId,
+        causal: CausalMetadata,
     ) -> GuardOutcome {
         self.prepare_lifecycle_transition(
             snapshot,
@@ -586,6 +591,7 @@ impl InvitationService {
                 invitation_id: invitation_id.clone(),
                 canceller_id: snapshot.authority_id,
                 cancelled_at: Self::exact_time(snapshot.now_ms),
+                causal,
             },
         )
     }
@@ -798,7 +804,14 @@ mod tests {
         let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
+        let outcome = service.prepare_accept_invitation(
+            &snapshot,
+            &invitation_id,
+            crate::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+                vector: aura_core::time::VectorClock::new(),
+                lamport: 0,
+            }),
+        );
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
@@ -810,7 +823,14 @@ mod tests {
         let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
+        let outcome = service.prepare_decline_invitation(
+            &snapshot,
+            &invitation_id,
+            crate::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+                vector: aura_core::time::VectorClock::new(),
+                lamport: 0,
+            }),
+        );
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
@@ -822,7 +842,14 @@ mod tests {
         let snapshot = test_snapshot();
         let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
+        let outcome = service.prepare_cancel_invitation(
+            &snapshot,
+            &invitation_id,
+            crate::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+                vector: aura_core::time::VectorClock::new(),
+                lamport: 0,
+            }),
+        );
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);

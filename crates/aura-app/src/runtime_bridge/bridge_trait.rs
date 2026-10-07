@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 /// Which fact family and key a causally stamped fact belongs to
 /// (`RuntimeBridge::causal_stamp`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CausalStampKey {
     /// A home governance fact in the home `context_id` (docs/115 §3.4).
     HomeGovernance {
@@ -44,6 +44,10 @@ pub enum CausalStampKey {
     Contact(aura_relational::ContactCausalKey),
     /// A friendship fact between the runtime authority and a peer.
     Friendship(aura_relational::FriendshipCausalKey),
+    /// An edit or delete of a chat message.
+    Chat(aura_chat::MessageRevisionKey),
+    /// A terminal outcome (accept, decline, cancel) of an invitation.
+    InvitationOutcome(aura_core::InvitationId),
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]

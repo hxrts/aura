@@ -35,7 +35,7 @@
 //! registry.register::<ChatFact>("chat", Box::new(ChatFactReducer));
 //! ```
 
-use aura_core::time::PhysicalTime;
+use aura_core::time::{CausalMetadata, PhysicalTime};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
@@ -61,7 +61,8 @@ pub enum ChatMessageDeliveryStatus {
 /// Type identifier for chat facts
 pub const CHAT_FACT_TYPE_ID: &str = "chat";
 /// Current schema shared by encoding and required decoding.
-pub const CHAT_FACT_SCHEMA_VERSION: u16 = 1;
+/// Schema 2: edits and deletes carry revision causal metadata.
+pub const CHAT_FACT_SCHEMA_VERSION: u16 = 2;
 /// Key for indexing chat facts in the journal
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatFactKey {
@@ -172,7 +173,8 @@ pub enum ChatFact {
     /// Message edited (Category A operation - optimistic)
     ///
     /// Edit facts are append-only - the original message is not modified.
-    /// Clients reduce by displaying the latest edit for each message_id.
+    /// Edits resolve per message by revision causality (`crate::revisions`),
+    /// never by physical time.
     MessageEdited {
         /// Relational context of the message
         context_id: ContextId,
@@ -184,8 +186,10 @@ pub enum ChatFact {
         editor_id: AuthorityId,
         /// New content (opaque bytes, typically UTF-8)
         new_payload: Vec<u8>,
-        /// Timestamp when message was edited
+        /// Timestamp when message was edited (display only)
         edited_at: PhysicalTime,
+        /// Revision causality: the edits of this message the editor observed.
+        causal: CausalMetadata,
     },
     /// Message delivery lifecycle updated.
     MessageDeliveryUpdated {
@@ -204,8 +208,9 @@ pub enum ChatFact {
     },
     /// Message deleted (Category B operation - deferred approval may apply)
     ///
-    /// Delete facts mark a message as deleted. The original message remains
-    /// in the journal but clients should not display deleted messages.
+    /// A delete is a tombstone that wins over every edit of the message,
+    /// concurrent or later (`crate::revisions`). The original message
+    /// remains in the journal but clients do not display it.
     MessageDeleted {
         /// Relational context of the message
         context_id: ContextId,
@@ -215,8 +220,10 @@ pub enum ChatFact {
         message_id: String,
         /// Authority that deleted the message
         deleter_id: AuthorityId,
-        /// Timestamp when message was deleted
+        /// Timestamp when message was deleted (display only)
         deleted_at: PhysicalTime,
+        /// Revision causality: the edits of this message the deleter observed.
+        causal: CausalMetadata,
     },
 }
 
@@ -477,7 +484,7 @@ impl ChatFact {
 
     /// Create a MessageEdited fact with millisecond timestamp (Category A operation)
     ///
-    /// Edit facts are append-only - clients display the latest edit for each message.
+    /// `causal` comes from `crate::revisions::message_revision_causal`.
     pub fn message_edited_ms(
         context_id: ContextId,
         channel_id: ChannelId,
@@ -485,6 +492,7 @@ impl ChatFact {
         editor_id: AuthorityId,
         new_payload: Vec<u8>,
         edited_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::MessageEdited {
             context_id,
@@ -493,6 +501,7 @@ impl ChatFact {
             editor_id,
             new_payload,
             edited_at: Self::physical_time(edited_at_ms),
+            causal,
         }
     }
 
@@ -517,13 +526,14 @@ impl ChatFact {
 
     /// Create a MessageDeleted fact with millisecond timestamp (Category B operation)
     ///
-    /// Delete facts mark a message as deleted - clients should not display deleted messages.
+    /// `causal` comes from `crate::revisions::message_revision_causal`.
     pub fn message_deleted_ms(
         context_id: ContextId,
         channel_id: ChannelId,
         message_id: String,
         deleter_id: AuthorityId,
         deleted_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::MessageDeleted {
             context_id,
@@ -531,6 +541,7 @@ impl ChatFact {
             message_id,
             deleter_id,
             deleted_at: Self::physical_time(deleted_at_ms),
+            causal,
         }
     }
 }

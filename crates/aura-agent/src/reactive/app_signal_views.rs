@@ -40,9 +40,11 @@ use crate::reactive::app_signal_projection;
 use crate::handlers::invitation::ChannelInviteDetails;
 use crate::runtime::AuraEffectSystem;
 use aura_chat::{ChatDelta, ChatFact, ChatViewReducer, CHAT_FACT_TYPE_ID};
+use aura_core::types::identifiers::InvitationId;
 use aura_invitation::{
-    Invitation as CachedInvitation, InvitationFact, InvitationStatus as DomainInvitationStatus,
-    InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
+    Invitation as CachedInvitation, InvitationFact, InvitationLifecycleLog,
+    InvitationStatus as DomainInvitationStatus, InvitationType as DomainInvitationType,
+    INVITATION_FACT_TYPE_ID,
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
@@ -562,11 +564,21 @@ async fn materialize_pending_invitation_witness(
 // Invitations
 // =============================================================================
 
+fn app_invitation_status(status: DomainInvitationStatus) -> InvitationStatus {
+    match status {
+        DomainInvitationStatus::Pending => InvitationStatus::Pending,
+        DomainInvitationStatus::Accepted => InvitationStatus::Accepted,
+        DomainInvitationStatus::Declined => InvitationStatus::Rejected,
+        DomainInvitationStatus::Cancelled => InvitationStatus::Revoked,
+        DomainInvitationStatus::Expired => InvitationStatus::Expired,
+    }
+}
+
 pub struct InvitationsSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     update_gate: Mutex<()>,
-    deferred_status: Mutex<HashMap<String, InvitationStatus>>,
+    outcomes: Mutex<InvitationLifecycleLog>,
 }
 
 impl InvitationsSignalView {
@@ -575,7 +587,7 @@ impl InvitationsSignalView {
             own_authority,
             reactive,
             update_gate: Mutex::new(()),
-            deferred_status: Mutex::new(HashMap::new()),
+            outcomes: Mutex::new(InvitationLifecycleLog::default()),
         }
     }
 }
@@ -591,8 +603,8 @@ impl ReactiveView for InvitationsSignalView {
                     Err(error) => return Err(required_projection_source(error)),
                 };
                 let mut state = current.value;
-                let mut deferred_status = self.deferred_status.lock().await;
-                let mut next_deferred_status = deferred_status.clone();
+                let mut outcomes = self.outcomes.lock().await;
+                let mut next_outcomes = outcomes.clone();
                 let mut changed = false;
 
                 for fact in facts {
@@ -617,78 +629,45 @@ impl ReactiveView for InvitationsSignalView {
                                 .invitation_sent_witness(&sent_fact, self.own_authority)
                                 .expect("matched InvitationFact::Sent");
                             let invitation_id = invitation.id().to_string();
-                            let sender_name =
-                                known_contact_name(&self.reactive, invitation.sender_id()).await;
-                            // A replayed Sent fact cannot recreate a pending row after
-                            // a newer acceptance, rejection, or cancellation.
-                            if state.invitation(&invitation_id).is_some() {
-                                if let Some(status) = next_deferred_status.remove(&invitation_id) {
-                                    let id = invitation_id.as_str();
-                                    changed |= match status {
-                                        InvitationStatus::Accepted => {
-                                            state.accept_invitation(id).is_ok()
-                                        }
-                                        InvitationStatus::Rejected => {
-                                            state.reject_invitation(id).is_ok()
-                                        }
-                                        InvitationStatus::Revoked => {
-                                            state.observe_cancelled_invitation(id).is_ok()
-                                        }
-                                        _ => false,
-                                    };
+                            // A replayed Sent fact cannot recreate a resolved row.
+                            if state.invitation(&invitation_id).is_none() {
+                                let sender_name =
+                                    known_contact_name(&self.reactive, invitation.sender_id())
+                                        .await;
+                                state.add_invitation(invitation);
+                                if let Some(name) = &sender_name {
+                                    state.name_unknown_sender(&invitation_id, name);
                                 }
-                                continue;
-                            }
-                            let pending_status = next_deferred_status.remove(&invitation_id);
-                            state.add_invitation(invitation);
-                            if let Some(name) = &sender_name {
-                                state.name_unknown_sender(&invitation_id, name);
-                            }
-                            match pending_status {
-                                Some(InvitationStatus::Accepted) => {
-                                    let _ = state.accept_invitation(&invitation_id);
-                                }
-                                Some(InvitationStatus::Rejected) => {
-                                    let _ = state.reject_invitation(&invitation_id);
-                                }
-                                Some(InvitationStatus::Revoked) => {
-                                    let _ = state.observe_cancelled_invitation(&invitation_id);
-                                }
-                                _ => {}
-                            }
-                            changed = true;
-                        }
-                        InvitationFact::Accepted { invitation_id, .. } => {
-                            if state.accept_invitation(invitation_id.as_str()).is_ok() {
                                 changed = true;
-                            } else if state.invitation(invitation_id.as_str()).is_none() {
-                                next_deferred_status
-                                    .insert(invitation_id.to_string(), InvitationStatus::Accepted);
                             }
-                        }
-                        InvitationFact::Declined { invitation_id, .. } => {
-                            if state.reject_invitation(invitation_id.as_str()).is_ok() {
-                                changed = true;
-                            } else if state.invitation(invitation_id.as_str()).is_none() {
-                                next_deferred_status
-                                    .insert(invitation_id.to_string(), InvitationStatus::Rejected);
-                            }
-                        }
-                        InvitationFact::Cancelled { invitation_id, .. } => {
-                            if state
-                                .observe_cancelled_invitation(invitation_id.as_str())
-                                .is_ok()
+                            if let Some(status) =
+                                next_outcomes.status(&InvitationId::new(&invitation_id))
                             {
-                                changed = true;
-                            } else if state.invitation(invitation_id.as_str()).is_none() {
-                                next_deferred_status
-                                    .insert(invitation_id.to_string(), InvitationStatus::Revoked);
+                                changed |= state.resolve_invitation(
+                                    &invitation_id,
+                                    app_invitation_status(status),
+                                );
+                            }
+                        }
+                        outcome @ (InvitationFact::Accepted { .. }
+                        | InvitationFact::Declined { .. }
+                        | InvitationFact::Cancelled { .. }) => {
+                            // Status is the order-independent resolution of every
+                            // observed outcome; an outcome before its Sent waits in
+                            // the log until the row exists.
+                            if let Some(invitation_id) = next_outcomes.insert(&outcome) {
+                                if let Some(status) = next_outcomes.status(&invitation_id) {
+                                    changed |= state.resolve_invitation(
+                                        invitation_id.as_str(),
+                                        app_invitation_status(status),
+                                    );
+                                }
                             }
                         }
                         InvitationFact::CeremonyInitiated {
                             ceremony_id,
                             sender,
-                            timestamp_ms,
+                            observed_at,
                             ..
                         } => {
                             // Invitation ceremony events don't map to InvitationsState.
@@ -697,44 +676,44 @@ impl ReactiveView for InvitationsSignalView {
                             tracing::debug!(
                                 ceremony_id = %ceremony_id,
                                 sender = %sender,
-                                timestamp_ms,
+                                observed_at_ms = observed_at.ts_ms,
                                 "Invitation ceremony initiated"
                             );
                         }
                         InvitationFact::CeremonyAcceptanceReceived {
                             ceremony_id,
-                            timestamp_ms,
+                            observed_at,
                             ..
                         } => {
                             tracing::debug!(
                                 ceremony_id = %ceremony_id,
-                                timestamp_ms,
+                                observed_at_ms = observed_at.ts_ms,
                                 "Invitation ceremony acceptance received"
                             );
                         }
                         InvitationFact::CeremonyCommitted {
                             ceremony_id,
                             relationship_id,
-                            timestamp_ms,
+                            observed_at,
                             ..
                         } => {
                             tracing::info!(
                                 ceremony_id = %ceremony_id,
                                 relationship_id = %relationship_id,
-                                timestamp_ms,
+                                observed_at_ms = observed_at.ts_ms,
                                 "Invitation ceremony committed - relationship established"
                             );
                         }
                         InvitationFact::CeremonyAborted {
                             ceremony_id,
                             reason,
-                            timestamp_ms,
+                            observed_at,
                             ..
                         } => {
                             tracing::warn!(
                                 ceremony_id = %ceremony_id,
                                 reason,
-                                timestamp_ms,
+                                observed_at_ms = observed_at.ts_ms,
                                 "Invitation ceremony aborted"
                             );
                         }
@@ -742,14 +721,14 @@ impl ReactiveView for InvitationsSignalView {
                             superseded_ceremony_id,
                             superseding_ceremony_id,
                             reason,
-                            timestamp_ms,
+                            observed_at,
                             ..
                         } => {
                             tracing::warn!(
                                 superseded_ceremony_id = %superseded_ceremony_id,
                                 superseding_ceremony_id = %superseding_ceremony_id,
                                 reason,
-                                timestamp_ms,
+                                observed_at_ms = observed_at.ts_ms,
                                 "Invitation ceremony superseded"
                             );
                         }
@@ -757,7 +736,7 @@ impl ReactiveView for InvitationsSignalView {
                 }
 
                 if !changed {
-                    *deferred_status = next_deferred_status;
+                    *outcomes = next_outcomes;
                     return Ok(());
                 }
 
@@ -766,7 +745,7 @@ impl ReactiveView for InvitationsSignalView {
                     .await
                 {
                     Ok(ConditionalEmit::Published { .. }) => {
-                        *deferred_status = next_deferred_status;
+                        *outcomes = next_outcomes;
                         return Ok(());
                     }
                     Ok(ConditionalEmit::Stale { .. }) => continue,
@@ -1981,6 +1960,7 @@ impl ReactiveView for ChatSignalView {
                                     ChatDelta::ChannelAdded(creation) => Some(creation),
                                     _ => None,
                                 });
+                            let revision = aura_chat::MessageRevision::from_fact(&chat_fact);
                             match chat_fact {
                                 ChatFact::ChannelCreated {
                                     channel_id,
@@ -2238,43 +2218,23 @@ impl ReactiveView for ChatSignalView {
                                 ChatFact::MessageEdited {
                                     channel_id,
                                     message_id,
-                                    editor_id,
-                                    new_payload,
-                                    edited_at,
                                     ..
-                                } => {
-                                    // Update the message content in local state
-                                    let new_content =
-                                        String::from_utf8_lossy(&new_payload).to_string();
-                                    if let Some(msg) = state.message_mut(&channel_id, &message_id) {
-                                        msg.content = new_content;
-                                    }
-                                    tracing::debug!(
-                                        channel_id = %channel_id,
-                                        message_id,
-                                        editor_id = %editor_id,
-                                        edited_at = edited_at.ts_ms,
-                                        "Message edited"
-                                    );
-                                    changed = true;
                                 }
-                                ChatFact::MessageDeleted {
+                                | ChatFact::MessageDeleted {
                                     channel_id,
                                     message_id,
-                                    deleter_id,
-                                    deleted_at,
                                     ..
                                 } => {
-                                    // Remove the message from local state
-                                    state.remove_message(&channel_id, &message_id);
-                                    tracing::debug!(
-                                        channel_id = %channel_id,
-                                        message_id,
-                                        deleter_id = %deleter_id,
-                                        deleted_at = deleted_at.ts_ms,
-                                        "Message deleted"
-                                    );
-                                    changed = true;
+                                    // Resolved order-independently by the message's
+                                    // revision register: delete wins, concurrent
+                                    // edits resolve causally.
+                                    if let Some(revision) = revision {
+                                        changed |= state.apply_message_revision(
+                                            channel_id,
+                                            &message_id,
+                                            revision,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -2482,9 +2442,14 @@ mod tests {
             // Social facts are at schema 5 (lifecycle causal metadata), kicks at
             // schema 4 (membership episodes),
             // other home governance facts at schema 3 and contact facts at
-            // schema 2 (causal stamps).
+            // schema 2 (causal stamps), as are chat facts (revision causality);
+            // invitation facts are at schema 3 (outcome causal stamps).
             let supported: u16 = match type_id {
-                CONTACT_FACT_TYPE_ID | FRIENDSHIP_FACT_TYPE_ID | RECOVERY_FACT_TYPE_ID => 2,
+                CONTACT_FACT_TYPE_ID
+                | FRIENDSHIP_FACT_TYPE_ID
+                | RECOVERY_FACT_TYPE_ID
+                | CHAT_FACT_TYPE_ID => 2,
+                INVITATION_FACT_TYPE_ID => 3,
                 SOCIAL_FACT_TYPE_ID => 5,
                 HOME_KICK_FACT_TYPE_ID => 4,
                 HOME_BAN_FACT_TYPE_ID
@@ -2779,6 +2744,7 @@ mod tests {
             invitation_id: invitation_id.clone(),
             acceptor_id: authority,
             accepted_at: at,
+            causal: outcome_causal(0, 0),
         };
         let reactive = ReactiveHandler::new();
         assert!(ProjectionOwner::new(reactive)
@@ -2814,6 +2780,8 @@ mod tests {
                     ts_ms: 2,
                     uncertainty: None,
                 },
+
+                causal: outcome_causal(0, 0),
             }
             .to_generic(),
         );
@@ -2840,6 +2808,100 @@ mod tests {
                 Some(InvitationStatus::Accepted)
             );
             assert_eq!(after.open_invitations().count(), 0);
+        }
+    }
+
+    fn outcome_causal(device: u8, counter: u64) -> aura_core::time::CausalMetadata {
+        let vector = if counter == 0 {
+            Vec::new()
+        } else {
+            vec![(aura_core::DeviceId::new_from_entropy([device; 32]), counter)]
+        };
+        aura_core::time::CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: counter,
+                vector,
+            },
+        }
+    }
+
+    /// Concurrent accept and decline resolve to the decline (explicit
+    /// precedence) for every arrival order and batch split, regardless of
+    /// physical time; a causally later outcome cannot replace the first.
+    #[tokio::test]
+    async fn invitation_outcomes_resolve_independently_of_arrival_order() {
+        let own = AuthorityId::new_from_entropy([0x90; 32]);
+        let sender = AuthorityId::new_from_entropy([0x91; 32]);
+        let context = ContextId::new_from_entropy([0x92; 32]);
+        let id = || aura_core::types::identifiers::InvitationId::new("racing-outcomes");
+        let relational = |fact: InvitationFact| fact_from_relational(fact.to_generic());
+        let sent = relational(InvitationFact::sent_ms(
+            context,
+            id(),
+            sender,
+            own,
+            DomainInvitationType::Contact { nickname: None },
+            1,
+            None,
+            None,
+        ));
+        let accepted = relational(InvitationFact::Accepted {
+            context_id: Some(context),
+            invitation_id: id(),
+            acceptor_id: own,
+            accepted_at: PhysicalTime::exact(900),
+            causal: outcome_causal(1, 1),
+        });
+        let declined = relational(InvitationFact::Declined {
+            context_id: Some(context),
+            invitation_id: id(),
+            decliner_id: own,
+            declined_at: PhysicalTime::exact(100),
+            causal: outcome_causal(2, 1),
+        });
+        // Cancelled after observing the acceptance: no effect, although it
+        // would outrank both first outcomes.
+        let mut after = outcome_causal(1, 1);
+        after
+            .clock
+            .vector
+            .push((aura_core::DeviceId::new_from_entropy([3; 32]), 1));
+        after.clock.vector.sort();
+        let late_cancel = relational(InvitationFact::Cancelled {
+            context_id: Some(context),
+            invitation_id: id(),
+            canceller_id: sender,
+            cancelled_at: PhysicalTime::exact(5_000),
+            causal: after,
+        });
+        let facts = [sent, accepted, declined, late_cancel];
+        let mut orders = Vec::new();
+        aura_journal::causal_reduction::for_each_permutation(&facts, |order| {
+            orders.push(order.to_vec());
+        });
+        for order in orders {
+            for split in [false, true] {
+                let reactive = ReactiveHandler::new();
+                register_app_signals(&reactive).await.unwrap();
+                let view = InvitationsSignalView::new(own, reactive.clone());
+                if split {
+                    for fact in &order {
+                        view.update(std::slice::from_ref(fact)).await.unwrap();
+                    }
+                } else {
+                    view.update(&order).await.unwrap();
+                }
+                let state = reactive.read(&*INVITATIONS_SIGNAL).await.unwrap();
+                assert_eq!(
+                    state
+                        .invitation("racing-outcomes")
+                        .map(|invite| invite.status),
+                    Some(InvitationStatus::Rejected)
+                );
+                assert_eq!(state.history_count(), 1);
+            }
         }
     }
 
@@ -2929,6 +2991,8 @@ mod tests {
                     ts_ms: 2,
                     uncertainty: None,
                 },
+
+                causal: outcome_causal(0, 0),
             },
             InvitationStatus::Rejected,
         )
@@ -2950,6 +3014,8 @@ mod tests {
                     ts_ms: 2,
                     uncertainty: None,
                 },
+
+                causal: outcome_causal(0, 0),
             },
             InvitationStatus::Revoked,
         )

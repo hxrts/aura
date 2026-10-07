@@ -51,7 +51,7 @@ mod tests {
     use aura_composition::IntoViewDelta;
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_core::types::identifiers::{AuthorityId, ContextId, InvitationId};
-    use aura_invitation::{InvitationDirection, InvitationFact, InvitationStatus};
+    use aura_invitation::{InvitationDirection, InvitationFact};
     use aura_journal::DomainFact;
 
     fn test_context_id() -> ContextId {
@@ -114,9 +114,7 @@ mod tests {
             .into_view_delta(),
             InvitationDelta::InvitationStatusChanged {
                 invitation_id: InvitationId::new("inv-1"),
-                old_status: InvitationStatus::Pending,
-                new_status: InvitationStatus::Accepted,
-                changed_at: 2,
+                outcomes: aura_invitation::InvitationOutcomes::default(),
             }
             .into_view_delta(),
         ];

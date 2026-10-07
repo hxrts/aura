@@ -49,14 +49,28 @@ fn prepare_accept_invitation_requires_capability() {
 
     let snap = snapshot_with_caps(&[]); // no caps
     let invitation_id = InvitationId::new("inv-absent");
-    let outcome = svc.prepare_accept_invitation(&snap, &invitation_id);
+    let outcome = svc.prepare_accept_invitation(
+        &snap,
+        &invitation_id,
+        aura_invitation::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+            vector: aura_core::time::VectorClock::new(),
+            lamport: 0,
+        }),
+    );
     assert!(
         outcome.is_denied(),
         "accept should be denied without capability"
     );
 
     let snap_ok = snapshot_with_caps(&[InvitationCapability::Accept]);
-    let outcome_ok = svc.prepare_accept_invitation(&snap_ok, &invitation_id);
+    let outcome_ok = svc.prepare_accept_invitation(
+        &snap_ok,
+        &invitation_id,
+        aura_invitation::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+            vector: aura_core::time::VectorClock::new(),
+            lamport: 0,
+        }),
+    );
     assert!(
         outcome_ok.is_allowed(),
         "accept should be allowed with capability"

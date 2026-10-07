@@ -5523,7 +5523,7 @@ mod required_orphan_fact_tests {
             let mut outer = context;
             match fault {
                 0 => envelope.payload = vec![0xff],
-                1 => envelope.schema_version = 3,
+                1 => envelope.schema_version += 1,
                 2 => envelope.encoding = FactEncoding::Json,
                 3 => outer = aura_core::ContextId::new_from_entropy([98; 32]),
                 _ => unreachable!(),

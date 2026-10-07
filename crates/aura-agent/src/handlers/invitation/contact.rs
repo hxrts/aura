@@ -615,10 +615,28 @@ impl<'a> InvitationContactHandler<'a> {
 
                     let context_id = self.handler.context.authority.default_context_id();
 
+                    let outcome_causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+
+                        effects.as_ref(),
+
+                        self.handler.context.authority.authority_id(),
+
+                        &acceptance.invitation_id,
+
+                    )
+
+                    .await?;
+
                     let fact = InvitationFact::accepted_ms(
+
                         acceptance.invitation_id.clone(),
+
                         acceptance.acceptor_id,
+
                         now_ms,
+
+                        outcome_causal,
+
                     );
                     execute_journal_append(
                         fact,
@@ -861,10 +879,28 @@ impl<'a> InvitationContactHandler<'a> {
                             .await;
                     }
 
+                    let outcome_causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+
+                        effects.as_ref(),
+
+                        self.handler.context.authority.authority_id(),
+
+                        &acceptance.invitation_id,
+
+                    )
+
+                    .await?;
+
                     let fact = InvitationFact::accepted_ms(
+
                         acceptance.invitation_id.clone(),
+
                         acceptance.acceptor_id,
+
                         now_ms,
+
+                        outcome_causal,
+
                     );
                     execute_journal_append(
                         fact,

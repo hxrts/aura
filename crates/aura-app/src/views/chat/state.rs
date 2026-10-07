@@ -4,6 +4,9 @@ use super::delivery::MessageDeliveryStatus;
 use super::models::{Channel, ChannelType, Message};
 use super::serde_support::channel_id_keyed_map;
 use aura_chat::view::CanonicalChannelCreation;
+use aura_chat::{
+    MessageRevision, MessageRevisionKind, MessageRevisionOutcome, MessageRevisionRegister,
+};
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -59,6 +62,10 @@ pub struct ChatState {
     pending_channel_updates: HashMap<ChannelId, Vec<ChannelProjectionUpdate>>,
     #[serde(skip)]
     channel_update_clocks: HashMap<ChannelId, ChannelUpdateClocks>,
+    /// Edits and deletes per message, resolved order-independently
+    /// (`aura_chat::revisions`); a tombstone hides a message sent later.
+    #[serde(skip)]
+    message_revisions: HashMap<(ChannelId, String), MessageRevisionRegister>,
 }
 
 impl ChatState {
@@ -329,6 +336,8 @@ impl ChatState {
         self.canonical_channels.remove(channel_id);
         self.pending_channel_updates.remove(channel_id);
         self.channel_update_clocks.remove(channel_id);
+        self.message_revisions
+            .retain(|(channel, _), _| channel != channel_id);
         self.channels.remove(channel_id)
     }
 
@@ -338,6 +347,7 @@ impl ChatState {
         self.canonical_channels.clear();
         self.pending_channel_updates.clear();
         self.channel_update_clocks.clear();
+        self.message_revisions.clear();
         self.total_unread = 0;
     }
 
@@ -359,7 +369,12 @@ impl ChatState {
         }
     }
 
-    pub fn apply_message(&mut self, channel_id: ChannelId, message: Message) {
+    pub fn apply_message(&mut self, channel_id: ChannelId, mut message: Message) {
+        match self.revision_outcome(&channel_id, &message.id) {
+            RevisionView::Deleted => return,
+            RevisionView::Edited(content) => message.content = content,
+            RevisionView::Unrevised => {}
+        }
         let is_latest = self
             .channel_messages
             .get(&channel_id)
@@ -439,9 +454,52 @@ impl ChatState {
             .and_then(|msgs| msgs.iter_mut().find(|m| m.id == message_id))
     }
 
-    pub fn remove_message(&mut self, channel_id: &ChannelId, message_id: &str) {
-        if let Some(msgs) = self.channel_messages.get_mut(channel_id) {
-            msgs.retain(|m| m.id != message_id);
+    /// Record an edit or delete of `message_id` and re-render the message from
+    /// the resolved register: a delete removes it for good, otherwise the
+    /// winning edit's content is shown. Returns whether the revision was new.
+    pub fn apply_message_revision(
+        &mut self,
+        channel_id: ChannelId,
+        message_id: &str,
+        revision: MessageRevision,
+    ) -> bool {
+        let inserted = self
+            .message_revisions
+            .entry((channel_id, message_id.to_string()))
+            .or_default()
+            .insert(revision);
+        match self.revision_outcome(&channel_id, message_id) {
+            RevisionView::Deleted => {
+                if let Some(msgs) = self.channel_messages.get_mut(&channel_id) {
+                    msgs.retain(|m| m.id != message_id);
+                }
+            }
+            RevisionView::Edited(content) => {
+                if let Some(message) = self.message_mut(&channel_id, message_id) {
+                    message.content = content;
+                }
+            }
+            RevisionView::Unrevised => {}
+        }
+        inserted
+    }
+
+    fn revision_outcome(&self, channel_id: &ChannelId, message_id: &str) -> RevisionView {
+        let Some(register) = self
+            .message_revisions
+            .get(&(*channel_id, message_id.to_string()))
+        else {
+            return RevisionView::Unrevised;
+        };
+        match register.resolve() {
+            MessageRevisionOutcome::Deleted => RevisionView::Deleted,
+            MessageRevisionOutcome::Edited(MessageRevision {
+                kind: MessageRevisionKind::Edit { new_payload },
+                ..
+            }) => RevisionView::Edited(String::from_utf8_lossy(new_payload).into_owned()),
+            MessageRevisionOutcome::Edited(_) | MessageRevisionOutcome::Unrevised => {
+                RevisionView::Unrevised
+            }
         }
     }
 
@@ -552,6 +610,13 @@ fn merge_channel_projection(canonical: &mut Channel, previous: Channel) {
 }
 
 /// Placeholder content the runtime renders for a message it could not open.
+/// Rendered resolution of a message's revision register.
+enum RevisionView {
+    Unrevised,
+    Edited(String),
+    Deleted,
+}
+
 fn is_sealed_placeholder(content: &str) -> bool {
     content.starts_with("[sealed: ") && content.ends_with(" bytes]")
 }
@@ -617,5 +682,133 @@ mod ordering_tests {
             "before enrollment"
         );
         assert_eq!(state.messages_for_channel(&channel_id).len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+    use aura_chat::revisions::test_support::causal_after;
+    use aura_chat::{ChatFact, MessageRevisionKey};
+    use aura_journal::causal_reduction::assert_permutation_invariant;
+
+    #[derive(Debug, Clone)]
+    enum Arrival {
+        Send(Message),
+        Revise(MessageRevision),
+    }
+
+    fn channel() -> ChannelId {
+        ChannelId::from_bytes([4u8; 32])
+    }
+
+    fn context() -> ContextId {
+        ContextId::new_from_entropy([5u8; 32])
+    }
+
+    fn key() -> MessageRevisionKey {
+        MessageRevisionKey::new(context(), channel(), "m1")
+    }
+
+    fn send() -> Arrival {
+        Arrival::Send(Message {
+            id: "m1".to_string(),
+            channel_id: channel(),
+            sender_id: AuthorityId::new_from_entropy([3u8; 32]),
+            sender_name: String::new(),
+            content: "original".to_string(),
+            timestamp: 10,
+            reply_to: None,
+            is_own: false,
+            is_read: false,
+            delivery_status: MessageDeliveryStatus::default(),
+            epoch_hint: None,
+            is_finalized: false,
+        })
+    }
+
+    fn revision(fact: &ChatFact) -> MessageRevision {
+        MessageRevision::from_fact(fact).expect("edit or delete")
+    }
+
+    fn edit(device: u8, body: &str, observed: &[MessageRevision]) -> MessageRevision {
+        revision(&ChatFact::message_edited_ms(
+            context(),
+            channel(),
+            "m1".to_string(),
+            AuthorityId::new_from_entropy([device; 32]),
+            body.as_bytes().to_vec(),
+            0,
+            causal_after(device, key(), observed),
+        ))
+    }
+
+    fn delete(device: u8, observed: &[MessageRevision]) -> MessageRevision {
+        revision(&ChatFact::message_deleted_ms(
+            context(),
+            channel(),
+            "m1".to_string(),
+            AuthorityId::new_from_entropy([device; 32]),
+            0,
+            causal_after(device, key(), observed),
+        ))
+    }
+
+    fn contents(arrivals: &[Arrival]) -> Vec<String> {
+        let mut state = ChatState::default();
+        for arrival in arrivals {
+            match arrival.clone() {
+                Arrival::Send(message) => state.apply_message(channel(), message),
+                Arrival::Revise(revision) => {
+                    state.apply_message_revision(channel(), "m1", revision);
+                }
+            }
+        }
+        state
+            .messages_for_channel(&channel())
+            .iter()
+            .map(|message| message.content.clone())
+            .collect()
+    }
+
+    #[test]
+    fn concurrent_edits_converge_for_every_arrival_order() {
+        let base = edit(1, "base", &[]);
+        let left = edit(2, "left", std::slice::from_ref(&base));
+        let right = edit(3, "right", std::slice::from_ref(&base));
+        let shown = assert_permutation_invariant(
+            &[
+                send(),
+                Arrival::Revise(base),
+                Arrival::Revise(left),
+                Arrival::Revise(right),
+            ],
+            contents,
+        );
+        assert!(shown == ["left"] || shown == ["right"], "{shown:?}");
+    }
+
+    #[test]
+    fn edit_after_delete_stays_deleted() {
+        let first = edit(1, "a", &[]);
+        let removed = delete(2, std::slice::from_ref(&first));
+        let after = edit(1, "after", &[first.clone(), removed.clone()]);
+        let shown = assert_permutation_invariant(
+            &[
+                send(),
+                Arrival::Revise(first),
+                Arrival::Revise(removed),
+                Arrival::Revise(after),
+            ],
+            contents,
+        );
+        assert!(shown.is_empty());
+    }
+
+    #[test]
+    fn delete_before_send_arrival_hides_the_message() {
+        let shown =
+            assert_permutation_invariant(&[send(), Arrival::Revise(delete(2, &[]))], contents);
+        assert!(shown.is_empty());
     }
 }

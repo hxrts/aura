@@ -561,6 +561,12 @@ mod tests {
                         ts_ms: 1,
                         uncertainty: None,
                     },
+                    causal: crate::lifecycle::invitation_outcome_causal(
+                        &aura_core::time::LogicalTime {
+                            vector: aura_core::time::VectorClock::new(),
+                            lamport: 0,
+                        },
+                    ),
                 },
             },
             EffectCommand::RecordReceipt {

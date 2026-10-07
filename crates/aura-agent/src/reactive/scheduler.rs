@@ -1570,6 +1570,10 @@ mod tests {
             InvitationId::new("inv-123"),
             AuthorityId::new_from_entropy([2u8; 32]),
             1234567900,
+            aura_invitation::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+                vector: aura_core::time::VectorClock::new(),
+                lamport: 0,
+            }),
         );
 
         let facts = vec![
@@ -1587,8 +1591,8 @@ mod tests {
         ));
         assert!(matches!(
             &deltas[1],
-            InvitationDelta::InvitationStatusChanged { new_status, .. }
-                if *new_status == aura_invitation::InvitationStatus::Accepted
+            InvitationDelta::InvitationStatusChanged { outcomes, .. }
+                if outcomes.status() == Some(aura_invitation::InvitationStatus::Accepted)
         ));
     }
 

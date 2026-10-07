@@ -671,6 +671,20 @@ impl RuntimeBridge for MockRuntimeBridge {
                     0x4d, key, &observed,
                 ));
             }
+            aura_app::runtime_bridge::CausalStampKey::Chat(_) => {
+                // Chat edits and deletes are stamped by the agent chat service;
+                // the mock has no chat journal to observe.
+                return Err(IntentError::internal_error(
+                    "mock runtime bridge does not author chat revisions",
+                ));
+            }
+            aura_app::runtime_bridge::CausalStampKey::InvitationOutcome(_) => {
+                // Invitation outcomes are stamped by the agent invitation
+                // handlers; the mock has no invitation journal to observe.
+                return Err(IntentError::internal_error(
+                    "mock runtime bridge does not author invitation outcomes",
+                ));
+            }
         };
         let observed: Vec<_> = self
             .facts

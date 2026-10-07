@@ -47,8 +47,14 @@ fn invitation_send_and_accept_end_to_end() {
 
     // Receiver prepares to accept
     let accept_snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Accept]);
-    let accept_outcome =
-        receiver_service.prepare_accept_invitation(&accept_snapshot, &invitation_id);
+    let accept_outcome = receiver_service.prepare_accept_invitation(
+        &accept_snapshot,
+        &invitation_id,
+        aura_invitation::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+            vector: aura_core::time::VectorClock::new(),
+            lamport: 0,
+        }),
+    );
     assert!(
         accept_outcome.is_allowed(),
         "accept should be allowed for pending invitation"
@@ -65,7 +71,14 @@ fn invitation_decline_flow_marks_status() {
     let invitation_id = InvitationId::new("inv-decline");
 
     let snapshot = snapshot_with_caps(receiver, ctx, &[InvitationCapability::Decline]);
-    let outcome = svc.prepare_decline_invitation(&snapshot, &invitation_id);
+    let outcome = svc.prepare_decline_invitation(
+        &snapshot,
+        &invitation_id,
+        aura_invitation::lifecycle::invitation_outcome_causal(&aura_core::time::LogicalTime {
+            vector: aura_core::time::VectorClock::new(),
+            lamport: 0,
+        }),
+    );
     assert!(
         outcome.is_allowed(),
         "decline should be allowed when pending"

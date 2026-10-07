@@ -25,7 +25,9 @@ impl ChatFactService {
     fn allowed_fact_append(cost: aura_core::FlowCost, fact: ChatFact) -> GuardOutcome {
         GuardOutcome::allowed(vec![
             EffectCommand::ChargeFlowBudget { cost },
-            EffectCommand::JournalAppend { fact },
+            EffectCommand::JournalAppend {
+                fact: Box::new(fact),
+            },
         ])
     }
 

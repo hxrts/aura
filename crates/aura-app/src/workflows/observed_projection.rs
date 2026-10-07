@@ -533,23 +533,13 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                 },
             );
         }
-        ChatDelta::MessageRemoved {
+        ChatDelta::MessageRevised {
             channel_id,
             message_id,
+            revision,
         } => {
             let channel_id = parse_channel_id(&channel_id)?;
-            state.remove_message(&channel_id, &message_id);
-        }
-        ChatDelta::MessageUpdated {
-            channel_id,
-            message_id,
-            new_content,
-            ..
-        } => {
-            let channel_id = parse_channel_id(&channel_id)?;
-            if let Some(message) = state.message_mut(&channel_id, &message_id) {
-                message.content = new_content;
-            }
+            state.apply_message_revision(channel_id, &message_id, revision);
         }
         ChatDelta::MessageDeliveryUpdated {
             channel_id,

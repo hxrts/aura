@@ -39,7 +39,7 @@
 use crate::InvitationType;
 use aura_core::crypto::hash;
 use aura_core::threshold::AgreementMode;
-use aura_core::time::PhysicalTime;
+use aura_core::time::{CausalMetadata, PhysicalTime};
 use aura_core::types::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-aura_core::define_fact_type_id!(str invitation, "invitation", 2);
+aura_core::define_fact_type_id!(str invitation, "invitation", 3);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CeremonyRelationshipId(String);
@@ -124,7 +124,7 @@ pub struct InvitationFactKey {
 #[domain_fact(
     type_id = INVITATION_FACT_TYPE_ID,
     schema_version = INVITATION_FACT_SCHEMA_VERSION,
-    min_supported_schema_version = 1,
+    min_supported_schema_version = 3,
     context_fn = "context_id_for_fact"
 )]
 #[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data
@@ -162,6 +162,8 @@ pub enum InvitationFact {
         acceptor_id: AuthorityId,
         /// Timestamp when invitation was accepted (uses unified time system)
         accepted_at: PhysicalTime,
+        /// Causal stamp: outcomes are first-wins (`lifecycle`).
+        causal: CausalMetadata,
     },
     /// Invitation declined
     Declined {
@@ -174,6 +176,8 @@ pub enum InvitationFact {
         decliner_id: AuthorityId,
         /// Timestamp when invitation was declined (uses unified time system)
         declined_at: PhysicalTime,
+        /// Causal stamp: outcomes are first-wins (`lifecycle`).
+        causal: CausalMetadata,
     },
     /// Invitation cancelled by sender
     Cancelled {
@@ -186,6 +190,8 @@ pub enum InvitationFact {
         canceller_id: AuthorityId,
         /// Timestamp when invitation was cancelled (uses unified time system)
         cancelled_at: PhysicalTime,
+        /// Causal stamp: outcomes are first-wins (`lifecycle`).
+        causal: CausalMetadata,
     },
 
     // =========================================================================
@@ -207,8 +213,8 @@ pub enum InvitationFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        /// Timestamp in milliseconds
-        timestamp_ms: u64,
+        /// Physical time of the event, for display only
+        observed_at: PhysicalTime,
     },
 
     /// Acceptance received from acceptor
@@ -224,8 +230,8 @@ pub enum InvitationFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        /// Timestamp in milliseconds
-        timestamp_ms: u64,
+        /// Physical time of the event, for display only
+        observed_at: PhysicalTime,
     },
 
     /// Ceremony committed (relationship established)
@@ -243,8 +249,8 @@ pub enum InvitationFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        /// Timestamp in milliseconds
-        timestamp_ms: u64,
+        /// Physical time of the event, for display only
+        observed_at: PhysicalTime,
     },
 
     /// Ceremony aborted
@@ -259,8 +265,8 @@ pub enum InvitationFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        /// Timestamp in milliseconds
-        timestamp_ms: u64,
+        /// Physical time of the event, for display only
+        observed_at: PhysicalTime,
     },
 
     /// Ceremony superseded by a newer ceremony
@@ -280,8 +286,8 @@ pub enum InvitationFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        /// Timestamp in milliseconds
-        timestamp_ms: u64,
+        /// Physical time of the event, for display only
+        observed_at: PhysicalTime,
     },
 }
 
@@ -309,7 +315,7 @@ pub enum InvitationFactDecodeError {
 
 impl InvitationFact {
     /// Decode a required fact without converting corruption into absence.
-    /// Schemas 1 and 2 remain replayable; decoding never manufactures trust.
+    /// Schema 3 added outcome causal metadata; older schemas are rejected.
     /// Only the explicitly declared encoding is attempted.
     ///
     /// # Errors
@@ -327,8 +333,11 @@ impl InvitationFact {
             }
             .into());
         }
-        FactSchemaCompatibility::range(1, INVITATION_FACT_SCHEMA_VERSION)
-            .ensure_supported(envelope.schema_version)?;
+        FactSchemaCompatibility::range(
+            INVITATION_FACT_SCHEMA_VERSION,
+            INVITATION_FACT_SCHEMA_VERSION,
+        )
+        .ensure_supported(envelope.schema_version)?;
         if envelope.payload.len() > MAX_FACT_PAYLOAD_BYTES {
             return Err(FactError::PayloadTooLarge {
                 size: envelope.payload.len() as u64,
@@ -446,19 +455,34 @@ impl InvitationFact {
         self.context_id_for_fact() == context_id
     }
 
-    /// Get the timestamp in milliseconds (backward compatibility)
-    pub fn timestamp_ms(&self) -> u64 {
+    /// Physical time of the fact, for display only; it never orders facts.
+    pub fn display_time(&self) -> &PhysicalTime {
         match self {
-            InvitationFact::Sent { sent_at, .. } => sent_at.ts_ms,
-            InvitationFact::Accepted { accepted_at, .. } => accepted_at.ts_ms,
-            InvitationFact::Declined { declined_at, .. } => declined_at.ts_ms,
-            InvitationFact::Cancelled { cancelled_at, .. } => cancelled_at.ts_ms,
-            // Ceremony facts already store ms
-            InvitationFact::CeremonyInitiated { timestamp_ms, .. } => *timestamp_ms,
-            InvitationFact::CeremonyAcceptanceReceived { timestamp_ms, .. } => *timestamp_ms,
-            InvitationFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
-            InvitationFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
-            InvitationFact::CeremonySuperseded { timestamp_ms, .. } => *timestamp_ms,
+            InvitationFact::Sent { sent_at: at, .. }
+            | InvitationFact::Accepted {
+                accepted_at: at, ..
+            }
+            | InvitationFact::Declined {
+                declined_at: at, ..
+            }
+            | InvitationFact::Cancelled {
+                cancelled_at: at, ..
+            }
+            | InvitationFact::CeremonyInitiated {
+                observed_at: at, ..
+            }
+            | InvitationFact::CeremonyAcceptanceReceived {
+                observed_at: at, ..
+            }
+            | InvitationFact::CeremonyCommitted {
+                observed_at: at, ..
+            }
+            | InvitationFact::CeremonyAborted {
+                observed_at: at, ..
+            }
+            | InvitationFact::CeremonySuperseded {
+                observed_at: at, ..
+            } => at,
         }
     }
 
@@ -539,45 +563,54 @@ impl InvitationFact {
         }
     }
 
-    /// Create an Accepted fact with millisecond timestamp (backward compatibility)
+    /// Create a contextless Accepted fact with a millisecond display time and its
+    /// causal stamp.
     pub fn accepted_ms(
         invitation_id: InvitationId,
         acceptor_id: AuthorityId,
         accepted_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Accepted {
             context_id: None,
             invitation_id,
             acceptor_id,
             accepted_at: Self::exact_time(accepted_at_ms),
+            causal,
         }
     }
 
-    /// Create a Declined fact with millisecond timestamp (backward compatibility)
+    /// Create a contextless Declined fact with a millisecond display time and its
+    /// causal stamp.
     pub fn declined_ms(
         invitation_id: InvitationId,
         decliner_id: AuthorityId,
         declined_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Declined {
             context_id: None,
             invitation_id,
             decliner_id,
             declined_at: Self::exact_time(declined_at_ms),
+            causal,
         }
     }
 
-    /// Create a Cancelled fact with millisecond timestamp (backward compatibility)
+    /// Create a contextless Cancelled fact with a millisecond display time and its
+    /// causal stamp.
     pub fn cancelled_ms(
         invitation_id: InvitationId,
         canceller_id: AuthorityId,
         cancelled_at_ms: u64,
+        causal: CausalMetadata,
     ) -> Self {
         Self::Cancelled {
             context_id: None,
             invitation_id,
             canceller_id,
             cancelled_at: Self::exact_time(cancelled_at_ms),
+            causal,
         }
     }
 }
@@ -709,7 +742,7 @@ impl FactReducer for InvitationFactReducer {
 mod tests {
     use super::*;
     #[test]
-    fn required_invitation_decoder_preserves_legacy_encoding_schema_and_sources() {
+    fn required_invitation_decoder_requires_schema_three_and_preserves_sources() {
         use aura_core::types::facts::{FactEncoding, FactError, MAX_FACT_PAYLOAD_BYTES};
         use std::error::Error;
         let fact = InvitationFact::sent_ms(
@@ -722,9 +755,9 @@ mod tests {
             None,
             None,
         );
-        for version in [1, 2] {
+        {
             let mut envelope = fact.to_envelope();
-            envelope.schema_version = version;
+            assert_eq!(envelope.schema_version, INVITATION_FACT_SCHEMA_VERSION);
             assert_eq!(InvitationFact::try_from_envelope(&envelope).unwrap(), fact);
             envelope.encoding = FactEncoding::Json;
             envelope.payload = serde_json::to_vec(&fact).unwrap();
@@ -734,13 +767,18 @@ mod tests {
             );
         }
         let mut future = fact.to_envelope();
-        future.schema_version = 3;
+        future.schema_version = 4;
         assert!(matches!(
             InvitationFact::try_from_envelope(&future),
             Err(InvitationFactDecodeError::Envelope(
-                FactError::VersionMismatch { actual: 3, .. }
+                FactError::VersionMismatch { actual: 4, .. }
             ))
         ));
+        for retired in [1, 2] {
+            let mut old = fact.to_envelope();
+            old.schema_version = retired;
+            assert!(InvitationFact::try_from_envelope(&old).is_err());
+        }
         let mut malformed = fact.to_envelope();
         malformed.payload = vec![0xff];
         let error = InvitationFact::try_from_envelope(&malformed).unwrap_err();
@@ -781,6 +819,17 @@ mod tests {
         assert!(InvitationFact::from_envelope(&future).is_none());
     }
 
+    fn test_causal() -> CausalMetadata {
+        CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: 0,
+                vector: Vec::new(),
+            },
+        }
+    }
+
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
     }
@@ -812,152 +861,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_enrollment_fact_decodes_without_minting_setup_binding() {
-        // These are the prechange schema shapes, independently encoded without
-        // the new InvitationType field. Production v1 facts use canonical
-        // DAG-CBOR maps (DomainFact::to_envelope), not positional bincode.
-        #[derive(serde::Serialize)]
-        enum OldInvitationTypeV1 {
-            DeviceEnrollment {
-                subject_authority: AuthorityId,
-                invitee_authority: Option<AuthorityId>,
-                initiator_device_id: aura_core::DeviceId,
-                device_id: aura_core::DeviceId,
-                nickname_suggestion: Option<String>,
-                ceremony_id: aura_core::CeremonyId,
-                pending_epoch: u64,
-                key_package: Vec<u8>,
-                threshold_config: Vec<u8>,
-                public_key_package: Vec<u8>,
-                baseline_tree_ops: Vec<Vec<u8>>,
-            },
-        }
-        #[derive(serde::Serialize)]
-        enum OldInvitationFactV1 {
-            Sent {
-                context_id: ContextId,
-                invitation_id: InvitationId,
-                sender_id: AuthorityId,
-                receiver_id: AuthorityId,
-                invitation_type: OldInvitationTypeV1,
-                sent_at: PhysicalTime,
-                expires_at: Option<PhysicalTime>,
-                #[serde(skip_serializing_if = "Option::is_none")]
-                receiver_nickname: Option<String>,
-                message: Option<String>,
-            },
-        }
-        let enrollment = InvitationType::DeviceEnrollment {
-            setup_binding: None,
-            subject_authority: test_authority_id(1),
-            invitee_authority: Some(test_authority_id(2)),
-            initiator_device_id: aura_core::DeviceId::new_from_entropy([3; 32]),
-            device_id: aura_core::DeviceId::new_from_entropy([4; 32]),
-            nickname_suggestion: None,
-            ceremony_id: aura_core::CeremonyId::new("legacy enrollment"),
-            pending_epoch: 1,
-            key_package: vec![5],
-            threshold_config: vec![6],
-            public_key_package: vec![7],
-            baseline_tree_ops: vec![],
-        };
-        let fact = InvitationFact::sent_ms(
-            test_context_id(),
-            InvitationId::new("legacy"),
-            test_authority_id(1),
-            test_authority_id(2),
-            enrollment.clone(),
-            100,
-            Some(200),
-            None,
-        );
-        let mut old = fact.to_envelope();
-        old.schema_version = 1;
-        let historical = OldInvitationFactV1::Sent {
-            context_id: test_context_id(),
-            invitation_id: InvitationId::new("legacy"),
-            sender_id: test_authority_id(1),
-            receiver_id: test_authority_id(2),
-            invitation_type: OldInvitationTypeV1::DeviceEnrollment {
-                subject_authority: test_authority_id(1),
-                invitee_authority: Some(test_authority_id(2)),
-                initiator_device_id: aura_core::DeviceId::new_from_entropy([3; 32]),
-                device_id: aura_core::DeviceId::new_from_entropy([4; 32]),
-                nickname_suggestion: None,
-                ceremony_id: aura_core::CeremonyId::new("legacy enrollment"),
-                pending_epoch: 1,
-                key_package: vec![5],
-                threshold_config: vec![6],
-                public_key_package: vec![7],
-                baseline_tree_ops: vec![],
-            },
-            sent_at: PhysicalTime {
-                ts_ms: 100,
-                uncertainty: None,
-            },
-            expires_at: Some(PhysicalTime {
-                ts_ms: 200,
-                uncertainty: None,
-            }),
-            receiver_nickname: None,
-            message: None,
-        };
-        old.payload = aura_core::util::serialization::to_vec(&historical).unwrap();
-        assert_eq!(
-            InvitationFact::from_bytes(&old.payload),
-            Some(fact.clone()),
-            "actual old shape encoded with production binary codec decodes without setup trust"
-        );
-        // None is omitted, retaining the old canonical map shape.
-        let shape: serde_json::Value = serde_json::to_value(&enrollment).unwrap();
-        assert!(shape["DeviceEnrollment"].get("setup_binding").is_none());
-        let decoded = InvitationFact::from_envelope(&old).expect("legacy fact remains replayable");
-        assert_eq!(InvitationFact::try_from_envelope(&old).unwrap(), decoded);
-        assert_eq!(decoded, fact);
-        let shareable = crate::shareable::ShareableInvitation {
-            version: 1,
-            invitation_id: InvitationId::new("legacy"),
-            sender_id: test_authority_id(1),
-            context_id: Some(test_context_id()),
-            invitation_type: enrollment,
-            expires_at: Some(200),
-            message: None,
-        };
-        assert_eq!(
-            shareable.require_enrollment_setup_binding(),
-            Err(crate::shareable::ShareableInvitationError::MissingEnrollmentSetupBinding)
-        );
-        assert_eq!(decoded.to_envelope().schema_version, 2);
-        let mut future = old;
-        future.schema_version = 3;
-        assert!(InvitationFact::from_envelope(&future).is_none());
-    }
-
-    #[test]
-    fn legacy_non_enrollment_fact_replays_and_new_writer_emits_schema_two() {
-        let fact = InvitationFact::sent_ms(
-            test_context_id(),
-            InvitationId::new("old guardian"),
-            test_authority_id(1),
-            test_authority_id(2),
-            InvitationType::Guardian {
-                subject_authority: test_authority_id(1),
-            },
-            100,
-            None,
-            None,
-        );
-        let mut old = fact.to_envelope();
-        old.schema_version = 1;
-        assert_eq!(InvitationFact::from_envelope(&old), Some(fact.clone()));
-        assert_eq!(fact.to_envelope().schema_version, 2);
-    }
-    #[test]
     fn test_invitation_fact_to_generic() {
         let fact = InvitationFact::accepted_ms(
             InvitationId::new("inv-456"),
             test_authority_id(3),
             1234567899,
+            test_causal(),
         );
 
         let generic = fact.to_generic();
@@ -1021,8 +930,12 @@ mod tests {
 
     #[test]
     fn test_binding_key_derivation() {
-        let fact =
-            InvitationFact::declined_ms(InvitationId::new("inv-42"), test_authority_id(4), 1234);
+        let fact = InvitationFact::declined_ms(
+            InvitationId::new("inv-42"),
+            test_authority_id(4),
+            1234,
+            test_causal(),
+        );
 
         let key = fact.binding_key();
         assert_eq!(key.sub_type, "invitation-declined");
@@ -1075,9 +988,24 @@ mod tests {
                 None,
                 None,
             ),
-            InvitationFact::accepted_ms(InvitationId::new("inv-2"), test_authority_id(3), 0),
-            InvitationFact::declined_ms(InvitationId::new("inv-3"), test_authority_id(4), 0),
-            InvitationFact::cancelled_ms(InvitationId::new("inv-4"), test_authority_id(5), 0),
+            InvitationFact::accepted_ms(
+                InvitationId::new("inv-2"),
+                test_authority_id(3),
+                0,
+                test_causal(),
+            ),
+            InvitationFact::declined_ms(
+                InvitationId::new("inv-3"),
+                test_authority_id(4),
+                0,
+                test_causal(),
+            ),
+            InvitationFact::cancelled_ms(
+                InvitationId::new("inv-4"),
+                test_authority_id(5),
+                0,
+                test_causal(),
+            ),
         ];
 
         assert_eq!(facts[0].invitation_id().unwrap().as_str(), "inv-1");
@@ -1099,9 +1027,24 @@ mod tests {
                 None,
                 None,
             ),
-            InvitationFact::accepted_ms(InvitationId::new("x"), test_authority_id(3), 0),
-            InvitationFact::declined_ms(InvitationId::new("x"), test_authority_id(4), 0),
-            InvitationFact::cancelled_ms(InvitationId::new("x"), test_authority_id(5), 0),
+            InvitationFact::accepted_ms(
+                InvitationId::new("x"),
+                test_authority_id(3),
+                0,
+                test_causal(),
+            ),
+            InvitationFact::declined_ms(
+                InvitationId::new("x"),
+                test_authority_id(4),
+                0,
+                test_causal(),
+            ),
+            InvitationFact::cancelled_ms(
+                InvitationId::new("x"),
+                test_authority_id(5),
+                0,
+                test_causal(),
+            ),
         ];
 
         for fact in facts {
@@ -1110,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn test_timestamp_ms_backward_compat() {
+    fn test_display_time() {
         let sent = InvitationFact::sent_ms(
             test_context_id(),
             InvitationId::new("inv"),
@@ -1123,22 +1066,31 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(sent.timestamp_ms(), 1234567890);
+        assert_eq!(sent.display_time().ts_ms, 1234567890);
 
-        let accepted =
-            InvitationFact::accepted_ms(InvitationId::new("inv"), test_authority_id(1), 1111111111);
-        assert_eq!(accepted.timestamp_ms(), 1111111111);
+        let accepted = InvitationFact::accepted_ms(
+            InvitationId::new("inv"),
+            test_authority_id(1),
+            1111111111,
+            test_causal(),
+        );
+        assert_eq!(accepted.display_time().ts_ms, 1111111111);
 
-        let declined =
-            InvitationFact::declined_ms(InvitationId::new("inv"), test_authority_id(1), 2222222222);
-        assert_eq!(declined.timestamp_ms(), 2222222222);
+        let declined = InvitationFact::declined_ms(
+            InvitationId::new("inv"),
+            test_authority_id(1),
+            2222222222,
+            test_causal(),
+        );
+        assert_eq!(declined.display_time().ts_ms, 2222222222);
 
         let cancelled = InvitationFact::cancelled_ms(
             InvitationId::new("inv"),
             test_authority_id(1),
             3333333333,
+            test_causal(),
         );
-        assert_eq!(cancelled.timestamp_ms(), 3333333333);
+        assert_eq!(cancelled.display_time().ts_ms, 3333333333);
     }
 
     #[test]
@@ -1149,7 +1101,7 @@ mod tests {
             sender: test_authority_id(1),
             agreement_mode: None,
             trace_id: None,
-            timestamp_ms: 42,
+            observed_at: PhysicalTime::exact(42),
         };
         let mut value = serde_json::to_value(&fact)
             .unwrap_or_else(|error| panic!("serialize initiated fact: {error}"));
@@ -1176,7 +1128,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("valid relationship id: {error}")),
             agreement_mode: Some(AgreementMode::ConsensusFinalized),
             trace_id: None,
-            timestamp_ms: 84,
+            observed_at: PhysicalTime::exact(84),
         };
         let mut value = serde_json::to_value(&fact)
             .unwrap_or_else(|error| panic!("serialize committed fact: {error}"));
@@ -1202,7 +1154,7 @@ mod tests {
             sender: test_authority_id(1),
             agreement_mode: None,
             trace_id: None,
-            timestamp_ms: 1,
+            observed_at: PhysicalTime::exact(1),
         };
         let mut value = serde_json::to_value(&fact)
             .unwrap_or_else(|error| panic!("serialize initiated fact: {error}"));
@@ -1221,18 +1173,18 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_legacy_ceremony_string_fields() {
-        let legacy = serde_json::json!({
+    fn test_decode_ceremony_string_fields() {
+        let payload = serde_json::json!({
             "CeremonyCommitted": {
                 "context_id": null,
                 "ceremony_id": "ceremony-legacy-1",
                 "relationship_id": "rel-0011223344556677",
                 "agreement_mode": null,
                 "trace_id": null,
-                "timestamp_ms": 99
+                "observed_at": {"ts_ms": 99, "uncertainty": null}
             }
         });
-        let bytes = serde_json::to_vec(&legacy)
+        let bytes = serde_json::to_vec(&payload)
             .unwrap_or_else(|error| panic!("encode legacy json: {error}"));
         let decoded: InvitationFact = serde_json::from_slice(&bytes)
             .unwrap_or_else(|error| panic!("legacy payload should decode: {error}"));

@@ -80,6 +80,7 @@ pub mod fact_service;
 pub mod facts;
 pub mod group;
 pub mod guards;
+pub mod revisions;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod types;
@@ -111,6 +112,10 @@ pub use facts::{
     CHAT_FACT_SCHEMA_VERSION, CHAT_FACT_TYPE_ID,
 };
 pub use group::ChatGroup;
+pub use revisions::{
+    message_revision_causal, MessageRevision, MessageRevisionKey, MessageRevisionKind,
+    MessageRevisionOutcome, MessageRevisionRegister, MessageRevisions,
+};
 pub use types::*;
 pub use view::{ChatDelta, ChatViewReducer};
 

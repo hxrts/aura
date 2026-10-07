@@ -188,7 +188,7 @@ impl ChatServiceApi {
         })?;
         let envelope = aura_core::types::facts::FactEnvelope {
             type_id: CHAT_FACT_TYPE_ID.into(),
-            schema_version: 1,
+            schema_version: aura_chat::facts::CHAT_FACT_SCHEMA_VERSION,
             encoding: aura_core::types::facts::FactEncoding::DagCbor,
             payload: bytes,
         };
@@ -599,70 +599,61 @@ impl ChatServiceApi {
         ordered
     }
 
+    /// Messages of a group with their edits and deletes resolved by
+    /// `aura_chat::MessageRevisions` (delete wins; concurrent edits resolve
+    /// causally), independent of fact order.
     fn reduce_group_messages(
         group_id: &ChatGroupId,
         facts: Vec<aura_chat::ChatFact>,
     ) -> Vec<ChatMessage> {
-        let mut messages = std::collections::BTreeMap::<String, ChatMessage>::new();
+        let mut revisions = aura_chat::MessageRevisions::default();
+        for revision in facts
+            .iter()
+            .filter_map(aura_chat::MessageRevision::from_fact)
+        {
+            revisions.insert(revision);
+        }
 
+        let mut messages = std::collections::BTreeMap::<String, ChatMessage>::new();
         for (_, fact) in Self::ordered_chat_facts(facts) {
-            match fact {
-                aura_chat::ChatFact::MessageSentSealed {
-                    message_id,
-                    sender_id,
-                    payload,
-                    sent_at,
-                    reply_to,
-                    ..
-                } => {
-                    let mut message = ChatMessage::new_text(
-                        Self::parse_message_id(&message_id),
-                        group_id.clone(),
-                        sender_id,
-                        Self::decode_payload(payload),
-                        Self::physical_timestamp(sent_at),
-                    );
-                    if let Some(reply_to) = reply_to {
-                        if let Ok(reply_uuid) = Uuid::parse_str(&reply_to) {
-                            message = message.set_reply_to(ChatMessageId(reply_uuid));
-                        }
+            let aura_chat::ChatFact::MessageSentSealed {
+                context_id,
+                channel_id,
+                message_id,
+                sender_id,
+                payload,
+                sent_at,
+                reply_to,
+                ..
+            } = fact
+            else {
+                continue;
+            };
+            let key = aura_chat::MessageRevisionKey::new(context_id, channel_id, &message_id);
+            let mut message = ChatMessage::new_text(
+                Self::parse_message_id(&message_id),
+                group_id.clone(),
+                sender_id,
+                Self::decode_payload(payload),
+                Self::physical_timestamp(sent_at),
+            );
+            match revisions.resolve(&key) {
+                aura_chat::MessageRevisionOutcome::Deleted => continue,
+                aura_chat::MessageRevisionOutcome::Edited(revision) => {
+                    if let aura_chat::MessageRevisionKind::Edit { new_payload } = &revision.kind {
+                        message.content = Self::decode_payload(new_payload.clone());
                     }
-                    messages.insert(message_id, message);
+                    message.timestamp = Self::physical_timestamp(revision.at.clone());
+                    message.message_type = aura_chat::types::MessageType::Edit;
                 }
-                aura_chat::ChatFact::MessageEdited {
-                    message_id,
-                    editor_id,
-                    new_payload,
-                    edited_at,
-                    ..
-                } => {
-                    let edited_content = Self::decode_payload(new_payload);
-                    let timestamp = Self::physical_timestamp(edited_at);
-                    if let Some(existing) = messages.get_mut(&message_id) {
-                        existing.content = edited_content;
-                        existing.timestamp = timestamp;
-                        existing.message_type = aura_chat::types::MessageType::Edit;
-                    } else {
-                        messages.insert(
-                            message_id.clone(),
-                            ChatMessage {
-                                id: Self::parse_message_id(&message_id),
-                                group_id: group_id.clone(),
-                                sender_id: editor_id,
-                                content: edited_content,
-                                message_type: aura_chat::types::MessageType::Edit,
-                                timestamp,
-                                reply_to: None,
-                                metadata: std::collections::HashMap::default(),
-                            },
-                        );
-                    }
-                }
-                aura_chat::ChatFact::MessageDeleted { message_id, .. } => {
-                    messages.remove(&message_id);
-                }
-                _ => {}
+                aura_chat::MessageRevisionOutcome::Unrevised => {}
             }
+            if let Some(reply_to) = reply_to {
+                if let Ok(reply_uuid) = Uuid::parse_str(&reply_to) {
+                    message = message.set_reply_to(ChatMessageId(reply_uuid));
+                }
+            }
+            messages.insert(message_id, message);
         }
 
         let mut messages: Vec<_> = messages.into_values().collect();
@@ -1285,6 +1276,12 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("time error: {e}")))?;
 
+        let causal = crate::handlers::shared::stamp_message_revision_causal(
+            self.effects.as_ref(),
+            self.effects.authority_id(),
+            aura_chat::MessageRevisionKey::new(context_id, channel_id, &message_id.to_string()),
+        )
+        .await?;
         // Create and commit the edit fact
         let edit_fact = aura_chat::ChatFact::message_edited_ms(
             context_id,
@@ -1293,6 +1290,7 @@ impl ChatServiceApi {
             editor,
             new_content.as_bytes().to_vec(),
             now.ts_ms,
+            causal,
         );
 
         self.commit_chat_fact_and_wait(operation, context_id, &edit_fact)
@@ -1343,6 +1341,12 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("time error: {e}")))?;
 
+        let causal = crate::handlers::shared::stamp_message_revision_causal(
+            self.effects.as_ref(),
+            self.effects.authority_id(),
+            aura_chat::MessageRevisionKey::new(context_id, channel_id, &message_id.to_string()),
+        )
+        .await?;
         // Create and commit the delete fact
         let delete_fact = aura_chat::ChatFact::message_deleted_ms(
             context_id,
@@ -1350,6 +1354,7 @@ impl ChatServiceApi {
             message_id.to_string(),
             requester,
             now.ts_ms,
+            causal,
         );
 
         self.commit_chat_fact_and_wait(operation, context_id, &delete_fact)
@@ -1636,7 +1641,7 @@ mod tests {
             .expect("fixture retains actual public chat operation");
         let envelope = aura_core::types::facts::FactEnvelope {
             type_id: CHAT_FACT_TYPE_ID.into(),
-            schema_version: 1,
+            schema_version: aura_chat::facts::CHAT_FACT_SCHEMA_VERSION,
             encoding: aura_core::types::facts::FactEncoding::DagCbor,
             payload: aura_core::util::serialization::to_vec(&fact).expect("fixture fact encoding"),
         };
@@ -1813,6 +1818,15 @@ mod tests {
                 creator,
                 b"hello, edited".to_vec(),
                 300,
+                aura_chat::revisions::test_support::causal_after(
+                    1,
+                    aura_chat::MessageRevisionKey::new(
+                        context_id,
+                        channel_id,
+                        &message_one.to_string(),
+                    ),
+                    &[],
+                ),
             ),
         )
         .await;
@@ -1825,6 +1839,15 @@ mod tests {
                 message_two.to_string(),
                 creator,
                 350,
+                aura_chat::revisions::test_support::causal_after(
+                    1,
+                    aura_chat::MessageRevisionKey::new(
+                        context_id,
+                        channel_id,
+                        &message_two.to_string(),
+                    ),
+                    &[],
+                ),
             ),
         )
         .await;
@@ -2237,7 +2260,7 @@ mod tests {
         assert_required_corrupt_chat_reads(
             aura_core::types::facts::FactEnvelope {
                 type_id: CHAT_FACT_TYPE_ID.into(),
-                schema_version: 1,
+                schema_version: aura_chat::facts::CHAT_FACT_SCHEMA_VERSION,
                 encoding: aura_core::types::facts::FactEncoding::Json,
                 payload: b"{".to_vec(),
             },

@@ -1232,6 +1232,24 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await
                 .map_err(|error| bridge_internal("Stamp friendship fact failed", error));
             }
+            CausalStampKey::Chat(key) => {
+                return crate::handlers::shared::stamp_message_revision_causal(
+                    &effects,
+                    self.agent.authority_id(),
+                    key,
+                )
+                .await
+                .map_err(|error| bridge_internal("Stamp chat revision failed", error));
+            }
+            CausalStampKey::InvitationOutcome(invitation_id) => {
+                return crate::handlers::shared::stamp_invitation_outcome_causal(
+                    &effects,
+                    self.agent.authority_id(),
+                    &invitation_id,
+                )
+                .await
+                .map_err(|error| bridge_internal("Stamp invitation outcome failed", error));
+            }
         };
         let committed = effects
             .load_committed_facts(self.agent.authority_id())
@@ -1260,10 +1278,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 observed.push(event);
             }
         }
-        let clock = crate::handlers::shared::advance_clock_past(&effects, &observed)
-            .await
-            .map_err(|error| bridge_internal("Advance logical clock failed", error))?;
-        Ok(home_governance_causal(key, &observed, &clock))
+        crate::handlers::shared::stamp_after(&effects, &observed, |clock| {
+            home_governance_causal(key, &observed, clock)
+        })
+        .await
+        .map_err(|error| bridge_internal("Advance logical clock failed", error))
     }
 
     async fn canonical_channel_creation(

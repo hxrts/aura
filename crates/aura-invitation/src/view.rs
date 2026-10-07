@@ -27,8 +27,12 @@ use aura_core::types::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_journal::DomainFact;
 
 use crate::{
-    facts::CeremonyRelationshipId, InvitationFact, InvitationStatus, INVITATION_FACT_TYPE_ID,
+    facts::CeremonyRelationshipId,
+    lifecycle::{ceremony_status_cmp, InvitationOutcome, InvitationOutcomes},
+    InvitationFact, INVITATION_FACT_TYPE_ID,
 };
+use aura_core::time::PhysicalTime;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvitationDirection {
@@ -87,15 +91,12 @@ pub enum InvitationDelta {
         expires_at: Option<u64>,
         message: Option<String>,
     },
-    /// Invitation status changed
+    /// Invitation outcomes observed. Merging unions the outcome sets, so the
+    /// resolved status (`InvitationOutcomes::status`) is order-independent.
     InvitationStatusChanged {
         invitation_id: InvitationId,
-        old_status: InvitationStatus,
-        new_status: InvitationStatus,
-        changed_at: u64,
+        outcomes: InvitationOutcomes,
     },
-    /// Invitation was removed/deleted
-    InvitationRemoved { invitation_id: InvitationId },
     /// Ceremony status changed
     CeremonyStatusChanged {
         ceremony_id: CeremonyId,
@@ -108,7 +109,8 @@ pub enum InvitationDelta {
         agreement_mode: Option<AgreementMode>,
         /// Whether reversion is still possible
         reversion_risk: bool,
-        timestamp_ms: u64,
+        /// Physical time of the winning stage, for display only
+        observed_at: PhysicalTime,
     },
 }
 
@@ -124,8 +126,7 @@ impl ComposableDelta for InvitationDelta {
     fn key(&self) -> Self::Key {
         match self {
             InvitationDelta::InvitationAdded { invitation_id, .. }
-            | InvitationDelta::InvitationStatusChanged { invitation_id, .. }
-            | InvitationDelta::InvitationRemoved { invitation_id } => {
+            | InvitationDelta::InvitationStatusChanged { invitation_id, .. } => {
                 InvitationDeltaKey::Invitation(invitation_id.clone())
             }
             InvitationDelta::CeremonyStatusChanged { ceremony_id, .. } => {
@@ -135,15 +136,6 @@ impl ComposableDelta for InvitationDelta {
     }
 
     fn try_merge(&mut self, other: Self) -> bool {
-        fn replace_if_newer(current_timestamp: &mut u64, candidate_timestamp: u64) -> bool {
-            if candidate_timestamp >= *current_timestamp {
-                *current_timestamp = candidate_timestamp;
-                true
-            } else {
-                false
-            }
-        }
-
         match (self, other) {
             (
                 InvitationDelta::InvitationAdded {
@@ -167,7 +159,8 @@ impl ComposableDelta for InvitationDelta {
                     message,
                 },
             ) => {
-                if replace_if_newer(created_at, other_ts) {
+                if other_ts >= *created_at {
+                    *created_at = other_ts;
                     *id = invitation_id;
                     *dir = direction;
                     *other_id = other_party_id;
@@ -179,62 +172,54 @@ impl ComposableDelta for InvitationDelta {
                 true
             }
             (
+                InvitationDelta::InvitationStatusChanged { outcomes, .. },
                 InvitationDelta::InvitationStatusChanged {
-                    changed_at,
-                    invitation_id: id,
-                    old_status: old,
-                    new_status: new,
-                },
-                InvitationDelta::InvitationStatusChanged {
-                    changed_at: other_ts,
-                    invitation_id,
-                    old_status,
-                    new_status,
+                    outcomes: other, ..
                 },
             ) => {
-                if replace_if_newer(changed_at, other_ts) {
-                    *id = invitation_id;
-                    *old = old_status;
-                    *new = new_status;
-                }
+                outcomes.merge(other);
                 true
             }
             (
-                InvitationDelta::InvitationRemoved { .. },
-                InvitationDelta::InvitationRemoved { .. },
-            ) => true,
-            (
-                InvitationDelta::CeremonyStatusChanged {
-                    timestamp_ms,
-                    ceremony_id: id,
-                    status: st,
-                    reason: rsn,
-                    relationship_id: rel,
-                    agreement_mode: mode,
-                    reversion_risk: risk,
-                },
-                InvitationDelta::CeremonyStatusChanged {
-                    timestamp_ms: other_ts,
-                    ceremony_id,
-                    status,
-                    reason,
-                    relationship_id,
-                    agreement_mode,
-                    reversion_risk,
-                },
+                current @ InvitationDelta::CeremonyStatusChanged { .. },
+                other @ InvitationDelta::CeremonyStatusChanged { .. },
             ) => {
-                if replace_if_newer(timestamp_ms, other_ts) {
-                    *id = ceremony_id;
-                    *st = status;
-                    *rsn = reason;
-                    *rel = relationship_id;
-                    *mode = agreement_mode;
-                    *risk = reversion_risk;
+                if ceremony_delta_cmp(&other, current) == Ordering::Greater {
+                    *current = other;
                 }
                 true
             }
             _ => false,
         }
+    }
+}
+
+/// Deterministic total order of two ceremony deltas for the same ceremony:
+/// stage precedence (`lifecycle::ceremony_status_cmp`), then content. Physical
+/// time is only the last tie-break between otherwise identical records.
+fn ceremony_delta_cmp(a: &InvitationDelta, b: &InvitationDelta) -> Ordering {
+    let key = |delta: &InvitationDelta| match delta {
+        InvitationDelta::CeremonyStatusChanged {
+            status,
+            reason,
+            relationship_id,
+            agreement_mode,
+            observed_at,
+            ..
+        } => Some((
+            *status,
+            relationship_id.as_ref().map(|id| id.as_str().to_owned()),
+            reason.clone(),
+            agreement_mode.map(|mode| format!("{mode:?}")),
+            observed_at.ts_ms,
+        )),
+        _ => None,
+    };
+    match (key(a), key(b)) {
+        (Some(left), Some(right)) => ceremony_status_cmp(left.0, right.0)
+            .then_with(|| (left.1, left.2, left.3).cmp(&(right.1, right.2, right.3)))
+            .then_with(|| right.4.cmp(&left.4)),
+        _ => Ordering::Equal,
     }
 }
 
@@ -263,7 +248,7 @@ impl InvitationViewReducer {
         reason: Option<String>,
         relationship_id: Option<CeremonyRelationshipId>,
         agreement_mode: Option<AgreementMode>,
-        timestamp_ms: u64,
+        observed_at: PhysicalTime,
     ) -> InvitationDelta {
         InvitationDelta::CeremonyStatusChanged {
             ceremony_id,
@@ -272,7 +257,7 @@ impl InvitationViewReducer {
             relationship_id,
             reversion_risk: !matches!(agreement_mode, Some(AgreementMode::ConsensusFinalized)),
             agreement_mode,
-            timestamp_ms,
+            observed_at,
         }
     }
 }
@@ -296,6 +281,17 @@ impl ViewDeltaReducer for InvitationViewReducer {
             return vec![];
         };
 
+        if let Some(outcome) = InvitationOutcome::from_fact(&inv_fact) {
+            let invitation_id = outcome.invitation_id.clone();
+            let mut outcomes = InvitationOutcomes::default();
+            outcomes.insert(outcome);
+            return vec![InvitationDelta::InvitationStatusChanged {
+                invitation_id,
+                outcomes,
+            }
+            .into_view_delta()];
+        }
+
         let delta = match inv_fact {
             InvitationFact::Sent {
                 invitation_id,
@@ -310,7 +306,7 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 let (direction, other_party_id) =
                     Self::invitation_direction(own_authority, sender_id, receiver_id);
 
-                Some(InvitationDelta::InvitationAdded {
+                InvitationDelta::InvitationAdded {
                     invitation_id,
                     direction,
                     other_party_id,
@@ -319,115 +315,90 @@ impl ViewDeltaReducer for InvitationViewReducer {
                     created_at: sent_at.ts_ms,
                     expires_at: expires_at.map(|t| t.ts_ms),
                     message,
-                })
+                }
             }
-            InvitationFact::Accepted {
-                invitation_id,
-                accepted_at,
-                ..
-            } => Some(InvitationDelta::InvitationStatusChanged {
-                invitation_id,
-                old_status: InvitationStatus::Pending,
-                new_status: InvitationStatus::Accepted,
-                changed_at: accepted_at.ts_ms,
-            }),
-            InvitationFact::Declined {
-                invitation_id,
-                declined_at,
-                ..
-            } => Some(InvitationDelta::InvitationStatusChanged {
-                invitation_id,
-                old_status: InvitationStatus::Pending,
-                new_status: InvitationStatus::Declined,
-                changed_at: declined_at.ts_ms,
-            }),
-            InvitationFact::Cancelled { invitation_id, .. } => {
-                Some(InvitationDelta::InvitationRemoved { invitation_id })
-            }
-            // Ceremony facts
+            InvitationFact::Accepted { .. }
+            | InvitationFact::Declined { .. }
+            | InvitationFact::Cancelled { .. } => return vec![],
             InvitationFact::CeremonyInitiated {
                 ceremony_id,
                 agreement_mode,
-                timestamp_ms,
+                observed_at,
                 ..
-            } => Some(Self::ceremony_status_delta(
+            } => Self::ceremony_status_delta(
                 ceremony_id,
                 CeremonyViewStatus::Initiated,
                 None,
                 None,
                 agreement_mode,
-                timestamp_ms,
-            )),
+                observed_at,
+            ),
             InvitationFact::CeremonyAcceptanceReceived {
                 ceremony_id,
                 agreement_mode,
-                timestamp_ms,
+                observed_at,
                 ..
-            } => Some(Self::ceremony_status_delta(
+            } => Self::ceremony_status_delta(
                 ceremony_id,
                 CeremonyViewStatus::AcceptanceReceived,
                 None,
                 None,
                 agreement_mode,
-                timestamp_ms,
-            )),
+                observed_at,
+            ),
             InvitationFact::CeremonyCommitted {
                 ceremony_id,
                 relationship_id,
                 agreement_mode,
-                timestamp_ms,
+                observed_at,
                 ..
-            } => Some(Self::ceremony_status_delta(
+            } => Self::ceremony_status_delta(
                 ceremony_id,
                 CeremonyViewStatus::Committed,
                 None,
                 Some(relationship_id),
                 agreement_mode,
-                timestamp_ms,
-            )),
+                observed_at,
+            ),
             InvitationFact::CeremonyAborted {
                 ceremony_id,
                 reason,
-                timestamp_ms,
+                observed_at,
                 ..
-            } => Some(Self::ceremony_status_delta(
+            } => Self::ceremony_status_delta(
                 ceremony_id,
                 CeremonyViewStatus::Aborted,
                 Some(reason),
                 None,
                 None,
-                timestamp_ms,
-            )),
+                observed_at,
+            ),
             InvitationFact::CeremonySuperseded {
                 superseded_ceremony_id,
                 superseding_ceremony_id,
                 reason,
-                timestamp_ms,
+                observed_at,
                 ..
-            } => {
-                let superseded_reason =
-                    format!("{reason} (superseded by {superseding_ceremony_id})");
-                Some(Self::ceremony_status_delta(
-                    superseded_ceremony_id,
-                    CeremonyViewStatus::Superseded,
-                    Some(superseded_reason),
-                    None,
-                    None,
-                    timestamp_ms,
-                ))
-            }
+            } => Self::ceremony_status_delta(
+                superseded_ceremony_id,
+                CeremonyViewStatus::Superseded,
+                Some(format!(
+                    "{reason} (superseded by {superseding_ceremony_id})"
+                )),
+                None,
+                None,
+                observed_at,
+            ),
         };
 
-        match delta {
-            Some(d) => vec![d.into_view_delta()],
-            None => vec![],
-        }
+        vec![delta.into_view_delta()]
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::InvitationStatus;
     use assert_matches::assert_matches;
     use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
@@ -518,51 +489,46 @@ mod tests {
         assert_eq!(*direction, InvitationDirection::Inbound);
     }
 
-    #[test]
-    fn test_invitation_accepted_reduction() {
-        let reducer = InvitationViewReducer;
+    fn causal(device: u8, counter: u64) -> aura_core::time::CausalMetadata {
+        aura_core::time::CausalMetadata {
+            revokes: Vec::new(),
+            supersedes: Vec::new(),
+            clock: aura_core::time::CausalClock {
+                lamport: counter,
+                vector: vec![(aura_core::DeviceId::new_from_entropy([device; 32]), counter)],
+            },
+        }
+    }
 
-        let fact = InvitationFact::accepted_ms(
-            InvitationId::new("inv-456"),
-            test_authority_id(3),
-            1234567899,
-        );
-
-        let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
-
+    fn status_delta(fact: &InvitationFact) -> InvitationDelta {
+        let deltas =
+            InvitationViewReducer.reduce_fact(INVITATION_FACT_TYPE_ID, &fact.to_bytes(), None);
         assert_eq!(deltas.len(), 1);
-        let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        let InvitationDelta::InvitationStatusChanged {
-            invitation_id,
-            old_status,
-            new_status,
-            ..
-        } = delta
-        else {
-            panic!("Expected InvitationStatusChanged delta");
-        };
-        assert_eq!(invitation_id.as_str(), "inv-456");
-        assert_eq!(*old_status, InvitationStatus::Pending);
-        assert_eq!(*new_status, InvitationStatus::Accepted);
+        downcast_delta::<InvitationDelta>(&deltas[0])
+            .unwrap()
+            .clone()
+    }
+
+    fn resolved(delta: &InvitationDelta) -> Option<InvitationStatus> {
+        match delta {
+            InvitationDelta::InvitationStatusChanged { outcomes, .. } => outcomes.status(),
+            other => panic!("expected InvitationStatusChanged, got {other:?}"),
+        }
     }
 
     #[test]
-    fn test_invitation_cancelled_reduction() {
-        let reducer = InvitationViewReducer;
-
-        let fact = InvitationFact::cancelled_ms(
-            InvitationId::new("inv-789"),
-            test_authority_id(4),
-            1234567900,
+    fn test_invitation_outcome_reductions() {
+        let id = || InvitationId::new("inv-456");
+        let accepted = InvitationFact::accepted_ms(id(), test_authority_id(3), 1, causal(3, 1));
+        assert_eq!(
+            resolved(&status_delta(&accepted)),
+            Some(InvitationStatus::Accepted)
         );
-
-        let bytes = fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
-
-        assert_eq!(deltas.len(), 1);
-        let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        assert_matches!(delta, InvitationDelta::InvitationRemoved { invitation_id } if invitation_id.as_str() == "inv-789");
+        let cancelled = InvitationFact::cancelled_ms(id(), test_authority_id(4), 2, causal(4, 1));
+        assert_eq!(
+            resolved(&status_delta(&cancelled)),
+            Some(InvitationStatus::Cancelled)
+        );
     }
 
     #[test]
@@ -579,69 +545,80 @@ mod tests {
         assert!(deltas.is_empty());
     }
 
+    /// Compacting status deltas unions outcome sets: every arrival order
+    /// resolves to the same status, regardless of physical time.
     #[test]
-    fn test_view_reducer_handles_legacy_ceremony_committed_payload() {
-        let reducer = InvitationViewReducer;
-        let legacy = serde_json::json!({
-            "CeremonyCommitted": {
-                "context_id": null,
-                "ceremony_id": "ceremony-legacy-view-1",
-                "relationship_id": "rel-0011223344556677",
-                "agreement_mode": null,
-                "trace_id": null,
-                "timestamp_ms": 123
-            }
-        });
-        let legacy_fact: InvitationFact = serde_json::from_value(legacy)
-            .unwrap_or_else(|error| panic!("legacy json should decode: {error}"));
-        let bytes = legacy_fact.to_bytes();
-        let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
-
-        assert_eq!(deltas.len(), 1);
-        let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        let InvitationDelta::CeremonyStatusChanged {
-            status,
-            relationship_id,
-            ..
-        } = delta
-        else {
-            panic!("Expected CeremonyStatusChanged delta");
-        };
-        assert_eq!(*status, CeremonyViewStatus::Committed);
-        assert_eq!(
-            relationship_id.as_ref().map(|id| id.as_str()),
-            Some("rel-0011223344556677")
-        );
+    fn test_compact_status_deltas_is_order_independent() {
+        let id = || InvitationId::new("inv-1");
+        let deltas = vec![
+            status_delta(&InvitationFact::accepted_ms(
+                id(),
+                test_authority_id(2),
+                900,
+                causal(2, 1),
+            )),
+            status_delta(&InvitationFact::declined_ms(
+                id(),
+                test_authority_id(3),
+                100,
+                causal(3, 1),
+            )),
+            status_delta(&InvitationFact::accepted_ms(
+                id(),
+                test_authority_id(2),
+                900,
+                causal(2, 1),
+            )),
+        ];
+        let compacted =
+            aura_journal::causal_reduction::assert_permutation_invariant(&deltas, |order| {
+                compact_deltas(order.to_vec())
+            });
+        assert_eq!(compacted.len(), 1);
+        assert_eq!(resolved(&compacted[0]), Some(InvitationStatus::Declined));
     }
 
+    /// Ceremony deltas resolve by stage precedence, not by timestamp.
     #[test]
-    fn test_compact_deltas_merges_status_updates() {
-        let deltas = vec![
-            InvitationDelta::InvitationStatusChanged {
-                invitation_id: InvitationId::new("inv-1"),
-                old_status: InvitationStatus::Pending,
-                new_status: InvitationStatus::Accepted,
-                changed_at: 100,
+    fn test_compact_ceremony_deltas_is_order_independent() {
+        let ceremony = || CeremonyId::new("ceremony-1");
+        let facts = [
+            InvitationFact::CeremonyInitiated {
+                context_id: None,
+                ceremony_id: ceremony(),
+                sender: test_authority_id(1),
+                agreement_mode: None,
+                trace_id: None,
+                observed_at: PhysicalTime::exact(300),
             },
-            InvitationDelta::InvitationStatusChanged {
-                invitation_id: InvitationId::new("inv-1"),
-                old_status: InvitationStatus::Accepted,
-                new_status: InvitationStatus::Cancelled,
-                changed_at: 200,
+            InvitationFact::CeremonyCommitted {
+                context_id: Some(test_context_id()),
+                ceremony_id: ceremony(),
+                relationship_id: CeremonyRelationshipId::parse("rel-0011223344556677").unwrap(),
+                agreement_mode: Some(AgreementMode::ConsensusFinalized),
+                trace_id: None,
+                observed_at: PhysicalTime::exact(100),
+            },
+            InvitationFact::CeremonyAborted {
+                context_id: None,
+                ceremony_id: ceremony(),
+                reason: "timeout".to_string(),
+                trace_id: None,
+                observed_at: PhysicalTime::exact(200),
             },
         ];
-
-        let compacted = compact_deltas(deltas);
-        assert_eq!(compacted.len(), 1);
-        let InvitationDelta::InvitationStatusChanged {
-            new_status,
-            changed_at,
-            ..
-        } = &compacted[0]
-        else {
-            panic!("Expected InvitationStatusChanged after compaction");
-        };
-        assert_eq!(*new_status, InvitationStatus::Cancelled);
-        assert_eq!(*changed_at, 200);
+        let deltas: Vec<InvitationDelta> = facts.iter().map(status_delta).collect();
+        let compacted =
+            aura_journal::causal_reduction::assert_permutation_invariant(&deltas, |order| {
+                compact_deltas(order.to_vec())
+            });
+        assert_matches!(
+            &compacted[..],
+            [InvitationDelta::CeremonyStatusChanged {
+                status: CeremonyViewStatus::Committed,
+                reversion_risk: false,
+                ..
+            }]
+        );
     }
 }

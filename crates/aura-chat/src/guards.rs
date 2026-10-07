@@ -113,7 +113,7 @@ pub enum EffectCommand {
     /// Append a chat fact to the journal.
     JournalAppend {
         /// The chat fact to append.
-        fact: ChatFact,
+        fact: Box<ChatFact>,
     },
 
     /// Charge flow budget.
@@ -174,7 +174,7 @@ pub fn plan_local_commit_execution(
     let mut tracked_flow_costs = Vec::new();
     for effect in outcome.effects {
         match effect {
-            EffectCommand::JournalAppend { fact } => journal_appends.push(fact),
+            EffectCommand::JournalAppend { fact } => journal_appends.push(*fact),
             EffectCommand::ChargeFlowBudget { cost } => tracked_flow_costs.push(cost),
         }
     }
@@ -232,7 +232,7 @@ mod tests {
                 cost: FlowCost::new(2),
             },
             EffectCommand::JournalAppend {
-                fact: ChatFact::ChannelClosed {
+                fact: Box::new(ChatFact::ChannelClosed {
                     context_id: ContextId::new_from_entropy([7; 32]),
                     channel_id: aura_core::types::identifiers::ChannelId::from_bytes([8; 32]),
                     closed_at: aura_core::time::PhysicalTime {
@@ -240,7 +240,7 @@ mod tests {
                         uncertainty: None,
                     },
                     actor_id: AuthorityId::new_from_entropy([9; 32]),
-                },
+                }),
             },
         ]);
 

@@ -87,6 +87,7 @@ pub mod invitation_ceremony;
 
 /// Domain fact types for invitation state changes
 pub mod facts;
+pub mod lifecycle;
 
 /// View delta and reducer for invitation facts
 pub mod view;
@@ -206,6 +207,10 @@ pub use facts::{
 };
 
 // Re-export view delta types
+pub use lifecycle::{
+    stamp_invitation_outcome, InvitationLifecycleLog, InvitationOutcome, InvitationOutcomeKind,
+    InvitationOutcomes,
+};
 pub use view::{CeremonyViewStatus, InvitationDelta, InvitationDirection, InvitationViewReducer};
 
 // Re-export protocol types

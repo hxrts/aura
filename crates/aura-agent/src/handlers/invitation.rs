@@ -1473,7 +1473,8 @@ impl InvitationHandler {
             "Accepting invitation"
         );
 
-        self.accept_invitation_owned(effects, invitation_id).await
+        // Boxed: the accept state machine is large; keep every caller future bounded.
+        Box::pin(self.accept_invitation_owned(effects, invitation_id)).await
     }
 
     async fn accept_invitation_owned(
@@ -1528,10 +1529,18 @@ impl InvitationHandler {
             "accept_invitation_prepare",
             INVITATION_ACCEPT_PREPARE_STAGE_TIMEOUT_MS,
             async {
+                // Stamp before snapshotting so the snapshot is never held
+                // across an await in the accept state machine.
+                let causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+                    effects.as_ref(),
+                    self.context.authority.authority_id(),
+                    invitation_id,
+                )
+                .await?;
                 let snapshot = self.build_snapshot(effects.as_ref()).await;
                 Ok(self
                     .service
-                    .prepare_accept_invitation(&snapshot, invitation_id))
+                    .prepare_accept_invitation(&snapshot, invitation_id, causal))
             },
         )
         .await?;
@@ -1573,7 +1582,11 @@ impl InvitationHandler {
             &operation_budget,
             "accept_invitation_materialize",
             INVITATION_ACCEPT_MATERIALIZE_STAGE_TIMEOUT_MS,
-            self.materialize_accept_invitation_state(effects.clone(), invitation_id, now_ms),
+            Box::pin(self.materialize_accept_invitation_state(
+                effects.clone(),
+                invitation_id,
+                now_ms,
+            )),
         )
         .await?;
 
@@ -2469,10 +2482,16 @@ impl InvitationHandler {
         .await?;
 
         // Build snapshot and prepare through service
+        let causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+            effects.as_ref(),
+            self.context.authority.authority_id(),
+            invitation_id,
+        )
+        .await?;
         let snapshot = self.build_snapshot(effects.as_ref()).await;
         let outcome = self
             .service
-            .prepare_decline_invitation(&snapshot, invitation_id);
+            .prepare_decline_invitation(&snapshot, invitation_id, causal);
 
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
@@ -2732,9 +2751,15 @@ impl InvitationHandler {
         let snapshot = self
             .cancellation_snapshot_required(runtime_owner.as_ref())
             .await?;
-        let outcome = self
-            .service
-            .prepare_cancel_invitation(&snapshot, &invitation.invitation_id);
+        let causal = crate::handlers::shared::stamp_invitation_outcome_causal(
+            runtime_owner.as_ref(),
+            self.context.authority.authority_id(),
+            &invitation.invitation_id,
+        )
+        .await?;
+        let outcome =
+            self.service
+                .prepare_cancel_invitation(&snapshot, &invitation.invitation_id, causal);
         if outcome.is_denied() {
             return Err(AgentError::from(aura_core::AuraError::permission_denied(
                 aura_invitation::guards::denial_reason(&outcome),

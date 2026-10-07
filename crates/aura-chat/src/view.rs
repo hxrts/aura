@@ -25,7 +25,7 @@ use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReduc
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::DomainFact;
 
-use crate::{ChatFact, ChatMessageDeliveryStatus, CHAT_FACT_TYPE_ID};
+use crate::{ChatFact, ChatMessageDeliveryStatus, MessageRevision, CHAT_FACT_TYPE_ID};
 
 /// Delta type for chat view updates.
 ///
@@ -76,25 +76,16 @@ pub enum ChatDelta {
         /// Channel epoch when message was sent (for consensus finalization tracking).
         epoch_hint: Option<u32>,
     },
-    /// A message was removed/deleted
-    MessageRemoved {
-        /// Channel from which the message was removed.
-        channel_id: String,
-        /// Identifier of the removed message.
-        message_id: String,
-    },
-    /// A message was edited (Category A operation)
-    MessageUpdated {
+    /// A message was edited or deleted. Consumers record the revision in a
+    /// `MessageRevisions` register and render its resolution, so the result
+    /// is independent of arrival order.
+    MessageRevised {
         /// Channel containing the message.
         channel_id: String,
-        /// Identifier of the edited message.
+        /// Identifier of the revised message.
         message_id: String,
-        /// AuthorityId string of the editor (must be original sender).
-        editor_id: String,
-        /// New content after edit.
-        new_content: String,
-        /// Unix epoch milliseconds when the edit occurred.
-        edited_at: u64,
+        /// The edit or delete.
+        revision: MessageRevision,
     },
     /// A message delivery lifecycle status changed.
     MessageDeliveryUpdated {
@@ -239,7 +230,7 @@ impl ComposableDelta for ChatDelta {
                 message_id,
                 ..
             }
-            | ChatDelta::MessageUpdated {
+            | ChatDelta::MessageRevised {
                 channel_id,
                 message_id,
                 ..
@@ -248,10 +239,6 @@ impl ComposableDelta for ChatDelta {
                 channel_id,
                 message_id,
                 ..
-            }
-            | ChatDelta::MessageRemoved {
-                channel_id,
-                message_id,
             } => ChatDeltaKey::Message(channel_id.clone(), message_id.clone()),
             ChatDelta::MessageRead {
                 channel_id,
@@ -301,27 +288,6 @@ impl ComposableDelta for ChatDelta {
                 *epoch = other_epoch;
             }),
             (
-                ChatDelta::MessageUpdated {
-                    edited_at,
-                    channel_id: ch,
-                    message_id: msg,
-                    editor_id: editor,
-                    new_content: content,
-                },
-                ChatDelta::MessageUpdated {
-                    edited_at: other_ts,
-                    channel_id,
-                    message_id,
-                    editor_id,
-                    new_content,
-                },
-            ) => Self::apply_if_newer(edited_at, other_ts, || {
-                *ch = channel_id;
-                *msg = message_id;
-                *editor = editor_id;
-                *content = new_content;
-            }),
-            (
                 ChatDelta::MessageDeliveryUpdated {
                     delivery_status, ..
                 },
@@ -333,7 +299,6 @@ impl ComposableDelta for ChatDelta {
                 *delivery_status = other_status;
                 true
             }
-            (ChatDelta::MessageRemoved { .. }, ChatDelta::MessageRemoved { .. }) => true,
             (
                 ChatDelta::MessageRead { read_at, .. },
                 ChatDelta::MessageRead {
@@ -374,6 +339,7 @@ impl ViewDeltaReducer for ChatViewReducer {
         let Some(chat_fact) = ChatFact::from_bytes(binding_data) else {
             return vec![];
         };
+        let revision = MessageRevision::from_fact(&chat_fact);
 
         let delta = match chat_fact {
             ChatFact::ChannelCreated {
@@ -447,20 +413,6 @@ impl ViewDeltaReducer for ChatViewReducer {
                 reader_id: reader_id.to_string(),
                 read_at: read_at.ts_ms,
             },
-            ChatFact::MessageEdited {
-                channel_id,
-                message_id,
-                editor_id,
-                new_payload,
-                edited_at,
-                ..
-            } => ChatDelta::MessageUpdated {
-                channel_id: channel_id.to_string(),
-                message_id,
-                editor_id: editor_id.to_string(),
-                new_content: String::from_utf8_lossy(&new_payload).to_string(),
-                edited_at: edited_at.ts_ms,
-            },
             ChatFact::MessageDeliveryUpdated {
                 channel_id,
                 message_id,
@@ -471,14 +423,25 @@ impl ViewDeltaReducer for ChatViewReducer {
                 message_id,
                 delivery_status,
             },
-            ChatFact::MessageDeleted {
+            ChatFact::MessageEdited {
                 channel_id,
                 message_id,
                 ..
-            } => ChatDelta::MessageRemoved {
-                channel_id: channel_id.to_string(),
+            }
+            | ChatFact::MessageDeleted {
+                channel_id,
                 message_id,
-            },
+                ..
+            } => {
+                let Some(revision) = revision else {
+                    return vec![];
+                };
+                ChatDelta::MessageRevised {
+                    channel_id: channel_id.to_string(),
+                    message_id,
+                    revision,
+                }
+            }
         };
 
         vec![delta.into_view_delta()]

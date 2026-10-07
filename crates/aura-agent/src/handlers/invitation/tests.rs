@@ -1608,6 +1608,12 @@ fn accept_guard_outcome_only_defers_peer_notification() {
                     ts_ms: 1,
                     uncertainty: None,
                 },
+                causal: aura_invitation::lifecycle::invitation_outcome_causal(
+                    &aura_core::time::LogicalTime {
+                        vector: aura_core::time::VectorClock::new(),
+                        lamport: 0,
+                    },
+                ),
             },
         },
         aura_invitation::guards::EffectCommand::NotifyPeer {

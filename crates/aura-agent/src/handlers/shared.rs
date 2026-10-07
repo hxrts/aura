@@ -218,6 +218,16 @@ pub async fn advance_clock_past<F: aura_journal::causal_reduction::CausalFact>(
         .map_err(|source| stamping_failure("advance logical clock", source))
 }
 
+/// The shared stamping step: advance past `observed`, then derive the new
+/// fact's metadata from the family's pure rule at the advanced clock.
+pub async fn stamp_after<F: aura_journal::causal_reduction::CausalFact>(
+    effects: &AuraEffectSystem,
+    observed: &[F],
+    causal: impl FnOnce(&aura_core::time::LogicalTime) -> aura_core::time::CausalMetadata,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    Ok(causal(&advance_clock_past(effects, observed).await?))
+}
+
 /// Every committed fact of `type_id` in `authority`'s journal, decoded.
 async fn load_decoded_facts<T, E>(
     effects: &AuraEffectSystem,
@@ -262,8 +272,10 @@ pub async fn stamp_contact_causal(
     key: aura_relational::ContactCausalKey,
 ) -> AgentResult<aura_core::time::CausalMetadata> {
     let observed = load_tagged_contact_facts(effects, authority).await?;
-    let clock = advance_clock_past(effects, &observed).await?;
-    Ok(aura_relational::contact_causal(key, &observed, &clock))
+    stamp_after(effects, &observed, |clock| {
+        aura_relational::contact_causal(key, &observed, clock)
+    })
+    .await
 }
 
 /// Causal metadata for a new recovery initiation of `kind` in `context_id`,
@@ -287,6 +299,32 @@ pub async fn stamp_recovery_initiation_causal(
         .map_err(|source| stamping_failure("stamp recovery initiation", source))
 }
 
+/// Causal metadata for a new terminal outcome (accept, decline, cancel) of
+/// `invitation_id`, observing every outcome of it committed in `authority`'s
+/// journal.
+///
+/// The journal scan and stamping state machine is boxed so the accept,
+/// decline and cancel flows that await it keep a bounded future size.
+pub async fn stamp_invitation_outcome_causal(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    invitation_id: &aura_core::types::identifiers::InvitationId,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    Box::pin(async move {
+        let observed = load_decoded_facts(
+            effects,
+            authority,
+            aura_invitation::INVITATION_FACT_TYPE_ID,
+            aura_invitation::InvitationFact::try_from_envelope,
+        )
+        .await?;
+        aura_invitation::stamp_invitation_outcome(effects, invitation_id, &observed)
+            .await
+            .map_err(|source| stamping_failure("stamp invitation outcome", source))
+    })
+    .await
+}
+
 /// Causal metadata for a new friendship fact about `key`, observing every
 /// friendship fact committed in `authority`'s journal.
 pub async fn stamp_friendship_causal(
@@ -304,6 +342,31 @@ pub async fn stamp_friendship_causal(
         },
     )
     .await?;
-    let clock = advance_clock_past(effects, &observed).await?;
-    Ok(aura_relational::friendship_causal(key, &observed, &clock))
+    stamp_after(effects, &observed, |clock| {
+        aura_relational::friendship_causal(key, &observed, clock)
+    })
+    .await
+}
+
+/// Causal metadata for a new edit or delete of the message `key`, observing
+/// every edit and delete committed in `authority`'s journal.
+pub async fn stamp_message_revision_causal(
+    effects: &AuraEffectSystem,
+    authority: AuthorityId,
+    key: aura_chat::MessageRevisionKey,
+) -> AgentResult<aura_core::time::CausalMetadata> {
+    let observed: Vec<_> = load_decoded_facts(
+        effects,
+        authority,
+        aura_chat::CHAT_FACT_TYPE_ID,
+        aura_chat::ChatFact::try_from_envelope,
+    )
+    .await?
+    .iter()
+    .filter_map(aura_chat::MessageRevision::from_fact)
+    .collect();
+    stamp_after(effects, &observed, |clock| {
+        aura_chat::message_revision_causal(key, &observed, clock)
+    })
+    .await
 }

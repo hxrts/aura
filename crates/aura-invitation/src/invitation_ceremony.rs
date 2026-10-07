@@ -841,7 +841,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             sender,
             agreement_mode: None,
             trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
-            timestamp_ms,
+            observed_at: aura_core::time::PhysicalTime::exact(timestamp_ms),
         };
         Self::ceremony_journal_append(CeremonyJournalKeyKind::Initiated, &ceremony_id_hex, fact)
     }
@@ -856,7 +856,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             agreement_mode: None,
             trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
-            timestamp_ms,
+            observed_at: aura_core::time::PhysicalTime::exact(timestamp_ms),
         };
         Self::ceremony_journal_append(CeremonyJournalKeyKind::Accepted, &ceremony_id_hex, fact)
     }
@@ -873,7 +873,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             relationship_id: relationship_id.clone(),
             agreement_mode: Some(AgreementMode::ConsensusFinalized),
             trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
-            timestamp_ms,
+            observed_at: aura_core::time::PhysicalTime::exact(timestamp_ms),
         };
         Self::ceremony_journal_append(CeremonyJournalKeyKind::Committed, &ceremony_id_hex, fact)
     }
@@ -889,7 +889,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             ceremony_id: Self::ceremony_fact_id(&ceremony_id_hex),
             reason: reason.to_string(),
             trace_id: Self::ceremony_trace_id(&ceremony_id_hex),
-            timestamp_ms,
+            observed_at: aura_core::time::PhysicalTime::exact(timestamp_ms),
         };
         Self::ceremony_journal_append(CeremonyJournalKeyKind::Aborted, &ceremony_id_hex, fact)
     }
