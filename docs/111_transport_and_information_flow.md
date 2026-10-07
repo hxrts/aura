@@ -8,7 +8,7 @@ Aura provides a transport layer that delivers payload-encrypted messages between
 
 The direct TCP/WebSocket emitters are byte-delivery mechanisms, not a substitute for payload encryption. Production direct transport rejects outbound envelopes unless the envelope either carries explicit `aura-payload-encryption` metadata with a non-plaintext value or uses an Aura content type that is already defined as encrypted. Test, simulation, and harness transports may bypass this send-time policy so deterministic fixtures can exercise routing without provisioning channel keys.
 
-A secure channel exposes a send operation and a receive operation. The channel manages replay protection and handles connection teardown on epoch changes.
+A secure channel exposes a send operation and a receive operation. The channel manages replay protection and handles connection teardown on epoch changes. Receipt generations, AMP generations, and AEAD nonces are owner-minted and consumed once; see [Ownership Model](122_ownership_model.md#replay-protection).
 
 ```rust
 pub struct SecureChannel {

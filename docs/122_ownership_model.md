@@ -432,6 +432,56 @@ For parity-critical operation families, "correct by construction" means:
   the first awaited verification/cache step. Only a verified import result
   allocates the separate typed contact, guardian, or channel accept owner
 
+## Replay Protection
+
+Sequences, nonces, generations, and message identities are minted by their
+owner and consumed once. Replay and reuse are rejected by type or by a
+verified nullifier, never only by a caller convention. Two layers apply.
+
+**Type layer (within one process).** These primitives live in
+`aura-core::ownership::sequence`:
+
+- `SequenceOwner<D>` is `ActorOwned` and not `Clone`. It is the only source of
+  `Admission<D>` for its domain `D`.
+- `Admission<D>` is `MoveOwned`: not `Clone` or `Copy`, private fields,
+  `#[must_use]`. It names exactly the next sequence, and admitting a frame
+  consumes it. Delivered frames are not `Clone`, so delivery consumes them
+  too. Re-injecting or forging an admission does not compile.
+- `DurableSequenceOwner<D, S>` reserves and persists the counter under its
+  owner before handing out an admission. Concurrent callers therefore never
+  share a generation, and a restart never reissues one.
+- `NonceOwner<K>` builds every AEAD nonce for key `K` itself. Raw-nonce AEAD
+  entry points are private to the effect implementation.
+- `FrostNonces` is consumed by value by signing, after its durable retirement
+  record. A signing nonce cannot be cloned, cached, or used twice.
+- `CommitKey` is the owner-minted idempotency key for a journal fact commit.
+
+Public APIs do not accept raw `u64`, `[u8; 12]`, or byte-slice sequence,
+nonce, generation, or message-id parameters outside this module. Non-test
+code has no process-global id counters.
+
+**Protocol layer (across peers, sessions, and restarts).** Choreography
+sessions run Telltale in `CommunicationReplayMode::Nullifier`, so a duplicate
+message terminates with a typed `DuplicateIdentity`. Cross-session protocol
+messages, ceremony and consensus shares, DKG packages, terminal notices, and
+commits are Telltale heap resources accepted through nullifier consumption.
+The nullifier set's root is part of the verified `HeapCommitment`.
+
+- A nullifier is derived from the authenticated message identity: sender,
+  session, label, and content hash. It excludes allocation counters, so a
+  re-sent message maps to the same nullifier.
+- Nullifier hashing uses a cryptographic `VerificationModel`.
+- Nullifier history is never removed by resource removal. It is pruned only by
+  folding a retired epoch into the committed root.
+- A consumed nullifier is persisted atomically with the effect it protects.
+  The `HeapCommitment` root is published as a fact at ceremony and epoch
+  boundaries, so peers and restarted devices verify against the root rather
+  than sync the whole set.
+
+Replay tolerance that a protocol requires, such as idempotent re-delivery or
+first-result-wins terminal outcomes, is expressed through these mechanisms,
+not by minting fresh identities to avoid duplicate detection.
+
 ## Enforcement Ratchet
 
 Aura treats ownership enforcement as a ratchet, not a static checklist.

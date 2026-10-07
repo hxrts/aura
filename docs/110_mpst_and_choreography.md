@@ -57,6 +57,8 @@ These values are sourced from runtime state such as params, journal facts, UI in
 Aura has one production choreography backend:
 - protocol-machine backend (`AuraChoreoEngine`) for admitted Telltale runtime execution, replay, and parity checks.
 
+Sessions run in Telltale nullifier replay mode, and frames are admitted by consumed owner-minted admissions; see [Ownership Model](122_ownership_model.md#replay-protection).
+
 The authoritative async ownership contract for how `aura-agent` hosts these sessions lives in `crates/aura-agent/ARCHITECTURE.md`.
 
 That contract is intentionally split:
