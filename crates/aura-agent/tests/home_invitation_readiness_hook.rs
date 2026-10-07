@@ -4,7 +4,7 @@
 
 #![allow(missing_docs)]
 
-mod support;
+use crate::support;
 
 use anyhow::Result;
 use aura_app::ui::workflows::context;

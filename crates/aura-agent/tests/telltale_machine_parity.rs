@@ -400,14 +400,14 @@ impl EffectHandler for NoOpHandler {
 #[cfg(not(target_arch = "wasm32"))]
 fn native_repro_command(test_name: &str, scenario: &str, seed: u64) -> String {
     format!(
-        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} cargo test -p aura-agent --features choreo-backend-telltale-machine --test telltale_machine_parity {test_name} -- --nocapture"
+        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} cargo test -p hxrts-aura-agent --test telltale_machine {test_name} -- --nocapture"
     )
 }
 
 #[cfg(target_arch = "wasm32")]
 fn wasm_repro_command(test_name: &str, scenario: &str, seed: u64) -> String {
     format!(
-        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner cargo test -p aura-agent --target wasm32-unknown-unknown --features web,choreo-backend-telltale-machine --test telltale_machine_parity {test_name} -- --nocapture"
+        "AURA_CONFORMANCE_SCENARIO={scenario} AURA_CONFORMANCE_SEED={seed} CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner cargo test -p hxrts-aura-agent --target wasm32-unknown-unknown --features web,choreo-backend-telltale-machine --test telltale_machine {test_name} -- --nocapture"
     )
 }
 
