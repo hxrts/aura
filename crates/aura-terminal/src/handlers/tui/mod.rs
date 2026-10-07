@@ -56,17 +56,17 @@ mod tui_tracing;
 
 use account::{
     cleanup_demo_storage, clear_pending_account_bootstrap, load_pending_account_bootstrap,
-    load_selected_runtime_identity, open_bootstrap_storage, persist_selected_authority,
-    try_load_account, wait_for_persisted_account,
+    load_selected_runtime_identity, persist_selected_authority, try_load_account,
+    wait_for_persisted_account,
 };
 #[cfg(feature = "development")]
 use demo_mode::seed_realistic_demo_world;
 use tui_tracing::init_tui_tracing;
 
 pub use account::{
-    create_account, export_account_backup, import_account_backup,
+    create_account, create_account_in, export_account_backup, import_account_backup,
     persist_completed_enrollment_runtime_identity, restore_recovered_account,
-    stage_account_for_bootstrap, try_load_account_from_path,
+    stage_account_for_bootstrap, ProfileStore,
 };
 
 pub use aura_app::ui::types::{
@@ -112,7 +112,7 @@ impl TuiMode {
         }
     }
 
-    fn is_demo(self) -> bool {
+    pub(crate) fn is_demo(self) -> bool {
         matches!(self, Self::Demo { .. })
     }
 }
@@ -256,10 +256,15 @@ impl RuntimeLaunchSpec<'_> {
         Ok(config)
     }
 
-    /// The production runtime of this launch, as the TUI runs it.
-    async fn build_production_agent(&self) -> Result<AuraAgent, AuraError> {
+    /// The production runtime of this launch, as the TUI runs it, on the
+    /// profile `profile` owns (its account records share the owner).
+    async fn build_production_agent(&self, profile: &ProfileStore) -> Result<AuraAgent, AuraError> {
         let config = self.agent_config()?;
-        AgentBuilder::new()
+        let builder = match profile.owner() {
+            Some(owner) => AgentBuilder::new().with_profile_owner(owner),
+            None => AgentBuilder::new(),
+        };
+        builder
             .with_config(config.clone())
             .with_authority(self.authority)
             .with_sync_config(self.sync_config())
@@ -403,6 +408,7 @@ fn build_demo_io_context(
     device_label: &str,
     has_existing_account: bool,
     pending_runtime_bootstrap: bool,
+    profile: &ProfileStore,
     simulator: Option<&DemoSimulator>,
     signed_codes: Option<(String, String)>,
 ) -> crate::error::TerminalResult<IoContext> {
@@ -422,6 +428,7 @@ fn build_demo_io_context(
     let mut builder = IoContext::builder()
         .with_app_core(app_core)
         .with_base_path(launch.base_path.clone())
+        .with_profile_store(profile.clone())
         .with_device_id(device_label.to_string())
         .with_mode(launch.mode)
         .with_existing_account(has_existing_account)
@@ -446,10 +453,12 @@ fn build_standard_io_context(
     device_label: &str,
     has_existing_account: bool,
     pending_runtime_bootstrap: bool,
+    profile: &ProfileStore,
 ) -> crate::error::TerminalResult<IoContext> {
     IoContext::builder()
         .with_app_core(app_core)
         .with_base_path(launch.base_path.clone())
+        .with_profile_store(profile.clone())
         .with_device_id(device_label.to_string())
         .with_mode(launch.mode)
         .with_existing_account(has_existing_account)
@@ -481,16 +490,56 @@ async fn host_node_socket(
     }
 }
 
+/// Reconcile a staged account bootstrap into the runtime, as the first
+/// launch on a newly created account does: the shared reconciler initializes
+/// the runtime account (and Note to Self), then the staged record is
+/// cleared. A pending device enrollment is left staged; its code is returned.
+async fn reconcile_pending_bootstrap(
+    storage: &impl aura_core::effects::StorageExtendedEffects,
+    app_core: &Arc<RwLock<AppCore>>,
+    pending_bootstrap: aura_app::ui::types::PendingAccountBootstrap,
+    base_path: &std::path::Path,
+    surface: BootstrapSurface,
+) -> Result<Option<String>, AuraError> {
+    use aura_app::ui::workflows::account::{
+        reconcile_pending_runtime_account_bootstrap, PendingRuntimeBootstrapAction,
+    };
+    let enrollment_code = pending_bootstrap.device_enrollment_code.clone();
+    let resolution =
+        reconcile_pending_runtime_account_bootstrap(app_core, Some(pending_bootstrap)).await?;
+    let clear = matches!(
+        resolution.action,
+        PendingRuntimeBootstrapAction::ClearedStalePending
+    ) || matches!(
+        resolution.action,
+        PendingRuntimeBootstrapAction::InitializedFromPending
+    ) && enrollment_code.is_none();
+    if clear {
+        let event = BootstrapEvent::new(surface, BootstrapEventKind::PendingBootstrapReconciled);
+        tracing::info!(event = %event, path = %base_path.display());
+        clear_pending_account_bootstrap(storage).await?;
+    }
+    if resolution.account_ready && enrollment_code.is_none() {
+        let event = BootstrapEvent::new(surface, BootstrapEventKind::RuntimeBootstrapFinalized);
+        tracing::info!(event = %event, path = %base_path.display());
+    }
+    Ok(enrollment_code)
+}
+
 /// The account's production runtime, opened the way the TUI opens it.
 pub struct ProductionRuntime {
     pub agent: Arc<AuraAgent>,
+    /// App core on the runtime, signals initialized, staged account bootstrap
+    /// reconciled.
+    pub app_core: Arc<RwLock<AppCore>>,
     pub authority: AuthorityId,
     pub context: ContextId,
 }
 
 /// Open the production runtime of the account stored at `base_path`, under
-/// the profile's exclusive lease (fails while another process holds it).
-/// Returns `Ok(None)` when no account exists there.
+/// the profile's exclusive lease (fails while another process holds it), and
+/// finish a newly created account's bootstrap the way the TUI's first launch
+/// does. Returns `Ok(None)` when no account exists there.
 pub async fn open_production_runtime(
     base_path: &std::path::Path,
 ) -> Result<Option<ProductionRuntime>, AuraError> {
@@ -501,7 +550,8 @@ pub async fn open_production_runtime(
         mode: TuiMode::Production,
     }
     .resolve();
-    let storage = open_bootstrap_storage(&launch.base_path);
+    let profile = ProfileStore::production(&launch.base_path)?;
+    let storage = profile.storage().clone();
     let AccountLoadResult::Loaded {
         authority, context, ..
     } = try_load_account(&storage).await?
@@ -512,12 +562,37 @@ pub async fn open_production_runtime(
         .await?
         .map(|identity| identity.device_id)
         .unwrap_or(launch.configured_device_id);
-    let agent = launch
-        .runtime_spec(authority, context, device_id)
-        .build_production_agent()
+    if load_pending_account_bootstrap(&storage)
+        .await?
+        .is_some_and(|pending| pending.has_pending_device_enrollment())
+    {
+        return Err(AuraError::invalid(
+            "this account has a pending device enrollment; finish it in the TUI",
+        ));
+    }
+    let agent = Arc::new(
+        launch
+            .runtime_spec(authority, context, device_id)
+            .build_production_agent(&profile)
+            .await?,
+    );
+    let app_core = initialized_runtime_app_core(launch.app_config(), agent.clone(), None)
+        .await?
+        .raw()
+        .clone();
+    if let Some(pending) = load_pending_account_bootstrap(&storage).await? {
+        reconcile_pending_bootstrap(
+            &storage,
+            &app_core,
+            pending,
+            &launch.base_path,
+            BootstrapSurface::Terminal,
+        )
         .await?;
+    }
     Ok(Some(ProductionRuntime {
-        agent: Arc::new(agent),
+        agent,
+        app_core,
         authority,
         context,
     }))
@@ -534,19 +609,26 @@ async fn handle_tui_launch(
     stdio: PreFullscreenStdio,
     launch: ResolvedTuiLaunch,
 ) -> crate::error::TerminalResult<()> {
-    handle_tui_launch_with_bootstrap(stdio, launch, None).await
+    handle_tui_launch_with_bootstrap(stdio, launch, None, None).await
 }
 
+/// `retained_profile`: the in-process bootstrap generation keeps the profile
+/// (and its exclusive owner) the first generation acquired.
 async fn handle_tui_launch_with_bootstrap(
     mut stdio: PreFullscreenStdio,
     launch: ResolvedTuiLaunch,
     bootstrap_app: Option<Arc<RwLock<AppCore>>>,
+    retained_profile: Option<ProfileStore>,
 ) -> crate::error::TerminalResult<()> {
     launch.print_startup(&mut stdio);
 
-    let storage = Arc::new(open_bootstrap_storage(&launch.base_path));
+    let profile = match retained_profile {
+        Some(profile) => profile,
+        None => ProfileStore::for_mode(&launch.base_path, launch.mode)?,
+    };
+    let storage = profile.storage().clone();
     if launch.mode.is_demo() {
-        cleanup_demo_storage(storage.as_ref(), &launch.base_path).await;
+        cleanup_demo_storage(&storage, &launch.base_path).await;
     }
 
     // The in-process bootstrap generation retains the original global logger
@@ -560,8 +642,8 @@ async fn handle_tui_launch_with_bootstrap(
     );
 
     let app_config = launch.app_config();
-    let selected_runtime_identity = load_selected_runtime_identity(storage.as_ref()).await?;
-    if load_pending_account_bootstrap(storage.as_ref())
+    let selected_runtime_identity = load_selected_runtime_identity(&storage).await?;
+    if load_pending_account_bootstrap(&storage)
         .await?
         .is_some_and(|pending| pending.has_pending_device_enrollment())
     {
@@ -581,7 +663,7 @@ async fn handle_tui_launch_with_bootstrap(
         .map(|identity| identity.device_id)
         .unwrap_or(launch.configured_device_id);
     let device_label = device_id.to_string();
-    let loaded_account = try_load_account(storage.as_ref()).await?;
+    let loaded_account = try_load_account(&storage).await?;
     let has_existing_account = matches!(loaded_account, AccountLoadResult::Loaded { .. });
 
     #[cfg(feature = "development")]
@@ -617,7 +699,7 @@ async fn handle_tui_launch_with_bootstrap(
             };
 
             let agent = match launch.mode {
-                TuiMode::Production => runtime_spec.build_production_agent().await?,
+                TuiMode::Production => runtime_spec.build_production_agent(&profile).await?,
                 TuiMode::Demo { seed } => {
                     stdio.println(format_args!("Using simulation agent with seed: {seed}"));
 
@@ -675,48 +757,17 @@ async fn handle_tui_launch_with_bootstrap(
                 initialized_runtime_app_core(app_config, agent.clone(), bootstrap_app).await?;
             let mut pending_device_enrollment_code = None;
 
-            let pending_bootstrap = load_pending_account_bootstrap(storage.as_ref()).await?;
+            let pending_bootstrap = load_pending_account_bootstrap(&storage).await?;
             if let Some(pending_bootstrap) = pending_bootstrap {
-                pending_device_enrollment_code = pending_bootstrap.device_enrollment_code.clone();
+                pending_device_enrollment_code = reconcile_pending_bootstrap(
+                    &storage,
+                    app_core.raw(),
+                    pending_bootstrap,
+                    &launch.base_path,
+                    BootstrapSurface::Tui,
+                )
+                .await?;
                 pending_runtime_bootstrap = pending_device_enrollment_code.is_some();
-                // The shared reconciler also provisions Note to Self when the runtime
-                // already holds the account, which a fresh account hits on reload.
-                let resolution =
-                    aura_app::ui::workflows::account::reconcile_pending_runtime_account_bootstrap(
-                        app_core.raw(),
-                        Some(pending_bootstrap.clone()),
-                    )
-                    .await?;
-
-                let clear_pending_bootstrap = matches!(
-                        resolution.action,
-                        aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::ClearedStalePending
-                    ) || matches!(
-                        resolution.action,
-                        aura_app::ui::workflows::account::PendingRuntimeBootstrapAction::InitializedFromPending
-                    ) && pending_device_enrollment_code.is_none();
-
-                if clear_pending_bootstrap {
-                    let reconciled_event = BootstrapEvent::new(
-                        BootstrapSurface::Tui,
-                        BootstrapEventKind::PendingBootstrapReconciled,
-                    );
-                    tracing::info!(
-                        event = %reconciled_event,
-                        path = %launch.base_path.display()
-                    );
-                    clear_pending_account_bootstrap(storage.as_ref()).await?;
-                }
-                if resolution.account_ready && pending_device_enrollment_code.is_none() {
-                    let finalized_event = BootstrapEvent::new(
-                        BootstrapSurface::Tui,
-                        BootstrapEventKind::RuntimeBootstrapFinalized,
-                    );
-                    tracing::info!(
-                        event = %finalized_event,
-                        path = %launch.base_path.display()
-                    );
-                }
             } else if context_workflows::current_home_context(app_core.raw())
                 .await
                 .is_err()
@@ -796,7 +847,7 @@ async fn handle_tui_launch_with_bootstrap(
                                             path = %startup_path.display()
                                         );
                                         if let Err(error) =
-                                            clear_pending_account_bootstrap(startup_storage.as_ref())
+                                            clear_pending_account_bootstrap(&startup_storage)
                                                 .await
                                         {
                                             tracing::error!(
@@ -912,7 +963,7 @@ async fn handle_tui_launch_with_bootstrap(
                     ));
 
                 let agent = match launch.mode {
-                    TuiMode::Production => runtime_spec.build_production_agent().await?,
+                    TuiMode::Production => runtime_spec.build_production_agent(&profile).await?,
                     TuiMode::Demo { seed } => AgentBuilder::new()
                         .with_config(runtime_spec.agent_config()?)
                         .with_authority(runtime_authority)
@@ -998,6 +1049,7 @@ async fn handle_tui_launch_with_bootstrap(
             &device_label,
             has_existing_account,
             pending_runtime_bootstrap,
+            &profile,
         )?,
     };
 
@@ -1008,6 +1060,7 @@ async fn handle_tui_launch_with_bootstrap(
         &device_label,
         has_existing_account,
         pending_runtime_bootstrap,
+        &profile,
     )?;
 
     #[cfg(not(feature = "development"))]
@@ -1076,7 +1129,7 @@ async fn handle_tui_launch_with_bootstrap(
                 .into());
             }
             match wait_for_persisted_account(
-                storage.as_ref(),
+                &storage,
                 std::time::Duration::from_secs(5),
                 std::time::Duration::from_millis(50),
             )
@@ -1102,6 +1155,7 @@ async fn handle_tui_launch_with_bootstrap(
                     stdio,
                     launch,
                     Some(retained_bootstrap_app),
+                    Some(profile),
                 ))
                 .await;
             }
@@ -1111,9 +1165,7 @@ async fn handle_tui_launch_with_bootstrap(
             authority_id,
             nickname_suggestion,
         } => {
-            let _ =
-                persist_selected_authority(&launch.base_path, authority_id, nickname_suggestion)
-                    .await?;
+            let _ = persist_selected_authority(&profile, authority_id, nickname_suggestion).await?;
             tracing::info!("Reloading TUI for authority: {authority_id}");
             return reexec_current_tui_process("authority switch").map_err(Into::into);
         }
@@ -1124,6 +1176,23 @@ async fn handle_tui_launch_with_bootstrap(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn production_runtime_opens_a_newly_created_account() {
+        let dir = tempfile::tempdir().unwrap();
+        super::create_account(dir.path(), "Alex").await.unwrap();
+        let runtime = super::open_production_runtime(dir.path())
+            .await
+            .unwrap()
+            .expect("the created account is found");
+        aura_app::ui::workflows::settings::refresh_settings_from_runtime(&runtime.app_core)
+            .await
+            .unwrap();
+        let settings = aura_app::ui::workflows::settings::get_settings(&runtime.app_core)
+            .await
+            .unwrap();
+        assert_eq!(settings.nickname_suggestion, "Alex");
+    }
+
     #[test]
     fn demo_runtime_paths_keep_rendezvous_enabled() {
         let source = include_str!("mod.rs");

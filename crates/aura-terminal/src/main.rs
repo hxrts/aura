@@ -17,10 +17,7 @@ use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs,
 use aura_terminal::command::{
     confirm, execute, with_timeout, CommandContext, CommandError, ErrorCode, Outcome, OutputMode,
 };
-use aura_terminal::handlers::{
-    tui::{open_production_runtime, try_load_account_from_path},
-    CliOutput,
-};
+use aura_terminal::handlers::{tui::open_production_runtime, CliOutput};
 use aura_terminal::ids;
 use aura_terminal::rpc_socket;
 use aura_terminal::CliHandler;
@@ -168,29 +165,36 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
         return run_account_command(command, &storage_base_path, timeout).await;
     }
 
-    let loaded_account = try_load_account_from_path(&storage_base_path)
-        .await
-        .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
-    let init_seed = match &command {
-        Commands::Init(init) => Some(format!("cli:init:{}", init.output.display())),
-        _ => None,
+    let timeout = timeout.map(Duration::from_secs);
+    if let Commands::SyncDaemon(args) = &command {
+        // The sync daemon runs on the account's production runtime.
+        let runtime = open_account(&storage_base_path).await?;
+        let effect_context = EffectContext::new(
+            runtime.authority,
+            runtime.context,
+            ExecutionMode::Production,
+        );
+        let cli_handler = CliHandler::with_agent(
+            runtime.app_core.clone(),
+            runtime.agent.clone(),
+            device_id,
+            effect_context,
+        );
+        return Ok(cli_handler
+            .handle_sync_daemon(args)
+            .await
+            .map_err(CommandError::from)?
+            .into());
+    }
+
+    // Offline device-config tools (`init`, `threshold`) need no account: their
+    // effects run under an identity derived from their inputs.
+    let seed = match &command {
+        Commands::Init(init) => format!("cli:init:{}", init.output.display()),
+        Commands::Threshold(ThresholdArgs { configs, .. }) => format!("cli:threshold:{configs}"),
+        _ => "cli:offline".to_string(),
     };
-    let (authority_id, context_id) = match loaded_account {
-        aura_terminal::handlers::tui::AccountLoadResult::Loaded {
-            authority, context, ..
-        } => (authority, context),
-        // `init` writes new threshold configs; it needs no existing account, so
-        // its effects run under an identity derived from the output directory.
-        aura_terminal::handlers::tui::AccountLoadResult::NotFound => match init_seed {
-            Some(seed) => (ids::authority_id(&seed), ids::context_id(&seed)),
-            None => {
-                return Err(CommandError::not_found(format!(
-                    "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
-                    storage_base_path.display()
-                )));
-            }
-        },
-    };
+    let (authority_id, context_id) = (ids::authority_id(&seed), ids::context_id(&seed));
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
     // Initialize agent using CLI preset (unified backend)
@@ -211,7 +215,6 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
         .map_err(|e| AuraError::agent(format!("{e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
-    let timeout = timeout.map(Duration::from_secs);
     let cli_handler = CliHandler::with_agent(app_core.clone(), agent, device_id, effect_context);
     with_timeout(&app_core, timeout, || async {
         dispatch(&cli_handler, command)
@@ -243,6 +246,30 @@ fn init_tracing(verbose: bool, json: bool) {
     };
 }
 
+/// Open the account's production runtime under the profile's exclusive
+/// lease, as the TUI does.
+async fn open_account(
+    base_path: &std::path::Path,
+) -> Result<aura_terminal::handlers::tui::ProductionRuntime, CommandError> {
+    open_production_runtime(base_path)
+        .await
+        .map_err(|e| {
+            let mut error = CommandError::from(e);
+            error.message = format!(
+                "Could not open the account at {} ({}). If another process holds it, run `aura serve` or the TUI there and retry.",
+                base_path.display(),
+                error.detail.as_deref().unwrap_or(&error.message)
+            );
+            error
+        })?
+        .ok_or_else(|| {
+            CommandError::not_found(format!(
+                "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
+                base_path.display()
+            ))
+        })
+}
+
 /// Account commands (`Run`, `rpc`, `serve`). A node already running on this
 /// data directory (the TUI or `aura serve`) answers over its socket;
 /// otherwise this process opens the account's production runtime under the
@@ -270,33 +297,8 @@ async fn run_account_command(
         _ => {}
     }
 
-    let runtime = open_production_runtime(base_path)
-        .await
-        .map_err(|e| {
-            let mut error = CommandError::from(e);
-            error.message = format!(
-                "Could not open the account at {} ({}). If another process holds it, run `aura serve` or the TUI there and retry.",
-                base_path.display(),
-                error.detail.as_deref().unwrap_or(&error.message)
-            );
-            error
-        })?
-        .ok_or_else(|| {
-            CommandError::not_found(format!(
-                "No Aura account found at {}. Create one with `aura tui`, or pass --data-dir <dir> pointing at an existing account.",
-                base_path.display()
-            ))
-        })?;
-    let app_core = AppCore::with_runtime(
-        AppConfig::default(),
-        runtime.agent.clone().as_runtime_bridge(),
-    )
-    .map_err(|e| AuraError::agent(format!("{e}")))?;
-    let app_core = Arc::new(RwLock::new(app_core));
-    // The same observed state the TUI reads.
-    AppCore::init_signals_with_hooks(&app_core)
-        .await
-        .map_err(|e| AuraError::agent(format!("initialize app signals: {e}")))?;
+    let runtime = open_account(base_path).await?;
+    let app_core = runtime.app_core.clone();
     let ctx = CommandContext::new(
         app_core.clone(),
         runtime.agent.runtime().effects(),
@@ -367,7 +369,6 @@ async fn dispatch(
                 )
                 .await
         }
-        Commands::SyncDaemon(args) => cli_handler.handle_sync_daemon(&args).await,
         #[cfg(feature = "development")]
         Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await,
         #[cfg(feature = "development")]
@@ -375,6 +376,7 @@ async fn dispatch(
         Commands::Run(_)
         | Commands::Rpc
         | Commands::Serve
+        | Commands::SyncDaemon(_)
         | Commands::Replay(_)
         | Commands::Version => Err(aura_terminal::TerminalError::Operation(
             "command reached the offline tool dispatch".into(),

@@ -1,6 +1,6 @@
 //! Local Unix-socket transport for `aura rpc` sessions.
 //!
-//! A running node (the TUI, or `aura serve`) listens on `<data-dir>/aura.sock`
+//! A running node (the TUI, or `aura serve`) listens on `<data-dir>.sock`
 //! so several clients can attach to the one runtime that holds the
 //! account's profile. The socket is owner-only: its file mode is `0600`, and
 //! connections from another user id are refused. There is no network
@@ -17,13 +17,16 @@ use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
-/// Socket file name inside the account's data directory.
-pub const SOCKET_FILE: &str = "aura.sock";
-
-/// The node socket for the account stored at `base_path`.
+/// The node socket for the account stored at `base_path`: a sibling of the
+/// data directory (`~/.aura` → `~/.aura.sock`). It stays outside the owned
+/// profile directory, whose storage owns every entry inside it.
 #[must_use]
 pub fn socket_path(base_path: &Path) -> PathBuf {
-    base_path.join(SOCKET_FILE)
+    let name = base_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "aura".to_string());
+    base_path.with_file_name(format!("{name}.sock"))
 }
 
 /// Removes the socket file when the server stops, however it stops.

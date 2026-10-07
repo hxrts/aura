@@ -39,6 +39,7 @@ pub struct IoContextBuilder {
     mode: Option<TuiMode>,
     has_existing_account: bool,
     pending_runtime_bootstrap: bool,
+    profile_store: Option<crate::handlers::tui::ProfileStore>,
     #[cfg_attr(feature = "development", doc = "Demo configuration fields")]
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
@@ -77,6 +78,15 @@ impl IoContextBuilder {
     #[must_use]
     pub fn with_device_id(mut self, id: String) -> Self {
         self.device_id = Some(id);
+        self
+    }
+
+    /// Share the profile store the launch acquired (and its exclusive
+    /// owner) for account file operations; without one, each operation
+    /// opens the profile for its mode.
+    #[must_use]
+    pub fn with_profile_store(mut self, store: crate::handlers::tui::ProfileStore) -> Self {
+        self.profile_store = Some(store);
         self
     }
 
@@ -144,9 +154,7 @@ impl IoContextBuilder {
         let device_id = self
             .device_id
             .ok_or(ContextBuildError::MissingField("device_id"))?;
-        // Mode is required in the builder but no longer used here. Keep the
-        // check to preserve the public API contract.
-        let _mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
+        let mode = self.mode.ok_or(ContextBuildError::MissingField("mode"))?;
 
         let tasks = Arc::new(UiTaskOwner::new());
         let operational = Arc::new(OperationalHandler::new(
@@ -159,7 +167,8 @@ impl IoContextBuilder {
         let has_existing_account = Arc::new(std::sync::atomic::AtomicBool::new(
             self.has_existing_account,
         ));
-        let account_files = AccountFilesHelper::new(base_path, device_id, has_existing_account);
+        let account_files = AccountFilesHelper::new(base_path, device_id, has_existing_account)
+            .with_profile(self.profile_store, mode.is_demo());
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));

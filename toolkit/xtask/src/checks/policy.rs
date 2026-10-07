@@ -2169,8 +2169,17 @@ fn is_frame_canonicality_smell(line: &str, context: &str) -> bool {
             && !context.contains("data.len() != expected_total_size"))
 }
 
+/// The owner-only product node socket transport.
+const PRODUCT_NODE_SOCKET_SOURCE: &str = "crates/aura-terminal/src/rpc_socket.rs";
+
 fn is_harness_ingress_env_smell(line: &str, context: &str, rel: &str) -> bool {
     if !rel.starts_with("crates/aura-terminal/src/") {
+        return false;
+    }
+    // The product node socket (`aura serve` / TUI, Task 160) is not harness
+    // ingress: it is bound only through `rpc_socket::bind` (mode 0600,
+    // same-uid peers, no network listener; tests/cli_socket.rs).
+    if rel == PRODUCT_NODE_SOCKET_SOURCE && line.contains("UnixListener::bind(path)") {
         return false;
     }
     if line.contains("const COMMAND_SOCKET_ENV")
@@ -8858,6 +8867,31 @@ pub fn run_shared_flow_policy() -> Result<()> {
     run_tui_selection_contract()?;
     println!("shared flow policy: clean");
     Ok(())
+}
+
+#[cfg(test)]
+mod harness_ingress_tests {
+    use super::{is_harness_ingress_env_smell, PRODUCT_NODE_SOCKET_SOURCE};
+
+    #[test]
+    fn only_the_product_node_socket_binds_without_harness_gating() {
+        let bind = "    let listener = UnixListener::bind(path)?;";
+        assert!(!is_harness_ingress_env_smell(
+            bind,
+            "",
+            PRODUCT_NODE_SOCKET_SOURCE
+        ));
+        assert!(is_harness_ingress_env_smell(
+            bind,
+            "",
+            "crates/aura-terminal/src/tui/harness_state/listener.rs"
+        ));
+        assert!(is_harness_ingress_env_smell(
+            "    UnixListener::bind(&harness_socket)?;",
+            "",
+            PRODUCT_NODE_SOCKET_SOURCE
+        ));
+    }
 }
 
 #[cfg(test)]

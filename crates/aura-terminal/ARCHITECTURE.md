@@ -37,8 +37,15 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
   local file access in `src/command`, `src/cli` and `src/rpc`, and any new
   module under `src/handlers` (offline tools and long-running modes only).
 
+- Account records (account configuration, staged bootstrap, selected
+  identity, backups) live in a `handlers::tui::ProfileStore`. In production
+  it owns the profile and uses the production runtime's own storage
+  selection; the TUI acquires it once per launch, shares it with IoContext
+  and hands its owner to production assembly. Demo mode keeps the
+  simulation runtime's nonproduction store.
+
 - One process holds an account's profile. A node (the TUI in production
-  mode, or `aura serve`) hosts `rpc_socket` at `<data-dir>/aura.sock`: mode
+  mode, or `aura serve`) hosts `rpc_socket` at `<data-dir>.sock` (beside the data directory, e.g. `~/.aura.sock`): mode
   `0600`, same-uid peers only, no network listener. Account commands and
   `aura rpc` route to that socket first; otherwise the CLI opens the
   production runtime itself through `handlers::tui::open_production_runtime`,

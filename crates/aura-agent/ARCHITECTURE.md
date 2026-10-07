@@ -105,6 +105,16 @@ ownership and complete native/browser restart coverage remain required.
 
 ## Invariants
 
+- A production profile's secure-storage provider is selected once, by
+  `AuraEffectSystem::select_profile_secure_storage` (configured backend plus
+  the profile's exclusive owner). Runtime assembly and the profile's
+  bootstrap records (`AuraEffectSystem::acquire_production_profile` /
+  `production_profile_storage`, used by frontends to stage and read account
+  records) both use it with the same encryption policy, so the encryption
+  master key is created where the runtime reads it. Frontends hand the
+  acquired owner to `AgentBuilder::with_profile_owner`; there is no key
+  adoption or migration path.
+
 - Enrollment issuance retains the exact user-transferred setup statement and
   digest in a runtime-owned versioned secure record before starting ceremony
   owners. Response verification requires that retained verifier and checks the

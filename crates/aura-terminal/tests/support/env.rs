@@ -202,19 +202,11 @@ pub async fn read_account_config(
     use std::io;
 
     use aura_core::effects::StorageCoreEffects;
-    use aura_effects::{
-        EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
-        FilesystemStorageHandler, RealCryptoHandler,
-    };
 
-    let storage = EncryptedStorage::new(
-        FilesystemStorageHandler::from_path(test_dir.to_path_buf()),
-        Arc::new(RealCryptoHandler::new()),
-        Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
-            test_dir.to_path_buf(),
-        )),
-        EncryptedStorageConfig::default(),
-    );
+    // The account records live in the production profile's own storage.
+    let storage = aura_terminal::handlers::tui::ProfileStore::production(test_dir)?
+        .storage()
+        .clone();
     let bytes = storage.retrieve("account.json").await?.ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "account.json missing from storage")
     })?;

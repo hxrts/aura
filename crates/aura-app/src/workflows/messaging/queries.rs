@@ -45,12 +45,37 @@ fn select_channel<'a>(
         .collect();
     match matches.as_slice() {
         [channel] => Ok((*channel).clone()),
-        [] => Err(AuraError::not_found(format!("Channel {raw} not found"))),
-        several => Err(AuraError::invalid(format!(
-            "Channel name {raw} matches {} channels; use its id",
-            several.len()
-        ))),
+        [] => {
+            let error = ChannelSelectorError::NotFound {
+                selector: raw.to_string(),
+            };
+            Err(AuraError::NotFound {
+                message: error.to_string(),
+                source: Some(Arc::new(error)),
+            })
+        }
+        several => {
+            let error = ChannelSelectorError::Ambiguous {
+                selector: raw.to_string(),
+                matches: several.len(),
+            };
+            Err(AuraError::Invalid {
+                message: error.to_string(),
+                source: Some(Arc::new(error)),
+            })
+        }
     }
+}
+
+/// Why a typed channel selector does not name exactly one channel.
+#[derive(Debug, thiserror::Error)]
+pub enum ChannelSelectorError {
+    /// No observed channel has this name or id.
+    #[error("Channel {selector} not found")]
+    NotFound { selector: String },
+    /// Several observed channels share this name.
+    #[error("Channel name {selector} matches {matches} channels; use its id")]
+    Ambiguous { selector: String, matches: usize },
 }
 
 /// The last `limit` messages of a channel, oldest first, optionally only
