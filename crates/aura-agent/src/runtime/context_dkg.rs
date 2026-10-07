@@ -1,4 +1,4 @@
-//! Context DKG ceremony runtime (work/8.md Tasks 55/59).
+//! Channel key DKG ceremony runtime (work/8.md Tasks 55/59/164).
 //!
 //! Runs one participant's [`ContextDkgSession`] over device-addressed
 //! transport envelopes: round-one packages are broadcast to the other
@@ -9,12 +9,12 @@
 //! in secure storage and the public key package (the verifying shares other
 //! members check threshold-PRF partials against, docs/100 §7.5) in storage.
 //!
-//! Callers choose the participants and supply each one's verified device key;
-//! this module does not decide whom to trust.
-
-// The ceremony API is consumed by AMP runtime key wiring (Work 10 Task 12,
-// agreed split 2026-10-04); until that lands only tests call it.
-#![allow(dead_code)]
+//! A ceremony is scoped to one channel of a context and one key epoch: its
+//! roster is the channel's members at that epoch, so channel keys follow
+//! channel membership (a later joiner holds no share of an earlier epoch, a
+//! departed member none of a later one). Callers choose the participants and
+//! supply each one's verified device key; this module does not decide whom
+//! to trust.
 
 use super::AuraEffectSystem;
 use aura_consensus::dkg::context_session::{
@@ -22,7 +22,7 @@ use aura_consensus::dkg::context_session::{
 };
 use aura_consensus::dkg::DkgConfig;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::types::identifiers::{AuthorityId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::AuraError;
 use aura_sync::protocols::device_sealed::{open_for_device, seal_for_device, DeviceSealedPayload};
 use rand::SeedableRng;
@@ -32,6 +32,13 @@ use std::collections::BTreeMap;
 pub(crate) const CONTEXT_DKG_CONTENT_TYPE: &str = "application/aura-context-dkg";
 const CONTEXT_DKG_SEAL_PURPOSE: &str = "aura.context-dkg.round2.v1";
 const RECEIVE_POLL_MS: u64 = 50;
+
+/// The channel a key ceremony belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ChannelKeyScope {
+    pub context: ContextId,
+    pub channel: ChannelId,
+}
 
 /// A DKG participant: its authority and the device running the ceremony.
 #[derive(Debug, Clone)]
@@ -47,6 +54,13 @@ pub(crate) struct ContextDkgPeer {
 pub(crate) struct LocalDeviceKeys {
     pub public_key: Vec<u8>,
     pub key_agreement_secret: aura_core::secrets::PrivateKeyBytes,
+}
+
+/// A DKG message on the wire, bound to its ceremony.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct ScopedDkgMessage {
+    scope: ChannelKeyScope,
+    message: ContextDkgMessage,
 }
 
 struct DeviceSealer<'a> {
@@ -96,11 +110,12 @@ impl DkgSealer for DeviceSealer<'_> {
 
 async fn send(
     effects: &AuraEffectSystem,
+    scope: ChannelKeyScope,
     peers: &BTreeMap<AuthorityId, ContextDkgPeer>,
     to: &[AuthorityId],
-    message: &ContextDkgMessage,
+    message: ContextDkgMessage,
 ) -> Result<(), AuraError> {
-    let bytes = aura_core::util::serialization::to_vec(message)
+    let bytes = aura_core::util::serialization::to_vec(&ScopedDkgMessage { scope, message })
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     for recipient in to {
         let peer = peers
@@ -114,18 +129,29 @@ async fn send(
     Ok(())
 }
 
-fn is_dkg_envelope(
+/// Decode a DKG envelope of this ceremony (`scope`, `epoch`) from one of its
+/// participants.
+fn decode_dkg_envelope(
     envelope: &TransportEnvelope,
+    scope: ChannelKeyScope,
+    epoch: u64,
     peers: &BTreeMap<AuthorityId, ContextDkgPeer>,
-) -> bool {
-    envelope.metadata.get("content-type").map(String::as_str) == Some(CONTEXT_DKG_CONTENT_TYPE)
-        && peers.contains_key(&envelope.source)
+) -> Option<ContextDkgMessage> {
+    if envelope.metadata.get("content-type").map(String::as_str) != Some(CONTEXT_DKG_CONTENT_TYPE)
+        || !peers.contains_key(&envelope.source)
+    {
+        return None;
+    }
+    let scoped: ScopedDkgMessage =
+        aura_core::util::serialization::from_slice(&envelope.payload).ok()?;
+    (scoped.scope == scope && scoped.message.epoch == epoch).then_some(scoped.message)
 }
 
-/// Run this device's side of a context DKG to completion (or until `max_polls`
-/// receive polls pass with the ceremony unfinished).
+/// Run this device's side of a channel key DKG to completion (or until
+/// `max_polls` receive polls pass with the ceremony unfinished).
 pub(crate) async fn run_context_dkg(
     effects: &AuraEffectSystem,
+    scope: ChannelKeyScope,
     config: DkgConfig,
     peers: &[ContextDkgPeer],
     local: &LocalDeviceKeys,
@@ -133,6 +159,7 @@ pub(crate) async fn run_context_dkg(
 ) -> Result<ContextDkgOutput, AuraError> {
     use aura_core::effects::RandomCoreEffects;
     let me = aura_guards::GuardContextProvider::authority_id(effects);
+    let epoch = config.epoch;
     let peers: BTreeMap<AuthorityId, ContextDkgPeer> = peers
         .iter()
         .filter(|peer| peer.authority != me)
@@ -147,13 +174,15 @@ pub(crate) async fn run_context_dkg(
     };
     let mut rng = rand::rngs::StdRng::from_seed(effects.random_bytes_32().await);
     let (mut session, broadcast) = ContextDkgSession::start(config, me, &mut rng)?;
-    send(effects, &peers, &broadcast.to, &broadcast.message).await?;
+    send(effects, scope, &peers, &broadcast.to, broadcast.message).await?;
 
     for _ in 0..max_polls {
-        while let Ok(envelope) = effects.take_inbound_envelope(|env| is_dkg_envelope(env, &peers)) {
-            let message: ContextDkgMessage =
-                aura_core::util::serialization::from_slice(&envelope.payload)
-                    .map_err(|error| AuraError::serialization(error.to_string()))?;
+        while let Ok(envelope) = effects
+            .take_inbound_envelope(|env| decode_dkg_envelope(env, scope, epoch, &peers).is_some())
+        {
+            let Some(message) = decode_dkg_envelope(&envelope, scope, epoch, &peers) else {
+                continue;
+            };
             // The transport authenticated the envelope's source; a message
             // claiming another participant is an injection attempt.
             if message.from != envelope.source {
@@ -166,7 +195,7 @@ pub(crate) async fn run_context_dkg(
             }
             let (outgoing, output) = session.receive(message, &sealer).await?;
             for out in outgoing {
-                send(effects, &peers, &out.to, &out.message).await?;
+                send(effects, scope, &peers, &out.to, out.message).await?;
             }
             if let Some(output) = output {
                 return Ok(output);
@@ -182,22 +211,28 @@ pub(crate) async fn run_context_dkg(
 }
 
 fn key_package_location(
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     epoch: u64,
 ) -> aura_core::effects::SecureStorageLocation {
     aura_core::effects::SecureStorageLocation::with_sub_key(
         "context_dkg",
-        format!("{context}:{epoch}"),
+        format!("{}:{}:{epoch}", scope.context, scope.channel),
         "key_package",
     )
 }
 
-fn public_package_key(context: aura_core::types::identifiers::ContextId, epoch: u64) -> String {
-    format!("context_dkg/{context}/{epoch}/public_key_package")
+fn public_package_key(scope: ChannelKeyScope, epoch: u64) -> String {
+    format!(
+        "context_dkg/{}/{}/{epoch}/public_key_package",
+        scope.context, scope.channel
+    )
 }
 
-fn roster_key(context: aura_core::types::identifiers::ContextId, epoch: u64) -> String {
-    format!("context_dkg/{context}/{epoch}/roster")
+fn roster_key(scope: ChannelKeyScope, epoch: u64) -> String {
+    format!(
+        "context_dkg/{}/{}/{epoch}/roster",
+        scope.context, scope.channel
+    )
 }
 
 /// The participants of a finished context DKG, in identifier order (the
@@ -220,7 +255,7 @@ impl ContextKeyRoster {
 /// secure storage, the public key package and roster in storage.
 pub(crate) async fn store_context_dkg_output(
     effects: &AuraEffectSystem,
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     config: &DkgConfig,
     output: &ContextDkgOutput,
 ) -> Result<(), AuraError> {
@@ -232,7 +267,7 @@ pub(crate) async fn store_context_dkg_output(
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     effects
         .secure_store(
-            &key_package_location(context, epoch),
+            &key_package_location(scope, epoch),
             &key_package,
             &[
                 SecureStorageCapability::Read,
@@ -246,7 +281,7 @@ pub(crate) async fn store_context_dkg_output(
         .serialize()
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     effects
-        .store(&public_package_key(context, epoch), public)
+        .store(&public_package_key(scope, epoch), public)
         .await
         .map_err(|error| {
             AuraError::storage(format!("store context DKG public package: {error}"))
@@ -258,30 +293,39 @@ pub(crate) async fn store_context_dkg_output(
     let roster = aura_core::util::serialization::to_vec(&roster)
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     effects
-        .store(&roster_key(context, epoch), roster)
+        .store(&roster_key(scope, epoch), roster)
         .await
         .map_err(|error| AuraError::storage(format!("store context DKG roster: {error}")))
+}
+
+/// This device's stored key package of a finished ceremony.
+pub(crate) async fn load_context_key_package(
+    effects: &AuraEffectSystem,
+    scope: ChannelKeyScope,
+    epoch: u64,
+) -> Result<frost_ed25519::keys::KeyPackage, AuraError> {
+    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+    let bytes = effects
+        .secure_retrieve(
+            &key_package_location(scope, epoch),
+            &[SecureStorageCapability::Read],
+        )
+        .await
+        .map_err(|error| AuraError::storage(format!("load context DKG share: {error}")))?;
+    frost_ed25519::keys::KeyPackage::deserialize(&bytes)
+        .map_err(|error| AuraError::serialization(error.to_string()))
 }
 
 /// This device's threshold-PRF partial for `input` from the stored context
 /// DKG share (docs/100 §7.5); `nonce` comes from the caller's random effect.
 pub(crate) async fn context_prf_partial(
     effects: &AuraEffectSystem,
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     epoch: u64,
     input: &[u8],
     nonce: &[u8; 64],
 ) -> Result<aura_core::crypto::threshold_prf::PartialEvaluation, AuraError> {
-    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
-    let bytes = effects
-        .secure_retrieve(
-            &key_package_location(context, epoch),
-            &[SecureStorageCapability::Read],
-        )
-        .await
-        .map_err(|error| AuraError::storage(format!("load context DKG share: {error}")))?;
-    let key_package = frost_ed25519::keys::KeyPackage::deserialize(&bytes)
-        .map_err(|error| AuraError::serialization(error.to_string()))?;
+    let key_package = load_context_key_package(effects, scope, epoch).await?;
     let participant = u16::from_le_bytes(
         key_package.identifier().serialize()[..2]
             .try_into()
@@ -299,32 +343,34 @@ pub(crate) const CHANNEL_KEY_PARTIAL_CONTENT_TYPE: &str =
 /// One member's threshold-PRF partial for a channel base key.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ChannelKeyPartial {
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     dkg_epoch: u64,
-    channel: aura_core::types::identifiers::ChannelId,
     chan_epoch: u64,
     from: AuthorityId,
     partial: aura_core::crypto::threshold_prf::PartialEvaluation,
 }
 
-async fn load_roster(
+/// The roster and public package of a finished ceremony.
+pub(crate) async fn load_roster(
     effects: &AuraEffectSystem,
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     dkg_epoch: u64,
 ) -> Result<(ContextKeyRoster, frost_ed25519::keys::PublicKeyPackage), AuraError> {
     use aura_core::effects::StorageCoreEffects;
     let read = |what: &'static str, bytes: Option<Vec<u8>>| {
-        bytes.ok_or_else(|| AuraError::not_found(format!("context DKG {what} for {context}")))
+        bytes.ok_or_else(|| {
+            AuraError::not_found(format!("context DKG {what} for {}", scope.context))
+        })
     };
     let roster = effects
-        .retrieve(&roster_key(context, dkg_epoch))
+        .retrieve(&roster_key(scope, dkg_epoch))
         .await
         .map_err(|error| AuraError::storage(format!("load context DKG roster: {error}")))?;
     let roster: ContextKeyRoster =
         aura_core::util::serialization::from_slice(&read("roster", roster)?)
             .map_err(|error| AuraError::serialization(error.to_string()))?;
     let public = effects
-        .retrieve(&public_package_key(context, dkg_epoch))
+        .retrieve(&public_package_key(scope, dkg_epoch))
         .await
         .map_err(|error| AuraError::storage(format!("load context DKG public package: {error}")))?;
     let public =
@@ -361,20 +407,19 @@ fn verify_channel_key_partial(
         .map_err(|error| AuraError::crypto(error.to_string()))
 }
 
-/// Derive the base key of `channel` at `chan_epoch` (>= 1) from the context
-/// threshold PRF (docs/112 §4): send this member's verified partial to the
-/// other roster members' devices, combine our partial with the first
-/// verified partials received until the roster threshold is met, and store
-/// the key at [`SecureStorageLocation::amp_channel_base_key`]. Every member
-/// of the context runs this for the same `(channel, chan_epoch)`; none of
-/// the inputs other than the members' shares is secret.
+/// Derive the base key of the scoped channel at `chan_epoch` (>= 1) from the
+/// ceremony's threshold PRF (docs/112 §4): send this member's verified
+/// partial to the other roster members' devices, combine our partial with
+/// the first verified partials received until the roster threshold is met,
+/// and store the key at [`SecureStorageLocation::amp_channel_base_key`].
+/// Every roster member runs this for the same `chan_epoch`; none of the
+/// inputs other than the members' shares is secret.
 ///
 /// [`SecureStorageLocation::amp_channel_base_key`]: aura_core::effects::SecureStorageLocation::amp_channel_base_key
 pub(crate) async fn derive_channel_base_key(
     effects: &AuraEffectSystem,
-    context: aura_core::types::identifiers::ContextId,
+    scope: ChannelKeyScope,
     dkg_epoch: u64,
-    channel: aura_core::types::identifiers::ChannelId,
     chan_epoch: u64,
     peers: &[ContextDkgPeer],
     max_polls: u32,
@@ -389,22 +434,21 @@ pub(crate) async fn derive_channel_base_key(
         ));
     }
     let me = aura_guards::GuardContextProvider::authority_id(effects);
-    let (roster, public) = load_roster(effects, context, dkg_epoch).await?;
+    let (roster, public) = load_roster(effects, scope, dkg_epoch).await?;
     if roster.identifier(me).is_none() {
         return Err(AuraError::permission_denied(
             "this authority holds no share of the context key",
         ));
     }
-    let input = threshold_prf::channel_base_key_input(&context, &channel, chan_epoch);
+    let input = threshold_prf::channel_base_key_input(&scope.context, &scope.channel, chan_epoch);
     let mut nonce = [0u8; 64];
     nonce[..32].copy_from_slice(&effects.random_bytes_32().await);
     nonce[32..].copy_from_slice(&effects.random_bytes_32().await);
-    let own = context_prf_partial(effects, context, dkg_epoch, &input, &nonce).await?;
+    let own = context_prf_partial(effects, scope, dkg_epoch, &input, &nonce).await?;
 
     let message = ChannelKeyPartial {
-        context,
+        scope,
         dkg_epoch,
-        channel,
         chan_epoch,
         from: me,
         partial: own,
@@ -434,10 +478,7 @@ pub(crate) async fn derive_channel_base_key(
             == Some(CHANNEL_KEY_PARTIAL_CONTENT_TYPE)
             && aura_core::util::serialization::from_slice::<ChannelKeyPartial>(&envelope.payload)
                 .is_ok_and(|m| {
-                    m.context == context
-                        && m.dkg_epoch == dkg_epoch
-                        && m.channel == channel
-                        && m.chan_epoch == chan_epoch
+                    m.scope == scope && m.dkg_epoch == dkg_epoch && m.chan_epoch == chan_epoch
                 })
     };
     for _ in 0..max_polls {
@@ -472,7 +513,11 @@ pub(crate) async fn derive_channel_base_key(
                 .map_err(|error| AuraError::crypto(error.to_string()))?;
             effects
                 .secure_store(
-                    &SecureStorageLocation::amp_channel_base_key(&context, &channel, chan_epoch),
+                    &SecureStorageLocation::amp_channel_base_key(
+                        &scope.context,
+                        &scope.channel,
+                        chan_epoch,
+                    ),
                     &key,
                     &[
                         SecureStorageCapability::Read,
@@ -554,43 +599,47 @@ mod tests {
         }
     }
 
-    /// Run a context DKG among `members` and store each member's output.
+    fn scope_of(context: u8, channel: u8) -> ChannelKeyScope {
+        ChannelKeyScope {
+            context: ContextId::new_from_entropy([context; 32]),
+            channel: ChannelId::from_bytes([channel; 32]),
+        }
+    }
+
+    /// Run a channel key DKG among `members` and store each member's output.
     async fn establish_context_key(
         members: &[Member],
-        context: aura_core::types::identifiers::ContextId,
+        scope: ChannelKeyScope,
         epoch: u64,
     ) -> Vec<ContextDkgOutput> {
         let peers: Vec<ContextDkgPeer> = members.iter().map(|(_, peer, _)| peer.clone()).collect();
         let config = dkg_config(epoch, &peers);
         let outputs: Vec<ContextDkgOutput> =
             futures::future::join_all(members.iter().map(|(effects, _, local)| {
-                run_context_dkg(effects, config.clone(), &peers, local, 400)
+                run_context_dkg(effects, scope, config.clone(), &peers, local, 400)
             }))
             .await
             .into_iter()
             .map(|output| output.expect("dkg completes"))
             .collect();
         for ((effects, _, _), output) in members.iter().zip(&outputs) {
-            store_context_dkg_output(effects, context, &config, output)
+            store_context_dkg_output(effects, scope, &config, output)
                 .await
                 .expect("stored");
         }
         outputs
     }
 
-    /// Every member derives `(channel, chan_epoch)`'s base key concurrently.
+    /// Every member derives the scoped channel's base key concurrently.
     async fn derive_all(
         members: &[Member],
-        context: aura_core::types::identifiers::ContextId,
+        scope: ChannelKeyScope,
         dkg_epoch: u64,
-        channel: aura_core::types::identifiers::ChannelId,
         chan_epoch: u64,
     ) -> Vec<[u8; 32]> {
         let peers: Vec<ContextDkgPeer> = members.iter().map(|(_, peer, _)| peer.clone()).collect();
         futures::future::join_all(members.iter().map(|(effects, _, _)| {
-            derive_channel_base_key(
-                effects, context, dkg_epoch, channel, chan_epoch, &peers, 400,
-            )
+            derive_channel_base_key(effects, scope, dkg_epoch, chan_epoch, &peers, 400)
         }))
         .await
         .into_iter()
@@ -598,7 +647,7 @@ mod tests {
         .collect()
     }
 
-    // Three authorities run the context DKG over the shared transport, with
+    // Three authorities run the DKG over the shared transport, with
     // round-two packages sealed to each recipient device, and end with the
     // same group key; any two members' partials combine to the same PRF
     // output.
@@ -609,21 +658,21 @@ mod tests {
         for seed in [61u8, 62, 63] {
             members.push(member(&shared, seed).await);
         }
-        let context = aura_core::types::identifiers::ContextId::new_from_entropy([64; 32]);
-        let outputs = establish_context_key(&members, context, 1).await;
+        let scope = scope_of(64, 65);
+        let outputs = establish_context_key(&members, scope, 1).await;
         let group = outputs[0].public_key_package.verifying_key();
         assert!(outputs
             .iter()
             .all(|output| output.public_key_package.verifying_key() == group));
 
         let input = aura_core::crypto::threshold_prf::channel_base_key_input(
-            &context,
-            &aura_core::types::identifiers::ChannelId::from_bytes([65; 32]),
+            &scope.context,
+            &scope.channel,
             1,
         );
         let mut partials = Vec::new();
         for (index, ((effects, _, _), output)) in members.iter().zip(&outputs).enumerate() {
-            let partial = context_prf_partial(effects, context, 1, &input, &[index as u8 + 1; 64])
+            let partial = context_prf_partial(effects, scope, 1, &input, &[index as u8 + 1; 64])
                 .await
                 .expect("partial");
             let verifying = output.public_key_package.verifying_shares()
@@ -644,32 +693,31 @@ mod tests {
         assert_eq!(combine([0, 1]), combine([1, 2]));
     }
 
-    // Tasks 31/55: members of a context derive the same epoch >= 1 channel
-    // base key by exchanging verified partials; the key differs per channel,
-    // per channel epoch and per context-key (DKG) epoch; a non-member that
-    // knows every public input (context, channel, epoch, the public key
-    // package) derives nothing, and its forged partials are rejected.
+    // Tasks 31/55/164: members derive the same epoch >= 1 channel base key by
+    // exchanging verified partials; the key differs per channel, per channel
+    // epoch and per key epoch (roster); a non-member that knows every public
+    // input derives nothing, and its forged partials are rejected.
     #[tokio::test(start_paused = true)]
     async fn members_derive_channel_base_keys_that_non_members_cannot() {
         use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
-        use aura_core::types::identifiers::{ChannelId, ContextId};
         let shared = crate::SharedTransport::new();
         let mut members = Vec::new();
         for seed in [71u8, 72, 73] {
             members.push(member(&shared, seed).await);
         }
-        let context = ContextId::new_from_entropy([74; 32]);
-        let channel = ChannelId::from_bytes([75; 32]);
-        let other_channel = ChannelId::from_bytes([76; 32]);
-        let outputs = establish_context_key(&members, context, 1).await;
+        let scope = scope_of(74, 75);
+        let other_scope = scope_of(74, 76);
+        let outputs = establish_context_key(&members, scope, 1).await;
 
-        let keys = derive_all(&members, context, 1, channel, 1).await;
+        let keys = derive_all(&members, scope, 1, 1).await;
         assert!(keys.iter().all(|key| *key == keys[0]), "members agree");
         let stored = members[2]
             .0
             .secure_retrieve(
                 &aura_core::effects::SecureStorageLocation::amp_channel_base_key(
-                    &context, &channel, 1,
+                    &scope.context,
+                    &scope.channel,
+                    1,
                 ),
                 &[SecureStorageCapability::Read],
             )
@@ -677,21 +725,22 @@ mod tests {
             .expect("base key cached");
         assert_eq!(stored, keys[0]);
 
-        let next_epoch = derive_all(&members, context, 1, channel, 2).await[0];
-        let other = derive_all(&members, context, 1, other_channel, 1).await[0];
+        let next_epoch = derive_all(&members, scope, 1, 2).await[0];
+        establish_context_key(&members, other_scope, 1).await;
+        let other = derive_all(&members, other_scope, 1, 1).await[0];
         assert_ne!(next_epoch, keys[0], "keys change across channel epochs");
         assert_ne!(other, keys[0], "keys differ per channel");
 
-        // A re-run DKG (authority epoch rotation) gives new keys.
-        establish_context_key(&members, context, 2).await;
-        let rotated = derive_all(&members, context, 2, channel, 1).await[0];
-        assert_ne!(rotated, keys[0], "keys change across context-key epochs");
+        // A re-run DKG (a new roster epoch) gives new keys.
+        establish_context_key(&members, scope, 2).await;
+        let rotated = derive_all(&members, scope, 2, 1).await[0];
+        assert_ne!(rotated, keys[0], "keys change across key epochs");
 
         // A non-member holds no roster or share and cannot derive.
         let (outsider, _, _) = member(&shared, 79).await;
         let peers: Vec<ContextDkgPeer> = members.iter().map(|(_, peer, _)| peer.clone()).collect();
         assert!(
-            derive_channel_base_key(&outsider, context, 1, channel, 1, &peers, 4)
+            derive_channel_base_key(&outsider, scope, 1, 1, &peers, 4)
                 .await
                 .is_err(),
             "a non-member derives no channel key"
@@ -704,20 +753,23 @@ mod tests {
             threshold: 2,
         };
         let public = &outputs[0].public_key_package;
-        let input = aura_core::crypto::threshold_prf::channel_base_key_input(&context, &channel, 1);
+        let input = aura_core::crypto::threshold_prf::channel_base_key_input(
+            &scope.context,
+            &scope.channel,
+            1,
+        );
         let forged =
             aura_core::crypto::threshold_prf::evaluate_partial(1, &[7u8; 32], &input, &[8u8; 64])
                 .expect("partial");
         let forged = ChannelKeyPartial {
-            context,
+            scope,
             dkg_epoch: 1,
-            channel,
             chan_epoch: 1,
             from: peers[0].authority,
             partial: forged,
         };
         assert!(verify_channel_key_partial(&roster, public, &input, &forged).is_err());
-        let genuine = context_prf_partial(&members[0].0, context, 1, &input, &[9u8; 64])
+        let genuine = context_prf_partial(&members[0].0, scope, 1, &input, &[9u8; 64])
             .await
             .expect("partial");
         let replayed = ChannelKeyPartial {

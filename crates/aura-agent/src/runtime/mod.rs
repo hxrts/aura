@@ -51,6 +51,8 @@ pub mod shared_transport;
 pub mod simulation_factory;
 
 // Cross-cutting concerns
+pub(crate) mod channel_consensus;
+pub(crate) mod channel_key_ceremony;
 pub(crate) mod context_dkg;
 pub mod contracts;
 pub mod diagnostics;

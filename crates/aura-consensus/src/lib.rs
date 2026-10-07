@@ -52,6 +52,7 @@ pub mod config;
 pub mod core;
 
 // Core modules
+pub mod distributed;
 pub mod dkg;
 pub mod evidence;
 pub mod facts;

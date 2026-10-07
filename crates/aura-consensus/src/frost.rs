@@ -398,33 +398,7 @@ impl FrostConsensusOrchestrator {
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
     ) -> Result<(NonceCommitment, NonceToken)> {
-        // Convert share to FROST signing share
-        // Convert Vec<u8> to fixed array for FROST
-        let share_bytes: [u8; 32] = share
-            .value
-            .as_slice()
-            .try_into()
-            .map_err(|_| AuraError::crypto("Invalid share length, expected 32 bytes"))?;
-        let signing_share = frost_ed25519::keys::SigningShare::deserialize(share_bytes)
-            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
-
-        // Generate nonces with randomness
-        let seed = random.random_bytes_32().await;
-        let mut rng = rand::rngs::StdRng::from_seed(seed);
-        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-
-        // Create commitment
-        let commitment = NonceCommitment {
-            signer: share.identifier,
-            commitment: nonces
-                .commitments()
-                .serialize()
-                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
-        };
-
-        let token = NonceToken::from(nonces);
-
-        Ok((commitment, token))
+        witness_nonce(share, random).await
     }
 
     /// Sign with a pre-generated nonce
@@ -651,6 +625,27 @@ pub(crate) fn verify_partial_signature(
             &challenge,
         )
         .map_err(|e| AuraError::crypto(format!("Partial signature verification failed: {e}")))
+}
+
+/// A witness's nonce commitment and one-use token for `share`, seeded from
+/// the caller's random effect.
+pub async fn witness_nonce(
+    share: &Share,
+    random: &(impl RandomEffects + ?Sized),
+) -> Result<(NonceCommitment, NonceToken)> {
+    let signing_share = share
+        .to_frost()
+        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
+    let mut rng = rand::rngs::StdRng::from_seed(random.random_bytes_32().await);
+    let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
+    let commitment = NonceCommitment {
+        signer: share.identifier,
+        commitment: nonces
+            .commitments()
+            .serialize()
+            .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
+    };
+    Ok((commitment, NonceToken::from(nonces)))
 }
 
 #[cfg(test)]
