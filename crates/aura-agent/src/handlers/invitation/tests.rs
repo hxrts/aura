@@ -8025,3 +8025,109 @@ large_stack_async_test!(relayed_channel_membership_fact_from_non_author_is_dropp
         FactContent::Relational(relational) if *relational == forged || *relational == relayed
     )));
 });
+
+// Task 162: a membership event written for another participant is accepted
+// only when its author has standing: a join from an admitted member (the
+// inviter), a departure from a home moderator. A stranger's join for a friend
+// and a kick by a member who does not moderate are refused at intake,
+// recorded in the dropped-message log, and not committed.
+large_stack_async_test!(membership_written_for_another_requires_author_standing, {
+    use crate::reactive::MessageDropReason;
+    use aura_amp::{ChannelMembershipFact, ChannelParticipantEvent};
+    let authority = AuthorityId::new_from_entropy([222u8; 32]);
+    let inviter = AuthorityId::new_from_entropy([223u8; 32]);
+    let acceptor = AuthorityId::new_from_entropy([224u8; 32]);
+    let stranger = AuthorityId::new_from_entropy([225u8; 32]);
+    let friend = AuthorityId::new_from_entropy([226u8; 32]);
+    let config = AgentConfig::default();
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+    let _pipeline = start_test_reactive_pipeline(&effects).await;
+    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+    let context_id = ContextId::new_from_entropy([227u8; 32]);
+    let channel_id = ChannelId::from_bytes([228u8; 32]);
+    let token = |byte| aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([byte; 32]));
+    let inviter_join = ChannelMembershipFact::new(
+        context_id,
+        channel_id,
+        inviter,
+        ChannelParticipantEvent::Joined,
+        token(1),
+    )
+    .to_generic();
+    let invited_join = ChannelMembershipFact::joined_episode(
+        context_id,
+        channel_id,
+        acceptor,
+        "inv-standing".into(),
+        token(2),
+    )
+    .authored_by(inviter)
+    .to_generic();
+    let stranger_join = ChannelMembershipFact::joined_episode(
+        context_id,
+        channel_id,
+        friend,
+        "inv-forged".into(),
+        token(3),
+    )
+    .authored_by(stranger)
+    .to_generic();
+    let member_kick = ChannelMembershipFact::new(
+        context_id,
+        channel_id,
+        acceptor,
+        ChannelParticipantEvent::Left,
+        token(4),
+    )
+    .authored_by(inviter)
+    .to_generic();
+    send_peer_relational_fact(&effects, authority, inviter, context_id, &inviter_join, 1).await;
+    send_peer_relational_fact(&effects, authority, inviter, context_id, &invited_join, 2).await;
+    send_peer_relational_fact(&effects, authority, stranger, context_id, &stranger_join, 3).await;
+    send_peer_relational_fact(&effects, authority, inviter, context_id, &member_kick, 4).await;
+    let processed = handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+    assert_eq!(processed, 2, "the inviter's join and invited join are processed");
+
+    let (drops, total) = effects.message_drops();
+    assert_eq!(total, 2);
+    assert_eq!(drops[0].peer_id, Some(stranger));
+    assert_eq!(
+        drops[0].reason,
+        MessageDropReason::MembershipAuthorWithoutStanding {
+            author: stranger,
+            participant: friend,
+        }
+    );
+    assert_eq!(drops[1].peer_id, Some(inviter));
+    assert_eq!(
+        drops[1].reason,
+        MessageDropReason::MembershipAuthorWithoutStanding {
+            author: inviter,
+            participant: acceptor,
+        }
+    );
+    let committed: Vec<RelationalFact> = effects
+        .load_committed_facts(authority)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|fact| match fact.content {
+            FactContent::Relational(relational) => Some(relational),
+            _ => None,
+        })
+        .collect();
+    assert!(committed.contains(&inviter_join));
+    assert!(committed.contains(&invited_join));
+    assert!(!committed.contains(&stranger_join));
+    assert!(!committed.contains(&member_kick));
+    let participants =
+        aura_amp::channel_membership_observations(effects.as_ref(), context_id, channel_id)
+            .await
+            .unwrap();
+    assert!(participants.contains(acceptor));
+    assert!(!participants.contains(friend));
+});

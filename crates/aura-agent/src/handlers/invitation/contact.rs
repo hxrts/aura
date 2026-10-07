@@ -1125,6 +1125,21 @@ impl<'a> InvitationContactHandler<'a> {
                                 continue;
                             }
                         }
+                        // A membership event written for someone else needs
+                        // an author with standing (inviter or moderator).
+                        if let Some(reason) =
+                            super::context_sync::membership_standing_refusal(effects.as_ref(), inner)
+                                .await?
+                        {
+                            effects.record_message_drop(MessageDrop::inbound_intake(
+                                sender,
+                                context,
+                                Some(fact),
+                                reason,
+                            ));
+                            in_flight_envelope = None;
+                            continue;
+                        }
                     }
 
                     // Context sync may deliver a fact again; commit it once.
