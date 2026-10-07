@@ -282,7 +282,7 @@ expect_status 0 env ACTIVE_ROOT="$test_root/sibling" bash "$repo_root/scripts/de
 # Cargo output goes to this checkout's target even if the shell named another.
 reset_case
 expect_status 0 env CARGO_TARGET_DIR=/elsewhere/target bash "$repo_root/scripts/dev/build-budget.sh" \
-  --root "$project" --no-prune -- sh -c 'test "$CARGO_TARGET_DIR" = "$PROJECT_ROOT/target"'
+  --root "$project" --no-prune -- sh -c 'test -z "${CARGO_TARGET_DIR:-}"'
 
 # A live reservation of another admitted build counts against the volume
 # floor (20 GiB free - 6 GiB reserved < 15 GiB); a dead one is reclaimed.

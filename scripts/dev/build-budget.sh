@@ -32,7 +32,7 @@ Defaults: per-checkout target soft cap 10 GiB, volume admission floor 15 GiB fre
 5 GiB free. Override with AURA_BUILD_TARGET_CAP_GIB, AURA_BUILD_MIN_FREE_GIB,
 AURA_BUILD_EMERGENCY_FREE_GIB, AURA_BUILD_RESERVE_GIB (integer GiB) and
 AURA_BUILD_SHARED_DIR (default ~/.cache/aura-build). Run inside nix develop.
-Cargo output always goes to this checkout's target/ (CARGO_TARGET_DIR is set).
+Cargo output always goes to this checkout's target/ (CARGO_TARGET_DIR is unset).
 Incremental compilation defaults to 0; set CARGO_INCREMENTAL=1 to opt in.
 EOF
 }
@@ -53,8 +53,9 @@ done
 root="$(cd "$root" && pwd -P)"
 [[ -f "$root/Cargo.toml" ]] || { echo "build-budget: no Cargo.toml in $root" >&2; exit 2; }
 # Cargo writes to this checkout's target/ even when the shell exported
-# another checkout's CARGO_TARGET_DIR (the dev shell sets it at entry).
-export CARGO_TARGET_DIR="$root/target"
+# another checkout's CARGO_TARGET_DIR. Unset rather than overridden: sccache
+# hashes CARGO_* variables, and a per-checkout value would defeat sharing.
+unset CARGO_TARGET_DIR
 [[ ! -L "$root/target" ]] || { echo 'build-budget: target is a symlink; refusing' >&2; exit 1; }
 if [[ "$dry_run" -eq 0 && "$#" -eq 0 ]]; then
   echo 'build-budget: command required after --' >&2

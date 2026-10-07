@@ -896,7 +896,7 @@ Use `just test` for the full suite. Use `just test-crate` for focused iteration 
 ### Build and Caching
 
 Route builds through `scripts/dev/build-budget.sh`. It writes to the
-checkout's own `target/` (it sets `CARGO_TARGET_DIR`), sweeps that target to a
+checkout's own `target/` (it unsets `CARGO_TARGET_DIR`), sweeps that target to a
 per-checkout soft cap (`AURA_BUILD_TARGET_CAP_GIB`, default 10), and admits a
 build only if the volume keeps `AURA_BUILD_MIN_FREE_GIB` (default 15) free
 after the reservations of other admitted builds. Each admitted build reserves
