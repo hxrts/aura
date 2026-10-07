@@ -41,6 +41,10 @@ link() { # link <inviter> <accepter>: contact invite from inviter, imported by a
   normal "$1"; keys "$1" 3n 1; key "$1" enter 4; local c; c=$(lastcode "$1"); key "$1" esc
   normal "$2"; keys "$2" 3a 1; keys "$2" "$c" 1; key "$2" enter 6; echo "link $1->$2 code=${#c}"
 }
+pick_channel() { # pick_channel <inst> <channel-name>: select the named chat channel (verified)
+  normal "$1"; keys "$1" 2 1
+  for _ in 1 2 3 4 5 6 7 8; do chans "$1" | grep -q "\"\*$2\"" && return 0; keys "$1" j 0.6; done; return 1
+}
 pick_contact() { # pick_contact <inst> <authority-id>: move the contacts selection to the id
   normal "$1"; keys "$1" 3 1
   for _ in 1 2 3 4 5 6; do [ "$(sel "$1" contacts)" = "$2" ] && return 0; keys "$1" j 0.6; done; return 1
