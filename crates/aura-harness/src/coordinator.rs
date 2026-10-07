@@ -1514,12 +1514,10 @@ fn choose_available_port(relay_host: Option<&str>, start: u16, attempts: u16) ->
     )
 }
 
+// The harness runs from the checkout (like the Playwright driver lookup), not
+// from its build directory: shipped Nix builds have no source tree.
 fn harness_repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
 fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
