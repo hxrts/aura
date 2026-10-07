@@ -161,7 +161,11 @@ mod tests {
         // key from real DKG shares.
         let config = config(2, 3);
         let outcomes = run(&config, 2);
-        let input = channel_base_key_input(&[9; 32], &[8; 32], 1);
+        let input = channel_base_key_input(
+            &aura_core::types::identifiers::ContextId::new_from_entropy([9; 32]),
+            &aura_core::types::identifiers::ChannelId::from_bytes([8; 32]),
+            1,
+        );
         let partial = |index: usize, nonce: u8| {
             let (key, public) = &outcomes[index];
             let participant = u16::try_from(index + 1).unwrap();

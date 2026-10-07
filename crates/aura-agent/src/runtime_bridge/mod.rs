@@ -904,17 +904,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             requested_recipients.insert(recipient);
         }
 
+        // A late joiner receives the existing epoch-0 key: the channel
+        // invitation carries it to the recipient (docs/112 §1.2). The
+        // bootstrap fact keeps listing the dealer's initial recipients.
         if let Some(existing) = existing_bootstrap {
-            if !requested_recipients.is_empty() {
-                let existing_recipients: BTreeSet<_> =
-                    existing.recipients.iter().copied().collect();
-                if !requested_recipients.is_subset(&existing_recipients) {
-                    return Err(bridge_validation_message(
-                        "AMP bootstrap already exists; refusing to add new recipients (late joiners cannot receive bootstrap keys)",
-                    ).into());
-                }
-            }
-
             let location = SecureStorageLocation::amp_bootstrap_key(
                 &context,
                 &channel,

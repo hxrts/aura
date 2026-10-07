@@ -481,6 +481,23 @@ async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()>
         })
         .await?;
     }
+    // Barbara's copy of the new join episode can reach Alex through
+    // relational-context sync before his own acceptance has rejoined the AMP
+    // channel; his send needs the channel membership itself.
+    let context = home_view(&alex.app, home)
+        .await
+        .and_then(|h| h.context_id)
+        .ok_or_else(|| anyhow!("Alex's home has no context"))?;
+    wait_until("Alex rejoins the home's AMP channel", || async {
+        let Ok(runtime) = aura_app::ui::workflows::runtime::require_runtime(&alex.app).await else {
+            return false;
+        };
+        runtime
+            .amp_list_channel_participants(context, home)
+            .await
+            .is_ok_and(|participants| participants.contains(&alex.id))
+    })
+    .await?;
     for (from, to, text) in [
         (&alex, &barbara, "back from alex"),
         (&barbara, &alex, "welcome back"),

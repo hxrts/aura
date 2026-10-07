@@ -28,8 +28,10 @@ pub(super) struct InvitationContextSync<'a> {
 
 /// Whether a home-context fact is governance state a joining member needs
 /// to evaluate moderation and access: creation (the creator's moderator
-/// designation), moderator grants/revokes, access overrides and the
-/// capability config.
+/// designation), moderator grants/revokes, access
+/// overrides, the capability config, and membership episodes (joins and
+/// leaves), so every member learns of members who joined after it and a
+/// joiner learns of the members before it.
 pub(super) fn is_home_governance_envelope(
     envelope: &aura_core::types::facts::FactEnvelope,
 ) -> bool {
@@ -44,6 +46,8 @@ pub(super) fn is_home_governance_envelope(
                 aura_social::SocialFact::HomeCreated { .. }
                     | aura_social::SocialFact::AccessOverrideSet { .. }
                     | aura_social::SocialFact::AccessLevelCapabilitiesConfigured { .. }
+                    | aura_social::SocialFact::MemberJoined { .. }
+                    | aura_social::SocialFact::MemberLeft { .. }
             )
         ),
         _ => false,
