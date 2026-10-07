@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use aura_agent::core::default_context_id_for_authority;
+use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_app::ui::types::{
     AccountBackup, AccountConfig, BootstrapEvent, BootstrapEventKind, BootstrapRuntimeIdentity,
     BootstrapSurface, PendingAccountBootstrap, PENDING_ACCOUNT_BOOTSTRAP_FILENAME,
@@ -10,7 +11,7 @@ use aura_app::ui::workflows::account::{
     derive_recovered_context_id, parse_backup_code, prepare_pending_account_bootstrap,
 };
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
+use aura_core::effects::{StorageCoreEffects, StorageEffects, StorageExtendedEffects};
 use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_effects::time::PhysicalTimeHandler;
@@ -24,23 +25,90 @@ use super::{AccountLoadResult, ACCOUNT_FILENAME, JOURNAL_FILENAME};
 
 const SELECTED_RUNTIME_IDENTITY_FILENAME: &str = "selected-runtime-identity.json";
 
-pub(super) type BootstrapStorage = EncryptedStorage<
-    FilesystemStorageHandler,
-    RealCryptoHandler,
-    FilesystemFallbackSecureStorageHandler,
->;
+/// One profile's account records: account configuration, staged account
+/// bootstrap and selected runtime identity.
+///
+/// A production profile holds the profile's exclusive owner and stores its
+/// records exactly as the production runtime stores the profile (same owned
+/// files, same selected secure-storage provider, same encryption policy), so
+/// the encryption master key is created where the runtime reads it. Hand
+/// [`ProfileStore::owner`] to production assembly so both share one owned
+/// profile. Demo profiles keep the simulation runtime's nonproduction store.
+#[derive(Clone)]
+pub struct ProfileStore {
+    base_path: PathBuf,
+    storage: Arc<dyn StorageEffects>,
+    owner: Option<Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+}
 
-pub(super) fn open_bootstrap_storage(base_path: &Path) -> BootstrapStorage {
-    let crypto = Arc::new(RealCryptoHandler::new());
-    let secure = Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
-        base_path.to_path_buf(),
-    ));
-    EncryptedStorage::new(
-        FilesystemStorageHandler::from_path(base_path.to_path_buf()),
-        crypto,
-        secure,
-        EncryptedStorageConfig::default(),
-    )
+impl ProfileStore {
+    /// Acquire the production profile at `base_path`. Fails while another
+    /// process (a running TUI or `aura serve`) owns it.
+    pub fn production(base_path: &Path) -> Result<Self, AuraError> {
+        let mut config = AgentConfig::default();
+        config.storage.base_path = base_path.to_path_buf();
+        if let Some(backend) = crate::env::secure_storage_backend_override()? {
+            config.storage.secure_storage_backend = backend;
+        }
+        let (owner, storage) =
+            AuraEffectSystem::acquire_production_profile(&config).map_err(|error| {
+                AuraError::Internal {
+                    message: format!("open profile {}", base_path.display()),
+                    source: Some(Arc::new(error)),
+                }
+            })?;
+        Ok(Self {
+            base_path: base_path.to_path_buf(),
+            storage: Arc::new(storage),
+            owner: Some(owner),
+        })
+    }
+
+    /// The nonproduction (demo/simulation) store at `base_path`.
+    #[must_use]
+    pub fn nonproduction(base_path: &Path) -> Self {
+        let secure = Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
+            base_path.to_path_buf(),
+        ));
+        let storage = EncryptedStorage::new(
+            FilesystemStorageHandler::from_path(base_path.to_path_buf()),
+            Arc::new(RealCryptoHandler::new()),
+            secure,
+            EncryptedStorageConfig::default(),
+        );
+        Self {
+            base_path: base_path.to_path_buf(),
+            storage: Arc::new(storage),
+            owner: None,
+        }
+    }
+
+    /// The store for a TUI mode.
+    pub fn for_mode(base_path: &Path, mode: super::TuiMode) -> Result<Self, AuraError> {
+        if mode.is_demo() {
+            Ok(Self::nonproduction(base_path))
+        } else {
+            Self::production(base_path)
+        }
+    }
+
+    /// The records' storage.
+    #[must_use]
+    pub fn storage(&self) -> &Arc<dyn StorageEffects> {
+        &self.storage
+    }
+
+    /// The profile's exclusive owner (production profiles only).
+    #[must_use]
+    pub fn owner(&self) -> Option<Arc<aura_effects::profile_storage::OwnedProfileLease>> {
+        self.owner.clone()
+    }
+
+    /// The profile directory.
+    #[must_use]
+    pub fn base_path(&self) -> &Path {
+        &self.base_path
+    }
 }
 
 pub(super) async fn cleanup_demo_storage(storage: &impl StorageExtendedEffects, base_path: &Path) {
@@ -91,12 +159,6 @@ pub(super) async fn wait_for_persisted_account(
         }
         tokio::time::sleep(poll_interval).await;
     }
-}
-
-/// Load persisted account state for a terminal storage root.
-pub async fn try_load_account_from_path(base_path: &Path) -> Result<AccountLoadResult, AuraError> {
-    let storage = open_bootstrap_storage(base_path);
-    try_load_account(&storage).await
 }
 
 async fn persist_account_config(
@@ -220,11 +282,11 @@ async fn persist_selected_runtime_identity(
 }
 
 pub(super) async fn persist_selected_authority(
-    base_path: &Path,
+    store: &ProfileStore,
     authority_id: AuthorityId,
     nickname_suggestion: Option<String>,
 ) -> Result<ContextId, AuraError> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let time = PhysicalTimeHandler::new();
     let context_id = default_context_id_for_authority(authority_id);
 
@@ -240,23 +302,48 @@ pub(super) async fn persist_selected_authority(
     Ok(context_id)
 }
 
-/// Create a new account and save to disk.
+/// Stage a new account in `store`; the first launch on it initializes the
+/// runtime account.
+pub async fn create_account_in(
+    store: &ProfileStore,
+    nickname_suggestion: &str,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?;
+    create_account_with_pending_bootstrap(store, pending_bootstrap, None).await
+}
+
+/// Stage a new production account at `base_path`, refusing when one exists.
+pub async fn create_new_account(
+    base_path: &Path,
+    nickname_suggestion: &str,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let store = ProfileStore::production(base_path)?;
+    if let AccountLoadResult::Loaded { authority, .. } = try_load_account(store.storage()).await? {
+        return Err(AuraError::invalid(format!(
+            "an account ({authority}) already exists at {}",
+            base_path.display()
+        )));
+    }
+    create_account_in(&store, nickname_suggestion).await
+}
+
+/// Stage a new production account at `base_path`, owning the profile only
+/// while writing.
 pub async fn create_account(
     base_path: &Path,
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let pending_bootstrap = prepare_pending_account_bootstrap(nickname_suggestion)?;
-    create_account_with_pending_bootstrap(base_path, pending_bootstrap, None).await
+    create_account_in(&ProfileStore::production(base_path)?, nickname_suggestion).await
 }
 
 /// Native configured staging adapter. Semantic completion belongs to the app producer.
 pub async fn stage_account_for_bootstrap(
-    base_path: &Path,
+    store: &ProfileStore,
     app: &Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
     nickname: String,
     instance: Option<aura_app::ui_contract::OperationInstanceId>,
 ) -> aura_app::ui_contract::WorkflowTerminalOutcome<(AuthorityId, ContextId)> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let time = PhysicalTimeHandler::new();
     let crypto = RealCryptoHandler::new();
     aura_app::ui::workflows::account::stage_runtime_free_account_with_terminal_status(
@@ -267,10 +354,10 @@ pub async fn stage_account_for_bootstrap(
 
 /// Persist only an app-issued accepted/adopted enrollment identity.
 pub async fn persist_completed_enrollment_runtime_identity(
-    base_path: &Path,
+    store: &ProfileStore,
     completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
 ) -> Result<(), AuraError> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let old = storage
         .retrieve(ACCOUNT_FILENAME)
         .await
@@ -321,7 +408,7 @@ pub async fn persist_completed_enrollment_runtime_identity(
 }
 
 async fn create_account_with_pending_bootstrap(
-    base_path: &Path,
+    store: &ProfileStore,
     pending_bootstrap: PendingAccountBootstrap,
     runtime_identity: Option<BootstrapRuntimeIdentity>,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
@@ -329,14 +416,14 @@ async fn create_account_with_pending_bootstrap(
         BootstrapSurface::Tui,
         BootstrapEventKind::PendingBootstrapStaged,
     );
-    tracing::info!(event = %staged_event, path = %base_path.display());
+    tracing::info!(event = %staged_event, path = %store.base_path().display());
     tracing::info!(
-        path = %base_path.display(),
+        path = %store.base_path().display(),
         nickname = pending_bootstrap.nickname_suggestion,
         pending_device_enrollment = pending_bootstrap.has_pending_device_enrollment(),
         "tui create_account begin"
     );
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let time = PhysicalTimeHandler::new();
     let crypto = RealCryptoHandler::new();
 
@@ -371,11 +458,11 @@ async fn create_account_with_pending_bootstrap(
 
 /// Restore an account from guardian-based recovery.
 pub async fn restore_recovered_account(
-    base_path: &Path,
+    store: &ProfileStore,
     recovered_authority_id: AuthorityId,
     recovered_context_id: Option<ContextId>,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let time = PhysicalTimeHandler::new();
     let context_id = recovered_context_id
         .unwrap_or_else(|| derive_recovered_context_id(&recovered_authority_id));
@@ -387,10 +474,10 @@ pub async fn restore_recovered_account(
 
 /// Export account to a portable backup code.
 pub async fn export_account_backup(
-    base_path: &Path,
+    store: &ProfileStore,
     device_id: Option<&str>,
 ) -> Result<String, AuraError> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let time = PhysicalTimeHandler::new();
 
     let Some(account_bytes) = storage
@@ -425,11 +512,11 @@ pub async fn export_account_backup(
 
 /// Import and restore account from backup code.
 pub async fn import_account_backup(
-    base_path: &Path,
+    store: &ProfileStore,
     backup_code: &str,
     overwrite: bool,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    let storage = open_bootstrap_storage(base_path);
+    let storage = store.storage().clone();
     let backup = parse_backup_code(backup_code)?;
 
     let authority_id = backup.account.authority_id;
@@ -471,6 +558,16 @@ mod tests {
 
     use super::*;
 
+    /// The production profile's record storage (owning the profile while
+    /// the returned handle lives).
+    fn open_bootstrap_storage(path: &Path) -> Arc<dyn StorageEffects> {
+        ProfileStore::production(path).unwrap().storage().clone()
+    }
+
+    async fn try_load_account_from_path(path: &Path) -> Result<AccountLoadResult, AuraError> {
+        try_load_account(&open_bootstrap_storage(path)).await
+    }
+
     #[tokio::test]
     async fn native_staging_producer_retains_original_account_operation_in_attached_signal() {
         use aura_app::ui::types::{AppConfig, AppCore};
@@ -483,9 +580,13 @@ mod tests {
         ));
         AppCore::init_signals_with_hooks(&app).await.unwrap();
         let instance = OperationInstanceId("native-stage-original-instance".into());
-        let staged =
-            stage_account_for_bootstrap(dir.path(), &app, "Alice".into(), Some(instance.clone()))
-                .await;
+        let staged = stage_account_for_bootstrap(
+            &ProfileStore::production(dir.path()).unwrap(),
+            &app,
+            "Alice".into(),
+            Some(instance.clone()),
+        )
+        .await;
         let (authority, context) = staged.result.expect("native encrypted writes acknowledged");
         assert!(staged.terminal.is_some());
         let loaded = try_load_account_from_path(dir.path()).await.unwrap();
@@ -571,7 +672,13 @@ mod tests {
             AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
         ));
         AppCore::init_signals_with_hooks(&app).await.unwrap();
-        let staged = stage_account_for_bootstrap(dir.path(), &app, "Alice".into(), None).await;
+        let staged = stage_account_for_bootstrap(
+            &ProfileStore::production(dir.path()).unwrap(),
+            &app,
+            "Alice".into(),
+            None,
+        )
+        .await;
         assert!(staged.result.is_err());
         assert!(staged.terminal.is_some());
         assert!(matches!(
@@ -595,7 +702,7 @@ mod tests {
         agent.shutdown(&effect_context).await.unwrap();
     }
 
-    struct RejectAccountProfile(BootstrapStorage);
+    struct RejectAccountProfile(Arc<dyn StorageEffects>);
 
     #[async_trait::async_trait]
     impl StorageCoreEffects for RejectAccountProfile {

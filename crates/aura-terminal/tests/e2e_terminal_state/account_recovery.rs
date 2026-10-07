@@ -9,10 +9,6 @@ use crate::support::{read_account_authority_id, read_account_config, IoContextTe
 #[tokio::test]
 async fn test_account_creation_callback_flow() {
     use aura_core::effects::StorageCoreEffects;
-    use aura_effects::{
-        EncryptedStorage, EncryptedStorageConfig, FilesystemFallbackSecureStorageHandler,
-        FilesystemStorageHandler, RealCryptoHandler,
-    };
 
     let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", std::process::id()));
     let env = IoContextTestEnvBuilder::new("callback")
@@ -40,14 +36,10 @@ async fn test_account_creation_callback_flow() {
         "account.json.dat MUST exist after create_account"
     );
 
-    let storage = EncryptedStorage::new(
-        FilesystemStorageHandler::from_path(test_dir.clone()),
-        Arc::new(RealCryptoHandler::new()),
-        Arc::new(FilesystemFallbackSecureStorageHandler::with_base_path(
-            test_dir.clone(),
-        )),
-        EncryptedStorageConfig::default(),
-    );
+    let storage = aura_terminal::handlers::tui::ProfileStore::production(&test_dir)
+        .unwrap()
+        .storage()
+        .clone();
     let content = storage
         .retrieve("account.json")
         .await

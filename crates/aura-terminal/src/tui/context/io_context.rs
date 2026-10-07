@@ -435,8 +435,17 @@ impl IoContext {
         aura_core::AuthorityId,
         aura_core::ContextId,
     )> {
+        let profile = match self.account_files.profile() {
+            Ok(profile) => profile,
+            Err(error) => {
+                return aura_app::ui_contract::WorkflowTerminalOutcome {
+                    result: Err(error),
+                    terminal: None,
+                }
+            }
+        };
         let outcome = crate::handlers::tui::stage_account_for_bootstrap(
-            self.account_files.base_path(),
+            &profile,
             original_app,
             nickname,
             instance,

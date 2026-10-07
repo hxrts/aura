@@ -5,11 +5,11 @@
 //!
 //! Returns structured `CliOutput` for testability.
 
-use crate::cli::sync::SyncAction;
+use crate::cli::sync::SyncDaemonArgs;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
-use aura_agent::{AdmittedSyncCommandCapability, ServiceHealth, SyncManagerConfig};
+use aura_agent::{AdmittedSyncCommandCapability, SyncManagerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::DeviceId;
 
@@ -132,44 +132,17 @@ async fn required_sync_tick<E: PhysicalTimeEffects + ?Sized>(
     Ok(elapsed / 1000)
 }
 
-/// Handle sync operations through effects
+/// Run the sync daemon in the foreground until Ctrl+C.
 ///
-/// Returns `CliOutput` instead of printing directly.
-///
-/// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_sync(
+/// Progress goes to stderr while running; the returned output is the
+/// final summary.
+pub async fn handle_daemon_mode(
     ctx: &HandlerContext<'_>,
-    action: &SyncAction,
+    args: &SyncDaemonArgs,
 ) -> TerminalResult<CliOutput> {
-    match action {
-        SyncAction::Daemon {
-            interval,
-            max_concurrent,
-            peers,
-            config: _,
-        } => handle_daemon_mode(ctx, *interval, *max_concurrent, peers.as_deref()).await,
-
-        SyncAction::Once { peers, config: _ } => handle_once_mode(ctx, peers).await,
-
-        SyncAction::Status => handle_status(ctx),
-
-        SyncAction::AddPeer { peer } => handle_add_peer(ctx, peer),
-
-        SyncAction::RemovePeer { peer } => handle_remove_peer(ctx, peer),
-    }
-}
-
-/// Run sync daemon mode (default)
-///
-/// Note: Daemon mode prints continuously during operation and returns
-/// summary output when shutting down. The periodic status messages
-/// are printed in real-time.
-async fn handle_daemon_mode(
-    ctx: &HandlerContext<'_>,
-    interval_secs: u64,
-    max_concurrent: usize,
-    peers: Option<&str>,
-) -> TerminalResult<CliOutput> {
+    let interval_secs = args.interval;
+    let max_concurrent = args.max_concurrent;
+    let peers = args.peers.as_deref();
     if interval_secs == 0 {
         return Err(TerminalError::Input(
             "Sync interval must be positive".into(),
@@ -195,9 +168,6 @@ async fn handle_daemon_mode(
         output.kv("Initial peers", initial_peers.len().to_string());
     }
 
-    // Render startup messages immediately
-    output.render();
-
     // Configure sync manager
     let config = SyncManagerConfig {
         auto_sync_enabled: true,
@@ -215,7 +185,7 @@ async fn handle_daemon_mode(
     let time_handler = manager.time_effects();
     let tick_count = run_sync_with_cleanup(async {
 
-        println!("\nSync daemon started. Press Ctrl+C to stop.\n");
+        eprintln!("Sync daemon started. Press Ctrl+C to stop.");
         let started = time_handler.physical_time().await.map_err(sync_source)?;
         let observation = aura_core::TimeoutClockObservation::new(&started);
         let mut tick_count = 0u64;
@@ -227,7 +197,7 @@ async fn handle_daemon_mode(
                 _ = manager.closed() => { break; }
                 result = signal::ctrl_c() => {
                     result.map_err(sync_source)?;
-                    println!("\nReceived shutdown signal...");
+                    eprintln!("Received shutdown signal...");
                     break;
                 }
                 result = required_sync_tick(time_handler.as_ref(), &observation, started.ts_ms, interval_ms) => {
@@ -237,10 +207,10 @@ async fn handle_daemon_mode(
                     }
                     tick_count += 1;
                     let health = manager.health().await;
-                    println!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
+                    eprintln!("[tick {tick_count}] Sync daemon {health} (uptime: {uptime_secs}s)");
                     if tick_count % 5 == 0 {
                         if let Some(metrics) = manager.metrics().await {
-                            println!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
+                            eprintln!("  Metrics - requests: {}, errors: {}, avg latency: {:.2}ms",
                                 metrics.requests_processed, metrics.errors_encountered, metrics.avg_latency_ms);
                         }
                     }
@@ -249,111 +219,13 @@ async fn handle_daemon_mode(
         }
         Ok::<_, aura_core::AuraError>(tick_count)
     }, || async {
-        println!("Stopping sync daemon...");
+        eprintln!("Stopping sync daemon...");
         manager.stop().await
     }).await?;
 
-    // Return shutdown summary (startup messages already rendered)
-    let mut shutdown_output = CliOutput::new();
-    shutdown_output.println("Sync daemon stopped.");
-    shutdown_output.kv("Total ticks", tick_count.to_string());
-    Ok(shutdown_output)
-}
-
-/// Perform a one-shot sync with specific peers
-async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    output.println("Performing one-shot sync...");
-
-    // Parse peers
-    let peers: Vec<DeviceId> = peers_str
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| ids::device_id(s.trim()))
-        .collect();
-
-    if peers.is_empty() {
-        return Err(TerminalError::Input("No peers specified for sync".into()));
-    }
-
-    output.kv("Peers", peers.len().to_string());
-
-    // Configure for one-shot (no auto sync)
-    let config = SyncManagerConfig::manual_only();
-    let manager = admit_sync_command(ctx, config).await?;
-
-    run_sync_with_cleanup(
-        async {
-            manager.sync_with_peers(peers).await?;
-
-            // Show completion
-            let health = manager.health().await;
-            output.kv("Sync service health", format_service_health(&health));
-
-            Ok::<(), aura_core::AuraError>(())
-        },
-        || manager.stop(),
-    )
-    .await?;
-
-    output.println("One-shot sync complete.");
-    Ok(output)
-}
-
-fn format_service_health(health: &ServiceHealth) -> &'static str {
-    match health {
-        ServiceHealth::Healthy => "healthy",
-        ServiceHealth::Degraded { .. } => "degraded",
-        ServiceHealth::Unhealthy { .. } => "unhealthy",
-        ServiceHealth::NotStarted => "not started",
-        ServiceHealth::Starting => "starting",
-        ServiceHealth::Stopping => "stopping",
-        ServiceHealth::Stopped => "stopped",
-    }
-}
-
-/// Show sync status and metrics
-fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    output.section("Sync Service Status");
-
-    // Status query requires a running sync daemon (started via `aura sync daemon`).
-    // Without a daemon, show usage instructions.
-    output.println("Note: Full status requires a running sync daemon.");
-    output.blank();
-    output.println("To start the sync daemon:");
-    output.println("  aura sync daemon");
-    output.blank();
-    output.println("To sync once with specific peers:");
-    output.println("  aura sync once --peers <device-id-1>,<device-id-2>");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
-}
-
-/// Add a peer to the sync list
-fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Added peer to sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
-}
-
-/// Remove a peer from the sync list
-fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Removed peer from sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
+    // Progress went to stderr while running; stdout gets one summary.
+    output.println("Sync daemon stopped.");
+    output.kv("Total ticks", tick_count.to_string());
     Ok(output)
 }
 

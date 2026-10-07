@@ -1,59 +1,34 @@
-//! Sync CLI Arguments - Sync daemon mode configuration
+//! `aura sync`: journal synchronization.
 //!
-//! Defines command-line arguments for journal synchronization operations.
-//! The sync command runs in daemon mode by default, continuously synchronizing
-//! with peers.
+//! `status`, `once`, `add-peer` and `remove-peer` are workflow requests;
+//! `daemon` (the default) keeps a sync service running in the foreground.
 
-use bpaf::{construct, long, pure, Parser};
-use std::path::PathBuf;
+use crate::cli::commands::Commands;
+use crate::cli::requests::sync_request_parser;
+use bpaf::{construct, long, Parser};
 
-/// Sync subcommands for journal synchronization
-#[derive(Debug, Clone)]
-pub enum SyncAction {
-    /// Start the sync daemon (default mode)
-    ///
-    /// Runs in the foreground, synchronizing with discovered or configured peers.
-    /// Use Ctrl+C to stop.
-    Daemon {
-        /// Sync interval in seconds (default: 60)
-        interval: u64,
-
-        /// Maximum concurrent sync sessions (default: 5)
-        max_concurrent: usize,
-
-        /// Initial peers to sync with (comma-separated device IDs)
-        peers: Option<String>,
-
-        /// Config file path
-        config: Option<PathBuf>,
-    },
-
-    /// Perform a one-shot sync with specific peers
-    Once {
-        /// Peers to sync with (comma-separated device IDs)
-        peers: String,
-
-        /// Config file path
-        config: Option<PathBuf>,
-    },
-
-    /// Show sync service status and metrics
-    Status,
-
-    /// Add a peer to the sync list
-    AddPeer {
-        /// Device ID of the peer to add
-        peer: String,
-    },
-
-    /// Remove a peer from the sync list
-    RemovePeer {
-        /// Device ID of the peer to remove
-        peer: String,
-    },
+/// Arguments of `aura sync daemon`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDaemonArgs {
+    /// Sync interval in seconds.
+    pub interval: u64,
+    /// Maximum concurrent sync sessions.
+    pub max_concurrent: usize,
+    /// Initial peers (comma-separated device IDs).
+    pub peers: Option<String>,
 }
 
-fn daemon_command() -> impl Parser<SyncAction> {
+impl Default for SyncDaemonArgs {
+    fn default() -> Self {
+        Self {
+            interval: 60,
+            max_concurrent: 5,
+            peers: None,
+        }
+    }
+}
+
+fn daemon_parser() -> impl Parser<SyncDaemonArgs> {
     let interval = long("interval")
         .help("Sync interval in seconds (default: 60)")
         .argument::<u64>("SECONDS")
@@ -66,71 +41,23 @@ fn daemon_command() -> impl Parser<SyncAction> {
         .help("Initial peers to sync with (comma-separated device IDs)")
         .argument::<String>("PEERS")
         .optional();
-    let config = long("config")
-        .short('c')
-        .help("Config file path")
-        .argument::<PathBuf>("CONFIG")
-        .optional();
-    construct!(SyncAction::Daemon {
+    construct!(SyncDaemonArgs {
         interval,
         max_concurrent,
-        peers,
-        config
+        peers
     })
-    .to_options()
-    .command("daemon")
-    .help("Start the sync daemon (default mode)")
 }
 
-fn once_command() -> impl Parser<SyncAction> {
-    let peers = long("peers")
-        .help("Peers to sync with (comma-separated device IDs)")
-        .argument::<String>("PEERS");
-    let config = long("config")
-        .short('c')
-        .help("Config file path")
-        .argument::<PathBuf>("CONFIG")
-        .optional();
-    construct!(SyncAction::Once { peers, config })
-        .to_options()
-        .command("once")
-        .help("Perform a one-shot sync with specific peers")
-}
-
-fn status_command() -> impl Parser<SyncAction> {
-    pure(SyncAction::Status)
-        .to_options()
-        .command("status")
-        .help("Show sync service status and metrics")
-}
-
-fn add_peer_command() -> impl Parser<SyncAction> {
-    let peer = long("peer")
-        .help("Device ID of the peer to add")
-        .argument::<String>("PEER");
-    construct!(SyncAction::AddPeer { peer })
-        .to_options()
-        .command("add-peer")
-        .help("Add a peer to the sync list")
-}
-
-fn remove_peer_command() -> impl Parser<SyncAction> {
-    let peer = long("peer")
-        .help("Device ID of the peer to remove")
-        .argument::<String>("PEER");
-    construct!(SyncAction::RemovePeer { peer })
-        .to_options()
-        .command("remove-peer")
-        .help("Remove a peer from the sync list")
-}
-
+/// The `aura sync` subcommands; no subcommand runs the daemon.
 #[must_use]
-pub fn sync_action_parser() -> impl Parser<SyncAction> {
-    construct!([
-        daemon_command(),
-        once_command(),
-        status_command(),
-        add_peer_command(),
-        remove_peer_command()
-    ])
+pub fn sync_parser() -> impl Parser<Commands> {
+    let daemon = daemon_parser()
+        .to_options()
+        .command("daemon")
+        .help("Start the sync daemon (default mode)")
+        .map(Commands::SyncDaemon);
+    let request = sync_request_parser().map(Commands::Run);
+    construct!([daemon, request])
+        .optional()
+        .map(|command| command.unwrap_or_else(|| Commands::SyncDaemon(SyncDaemonArgs::default())))
 }

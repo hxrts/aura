@@ -36,6 +36,8 @@ pub struct AccountFilesHelper {
     base_path: PathBuf,
     device_id_str: String,
     has_existing_account: Arc<AtomicBool>,
+    profile: Option<crate::handlers::tui::ProfileStore>,
+    demo: bool,
 }
 
 impl AccountFilesHelper {
@@ -48,7 +50,37 @@ impl AccountFilesHelper {
             base_path,
             device_id_str,
             has_existing_account,
+            profile: None,
+            demo: false,
         }
+    }
+
+    /// Use `profile` (the launch's owned profile) for account records; with
+    /// none, each operation opens the production or demo profile.
+    #[must_use]
+    pub fn with_profile(
+        mut self,
+        profile: Option<crate::handlers::tui::ProfileStore>,
+        demo: bool,
+    ) -> Self {
+        self.profile = profile;
+        self.demo = demo;
+        self
+    }
+
+    /// The account records' profile store.
+    pub fn profile(&self) -> Result<crate::handlers::tui::ProfileStore, aura_core::AuraError> {
+        match &self.profile {
+            Some(profile) => Ok(profile.clone()),
+            None if self.demo => Ok(crate::handlers::tui::ProfileStore::nonproduction(
+                &self.base_path,
+            )),
+            None => crate::handlers::tui::ProfileStore::production(&self.base_path),
+        }
+    }
+
+    fn profile_or_err(&self) -> TerminalResult<crate::handlers::tui::ProfileStore> {
+        self.profile().map_err(TerminalError::from)
     }
 
     #[must_use]
@@ -104,7 +136,9 @@ impl AccountFilesHelper {
         &self,
         nickname_suggestion: &str,
     ) -> TerminalResult<(AuthorityId, ContextId)> {
-        match crate::handlers::tui::create_account(&self.base_path, nickname_suggestion).await {
+        match crate::handlers::tui::create_account_in(&self.profile_or_err()?, nickname_suggestion)
+            .await
+        {
             Ok((authority_id, context_id)) => {
                 self.set_account_created();
                 Ok((authority_id, context_id))
@@ -121,7 +155,7 @@ impl AccountFilesHelper {
         completed: &aura_app::ui::workflows::invitation::DeviceEnrollmentImportCompleted,
     ) -> Result<(), aura_core::AuraError> {
         crate::handlers::tui::persist_completed_enrollment_runtime_identity(
-            &self.base_path,
+            &self.profile()?,
             completed,
         )
         .await?;
@@ -135,7 +169,7 @@ impl AccountFilesHelper {
         recovered_context_id: Option<aura_core::types::identifiers::ContextId>,
     ) -> TerminalResult<()> {
         match crate::handlers::tui::restore_recovered_account(
-            &self.base_path,
+            &self.profile_or_err()?,
             recovered_authority_id,
             recovered_context_id,
         )
@@ -159,13 +193,21 @@ impl AccountFilesHelper {
             ));
         }
 
-        crate::handlers::tui::export_account_backup(&self.base_path, Some(&self.device_id_str))
-            .await
-            .map_err(|e| TerminalError::Operation(e.to_string()))
+        crate::handlers::tui::export_account_backup(
+            &self.profile_or_err()?,
+            Some(&self.device_id_str),
+        )
+        .await
+        .map_err(|e| TerminalError::Operation(e.to_string()))
     }
 
     pub async fn import_account_backup(&self, backup_code: &str) -> TerminalResult<()> {
-        match crate::handlers::tui::import_account_backup(&self.base_path, backup_code, true).await
+        match crate::handlers::tui::import_account_backup(
+            &self.profile_or_err()?,
+            backup_code,
+            true,
+        )
+        .await
         {
             Ok((_authority_id, _context_id)) => {
                 self.set_account_created();

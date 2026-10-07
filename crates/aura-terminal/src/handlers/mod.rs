@@ -1,68 +1,19 @@
-//! # CLI Command Handlers
+//! # CLI Handlers
 //!
-//! Layer 7 (User Interface) - Effect-based implementations of user-facing CLI commands.
+//! Layer 7 (User Interface).
 //!
-//! ## Architecture
+//! Account commands do not live here: they are typed requests executed by
+//! the shared command model (`crate::command`) through
+//! `aura_app::ui::workflows`. This module keeps the TUI launcher, the
+//! structured output type, and the offline or long-running tools:
 //!
-//! Handlers sit between CLI argument parsing and the effect system:
-//!
-//! ```text
-//! CLI Args → Handlers → Effects → Facts → Views → UI
-//! ```
-//!
-//! ## Responsibilities
-//!
-//! - Orchestrate effect calls to implement command logic
-//! - Validate arguments and business constraints
-//! - Translate effect results to user feedback
-//! - Handle errors gracefully
-//! - Coordinate multi-step operations (e.g., recovery flows)
-//!
-//! ## Handler Pattern
-//!
-//! All handlers follow a standard signature using `HandlerContext`:
-//!
-//! ```ignore
-//! use crate::handlers::HandlerContext;
-//!
-//! pub async fn handle_command(
-//!     ctx: &HandlerContext<'_>,
-//!     args: &CommandArgs,
-//! ) -> TerminalResult<()> {
-//!     // 1. Validate arguments
-//!     // 2. Call effects via ctx.effects()
-//!     // 3. Return result
-//! }
-//! ```
-//!
-//! ## Handler Modules
-//!
-//! - **Authority and Context**: `authority`, `context` - Authority/context inspection and management
-//! - **Account Administration**: `admin`, `snapshot` - Administrative operations
-//! - **Scenario Management**: `scenarios`, `amp` - Demo scenarios and AMP tests
-//! - **Recovery Workflows**: `recovery` - Guardian-based recovery coordination
-//! - **Invitations**: `invite` - Device onboarding and invitation flows
-//! - **OTA Upgrades**: `ota` - Over-the-air update handling
-//! - **Status Monitoring**: `status`, `version`, `node`, `threshold`, `init` - System status
-//!
-//! ## Adding a New Handler
-//!
-//! 1. Create handler function in appropriate module (or new module)
-//! 2. Define command args in `cli_args/`
-//! 3. Wire command → handler in main dispatch (handlers are called from main.rs)
-//! 4. Add tests in `tests/handlers/`
-//!
-//! ## See Also
-//!
-//! - `cli_args/` - Command-line argument definitions (Clap)
-//! - `handler_context` - Shared context type for all handlers
-//! - `docs/001_system_architecture.md` - Layer 7 architecture
+//! - `init`, `threshold`: offline device-config tools
+//! - `sync`: the foreground sync daemon
+//! - `ota`, `budget`: not yet reachable from the parser (work/8.md Task 155)
+//! - `scenarios`, `demo`: development builds only
 
 use crate::error::{TerminalError, TerminalResult};
-use crate::{
-    AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, InvitationAction,
-    OtaAction, RecoveryAction, SnapshotAction, SyncAction,
-};
+use crate::{OtaAction, SyncDaemonArgs};
 
 #[cfg(feature = "terminal")]
 use crate::cli::tui::TuiArgs;
@@ -78,22 +29,12 @@ use std::sync::Arc;
 // Re-export agent types through handler_context for convenience
 pub use handler_context::{AuraAgent, AuraEffectSystem, EffectContext};
 
-pub mod admin;
-pub mod amp;
-pub mod authority;
 pub mod budget;
-pub mod chat;
 pub mod cli_output;
 pub mod config;
-pub mod context;
 pub mod handler_context;
 pub mod init;
-pub mod invite;
-pub mod node;
 pub mod ota;
-pub mod recovery;
-pub mod snapshot;
-pub mod status;
 pub mod sync;
 pub mod threshold;
 #[cfg(feature = "terminal")]
@@ -113,16 +54,14 @@ pub mod demo;
 #[cfg(feature = "development")]
 pub mod scenarios;
 
-/// Main CLI handler that coordinates all operations through effects
+/// Runs the offline and long-running CLI tools against an agent.
 ///
-/// Uses `AppCore` as the unified backend for intent-based state management,
-/// and stores the `AuraAgent` directly for effect system and service access.
-/// This follows the dependency inversion pattern where aura-app doesn't
-/// depend on aura-agent.
+/// Every `handle_*` method returns the command's structured [`CliOutput`];
+/// the caller renders it as text or JSON.
 pub struct CliHandler {
-    /// The portable application core (provides intent-based state management)
+    /// The portable application core
     app_core: Arc<RwLock<AppCore>>,
-    /// The agent for effect system and service access
+    /// The agent providing the effect system
     agent: Arc<AuraAgent>,
     /// The device ID for this handler
     device_id: DeviceId,
@@ -132,9 +71,6 @@ pub struct CliHandler {
 
 impl CliHandler {
     /// Create a new CLI handler with AppCore and agent
-    ///
-    /// This constructor uses both AppCore (for intent-based state) and
-    /// the agent directly (for effect system and services).
     pub fn with_agent(
         app_core: Arc<RwLock<AppCore>>,
         agent: Arc<AuraAgent>,
@@ -161,13 +97,13 @@ impl CliHandler {
         &self.effect_context
     }
 
-    /// Access the AppCore (for advanced operations)
+    /// Access the AppCore
     #[must_use]
     pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {
         &self.app_core
     }
 
-    /// Access the agent (for effect system and service access)
+    /// Access the agent
     #[must_use]
     pub fn agent(&self) -> &Arc<AuraAgent> {
         &self.agent
@@ -179,96 +115,28 @@ impl CliHandler {
         effects: &'a AuraEffectSystem,
         include_agent: bool,
     ) -> HandlerContext<'a> {
-        let agent_opt = if include_agent {
-            Some(&*self.agent)
-        } else {
-            None
-        };
+        let agent_opt = include_agent.then_some(&*self.agent);
         HandlerContext::new(&self.effect_context, effects, self.device_id, agent_opt)
     }
 
     /// Handle init command through effects
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_init(
         &self,
         num_devices: u32,
         threshold: u32,
         output_dir: &Path,
-    ) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = init::handle_init(&ctx, num_devices, threshold, output_dir).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle status command through effects
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_status(&self, config_path: &Path) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = status::handle_status(&ctx, config_path).await?;
-
-        // Render device status
-        output.render();
-
-        // Add budget information using shared handlers
-        let current_budget =
-            aura_app::ui::workflows::budget::get_current_budget(&self.app_core).await;
-        let budget_status = budget::format_budget_status(&current_budget);
-
-        println!();
-        println!("=== Home Storage Budget ===");
-        println!("{budget_status}");
-
-        Ok(())
-    }
-
-    /// Report the loaded account: identity, threshold, devices and contacts.
-    pub async fn handle_account_status(&self) -> TerminalResult<()> {
-        let runtime = self.agent.clone().as_runtime_bridge();
-        let settings = runtime
-            .try_get_settings()
-            .await
-            .map_err(|e| TerminalError::Operation(e.to_string()))?;
-        let mut output = CliOutput::new();
-        output.section("Account Status");
-        output.kv("Authority", self.agent.authority_id().to_string());
-        output.kv("Nickname", settings.nickname_suggestion.clone());
-        output.kv(
-            "Threshold",
-            format!("{} of {}", settings.threshold_k, settings.threshold_n),
-        );
-        output.kv("Devices", settings.device_count.to_string());
-        output.kv("Contacts", settings.contact_count.to_string());
-        output.render();
-        Ok(())
-    }
-
-    /// Handle node command through effects
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_node(
-        &self,
-        port: u16,
-        daemon: bool,
-        config_path: &Path,
-    ) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = node::handle_node(&ctx, port, daemon, config_path).await?;
-        output.render();
-        Ok(())
+    ) -> TerminalResult<CliOutput> {
+        let effects = self.agent.runtime().effects();
+        init::handle_init(
+            &self.make_ctx(&effects, false),
+            num_devices,
+            threshold,
+            output_dir,
+        )
+        .await
     }
 
     /// Handle threshold command through effects
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
     pub async fn handle_threshold(
         &self,
         configs: &str,
@@ -277,12 +145,10 @@ impl CliHandler {
         message: Option<&str>,
         message_hex: Option<&str>,
         signature: Option<&str>,
-    ) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = threshold::handle_threshold(
-            &ctx,
+    ) -> TerminalResult<CliOutput> {
+        let effects = self.agent.runtime().effects();
+        threshold::handle_threshold(
+            &self.make_ctx(&effects, false),
             configs,
             threshold,
             mode,
@@ -290,155 +156,36 @@ impl CliHandler {
             message_hex,
             signature,
         )
-        .await?;
-        output.render();
-        Ok(())
+        .await
     }
 
     /// Handle scenarios command through effects (requires development feature)
     #[cfg(feature = "development")]
-    pub async fn handle_scenarios(&self, action: &ScenarioAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        scenarios::handle_scenarios(&ctx, action).await
-    }
-
-    /// Handle version command through effects
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    #[allow(clippy::unused_async)]
-    pub async fn handle_version(&self) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = version::handle_version(&ctx)?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle snapshot maintenance commands.
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_snapshot(&self, action: &SnapshotAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = snapshot::handle_snapshot(&ctx, action).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle admin maintenance commands.
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_admin(&self, action: &AdminAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = admin::handle_admin(&ctx, action).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle guardian recovery commands
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_recovery(&self, action: &RecoveryAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = recovery::handle_recovery(&ctx, action).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle invitation commands
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_invitation(&self, action: &InvitationAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, true);
-        let output = invite::handle_invitation(&ctx, action).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle authority management commands
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_authority(&self, command: &AuthorityCommands) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = authority::handle_authority(&ctx, command).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle context inspection commands
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_context(&self, action: &ContextAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = context::handle_context(&ctx, action).await?;
-        output.render();
-        Ok(())
+    pub async fn handle_scenarios(&self, action: &ScenarioAction) -> TerminalResult<CliOutput> {
+        let effects = self.agent.runtime().effects();
+        scenarios::handle_scenarios(&self.make_ctx(&effects, false), action).await?;
+        Ok(CliOutput::new())
     }
 
     /// Handle OTA upgrade commands
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_ota(&self, action: &OtaAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = ota::handle_ota(&ctx, action).await?;
-        output.render();
-        Ok(())
+    pub async fn handle_ota(&self, action: &OtaAction) -> TerminalResult<CliOutput> {
+        let effects = self.agent.runtime().effects();
+        ota::handle_ota(&self.make_ctx(&effects, false), action).await
     }
 
-    /// Handle AMP commands routed through the effect system.
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_amp(&self, action: &AmpAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = amp::handle_amp(&ctx, action).await?;
-        output.render();
-        Ok(())
-    }
-
-    /// Handle chat commands
-    pub async fn handle_chat(&self, command: &ChatCommands) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, true);
-        chat::handle_chat(&ctx, effects, command).await
-    }
-
-    /// Handle sync commands (daemon mode by default)
-    ///
-    /// Returns structured output that is rendered to stdout/stderr
-    pub async fn handle_sync(&self, action: &SyncAction) -> TerminalResult<()> {
-        let effects_arc = self.agent.runtime().effects();
-        let effects = &*effects_arc;
-        let ctx = self.make_ctx(effects, false);
-        let output = sync::handle_sync(&ctx, action).await?;
-        output.render();
-        Ok(())
+    /// Run the foreground sync daemon
+    pub async fn handle_sync_daemon(&self, args: &SyncDaemonArgs) -> TerminalResult<CliOutput> {
+        let effects = self.agent.runtime().effects();
+        sync::handle_daemon_mode(&self.make_ctx(&effects, true), args).await
     }
 
     /// Handle demo commands (requires development feature)
     #[cfg(feature = "development")]
-    pub async fn handle_demo(&self, command: &DemoCommands) -> TerminalResult<()> {
+    pub async fn handle_demo(&self, command: &DemoCommands) -> TerminalResult<CliOutput> {
         demo::DemoHandler::handle_demo_command(command.clone())
             .await
-            .map_err(|e| TerminalError::Operation(format!("Demo command failed: {e}")))
+            .map_err(|e| TerminalError::Operation(format!("Demo command failed: {e}")))?;
+        Ok(CliOutput::new())
     }
 
     /// Handle TUI commands for production terminal interface

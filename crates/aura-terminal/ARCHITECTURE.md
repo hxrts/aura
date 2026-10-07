@@ -27,6 +27,45 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 ## Invariants
 
+- Account commands are typed `command::Request` values executed by
+  `command::execute` through `aura_app::ui::workflows` only, the functions
+  the TUI and web call; `command::Response` is the typed result. The bpaf
+  parsers build requests and nothing else, and `aura rpc` reads the same
+  `Request` from JSON lines, so CLI and RPC responses are identical. The
+  `cli-workflow-facade` check (`just ci-frontend-handoff-boundary`) rejects
+  agent APIs, crate-root `aura_app::*` reach-ins, agent service accessors and
+  local file access in `src/command`, `src/cli` and `src/rpc`, and any new
+  module under `src/handlers` (offline tools and long-running modes only).
+
+- Account records (account configuration, staged bootstrap, selected
+  identity, backups) live in a `handlers::tui::ProfileStore`. In production
+  it owns the profile and uses the production runtime's own storage
+  selection; the TUI acquires it once per launch, shares it with IoContext
+  and hands its owner to production assembly. Demo mode keeps the
+  simulation runtime's nonproduction store.
+
+- One process holds an account's profile. A node (the TUI in production
+  mode, or `aura serve`) hosts `rpc_socket` at `<data-dir>.sock` (beside the data directory, e.g. `~/.aura.sock`): mode
+  `0600`, same-uid peers only, no network listener. Account commands and
+  `aura rpc` route to that socket first; otherwise the CLI opens the
+  production runtime itself through `handlers::tui::open_production_runtime`,
+  the TUI's own assembly. The published schema
+  (`schema/aura-rpc-v1.json`) is generated from the types and checked by
+  `just ci-rpc-schema`.
+
+- `aura rpc` keeps one runtime online across requests. RPC events derive
+  from the reactive signals the TUI observes; each subscription has a bounded
+  queue and a lagging subscriber receives one `resync` snapshot instead of
+  the dropped events.
+
+- Every CLI command ends in one outcome: its structured `CliOutput` (text,
+  or one `{"ok":true,"result":..}` document under `--json`) with exit code 0,
+  or a typed `command::CommandError` whose `ErrorCode` fixes the exit code and
+  whose message is worded by `user_errors::classify`. Under `--json`, stdout
+  carries only that document. Destructive commands confirm through
+  `command::confirm` (`--yes`), and `--timeout` is measured on the runtime
+  clock.
+
 - Runtime bring-up retains the original agent error as its native source.
   `AURA_SECURE_STORAGE_BACKEND` explicitly selects `platform` or
   `filesystem-fallback`; invalid values fail construction. The runtime owns
@@ -169,6 +208,10 @@ cargo test -p aura-terminal
 | Demo mobile enrollment regression | `tests/regression/regression_demo_mobile_enrollment.rs` | Covered |
 | Guardian ceremony no-peers regression | `tests/regression/regression_guardian_ceremony_no_peers.rs` | Covered |
 | ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
+| CLI `--json` output or exit codes wrong | `tests/cli_json.rs`, `src/command/error.rs` | Covered |
+| CLI and RPC drift, RPC flows or events broken, CLI send differs from TUI send | `tests/cli_rpc.rs` (virtual-time two-runtime fixture) | Covered |
+| CLI does not reach a running node, socket not owner-only, schema drift | `tests/cli_socket.rs`, `src/rpc/schema.rs` (`just ci-rpc-schema`) | Covered |
+| CLI bypasses the app workflows | `toolkit/xtask` `cli-workflow-facade` | Covered |
 
 ## References
 

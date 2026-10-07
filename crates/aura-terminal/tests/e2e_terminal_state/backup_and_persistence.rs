@@ -9,7 +9,9 @@ use crate::support::IoContextTestEnvBuilder;
 
 #[tokio::test]
 async fn test_account_backup_restore_flow() {
-    use aura_terminal::handlers::tui::{export_account_backup, import_account_backup};
+    use aura_terminal::handlers::tui::{
+        export_account_backup, import_account_backup, ProfileStore,
+    };
 
     let test_dir_a =
         std::env::temp_dir().join(format!("aura-backup-test-a-{}", std::process::id()));
@@ -40,10 +42,13 @@ async fn test_account_backup_restore_flow() {
         .expect("Backup code should be valid base64");
     assert!(!decoded.is_empty());
 
-    let (restored_authority, restored_context) =
-        import_account_backup(&test_dir_b, &backup_code, false)
-            .await
-            .expect("Failed to import backup");
+    let (restored_authority, restored_context) = import_account_backup(
+        &ProfileStore::production(&test_dir_b).unwrap(),
+        &backup_code,
+        false,
+    )
+    .await
+    .expect("Failed to import backup");
     assert!(test_dir_b.join("account.json.dat").exists());
     assert!(!restored_authority.to_string().is_empty());
     assert!(!restored_context.to_string().is_empty());
@@ -70,11 +75,24 @@ async fn test_account_backup_restore_flow() {
         .await
         .is_ok());
 
-    assert!(export_account_backup(&test_dir_c, None).await.is_err());
-    assert!(import_account_backup(&test_dir_c, "invalid-code", false)
-        .await
-        .is_err());
-    let no_overwrite_result = import_account_backup(&test_dir_b, &backup_code, false).await;
+    assert!(
+        export_account_backup(&ProfileStore::production(&test_dir_c).unwrap(), None)
+            .await
+            .is_err()
+    );
+    assert!(import_account_backup(
+        &ProfileStore::production(&test_dir_c).unwrap(),
+        "invalid-code",
+        false
+    )
+    .await
+    .is_err());
+    let no_overwrite_result = import_account_backup(
+        &ProfileStore::production(&test_dir_b).unwrap(),
+        &backup_code,
+        false,
+    )
+    .await;
     assert!(no_overwrite_result.is_err());
     assert!(no_overwrite_result
         .expect_err("existing account should fail without overwrite")

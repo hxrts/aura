@@ -76,12 +76,15 @@
 #![allow(missing_docs)]
 
 pub mod cli;
+pub mod command;
 pub mod demo_invitation;
 pub mod env;
 pub mod error;
 pub mod handlers;
 pub mod ids;
 pub mod local_store;
+pub mod rpc;
+pub mod rpc_socket;
 #[cfg(feature = "terminal")]
 pub mod tui;
 
@@ -96,9 +99,9 @@ pub mod demo;
 // Re-export CLI handler and command enums
 #[cfg(feature = "development")]
 pub use cli::DemoCommands;
+pub use cli::SyncDaemonArgs;
 #[cfg(feature = "terminal")]
 pub use cli::TuiArgs;
-pub use cli::{AmpAction, AuthorityCommands, ChatCommands, ContextAction, SyncAction};
 pub use handlers::CliHandler;
 
 // Action types defined in this module (no re-export needed)
@@ -142,55 +145,6 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
         device_id,
         effect_context,
     ))
-}
-
-/// Create a test CLI handler for the given device ID
-pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let authority_id = ids::authority_id(&format!("cli:test-authority:{device_id}"));
-    let context_id = ids::context_id(&format!("cli:test-context:{device_id}"));
-
-    // Build agent
-    let agent = AgentBuilder::new()
-        .with_authority(authority_id)
-        .build_testing()
-        .map_err(|e| AuraError::agent(format!("Agent build failed: {e}")))?;
-    let agent = Arc::new(agent);
-
-    // Create AppCore with the runtime bridge (dependency inversion)
-    let config = AppConfig::default();
-    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
-        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {e}")))?;
-    let app_core = Arc::new(RwLock::new(app_core));
-
-    let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-    Ok(CliHandler::with_agent(
-        app_core,
-        agent,
-        device_id,
-        effect_context,
-    ))
-}
-
-/// Create a CLI handler with a generated device ID
-pub fn create_default_cli_handler() -> Result<CliHandler, AuraError> {
-    let device_id = ids::device_id("cli:default-device");
-    create_cli_handler(device_id)
-}
-
-/// Create a test CLI handler with a deterministic device ID
-#[cfg(test)]
-pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
-    use aura_testkit::DeviceTestFixture;
-    let fixture = DeviceTestFixture::new(0);
-    let device_id = fixture.device_id();
-    create_test_cli_handler(device_id)
-}
-
-/// Create a test CLI handler with a deterministic device ID (fallback for non-test builds)
-#[cfg(not(test))]
-pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
-    let device_id = ids::device_id("cli:default-test-device");
-    create_test_cli_handler(device_id)
 }
 
 /// Scenario action types
@@ -245,104 +199,6 @@ pub enum ScenarioAction {
     },
 }
 
-/// Snapshot maintenance subcommands.
-#[derive(Debug, Clone)]
-pub enum SnapshotAction {
-    /// Run the full Snapshot_v1 ceremony locally (propose + commit + GC).
-    Propose,
-}
-
-/// Admin maintenance subcommands.
-#[derive(Debug, Clone)]
-pub enum AdminAction {
-    /// Replace the administrator for an account (records journal fact).
-    Replace {
-        /// Account identifier (UUID string).
-        account: String,
-        /// Device ID of the new admin (UUID string).
-        new_admin: String,
-        /// Epoch when the new admin becomes authoritative.
-        activation_epoch: u64,
-    },
-}
-
-/// Recovery subcommands exposed via CLI.
-#[derive(Debug, Clone)]
-pub enum RecoveryAction {
-    /// Initiate guardian recovery from the local device.
-    Start {
-        /// Account identifier to recover.
-        account: String,
-        /// Comma separated guardian device IDs.
-        guardians: String,
-        /// Required guardian threshold (defaults to 2).
-        threshold: u32,
-        /// Recovery priority (normal|urgent|emergency).
-        priority: String,
-        /// Dispute window in hours (guardians can object before finalize).
-        dispute_hours: u64,
-        /// Optional human readable justification recorded in the request.
-        justification: Option<String>,
-    },
-    /// Approve a guardian recovery request from this device.
-    Approve {
-        /// Path to a serialized recovery request (JSON).
-        request_file: std::path::PathBuf,
-    },
-    /// Show local guardian recovery status and cooldown timers.
-    Status,
-    /// File a dispute against a recovery evidence record.
-    Dispute {
-        /// Evidence identifier returned by `aura recovery start`.
-        evidence: String,
-        /// Human readable reason included in the dispute log.
-        reason: String,
-    },
-}
-
-/// Invitation subcommands.
-#[derive(Debug, Clone)]
-pub enum InvitationAction {
-    /// Create a contact, guardian or channel invitation.
-    Create {
-        /// Account identifier.
-        account: String,
-        /// Authority ID of the invitee.
-        invitee: String,
-        /// Role granted to the invitee.
-        role: String,
-        /// Optional TTL in seconds.
-        ttl: Option<u64>,
-    },
-    /// Accept an invitation by ID.
-    Accept {
-        /// Invitation identifier string.
-        invitation_id: String,
-    },
-    /// Decline an invitation by ID.
-    Decline {
-        /// Invitation identifier string.
-        invitation_id: String,
-    },
-    /// Cancel an invitation you previously sent.
-    Cancel {
-        /// Invitation identifier string.
-        invitation_id: String,
-    },
-    /// List pending invitations.
-    List,
-    /// Export an invitation as a shareable code for out-of-band transfer.
-    Export {
-        /// Invitation ID to export.
-        invitation_id: String,
-    },
-    /// Import and display details of a shareable invite code.
-    Import {
-        /// The shareable invite code (format: aura:v<version>:<base64>).
-        code: String,
-    },
-}
-
 /// OTA upgrade subcommands
 #[derive(Debug, Clone)]
 pub enum OtaAction {
@@ -375,44 +231,4 @@ pub enum OtaAction {
     List,
     /// Show upgrade statistics
     Stats,
-}
-
-/// CLI error types
-#[derive(Debug, thiserror::Error)]
-pub enum CliError {
-    /// Command was not found or recognized
-    #[error("Command not found: {0}")]
-    CommandNotFound(String),
-
-    /// Invalid input provided by the user
-    #[error("Invalid input: {0}")]
-    InvalidInput(String),
-
-    /// Configuration-related error
-    #[error("Configuration error: {0}")]
-    Configuration(String),
-
-    /// File system operation error
-    #[error("File system error: {0}")]
-    FileSystem(String),
-
-    /// Data serialization/deserialization error
-    #[error("Serialization error: {0}")]
-    Serialization(String),
-
-    /// Feature currently unavailable
-    #[error("Feature unavailable: {0}")]
-    NotImplemented(String),
-
-    /// Authentication or authorization error
-    #[error("Authentication error: {0}")]
-    Authentication(String),
-
-    /// Network communication error
-    #[error("Network error: {0}")]
-    Network(String),
-
-    /// General operation failure
-    #[error("Operation failed: {0}")]
-    OperationFailed(String),
 }

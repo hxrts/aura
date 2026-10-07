@@ -357,17 +357,54 @@ View the account:
 aura --data-dir ~/.aura status
 ```
 
-This prints the account's authority, nickname, threshold, device count and contact count. Pass `-c CONFIG` to report a device config file instead.
+This prints the account's authority, nickname, threshold, device count and contact count.
 
-Inspect chat, invitations and the authority:
+Inspect and use chat, contacts, invitations and homes. Channels are named by name or id:
 
 ```bash
 aura chat list
-aura invite list
-aura authority list
+aura chat send general "hello"
+aura chat history general --limit 20
+aura contact list
+aura invite create --invitee AUTHORITY      # prints a shareable code
+aura invite import --code CODE
+aura invite accept --invitation-id ID
+aura home create --name Home
+aura home invite AUTHORITY
+aura slash "/topic welcome" --channel general
 ```
 
+The other command groups follow the TUI's screens: `account create|refresh`, `profile nick`, `settings show|mfa`, `contact list|rename|remove|whois|read-receipts`, `friend send|accept|decline|revoke`, `chat dm|join|close|members|retry|mark-read`, `home enter`, `neighborhood create|add|link`, `mod kick|ban|unban|mute|unmute|pin|unpin|op|deop|admit`, `access set`, `peer list|discover`, `device threshold|remove`, `guardians set`, `rotation cancel`, `budget` and `notifications list`. `aura account create --nickname NAME` creates an account the same way the TUI does, so the TUI opens it afterwards.
+
+Every account command runs the same `aura_app::ui::workflows` functions as the TUI and web, through one typed request model.
+
+### Driving a node from a program
+
+`aura rpc` keeps one runtime online and reads one JSON request per line on stdin; `aura serve` keeps it online without a client:
+
+```bash
+aura rpc
+{"id":1,"method":"chat_send","params":{"channel":"general","message":"hi"}}
+{"id":2,"method":"subscribe","params":{"topics":["messages"]}}
+```
+
+A running node, the TUI or `aura serve`, also listens on the owner-only local socket `<data-dir>.sock` (beside the data directory, e.g. `~/.aura.sock`) (mode `0600`, same-user connections only, no network listener). Every `aura` account command and `aura rpc` first try that socket, so they work while the TUI holds the account. With no node running, the CLI opens the account's production runtime itself under the profile's exclusive lease.
+
+The protocol schema is published at `crates/aura-terminal/schema/aura-rpc-v1.json`, generated from the request and response types and kept in sync by `just ci-rpc-schema`.
+
+The first line written is a hello line with the protocol version, methods and event topics. Each response carries the request's `id` and the same `result` or `error` that `aura --json` prints. After `subscribe`, event lines (`{"type":"event","topic":"messages",...}`) interleave with responses; a subscriber that falls behind gets one `resync` event with a fresh snapshot. The session ends on EOF or `{"method":"shutdown"}`.
+
 Command output is printed plainly. Add `-v` to also print runtime diagnostics.
+
+For scripts, the global flags make every command machine-readable:
+
+```bash
+aura --json status            # {"ok":true,"result":{...}} on stdout
+aura --yes chat leave general  # confirm a destructive command without a prompt
+aura --timeout 30 sync once --peers PEER
+```
+
+Under `--json`, stdout carries exactly one JSON document, either `{"ok":true,"result":...}` or `{"ok":false,"error":{"code":...,"message":...}}`; diagnostics go to stderr. Destructive commands prompt on a terminal and fail without `--yes` otherwise. The exit code classifies failures: 0 success, 1 failed, 2 invalid input, 3 not found, 4 permission denied, 5 timeout, 6 unavailable.
 
 ## Testing Your Protocol
 

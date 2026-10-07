@@ -7,6 +7,8 @@ use std::{
 
 #[path = "authoritative_fact_scope.rs"]
 mod authoritative_fact_scope;
+#[path = "cli_workflow_facade.rs"]
+mod cli_workflow_facade;
 #[path = "runtime_entropy_scope.rs"]
 mod runtime_entropy_scope;
 #[path = "security_test_scope.rs"]
@@ -757,8 +759,11 @@ pub fn run_runtime_shutdown_order() -> Result<()> {
     }
     let reactive = first_match_line(&target, ".stop_with_original_budget(original.budget())")?
         .context("runtime-shutdown-order: missing reactive pipeline shutdown step")?;
-    let task_tree = first_match_line(&target, ".shutdown_with_original_budget(self.effect_system.as_ref(), original.budget())")?
-        .context("runtime-shutdown-order: missing runtime task tree shutdown step")?;
+    let task_tree = first_match_line(
+        &target,
+        ".shutdown_with_original_budget(self.effect_system.as_ref(), original.budget())",
+    )?
+    .context("runtime-shutdown-order: missing runtime task tree shutdown step")?;
     let stop_services = first_match_line(&target, "self.stop_services(&original)")?
         .context("runtime-shutdown-order: missing stop_services step")?;
     let lifecycle = first_match_line(&target, "lifecycle_manager.shutdown(ctx)")?
@@ -2164,8 +2169,17 @@ fn is_frame_canonicality_smell(line: &str, context: &str) -> bool {
             && !context.contains("data.len() != expected_total_size"))
 }
 
+/// The owner-only product node socket transport.
+const PRODUCT_NODE_SOCKET_SOURCE: &str = "crates/aura-terminal/src/rpc_socket.rs";
+
 fn is_harness_ingress_env_smell(line: &str, context: &str, rel: &str) -> bool {
     if !rel.starts_with("crates/aura-terminal/src/") {
+        return false;
+    }
+    // The product node socket (`aura serve` / TUI, Task 160) is not harness
+    // ingress: it is bound only through `rpc_socket::bind` (mode 0600,
+    // same-uid peers, no network listener; tests/cli_socket.rs).
+    if rel == PRODUCT_NODE_SOCKET_SOURCE && line.contains("UnixListener::bind(path)") {
         return false;
     }
     if line.contains("const COMMAND_SOCKET_ENV")
@@ -7733,6 +7747,10 @@ pub fn run_tui_observation_channel() -> Result<()> {
     Ok(())
 }
 
+pub fn run_cli_workflow_facade() -> Result<()> {
+    cli_workflow_facade::run(&repo_root()?)
+}
+
 pub fn run_tui_product_path() -> Result<()> {
     let repo_root = repo_root()?;
     let shell = repo_root.join("crates/aura-terminal/src/tui/screens/app/shell.rs");
@@ -8849,6 +8867,31 @@ pub fn run_shared_flow_policy() -> Result<()> {
     run_tui_selection_contract()?;
     println!("shared flow policy: clean");
     Ok(())
+}
+
+#[cfg(test)]
+mod harness_ingress_tests {
+    use super::{is_harness_ingress_env_smell, PRODUCT_NODE_SOCKET_SOURCE};
+
+    #[test]
+    fn only_the_product_node_socket_binds_without_harness_gating() {
+        let bind = "    let listener = UnixListener::bind(path)?;";
+        assert!(!is_harness_ingress_env_smell(
+            bind,
+            "",
+            PRODUCT_NODE_SOCKET_SOURCE
+        ));
+        assert!(is_harness_ingress_env_smell(
+            bind,
+            "",
+            "crates/aura-terminal/src/tui/harness_state/listener.rs"
+        ));
+        assert!(is_harness_ingress_env_smell(
+            "    UnixListener::bind(&harness_socket)?;",
+            "",
+            PRODUCT_NODE_SOCKET_SOURCE
+        ));
+    }
 }
 
 #[cfg(test)]

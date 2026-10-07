@@ -791,6 +791,180 @@ impl AuraEffectSystem {
         Ok(config)
     }
 
+    /// The one owned secure-storage selection for a profile: the configured
+    /// backend (with the `AURA_SECURE_STORAGE_BACKEND` override already
+    /// applied to `config`), bound to the profile's exclusive owner. Runtime
+    /// assembly and an owned profile's bootstrap records both use it, so the
+    /// encryption master key lives where the runtime reads it.
+    fn select_profile_secure_storage(
+        config: &AgentConfig,
+        execution_mode: ExecutionMode,
+        profile_owner: Option<&Arc<aura_effects::profile_storage::OwnedProfileLease>>,
+        harness_mode_enabled: bool,
+        test_filesystem_secure_storage_allowed: bool,
+    ) -> Result<ProductionSecureStorageHandler, crate::core::AgentError> {
+        let profile_error = |source: aura_core::effects::profile_storage::ProfileStorageError| {
+            crate::core::AgentError::from(AuraError::Storage {
+                message: "runtime profile ownership failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        };
+        // The actual filesystem provider must receive the owner before touching
+        // its wrapping key. Platform providers retain their separate namespace.
+        #[cfg(unix)]
+        if let Some(owner) = profile_owner {
+            if config.storage.secure_storage_backend == SecureStorageBackend::FilesystemFallback {
+                if execution_mode.is_production()
+                    && !harness_mode_enabled
+                    && !test_filesystem_secure_storage_allowed
+                {
+                    return Err(crate::core::AgentError::config(
+                        "production runtime rejects filesystem secure-storage fallback",
+                    ));
+                }
+                return ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
+                    owner.clone(),
+                )
+                .map_err(crate::core::AgentError::from);
+            }
+        }
+        let backend = Self::secure_storage_handler_for_config(
+            config,
+            execution_mode,
+            harness_mode_enabled,
+            test_filesystem_secure_storage_allowed,
+        )?;
+        match profile_owner {
+            Some(owner) => backend
+                .retain_profile_owner(owner.clone())
+                .map_err(profile_error),
+            None => Ok(backend),
+        }
+    }
+
+    /// The encrypted-storage policy runtime assembly applies to a profile.
+    fn profile_encrypted_storage_config(
+        config: &AgentConfig,
+        execution_mode: ExecutionMode,
+    ) -> Result<EncryptedStorageConfig, crate::core::AgentError> {
+        let mut cfg = match config.storage.encryption_policy {
+            crate::core::config::StorageEncryptionPolicy::Required => {
+                EncryptedStorageConfig::production_required()
+            }
+            crate::core::config::StorageEncryptionPolicy::PlaintextForTests => {
+                if execution_mode.is_production() {
+                    return Err(crate::core::AgentError::config(
+                        "production runtime rejects plaintext storage policy; use encrypted storage or an explicit test/simulation constructor",
+                    ));
+                }
+                #[cfg(any(test, feature = "simulation"))]
+                {
+                    EncryptedStorageConfig::testing_plaintext()
+                }
+                #[cfg(not(any(test, feature = "simulation")))]
+                {
+                    return Err(crate::core::AgentError::config(
+                        "plaintext storage policy requires a test build or the simulation feature",
+                    ));
+                }
+            }
+        };
+        if config.storage.opaque_names {
+            cfg = cfg.with_opaque_names();
+        }
+        Ok(cfg)
+    }
+
+    /// Acquire the exclusive owner of the production profile at
+    /// `config.storage.base_path` together with its bootstrap-record storage
+    /// ([`Self::production_profile_storage`]). Hand the owner to production
+    /// assembly (`AgentBuilder::with_profile_owner`) so the runtime and the
+    /// bootstrap records share one owned profile.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::type_complexity)]
+    pub fn acquire_production_profile(
+        config: &AgentConfig,
+    ) -> Result<
+        (
+            Arc<aura_effects::profile_storage::OwnedProfileLease>,
+            EncryptedStorage<
+                FilesystemStorageHandler,
+                RealCryptoHandler,
+                ProductionSecureStorageHandler,
+            >,
+        ),
+        crate::core::AgentError,
+    > {
+        let owner = aura_effects::profile_storage::FilesystemProfileStorageHandler::new(
+            config.storage.base_path.clone(),
+        )
+        .acquire_owned_native()
+        .map(Arc::new)
+        .map_err(|source| {
+            crate::core::AgentError::from(AuraError::Storage {
+                message: "runtime profile ownership failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        })?;
+        let storage = Self::production_profile_storage(config, owner.clone())?;
+        Ok((owner, storage))
+    }
+
+    /// Storage for an owned production profile's bootstrap records (account
+    /// configuration, staged account bootstrap, selected runtime identity),
+    /// built exactly as production assembly builds the profile's storage:
+    /// the same owner-bound files, the same selected secure-storage provider
+    /// and the same encryption policy. Records written here are readable by
+    /// the production runtime that later receives `owner`, and vice versa.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn production_profile_storage(
+        config: &AgentConfig,
+        owner: Arc<aura_effects::profile_storage::OwnedProfileLease>,
+    ) -> Result<
+        EncryptedStorage<
+            FilesystemStorageHandler,
+            RealCryptoHandler,
+            ProductionSecureStorageHandler,
+        >,
+        crate::core::AgentError,
+    > {
+        let execution_mode = ExecutionMode::Production;
+        let profile_error = |source: aura_core::effects::profile_storage::ProfileStorageError| {
+            crate::core::AgentError::from(AuraError::Storage {
+                message: "runtime profile ownership failed".into(),
+                source: Some(std::sync::Arc::new(source)),
+            })
+        };
+        if !owner
+            .matches_profile(&config.storage.base_path)
+            .map_err(profile_error)?
+        {
+            return Err(profile_error(
+                aura_core::effects::profile_storage::ProfileStorageError::Invalid(
+                    "profile storage configuration differs from selected physical profile".into(),
+                ),
+            ));
+        }
+        let harness_mode_enabled =
+            std::env::var_os("AURA_HARNESS_MODE").is_some() || authenticated_browser_harness_mode();
+        let secure = Self::select_profile_secure_storage(
+            config,
+            execution_mode,
+            Some(&owner),
+            harness_mode_enabled,
+            false,
+        )?;
+        let files = FilesystemStorageHandler::new(config.storage.base_path.clone())
+            .retain_profile_owner(owner)
+            .map_err(profile_error)?;
+        Ok(EncryptedStorage::new(
+            files,
+            Arc::new(RealCryptoHandler::new()),
+            Arc::new(secure),
+            Self::profile_encrypted_storage_config(config, execution_mode)?,
+        ))
+    }
+
     fn secure_storage_handler_for_config(
         config: &AgentConfig,
         execution_mode: ExecutionMode,
@@ -981,59 +1155,13 @@ impl AuraEffectSystem {
             Some(seed) => seed.random_stream(),
             None => CryptoRng::thread_local(),
         };
-        // The actual filesystem provider must receive the owner before touching
-        // its wrapping key. Platform providers retain their separate namespace.
-        #[cfg(unix)]
-        let owned_filesystem_backend = match profile_owner.as_ref() {
-            Some(owner)
-                if config.storage.secure_storage_backend
-                    == SecureStorageBackend::FilesystemFallback =>
-            {
-                if execution_mode.is_production()
-                    && !harness_mode_enabled
-                    && !test_filesystem_secure_storage_allowed
-                {
-                    return Err(crate::core::AgentError::config(
-                        "production runtime rejects filesystem secure-storage fallback",
-                    ));
-                }
-                Some(
-                    ProductionSecureStorageHandler::filesystem_fallback_with_profile_owner(
-                        owner.clone(),
-                    )
-                    .map_err(crate::core::AgentError::from)?,
-                )
-            }
-            _ => None,
-        };
-        #[cfg(unix)]
-        let already_owned = owned_filesystem_backend.is_some();
-        #[cfg(not(unix))]
-        let already_owned = false;
-        #[cfg(unix)]
-        let secure_storage_backend = if let Some(backend) = owned_filesystem_backend {
-            backend
-        } else {
-            Self::secure_storage_handler_for_config(
-                &config,
-                execution_mode,
-                harness_mode_enabled,
-                test_filesystem_secure_storage_allowed,
-            )?
-        };
-        #[cfg(not(unix))]
-        let secure_storage_backend = Self::secure_storage_handler_for_config(
+        let secure_storage_backend = Self::select_profile_secure_storage(
             &config,
             execution_mode,
+            profile_owner.as_ref(),
             harness_mode_enabled,
             test_filesystem_secure_storage_allowed,
         )?;
-        let secure_storage_backend = match profile_owner.as_ref() {
-            Some(owner) if !already_owned => secure_storage_backend
-                .retain_profile_owner(owner.clone())
-                .map_err(profile_error)?,
-            _ => secure_storage_backend,
-        };
         #[cfg(unix)]
         let (secure_storage_backend, allocation_lifetime_root) = if profile_owner.is_some()
             && matches!(&secure_storage_backend, ProductionSecureStorageHandler::ProfileOwned(owned) if owned.uses_filesystem_fallback())
@@ -1077,36 +1205,9 @@ impl AuraEffectSystem {
             execution_mode,
             harness_mode_enabled,
         );
-        let encrypted_storage_config = {
-            let mut cfg = match config.storage.encryption_policy {
-                crate::core::config::StorageEncryptionPolicy::Required => {
-                    EncryptedStorageConfig::production_required()
-                }
-                crate::core::config::StorageEncryptionPolicy::PlaintextForTests => {
-                    if execution_mode.is_production() {
-                        return Err(crate::core::AgentError::config(
-                            "production runtime rejects plaintext storage policy; use encrypted storage or an explicit test/simulation constructor",
-                        ));
-                    }
-                    #[cfg(any(test, feature = "simulation"))]
-                    {
-                        EncryptedStorageConfig::testing_plaintext()
-                    }
-                    #[cfg(not(any(test, feature = "simulation")))]
-                    {
-                        return Err(crate::core::AgentError::config(
-                            "plaintext storage policy requires a test build or the simulation feature",
-                        ));
-                    }
-                }
-            };
-            if config.storage.opaque_names {
-                cfg = cfg.with_opaque_names();
-            }
-
-            let _ = test_mode; // Suppress unused warning
-            cfg
-        };
+        let _ = test_mode;
+        let encrypted_storage_config =
+            Self::profile_encrypted_storage_config(&config, execution_mode)?;
         let plain_storage = FilesystemStorageHandler::new(config.storage.base_path.clone());
         let plain_storage = match profile_owner.as_ref() {
             Some(owner) => plain_storage

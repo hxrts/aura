@@ -659,21 +659,32 @@ fn test_screen_navigation() {
 
 TUI state machine tests validate screen transitions and keyboard input handling without requiring a real terminal.
 
-### CLI Handler Testing
+### CLI and RPC Testing
+
+CLI account commands and `aura rpc` share one typed command model
+(`aura_terminal::command::{Request, Response, execute}`), so most coverage
+drives requests directly:
 
 ```rust
-use aura_terminal::handlers::{CliOutput, HandlerContext};
+use aura_terminal::command::{execute, Request, Response};
 
-#[tokio::test]
-async fn test_status_handler() {
-    let ctx = create_test_handler_context().await;
-    let output = status::handle_status(&ctx).await.unwrap();
-    let lines = output.stdout_lines();
-    assert!(lines.iter().any(|l| l.contains("Authority")));
-}
+let response = execute(&peer.ctx, Request::ChatList).await?;
+assert!(matches!(response, Response::Channels(_)));
 ```
 
-CLI handler tests exercise command handlers in isolation and assert against structured output lines.
+- `tests/cli_rpc.rs` runs simulation runtimes on the shared virtual-time
+  fixture (`tests/cli_rpc/simnet.rs`, paused tokio clock) and drives `aura
+  rpc` sessions over in-memory pipes. Wait for outcomes with `subscribe`
+  events or bounded `call_until` re-checks at quiescent points, never wall
+  clock sleeps. It also checks that CLI and RPC give identical responses and
+  that a CLI send matches the TUI send's semantic outcome.
+- `tests/cli_json.rs` and `tests/cli_socket.rs` run the real `aura` binary
+  against a node serving the socket.
+- `tests/cli_production.rs` creates an account through the TUI's staging
+  path, then runs the binary against the production profile (no node) and
+  through `aura serve`. It relies on the test keyring above; set
+  `AURA_TEST_KEYRING_DIR` per test so the test and binary share one store.
+- The published protocol schema is checked by `just ci-rpc-schema`.
 
 ### Quint Trace Usage
 
