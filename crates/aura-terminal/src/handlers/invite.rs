@@ -110,6 +110,14 @@ pub async fn handle_invitation(
             let mut output = CliOutput::new();
             let shareable = InvitationServiceApi::import_code(code)
                 .map_err(|e| TerminalError::Input(format!("Invalid invite code: {e}")))?;
+            // Cache the invitation so a later `aura invite accept` finds it.
+            agent
+                .invitations()?
+                .import_and_cache(code)
+                .await
+                .map_err(|e| {
+                    TerminalError::Operation(format!("Import invite code: {}", with_causes(&e)))
+                })?;
 
             output.section("Invitation Details");
             output.kv("Invitation ID", shareable.invitation_id.to_string());
@@ -177,6 +185,25 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
     }
 }
 
+/// Render an error with its source chain, so a CLI failure names its cause.
+fn with_causes(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut rendered = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        rendered.push_str(": ");
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    rendered
+}
+
+/// Parse an authority as printed by the CLI (`authority-<uuid>`) or a bare UUID.
+fn parse_authority(value: &str, label: &str) -> TerminalResult<AuthorityId> {
+    AuthorityId::from_str(value)
+        .or_else(|_| uuid::Uuid::from_str(value).map(AuthorityId::from_uuid))
+        .map_err(|e| TerminalError::Input(format!("invalid {label} authority: {e}")))
+}
+
 async fn create_invitation(
     agent: &AuraAgent,
     account: &str,
@@ -184,14 +211,8 @@ async fn create_invitation(
     role: &str,
     ttl_secs: Option<u64>,
 ) -> TerminalResult<aura_agent::Invitation> {
-    let receiver_id = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(invitee)
-            .map_err(|e| TerminalError::Input(format!("invalid invitee authority: {e}")))?,
-    );
-    let subject_authority = AuthorityId::from_uuid(
-        uuid::Uuid::from_str(account)
-            .map_err(|e| TerminalError::Input(format!("invalid account authority: {e}")))?,
-    );
+    let receiver_id = parse_authority(invitee, "invitee")?;
+    let subject_authority = parse_authority(account, "account")?;
     let service = agent.invitations()?;
     let expires_ms = ttl_secs.map(|s| s * 1000);
 
@@ -203,7 +224,7 @@ async fn create_invitation(
         InvitationRoleValue::Guardian => service
             .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
             .await
-            .map_err(|e| TerminalError::Operation(e.to_string())),
+            .map_err(|e| TerminalError::Operation(with_causes(&e))),
         InvitationRoleValue::Channel => service
             .invite_to_channel(
                 receiver_id,
@@ -215,11 +236,11 @@ async fn create_invitation(
                 expires_ms,
             )
             .await
-            .map_err(|e| TerminalError::Operation(e.to_string())),
+            .map_err(|e| TerminalError::Operation(with_causes(&e))),
         InvitationRoleValue::Contact => service
             .invite_as_contact(receiver_id, None, None, None, expires_ms)
             .await
-            .map_err(|e| TerminalError::Operation(e.to_string())),
+            .map_err(|e| TerminalError::Operation(with_causes(&e))),
     }
 }
 

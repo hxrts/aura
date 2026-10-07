@@ -84,6 +84,7 @@ use std::sync::RwLock;
 
 pub mod contacts;
 pub mod facts;
+pub mod flow_allowance;
 pub mod guardian;
 pub mod guardian_request;
 pub mod guardian_service;
@@ -119,6 +120,10 @@ pub use facts::{
 };
 
 pub use aura_consensus::types::ConsensusConfig;
+pub use flow_allowance::{
+    resolve_flow_allowances, FlowAllowanceFact, FlowAllowanceFactReducer,
+    FLOW_ALLOWANCE_FACT_TYPE_ID,
+};
 pub use guardian_request::{
     parse_guardian_request, GuardianRequestFact, GuardianRequestFactReducer,
     GuardianRequestPayload, GUARDIAN_REQUEST_FACT_TYPE_ID,

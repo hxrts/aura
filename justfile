@@ -97,6 +97,15 @@ cache-inventory:
 prune-inactive-lane lane="wasm-debug" mode="--dry-run":
     bash scripts/dev/prune-inactive-lane.sh --lane {{ lane }} {{ mode }}
 
+# Report (default) or collect unreachable Nix store paths; mode is --dry-run or --apply
+nix-store-gc mode="--dry-run":
+    bash scripts/dev/nix-store-gc.sh {{ mode }}
+
+# Build the LAN `aura` and `tool_repl` binaries hermetically with crate2nix
+nix-build-lan:
+    nix build .#aura-lan-terminal --out-link .nix-ship/aura-lan-terminal
+    nix build .#aura-lan-harness --out-link .nix-ship/aura-lan-harness
+
 # Preview Cargo artifact collection without building or deleting
 build-budget-dry-run:
     bash scripts/dev/build-budget.sh --dry-run

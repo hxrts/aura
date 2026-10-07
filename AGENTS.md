@@ -456,7 +456,10 @@ See `docs/804_testing_guide.md` "Build and Caching" for details.
   add new test files as a `mod` of the matching root in `crates/aura-agent/tests/`.
 - Run `just web-check` in pre-ship batches. `scripts/harness/lan/ship.sh`
   builds from a clean commit; do not edit that checkout while a ship build
-  runs.
+  runs. It builds `aura` and `tool_repl` with crate2nix (`just nix-build-lan`)
+  and sends them with `nix copy`; the web bundle stays on `dx`. Run
+  `crate2nix generate` after dependency changes; `just nix-store-gc` reports
+  (and `--apply` collects) unreachable store paths.
 
 ### Durable enrollment window discipline
 

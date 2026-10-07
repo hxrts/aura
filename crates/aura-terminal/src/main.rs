@@ -28,7 +28,7 @@ commands:
     chat        Secure messaging
     sync        Journal synchronization
     recovery    Guardian recovery flows
-    invite      Device invitations
+    invite      Contact, guardian and channel invitations
     authority   Authority management
     context     Relational context inspection
     amp         AMP channel operations

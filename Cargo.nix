@@ -9145,11 +9145,11 @@ decoding/encoding support
       };
       "either" = rec {
         crateName = "either";
-        version = "1.18.0";
+        version = "1.19.0";
         edition = "2021";
         description = "The enum `Either` with variants `Left` and `Right` is a general purpose sum type with two cases.
 ";
-        sha256 = "0d7dx31sf8rakcgp63070ngb2vkjynrni866pnx879pawndgnai5";
+        sha256 = "1gjq21g0sgk5ylpj85zafcinwhh3jj91i6drhb4278vw2v17370f";
         features = {
           "default" = [ "std" ];
           "serde" = [ "dep:serde" ];
@@ -15523,7 +15523,7 @@ library used by the other higher-level Hickory DNS crates.
             name = "tokio";
             packageId = "tokio";
             usesDefaultFeatures = false;
-            features = [ "io-util" "macros" "rt" "sync" "time" ];
+            features = [ "io-util" "macros" "rt" "sync" "time" "test-util" ];
           }
         ];
         features = {
@@ -15579,10 +15579,10 @@ library used by the other higher-level Hickory DNS crates.
       };
       "hyper" = rec {
         crateName = "hyper";
-        version = "1.11.1";
+        version = "1.12.0";
         edition = "2021";
         description = "A protective and efficient HTTP library for all.";
-        sha256 = "0hxyikj5livhmw5q3x3ifyhphh1g2cjsc32nsg1jcyhflpx03d97";
+        sha256 = "173wg6msakx4lha6hxm9z0i1h3bw34q8fk0x57b7flf9li6k4gic";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -15595,11 +15595,6 @@ library used by the other higher-level Hickory DNS crates.
           {
             name = "bytes";
             packageId = "bytes";
-          }
-          {
-            name = "futures-channel";
-            packageId = "futures-channel";
-            optional = true;
           }
           {
             name = "futures-core";
@@ -15648,11 +15643,6 @@ library used by the other higher-level Hickory DNS crates.
         ];
         devDependencies = [
           {
-            name = "futures-channel";
-            packageId = "futures-channel";
-            features = [ "sink" ];
-          }
-          {
             name = "pin-project-lite";
             packageId = "pin-project-lite";
           }
@@ -15666,7 +15656,7 @@ library used by the other higher-level Hickory DNS crates.
           "client" = [ "dep:want" "dep:pin-project-lite" "dep:smallvec" ];
           "ffi" = [ "dep:http-body-util" "dep:futures-util" ];
           "full" = [ "client" "http1" "http2" "server" ];
-          "http1" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:httparse" "dep:itoa" ];
+          "http1" = [ "dep:atomic-waker" "dep:futures-core" "dep:httparse" "dep:itoa" ];
           "http2" = [ "dep:atomic-waker" "dep:futures-channel" "dep:futures-core" "dep:h2" ];
           "server" = [ "dep:httpdate" "dep:pin-project-lite" "dep:smallvec" ];
           "tracing" = [ "dep:tracing" ];
@@ -17177,13 +17167,13 @@ library used by the other higher-level Hickory DNS crates.
       };
       "jiff" = rec {
         crateName = "jiff";
-        version = "0.2.37";
+        version = "0.2.38";
         edition = "2021";
         description = "A date-time library that encourages you to jump into the pit of success.
 
 This library is heavily inspired by the Temporal project.
 ";
-        sha256 = "1nxgdj2wajw9ml8fcc2zq858k6v9618m22864vh6sy885zvvmc8a";
+        sha256 = "10x38b9qb1b47mq54d9j4ljkpk7i5ygvknn0lf4h1sybbmqhbc5j";
         authors = [
           "Andrew Gallant <jamslam@gmail.com>"
         ];
@@ -17307,10 +17297,10 @@ This library is heavily inspired by the Temporal project.
       };
       "jiff-static" = rec {
         crateName = "jiff-static";
-        version = "0.2.37";
+        version = "0.2.38";
         edition = "2021";
         description = "Create static TimeZone values for Jiff (useful in core-only environments).";
-        sha256 = "04kjdzg4h4wy38ghm91qva7xg4glr65120c74bk7mmka26hni0ip";
+        sha256 = "0p39a035j9c634llmr8lh1jz7ml8gqrbsla4d3j7wz6gadr83j9c";
         procMacro = true;
         libName = "jiff_static";
         authors = [
@@ -17342,10 +17332,10 @@ This library is heavily inspired by the Temporal project.
       };
       "jiff-tzdb" = rec {
         crateName = "jiff-tzdb";
-        version = "0.1.8";
+        version = "0.1.9";
         edition = "2021";
         description = "The entire Time Zone Database embedded into your binary.";
-        sha256 = "07hl9sgzfb9as1x0n5bjk1qxishzcriapy9xa481y8xd6acx6aql";
+        sha256 = "19rd52w3il7603xln19s5yvz113dyrvmlpj4b63qdbkb1h3pg0zs";
         libName = "jiff_tzdb";
         libPath = "lib.rs";
         authors = [
@@ -20096,10 +20086,10 @@ turbofish syntax.
       };
       "objc2" = rec {
         crateName = "objc2";
-        version = "0.6.4";
+        version = "0.6.5";
         edition = "2021";
         description = "Objective-C interface and runtime bindings";
-        sha256 = "17x8qpl512frscfqbmgjr20kg3y4r0xdqxphja17dz5f0znsh4is";
+        sha256 = "1y41g7xhc3idzymsgr5vh414xzl43jp5cs39ayaaxpv78yyrp108";
         authors = [
           "Mads Marquart <mads@marquart.dk>"
         ];
@@ -22068,13 +22058,13 @@ a Message Authentication Code (MAC)
       };
       "powerfmt" = rec {
         crateName = "powerfmt";
-        version = "0.2.0";
+        version = "0.2.1";
         edition = "2021";
         description = "    `powerfmt` is a library that provides utilities for formatting values. This crate makes it
     significantly easier to support filling to a minimum width with alignment, avoid heap
     allocation, and avoid repetitive calculations.
 ";
-        sha256 = "14ckj2xdpkhv3h6l5sdmb9f1d57z8hbfpdldjc2vl5givq2y77j3";
+        sha256 = "0n293rvnpisjmxdqhq6zmrvcdql7j1c4zrcy5053vrv5x6wr8qsa";
         authors = [
           "Jacob Pratt <jacob@jhpratt.dev>"
         ];
@@ -29936,10 +29926,10 @@ clients and servers.
       };
       "unicase" = rec {
         crateName = "unicase";
-        version = "2.9.0";
+        version = "2.10.0";
         edition = "2018";
         description = "A case-insensitive wrapper around strings.";
-        sha256 = "0hh1wrfd7807mfph2q67jsxqgw8hm82xg2fb8ln8cvblkwxbri6v";
+        sha256 = "13x2h9s4jhch7rknqkqb1pb35irpj00fswy9ssgh0dm0qsnc6z1m";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -30765,10 +30755,10 @@ Unicode Standard Annex #31.
       };
       "want" = rec {
         crateName = "want";
-        version = "0.3.1";
+        version = "0.3.2";
         edition = "2018";
         description = "Detect when another Future wants a result.";
-        sha256 = "03hbfrnvqqdchb5kgxyavb9jabwza0dmh2vw5kg0dq8rxl57d9xz";
+        sha256 = "02zdlaqarwm9x3z1l0vm61mv8f6mv0kp4izgnxlfibqhv46xsk7c";
         authors = [
           "Sean McArthur <sean@seanmonstar.com>"
         ];
@@ -35664,10 +35654,10 @@ Used when compiling Rust programs to the component model.
       };
       "zerocopy" = rec {
         crateName = "zerocopy";
-        version = "0.8.59";
+        version = "0.8.61";
         edition = "2021";
         description = "Zerocopy makes zero-cost memory manipulation effortless. We write \"unsafe\" so you don't have to.";
-        sha256 = "1jq0z0rxrmpzfrvkj3z5gb1anaxczzdiv43k67ay6yr2v7rjpybd";
+        sha256 = "0ri8ajsyghsl0fmwc55k4cj4ky042az0z5yvxd0jxhwqrq2vg7w7";
         dependencies = [
           {
             name = "zerocopy-derive";
@@ -35697,10 +35687,10 @@ Used when compiling Rust programs to the component model.
       };
       "zerocopy-derive" = rec {
         crateName = "zerocopy-derive";
-        version = "0.8.59";
+        version = "0.8.61";
         edition = "2021";
         description = "Custom derive for traits from the zerocopy crate";
-        sha256 = "10pc78vxhr6lqk71yvm1aqv1h2pd6czrqgkc9570hpghya634kxc";
+        sha256 = "0ncpf1fq0gv8rk4nxivdp32093d90xv75iww0gx09mh1hfi8523h";
         procMacro = true;
         libName = "zerocopy_derive";
         dependencies = [
@@ -35784,7 +35774,7 @@ Used when compiling Rust programs to the component model.
       };
       "zeroize" = rec {
         crateName = "zeroize";
-        version = "1.9.0";
+        version = "1.9.1";
         edition = "2024";
         description = "Securely clear secrets from memory with a simple trait built on
 stable Rust primitives which guarantee memory is zeroed using an
@@ -35792,7 +35782,7 @@ operation will not be 'optimized away' by the compiler.
 Uses a portable pure Rust implementation that works everywhere,
 even WASM!
 ";
-        sha256 = "0kpnij2v1ig6g2mhc0bnci0lrdfdhiq40afbc0fahajqc9jiag71";
+        sha256 = "0yb8iykihpl3hfw5c4silw2lklpfxajkaa9yj1qw6jsy5hwq8c71";
         authors = [
           "The RustCrypto Project Developers"
         ];

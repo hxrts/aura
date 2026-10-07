@@ -10,9 +10,10 @@
 //! receives are queued for adoption into its journal budget. Both queues are
 //! flushed from async receive paths by the effect system.
 //!
-//! Window state is runtime-owned and in memory. After a restart the receiver
-//! adopts the first receipt it sees from a sender device as that direction's
-//! checkpoint, which resets accounting by at most one window per restart.
+//! Window state is runtime-owned; window bounds persist to local storage and
+//! are restored before the first receive after a restart. Per-peer allowance
+//! overrides are committed `FlowAllowanceFact`s, reduced into this ingress at
+//! start and whenever replicated facts arrive.
 
 // Runtime-owned state guarded by short synchronous critical sections that
 // never cross an `.await` (clippy.toml: allowed in aura-agent/src/runtime).
@@ -59,8 +60,6 @@ pub(crate) struct FlowIngress {
     inbound: Mutex<Vec<FlowCheckpointNotice>>,
     /// Directions whose window bounds changed since the last persist.
     dirty_windows: Mutex<HashSet<Direction>>,
-    /// Whether allowances changed since the last persist.
-    dirty_allowances: std::sync::atomic::AtomicBool,
     /// Whether persisted state was restored after start.
     restored: std::sync::atomic::AtomicBool,
 }
@@ -74,17 +73,18 @@ pub(crate) struct PersistedFlowWindow {
     pub state: aura_core::types::flow_window::FlowWindowState,
 }
 
-/// Persisted allowance overrides (work/8.md Task 54).
-pub(crate) type PersistedAllowances = Vec<(ContextId, AuthorityId, u64)>;
-
 impl FlowIngress {
     /// Override the window granted to `peer` in `context` from the next epoch.
-    // Callers arrive with a user-facing allowance control (work/8.md Task 54).
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn set_allowance(&self, context: ContextId, peer: AuthorityId, window: u64) {
         self.allowances.lock().insert((context, peer), window);
-        self.dirty_allowances
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Replace the allowance overrides with those reduced from committed
+    /// `FlowAllowanceFact`s (docs/111 §3.1). The facts replicate with the
+    /// owner's journal, so every device of the owner enforces them.
+    pub(crate) fn replace_allowances(&self, allowances: HashMap<(ContextId, AuthorityId), u64>) {
+        *self.allowances.lock() = allowances;
     }
 
     /// Whether persisted windows still need restoring after start.
@@ -92,24 +92,14 @@ impl FlowIngress {
         !self.restored.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Restore persisted windows and allowances. Windows already live in
-    /// memory (admitted before the restore ran) are kept.
-    pub(crate) fn restore(
-        &self,
-        windows: Vec<PersistedFlowWindow>,
-        allowances: PersistedAllowances,
-    ) {
+    /// Restore persisted windows. Windows already live in memory (admitted
+    /// before the restore ran) are kept.
+    pub(crate) fn restore(&self, windows: Vec<PersistedFlowWindow>) {
         {
             let mut live = self.windows.lock();
             for persisted in windows {
                 live.entry((persisted.context, persisted.peer, persisted.device))
                     .or_insert_with(|| FlowReceiveWindow::from_state(persisted.state));
-            }
-        }
-        {
-            let mut live = self.allowances.lock();
-            for (context, peer, window) in allowances {
-                live.entry((context, peer)).or_insert(window);
             }
         }
         self.restored
@@ -135,20 +125,7 @@ impl FlowIngress {
             .collect()
     }
 
-    /// All allowances if any changed since the last call.
-    pub(crate) fn take_dirty_allowances(&self) -> Option<PersistedAllowances> {
-        self.dirty_allowances
-            .swap(false, std::sync::atomic::Ordering::Relaxed)
-            .then(|| {
-                self.allowances
-                    .lock()
-                    .iter()
-                    .map(|((context, peer), window)| (*context, *peer, *window))
-                    .collect()
-            })
-    }
-
-    fn window_for(&self, context: ContextId, peer: AuthorityId) -> u64 {
+    pub(crate) fn window_for(&self, context: ContextId, peer: AuthorityId) -> u64 {
         resolve_flow_window(self.allowances.lock().get(&(context, peer)).copied(), None)
     }
 
@@ -390,7 +367,6 @@ mod tests {
                 .expect("admitted");
         }
         let windows = before.take_dirty_windows();
-        let allowances = before.take_dirty_allowances().expect("allowance changed");
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].state.current.epoch.value(), 1, "bump persisted");
         assert!(before.take_dirty_windows().is_empty(), "dirty set drained");
@@ -398,7 +374,9 @@ mod tests {
         // A fresh runtime restores instead of trusting the next receipt.
         let after = FlowIngress::default();
         assert!(after.needs_restore());
-        after.restore(windows, allowances);
+        // Allowances come back from committed override facts.
+        after.set_allowance(context, sender, 4);
+        after.restore(windows);
         assert!(!after.needs_restore());
         // Epoch 0 is still open as the previous window; epoch 7 was never
         // opened, so it is not adopted as a fresh checkpoint.

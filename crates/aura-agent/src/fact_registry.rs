@@ -41,11 +41,12 @@ use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYP
 use aura_journal::FactRegistry;
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
-    ContactFact, ContactFactReducer, FriendshipFact, FriendshipFactReducer,
-    GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer, GuardianRequestFact,
-    GuardianRequestFactReducer, RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer,
-    TrustIntroductionFact, TrustIntroductionFactReducer, CONTACT_FACT_TYPE_ID,
-    FRIENDSHIP_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, GUARDIAN_REQUEST_FACT_TYPE_ID,
+    ContactFact, ContactFactReducer, FlowAllowanceFact, FlowAllowanceFactReducer, FriendshipFact,
+    FriendshipFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
+    GuardianRequestFact, GuardianRequestFactReducer, RecoveryGrantDetailsFact,
+    RecoveryGrantDetailsFactReducer, TrustIntroductionFact, TrustIntroductionFactReducer,
+    CONTACT_FACT_TYPE_ID, FLOW_ALLOWANCE_FACT_TYPE_ID, FRIENDSHIP_FACT_TYPE_ID,
+    GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, GUARDIAN_REQUEST_FACT_TYPE_ID,
     RECOVERY_GRANT_DETAILS_FACT_TYPE_ID, TRUST_INTRODUCTION_FACT_TYPE_ID,
 };
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
@@ -69,6 +70,10 @@ pub fn build_fact_registry() -> FactRegistry {
     registry.register::<ConsensusFact>(CONSENSUS_FACT_TYPE_ID, Box::new(ConsensusFactReducer));
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
+    registry.register::<FlowAllowanceFact>(
+        FLOW_ALLOWANCE_FACT_TYPE_ID,
+        Box::new(FlowAllowanceFactReducer),
+    );
     registry.register::<FriendshipFact>(FRIENDSHIP_FACT_TYPE_ID, Box::new(FriendshipFactReducer));
     registry.register::<TrustIntroductionFact>(
         TRUST_INTRODUCTION_FACT_TYPE_ID,
@@ -116,6 +121,7 @@ mod tests {
         assert!(registry.is_registered(CONSENSUS_FACT_TYPE_ID));
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
         assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
+        assert!(registry.is_registered(FLOW_ALLOWANCE_FACT_TYPE_ID));
         assert!(registry.is_registered(FRIENDSHIP_FACT_TYPE_ID));
         assert!(registry.is_registered(TRUST_INTRODUCTION_FACT_TYPE_ID));
         assert!(registry.is_registered(GUARDIAN_REQUEST_FACT_TYPE_ID));

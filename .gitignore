@@ -70,4 +70,5 @@ wip
 target-codex
 node_modules/
 /bin/
+/.nix-ship/
 .sweep.timestamp

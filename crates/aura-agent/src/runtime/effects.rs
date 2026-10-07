@@ -2400,8 +2400,17 @@ impl AuraEffectSystem {
             imported.push(fact);
         }
         let count = imported.len();
+        let allowance_changed = imported.iter().any(|fact| {
+            matches!(&fact.content,
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == aura_relational::FLOW_ALLOWANCE_FACT_TYPE_ID)
+        });
         if count > 0 {
             self.publish_typed_facts(imported).await?;
+        }
+        if allowance_changed {
+            // A sibling device's override applies here too (docs/111 §3.1).
+            self.refresh_flow_allowances().await?;
         }
         Ok(count)
     }

@@ -932,6 +932,16 @@ pub trait RuntimeBridge: Send + Sync {
     /// Update MFA policy
     async fn set_mfa_policy(&self, policy: &str) -> Result<(), RuntimeBridgeError>;
 
+    /// Commit a per-peer flow allowance override (docs/111 §3.1): the receive
+    /// window granted to `peer` in `context`, applied on all of this
+    /// authority's devices from the next window epoch.
+    async fn set_peer_flow_allowance(
+        &self,
+        context: aura_core::types::identifiers::ContextId,
+        peer: aura_core::types::identifiers::AuthorityId,
+        window: u64,
+    ) -> Result<(), RuntimeBridgeError>;
+
     // =========================================================================
     // Recovery Operations
     // =========================================================================
