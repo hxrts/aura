@@ -569,13 +569,82 @@ impl AuraEffectSystem {
                 }
             }
         }
-        let allowances = match self.retrieve(FLOW_ALLOWANCES_STORAGE_KEY).await {
-            Ok(Some(bytes)) => {
-                aura_core::util::serialization::from_slice(&bytes).unwrap_or_default()
-            }
-            _ => Vec::new(),
+        if let Err(error) = self.refresh_flow_allowances().await {
+            tracing::warn!(%error, "flow allowance overrides not restored");
+        }
+        flow.restore(windows);
+    }
+
+    /// Reduce this authority's committed `FlowAllowanceFact`s into the
+    /// receive ingress (docs/111 §3.1). Overrides replicate with the owner's
+    /// journal, so every device of the owner enforces the same allowance.
+    pub(crate) async fn refresh_flow_allowances(&self) -> Result<(), aura_core::AuraError> {
+        let facts = self.flow_allowance_facts().await?;
+        let owner = self.authority_id;
+        let allowances = aura_relational::resolve_flow_allowances(facts.iter())
+            .into_iter()
+            .filter(|((_, fact_owner, _), _)| *fact_owner == owner)
+            .map(|((context, _, peer), fact)| ((context, peer), fact.window))
+            .collect();
+        self.transport.flow().replace_allowances(allowances);
+        Ok(())
+    }
+
+    async fn flow_allowance_facts(
+        &self,
+    ) -> Result<Vec<aura_relational::FlowAllowanceFact>, aura_core::AuraError> {
+        use aura_journal::DomainFact as _;
+        Ok(self
+            .load_committed_facts(self.authority_id)
+            .await?
+            .iter()
+            .filter_map(|fact| match &fact.content {
+                aura_journal::FactContent::Relational(aura_journal::RelationalFact::Generic {
+                    envelope,
+                    ..
+                }) => aura_relational::FlowAllowanceFact::from_envelope(envelope),
+                _ => None,
+            })
+            .collect())
+    }
+
+    /// Commit a per-peer allowance override for receipts `peer` sends in
+    /// `context` and apply it from the next window epoch. The override
+    /// supersedes every override this runtime has seen.
+    pub async fn set_flow_allowance(
+        &self,
+        context: ContextId,
+        peer: AuthorityId,
+        window: u64,
+    ) -> Result<(), aura_core::AuraError> {
+        use aura_journal::DomainFact as _;
+        if window == 0 {
+            return Err(aura_core::AuraError::invalid(
+                "a flow allowance must be at least one message per window",
+            ));
+        }
+        let revision = self
+            .flow_allowance_facts()
+            .await?
+            .iter()
+            .filter(|fact| {
+                fact.context_id == context
+                    && fact.owner_id == self.authority_id
+                    && fact.peer_id == peer
+            })
+            .map(|fact| fact.revision)
+            .max()
+            .map_or(0, |latest| latest.saturating_add(1));
+        let fact = aura_relational::FlowAllowanceFact {
+            context_id: context,
+            owner_id: self.authority_id,
+            peer_id: peer,
+            window,
+            revision,
         };
-        flow.restore(windows, allowances);
+        self.commit_relational_facts(vec![fact.to_generic()])
+            .await?;
+        self.refresh_flow_allowances().await
     }
 
     async fn persist_flow_windows(&self) {
@@ -596,13 +665,6 @@ impl AuraEffectSystem {
             if let Ok(bytes) = aura_core::util::serialization::to_vec(&window) {
                 if let Err(error) = self.store(&key, bytes).await {
                     tracing::debug!(%error, "flow window not persisted");
-                }
-            }
-        }
-        if let Some(allowances) = flow.take_dirty_allowances() {
-            if let Ok(bytes) = aura_core::util::serialization::to_vec(&allowances) {
-                if let Err(error) = self.store(FLOW_ALLOWANCES_STORAGE_KEY, bytes).await {
-                    tracing::debug!(%error, "flow allowances not persisted");
                 }
             }
         }
@@ -712,8 +774,6 @@ impl AuraEffectSystem {
 const SOURCE_DEVICE_METADATA_KEY: &str = "aura-source-device-id";
 /// Storage prefix for persisted flow receive windows (work/8.md Task 54).
 const FLOW_WINDOW_STORAGE_PREFIX: &str = "flow_window/recv/";
-/// Storage key for persisted flow allowance overrides.
-const FLOW_ALLOWANCES_STORAGE_KEY: &str = "flow_window/allowances";
 
 impl AuraEffectSystem {
     /// Original native tree custody authorizes addressing only current sibling
@@ -900,6 +960,67 @@ mod tests {
         let alice_fx = build(format!("flow-alice-{}", seeds.0), alice, shared.clone());
         let bob_fx = build(format!("flow-bob-{}", seeds.1), bob, shared);
         (alice, alice_fx, bob, bob_fx)
+    }
+
+    // Task 54: an allowance override is a committed relational fact. It
+    // survives a restart of the owner's runtime and, once replicated, applies
+    // on the owner's other devices; a later override supersedes it.
+    #[tokio::test]
+    async fn flow_allowance_override_replicates_to_sibling_devices_and_restarts() {
+        let owner = AuthorityId::new_from_entropy([81; 32]);
+        let peer = AuthorityId::new_from_entropy([82; 32]);
+        let context = default_context_id_for_authority(peer);
+        let device = |seed: u8, name: &str| {
+            let config = AgentConfig {
+                device_id: aura_core::DeviceId::new_from_entropy([seed; 32]),
+                ..AgentConfig::default()
+            };
+            AuraEffectSystem::simulation_for_named_test_with_shared_transport_for_authority(
+                &config,
+                name,
+                owner,
+                crate::SharedTransport::new(),
+            )
+            .expect("simulation effect system")
+        };
+        let first = device(83, "flow-allowance-first");
+        let sibling = device(84, "flow-allowance-sibling");
+        let default_window = aura_core::types::flow_window::DEFAULT_FLOW_WINDOW;
+        assert_eq!(
+            first.transport.flow().window_for(context, peer),
+            default_window
+        );
+
+        first
+            .set_flow_allowance(context, peer, 16)
+            .await
+            .expect("commit override");
+        assert_eq!(first.transport.flow().window_for(context, peer), 16);
+        assert!(first.set_flow_allowance(context, peer, 0).await.is_err());
+
+        let facts = first.load_committed_facts(owner).await.expect("facts");
+        assert!(sibling.import_committed_facts(facts).await.expect("import") > 0);
+        assert_eq!(sibling.transport.flow().window_for(context, peer), 16);
+
+        sibling
+            .set_flow_allowance(context, peer, 64)
+            .await
+            .expect("supersede on the sibling");
+        let facts = sibling.load_committed_facts(owner).await.expect("facts");
+        first.import_committed_facts(facts).await.expect("import");
+        assert_eq!(first.transport.flow().window_for(context, peer), 64);
+
+        // A fresh ingress (restart) reduces the committed facts again.
+        first
+            .transport
+            .flow()
+            .replace_allowances(std::collections::HashMap::default());
+        assert_eq!(
+            first.transport.flow().window_for(context, peer),
+            default_window
+        );
+        first.refresh_flow_allowances().await.expect("refresh");
+        assert_eq!(first.transport.flow().window_for(context, peer), 64);
     }
 
     // Background sync sends one charged message per round. With the receiver

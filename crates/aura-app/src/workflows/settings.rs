@@ -141,6 +141,31 @@ pub async fn update_mfa_policy(
     Ok(())
 }
 
+/// Set the receive allowance granted to `peer` in `context`
+///
+/// **What it does**: Commits a per-peer flow allowance override fact
+/// (docs/111 §3.1); every device of this authority enforces it from the
+/// next window epoch.
+/// **Returns**: Unit result
+pub async fn set_peer_flow_allowance(
+    app_core: &Arc<RwLock<AppCore>>,
+    context: aura_core::types::identifiers::ContextId,
+    peer: aura_core::types::identifiers::AuthorityId,
+    window: u64,
+) -> Result<(), AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    timeout_runtime_call(
+        &runtime,
+        "set_peer_flow_allowance",
+        "set_peer_flow_allowance",
+        SETTINGS_RUNTIME_TIMEOUT,
+        || runtime.set_peer_flow_allowance(context, peer, window),
+    )
+    .await?
+    .map_err(|e| super::error::native_runtime_call("set peer flow allowance", e))?;
+    Ok(())
+}
+
 /// Update nickname suggestion (what the user wants to be called)
 ///
 /// **What it does**: Updates nickname suggestion and emits SETTINGS_SIGNAL

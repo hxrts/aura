@@ -1744,6 +1744,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
+    async fn set_peer_flow_allowance(
+        &self,
+        _context: ContextId,
+        _peer: AuthorityId,
+        _window: u64,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        Ok(())
+    }
+
     // =========================================================================
     // Misc
     // =========================================================================

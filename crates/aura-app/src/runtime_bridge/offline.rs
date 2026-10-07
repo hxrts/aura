@@ -1186,6 +1186,15 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Err(IntentError::no_agent("Settings update not available in offline mode").into())
     }
 
+    async fn set_peer_flow_allowance(
+        &self,
+        _context: aura_core::types::identifiers::ContextId,
+        _peer: aura_core::types::identifiers::AuthorityId,
+        _window: u64,
+    ) -> Result<(), RuntimeBridgeError> {
+        Err(IntentError::no_agent("Settings update not available in offline mode").into())
+    }
+
     async fn respond_to_guardian_ceremony(
         &self,
         _ceremony_id: &CeremonyId,
