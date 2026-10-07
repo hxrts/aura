@@ -1706,14 +1706,20 @@ async fn test_send_message_by_name_with_instance_publishes_terminal_failure() {
 // OWNERSHIP: test-only-helper
 #[tokio::test]
 async fn test_mark_message_delivery_failed_reduces_delivery_status() {
+    // The failure applies to the sender's own message, so the core runs as
+    // the sender (an offline runtime that records the committed failure).
     let config = AppConfig::default();
-    let core = AppCore::new(config).unwrap();
-    let app_core = Arc::new(RwLock::new(core));
-    AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+    let sender_id = AuthorityId::new_from_entropy([92u8; 32]);
+    let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(sender_id));
+    runtime.record_relational_facts();
+    let runtime_bridge: Arc<dyn RuntimeBridge> = runtime.clone();
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(config, runtime_bridge).unwrap(),
+    ));
+    register_signals_only(&app_core).await;
 
     let context_id = ContextId::new_from_entropy([91u8; 32]);
     let channel_id = ChannelId::from_bytes(hash(b"delivery-failed-reduction"));
-    let sender_id = AuthorityId::new_from_entropy([92u8; 32]);
     let message_id = "delivery-failed-message".to_string();
 
     reduce_chat_fact_observed(
@@ -2522,8 +2528,9 @@ async fn test_enforce_home_join_blocks_banned_sender_when_context_mismatched() {
         .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
     assert!(matches!(
-        std::error::Error::source(&error)
-            .and_then(|source| source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()),
+        std::error::Error::source(&error).and_then(|source| {
+            source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()
+        }),
         Some(crate::workflows::moderation::ModerationDenial::Banned { .. })
     ));
 }
@@ -2658,8 +2665,9 @@ async fn test_enforce_home_join_blocks_banned_sender_across_context_homes() {
         .expect_err("a banned authority must not join");
     assert!(matches!(error, AuraError::PermissionDenied { .. }));
     assert!(matches!(
-        std::error::Error::source(&error)
-            .and_then(|source| source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()),
+        std::error::Error::source(&error).and_then(|source| {
+            source.downcast_ref::<crate::workflows::moderation::ModerationDenial>()
+        }),
         Some(crate::workflows::moderation::ModerationDenial::Banned { .. })
     ));
 }
@@ -3319,7 +3327,9 @@ async fn send_with_no_authoritative_recipients_fails_before_commit() {
         .await
         .expect_err("a send with no authoritative recipient must fail");
     assert!(
-        error.to_string().contains("Recipient peers are not resolved"),
+        error
+            .to_string()
+            .contains("Recipient peers are not resolved"),
         "{error}"
     );
 }

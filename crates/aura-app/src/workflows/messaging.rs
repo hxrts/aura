@@ -25,8 +25,8 @@ use crate::workflows::observed_projection::{
 use crate::workflows::observed_snapshot::{observed_chat_snapshot, observed_contacts_snapshot};
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{
-    converge_runtime, cooperative_yield, ensure_runtime_peer_connectivity,
-    execute_with_runtime_retry_budget, execute_with_runtime_timeout_budget, require_runtime,
+    converge_runtime, ensure_runtime_peer_connectivity, execute_with_runtime_retry_budget,
+    execute_with_runtime_timeout_budget, require_runtime, send_committed_fact,
     timeout_runtime_call, warn_workflow_timeout, workflow_best_effort, workflow_retry_policy,
     workflow_timeout_budget,
 };
@@ -76,14 +76,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
-const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
-const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 pub(crate) const AMP_SEND_RETRY_ATTEMPTS: usize = 6;
 pub(crate) const AMP_SEND_RETRY_BACKOFF_MS: u64 = 75;
 const CHANNEL_CONTEXT_RETRY_ATTEMPTS: usize = 12;
 const CHANNEL_CONTEXT_RETRY_BACKOFF_MS: u64 = 100;
-const REMOTE_DELIVERY_RETRY_ATTEMPTS: usize = 24;
-const REMOTE_DELIVERY_RETRY_BACKOFF_MS: u64 = 250;
 const INVITE_USER_STAGE_TIMEOUT_MS: u64 = 20_000;
 const INVITE_USER_OPERATION_TIMEOUT_MS: u64 = 15_000;
 const MESSAGING_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(5_000);
@@ -310,61 +306,6 @@ fn next_message_id(
 
 fn is_invitation_capability_missing(error: &AuraError) -> bool {
     validation::is_invitation_capability_missing(error)
-}
-
-async fn send_chat_fact_with_retry(
-    runtime: &Arc<dyn RuntimeBridge>,
-    peer: AuthorityId,
-    context: ContextId,
-    fact: &RelationalFact,
-) -> Result<(), AuraError> {
-    let retry_policy = workflow_retry_policy(
-        CHAT_FACT_SEND_MAX_ATTEMPTS as u32,
-        Duration::from_millis(1),
-        Duration::from_millis(1),
-    )?;
-    let mut attempts = retry_policy.attempt_budget();
-    let last_error = loop {
-        let _attempt = attempts.record_attempt()?;
-        match timeout_runtime_call(
-            runtime,
-            "send_chat_fact_with_retry",
-            "send_chat_fact",
-            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-            || runtime.send_chat_fact(peer, context, fact),
-        )
-        .await
-        {
-            Ok(Ok(())) => return Ok(()),
-            Ok(Err(error)) => {
-                if attempts.can_attempt() {
-                    converge_runtime(runtime).await;
-                    for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
-                        cooperative_yield().await;
-                    }
-                    continue;
-                }
-                break error.to_string();
-            }
-            Err(error) => {
-                if attempts.can_attempt() {
-                    converge_runtime(runtime).await;
-                    for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
-                        cooperative_yield().await;
-                    }
-                    continue;
-                }
-                break error.to_string();
-            }
-        }
-    };
-
-    Err(super::error::WorkflowError::DeliveryFailed {
-        peer: peer.to_string(),
-        attempts: CHAT_FACT_SEND_MAX_ATTEMPTS,
-        source: AuraError::agent(last_error),
-    }
-    .into())
 }
 
 async fn resolve_target_authority_for_invite(

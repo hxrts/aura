@@ -10,22 +10,17 @@ use crate::workflows::moderation::governance_causal;
 use crate::workflows::observed_projection::{
     homes_signal_snapshot, try_update_homes_projection_observed,
 };
-use crate::workflows::runtime::{
-    converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
-    timeout_runtime_call, workflow_retry_policy,
-};
+use crate::workflows::runtime::{require_runtime, send_committed_fact, timeout_runtime_call};
 use crate::{views::home::HomeRole, AppCore};
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::{AuraError, RetryRunError};
-use aura_journal::{fact::RelationalFact, DomainFact};
+use aura_core::AuraError;
+use aura_journal::DomainFact;
 use aura_social::moderation::facts::{HomeGrantModeratorFact, HomeRevokeModeratorFact};
 use aura_social::HomeGovernanceKey;
 use std::sync::Arc;
 use std::time::Duration;
 
-const MODERATOR_FACT_SEND_MAX_ATTEMPTS: usize = 4;
-const MODERATOR_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const MODERATOR_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 fn apply_moderator_role_to_materialized_home(
@@ -66,46 +61,6 @@ fn apply_moderator_role_to_materialized_home(
         }
     }
     Ok(())
-}
-
-async fn send_moderator_fact_with_retry(
-    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    peer: AuthorityId,
-    context_id: ContextId,
-    fact: &RelationalFact,
-) -> Result<(), AuraError> {
-    let retry_policy = workflow_retry_policy(
-        MODERATOR_FACT_SEND_MAX_ATTEMPTS as u32,
-        std::time::Duration::from_millis(1),
-        std::time::Duration::from_millis(1),
-    )?;
-    execute_with_runtime_retry_budget(runtime, &retry_policy, |attempt| {
-        let runtime = Arc::clone(runtime);
-        async move {
-            if attempt > 0 {
-                converge_runtime(&runtime).await;
-                for _ in 0..MODERATOR_FACT_SEND_YIELDS_PER_RETRY {
-                    cooperative_yield().await;
-                }
-            }
-            timeout_runtime_call(
-                &runtime,
-                "send_moderator_fact_with_retry",
-                "send_chat_fact",
-                MODERATOR_RUNTIME_TIMEOUT,
-                || runtime.send_chat_fact(peer, context_id, fact),
-            )
-            .await?
-            .map_err(|error| {
-                AuraError::from(super::error::runtime_call("Send moderator fact", error))
-            })
-        }
-    })
-    .await
-    .map_err(|error| match error {
-        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-    })
 }
 
 #[aura_macros::strong_reference(domain = "home_scope")]
@@ -343,8 +298,16 @@ pub async fn grant_moderator_resolved(
         if peer == actor {
             continue;
         }
-        // Committed above; delivery is best-effort and peers catch up via sync.
-        let _ = send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
+        // Committed above. One send for latency; relational-context sync
+        // delivers it if this send is lost.
+        let _ = send_committed_fact(
+            &runtime,
+            "moderator_fact_send",
+            peer,
+            scope.context_id,
+            &fact,
+        )
+        .await;
     }
 
     // Observed UI mirror.
@@ -447,8 +410,16 @@ pub async fn revoke_moderator_resolved(
         if peer == actor {
             continue;
         }
-        // Committed above; delivery is best-effort and peers catch up via sync.
-        let _ = send_moderator_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
+        // Committed above. One send for latency; relational-context sync
+        // delivers it if this send is lost.
+        let _ = send_committed_fact(
+            &runtime,
+            "moderator_fact_send",
+            peer,
+            scope.context_id,
+            &fact,
+        )
+        .await;
     }
 
     try_update_homes_projection_observed(app_core, |homes| {

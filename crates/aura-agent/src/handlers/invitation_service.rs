@@ -1950,6 +1950,18 @@ impl InvitationServiceApi {
             .await
     }
 
+    /// Authoritative participants of a channel (AMP membership plus accepted
+    /// channel invitations).
+    pub async fn channel_participants(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+    ) -> Result<std::collections::BTreeSet<AuthorityId>, aura_core::AuraError> {
+        self.handler
+            .channel_participants(&self.effects, context, channel)
+            .await
+    }
+
     /// Observed-only best-effort listing from cache and persisted stores.
     pub async fn list_with_storage(&self) -> Vec<Invitation> {
         self.handler.list_with_storage(&self.effects).await

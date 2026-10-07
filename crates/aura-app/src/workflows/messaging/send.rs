@@ -301,8 +301,12 @@ fn outbound_delivery_failures(
     )]
 }
 
+/// One send of a committed message fact to each recipient. The send only cuts
+/// latency: a recipient it misses receives the message through
+/// relational-context sync (docs/111 §11.4), and the recipient's delivery receipt,
+/// not this send, advances the message to Delivered. A failed send marks the
+/// message Failed until such a receipt arrives.
 async fn deliver_message_fact_remotely(
-    _app_core: &Arc<RwLock<AppCore>>,
     runtime: &Arc<dyn RuntimeBridge>,
     channel: AuthoritativeChannelRef,
     sender_id: AuthorityId,
@@ -310,134 +314,53 @@ async fn deliver_message_fact_remotely(
 ) -> Result<(), AuraError> {
     let context_id = channel.context_id();
     let channel_id = channel.channel_id();
-    let mut delivered_remote = false;
-    let mut recipients =
-        authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
-    let mut failed_fanout = Vec::new();
-    let mut attempted_fanout_total = 0usize;
-    let mut last_connectivity_error: Option<String> = None;
-    let retry_policy = workflow_retry_policy(
-        REMOTE_DELIVERY_RETRY_ATTEMPTS as u32,
-        Duration::from_millis(REMOTE_DELIVERY_RETRY_BACKOFF_MS),
-        Duration::from_millis(REMOTE_DELIVERY_RETRY_BACKOFF_MS),
-    )?;
-    let mut attempts = retry_policy.attempt_budget();
-    loop {
-        let attempt = attempts.record_attempt()?;
-        if recipients.is_empty() {
-            converge_runtime(runtime).await;
-            if attempts.can_attempt() {
-                runtime
-                    .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
-                    .await
-                    .map_err(|error| {
-                        super::super::error::runtime_call("remote delivery retry delay", error)
-                    })?;
-                recipients =
-                    authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
-                continue;
+    let recipients = authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
+    if recipients.is_empty() {
+        return Err(
+            super::super::error::WorkflowError::DeliveryRecipientsUnresolved {
+                channel: channel_id.to_string(),
+                attempts: 1,
             }
-            break;
-        }
-
-        let mut channel_setup_errors = Vec::new();
-        for peer in recipients.iter().copied() {
-            if let Err(error) = timeout_runtime_call(
-                runtime,
-                "deliver_message_fact_remotely",
-                "ensure_peer_channel",
-                MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-                || runtime.ensure_peer_channel(context_id, peer),
-            )
-            .await
-            {
-                channel_setup_errors.push(format!("{peer}: {error}"));
-            }
-        }
-
-        if let Err(error) = ensure_runtime_peer_connectivity(runtime, "send_message_ref").await {
-            let mut detail = error.to_string();
-            if !channel_setup_errors.is_empty() {
-                detail.push_str("; channel_setup=");
-                detail.push_str(&channel_setup_errors.join(", "));
-            }
-            last_connectivity_error = Some(detail);
-        }
-
-        failed_fanout.clear();
-        let mut attempted_fanout = 0usize;
-        for peer in recipients.iter().copied() {
-            attempted_fanout = attempted_fanout.saturating_add(1);
-            attempted_fanout_total = attempted_fanout_total.saturating_add(1);
-            if let Err(error) = send_chat_fact_with_retry(runtime, peer, context_id, fact).await {
-                failed_fanout.push((peer, error.to_string()));
-            }
-        }
-
-        if attempted_fanout > 0 && failed_fanout.is_empty() {
-            delivered_remote = true;
-            break;
-        }
-
-        if attempts.can_attempt() {
-            converge_runtime(runtime).await;
-            runtime
-                .sleep_ms(retry_policy.delay_for_attempt(attempt).as_millis() as u64)
-                .await
-                .map_err(|error| {
-                    super::super::error::runtime_call("remote delivery retry delay", error)
-                })?;
-            recipients =
-                authoritative_recipient_peers_for_channel(runtime, channel, sender_id).await?;
-        } else {
-            break;
-        }
-    }
-
-    if !delivered_remote {
-        if recipients.is_empty() {
-            return Err(
-                super::super::error::WorkflowError::DeliveryRecipientsUnresolved {
-                    channel: channel_id.to_string(),
-                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                }
-                .into(),
-            );
-        }
-        if attempted_fanout_total == 0 {
-            return Err(
-                super::super::error::WorkflowError::DeliveryPrerequisitesNeverConverged {
-                    peer: channel_id.to_string(),
-                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                    detail: last_connectivity_error
-                        .unwrap_or_else(|| "no recipient fanout attempt executed".to_string()),
-                }
-                .into(),
-            );
-        }
-        if !failed_fanout.is_empty() {
-            return Err(
-                super::super::error::WorkflowError::DeliveryFanoutUnavailable {
-                    peer: channel_id.to_string(),
-                    attempts: REMOTE_DELIVERY_RETRY_ATTEMPTS,
-                    recipients: failed_fanout,
-                }
-                .into(),
-            );
-        }
-    }
-
-    converge_runtime(runtime).await;
-    if let Err(_error) = ensure_runtime_peer_connectivity(runtime, "send_message_ref").await {
-        #[cfg(feature = "instrumented")]
-        tracing::warn!(
-            error = %_error,
-            channel_id = %channel_id,
-            "message send completed without reachable peers — remote delivery may not have converged"
+            .into(),
         );
     }
-
-    Ok(())
+    for peer in recipients.iter().copied() {
+        // Route warmup; a failure surfaces as the send's own error.
+        let _ = timeout_runtime_call(
+            runtime,
+            "deliver_message_fact_remotely",
+            "ensure_peer_channel",
+            MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+            || runtime.ensure_peer_channel(context_id, peer),
+        )
+        .await;
+    }
+    let mut failed_fanout = Vec::new();
+    for peer in recipients {
+        if let Err(error) = send_committed_fact(
+            runtime,
+            "deliver_message_fact_remotely",
+            peer,
+            context_id,
+            fact,
+        )
+        .await
+        {
+            failed_fanout.push((peer, error.to_string()));
+        }
+    }
+    if failed_fanout.is_empty() {
+        Ok(())
+    } else {
+        Err(
+            super::super::error::WorkflowError::DeliveryFanoutUnavailable {
+                peer: channel_id.to_string(),
+                attempts: 1,
+                recipients: failed_fanout,
+            }
+            .into(),
+        )
+    }
 }
 
 /// Record a remote delivery that failed or never started: typed per-recipient
@@ -1161,14 +1084,9 @@ async fn send_message_ref_owned(
             let runtime = runtime.clone();
             let followup_message_id = followup_message_id.clone();
             async move {
-                if let Err(error) = deliver_message_fact_remotely(
-                    &app_core,
-                    &runtime,
-                    authoritative_channel,
-                    sender_id,
-                    &fact,
-                )
-                .await
+                if let Err(error) =
+                    deliver_message_fact_remotely(&runtime, authoritative_channel, sender_id, &fact)
+                        .await
                 {
                     record_remote_delivery_failure(
                         &app_core,
@@ -1338,7 +1256,16 @@ pub async fn start_direct_chat_with_authority(
         .map_err(|error| super::super::error::runtime_call("persist direct channel", error))?;
 
         reduce_chat_fact_observed(app_core, &chat_fact).await?;
-        send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
+        // Latency only; the contact receives the creation fact through
+        // relational-context sync if this send is lost.
+        let _ = send_committed_fact(
+            &runtime,
+            "start_direct_chat_with_authority",
+            contact_authority,
+            context_id,
+            &fact,
+        )
+        .await;
         // Direct chats need epoch-0 key material on both sides; deliver it to the
         // contact as a channel invitation, which the receiving runtime installs
         // without a manual accept (it recognises the pair DM channel).

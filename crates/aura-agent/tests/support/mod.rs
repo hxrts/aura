@@ -353,3 +353,62 @@ pub async fn join_home(inviter: &Peer, invitee: &Peer, home: ChannelId) -> Resul
     })
     .await
 }
+
+/// Wait until `check` holds on every peer: the context state the check reads
+/// has converged across them. Convergence comes only from the runtimes' own
+/// periodic relational-context sync, driven by virtual time.
+pub async fn wait_converged<F, Fut>(what: &str, peers: &[&Peer], check: F) -> Result<()>
+where
+    F: Fn(Arc<AuraAgent>, Arc<RwLock<AppCore>>) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    wait_until(what, || async {
+        for peer in peers {
+            if !check(peer.agent.clone(), peer.app.clone()).await {
+                return false;
+            }
+        }
+        true
+    })
+    .await
+}
+
+/// The AMP channel membership facts `agent` holds for `context`, as their
+/// canonical encodings.
+pub async fn membership_facts(
+    agent: &AuraAgent,
+    context: ContextId,
+) -> std::collections::BTreeSet<Vec<u8>> {
+    use aura_protocol::amp::AmpJournalEffects;
+    let Ok(journal) = agent
+        .runtime()
+        .effects()
+        .fetch_context_journal(context)
+        .await
+    else {
+        return std::collections::BTreeSet::default();
+    };
+    journal
+        .iter_facts()
+        .filter_map(|fact| match &fact.content {
+            aura_journal::fact::FactContent::Relational(
+                aura_journal::fact::RelationalFact::Generic { envelope, .. },
+            ) if envelope.type_id.as_str() == aura_amp::CHANNEL_MEMBERSHIP_FACT_TYPE_ID => {
+                aura_core::util::serialization::to_vec(envelope).ok()
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Wait until every peer holds the same AMP membership facts for `context`.
+pub async fn wait_membership_converged(peers: &[&Peer], context: ContextId) -> Result<()> {
+    wait_until("channel membership facts converge", || async {
+        let mut sets = Vec::new();
+        for peer in peers {
+            sets.push(membership_facts(&peer.agent, context).await);
+        }
+        sets.windows(2).all(|pair| pair[0] == pair[1])
+    })
+    .await
+}

@@ -506,7 +506,13 @@ impl ChatState {
     pub fn mark_delivered(&mut self, message_id: &str) -> bool {
         for msgs in self.channel_messages.values_mut() {
             if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
-                if msg.delivery_status == MessageDeliveryStatus::Sent {
+                // A receipt is authoritative evidence of delivery, so it also
+                // clears a Failed mark left by a lost send (the message
+                // arrived through relational-context sync).
+                if matches!(
+                    msg.delivery_status,
+                    MessageDeliveryStatus::Sent | MessageDeliveryStatus::Failed
+                ) {
                     msg.delivery_status = MessageDeliveryStatus::Delivered;
                     return true;
                 }
@@ -530,7 +536,11 @@ impl ChatState {
     pub fn mark_failed(&mut self, message_id: &str) -> bool {
         for msgs in self.channel_messages.values_mut() {
             if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
-                if msg.delivery_status != MessageDeliveryStatus::Failed {
+                // A failed send never overrides a receipt.
+                if matches!(
+                    msg.delivery_status,
+                    MessageDeliveryStatus::Sending | MessageDeliveryStatus::Sent
+                ) {
                     msg.delivery_status = MessageDeliveryStatus::Failed;
                     return true;
                 }

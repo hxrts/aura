@@ -254,6 +254,16 @@ Retry behavior follows `AntiEntropyConfig.retry_policy` with exponential backoff
 
 See [Choreography Development Guide](803_choreography_guide.md) for anti-entropy implementation.
 
+### 11.4 Relational-Context Sync
+
+Anti-entropy carries only `AttestedOp`s. Committed relational facts of home, channel and DM contexts converge through relational-context sync, a membership-checked pull between the members of one context.
+
+A member sends each peer it counts as a member of the context a `ContextSyncRequest` (content type `application/aura-context-sync`) holding the context id and the digests of the context-sync facts it has committed there. Context-sync facts are home governance facts, moderation actions, chat facts (channels, messages, delivery and read state) and AMP channel membership facts. The peer serves only a requester it counts as a member: the home roster (members and moderation targets) of a home with that context, or an authoritative participant of a channel in it (AMP membership plus accepted channel invitations). It answers with the facts the requester lacks that it may serve. A moderation fact is served only by its author, because a receiver requires a moderation fact's actor to be its sender. The receiver commits a delivered fact once; a synced membership fact also enters the AMP context journal.
+
+The runtime-owned periodic sync runs the pull on `PhysicalTimeEffects`, coalesced per (context, peer) by the sync manager. Commit-time sends to peers are single best-effort sends that only cut latency; they are never retried, and a failed send never turns a committed action into a reported failure. Message delivery status comes from the recipient's delivery receipt, which a recipient sends when it first commits the message whether the message arrived by send or by sync. A failed commit-time send marks the message `Failed`; a later receipt advances it to `Delivered`, and a failed send never overrides a receipt.
+
+Relational-context sync does not establish membership. A peer that does not yet count the requester as a member ignores the request, and the requester converges through another member. Held-digest sets grow with the context's history.
+
 ## 12. Protocol Version Negotiation
 
 All choreographic protocols participate in version negotiation during connection establishment.

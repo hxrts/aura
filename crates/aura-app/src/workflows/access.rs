@@ -4,22 +4,17 @@
 
 use crate::workflows::moderation::governance_causal;
 use crate::workflows::observed_projection::update_homes_projection_observed;
-use crate::workflows::runtime::{
-    converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, require_runtime,
-    timeout_runtime_call, workflow_retry_policy,
-};
+use crate::workflows::runtime::{require_runtime, send_committed_fact, timeout_runtime_call};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
-use aura_core::{AuraError, RetryRunError};
+use aura_core::AuraError;
 use aura_journal::{fact::RelationalFact, DomainFact};
 use aura_social::{AccessLevel, AccessLevelCapabilityConfig, HomeGovernanceKey, SocialFact};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-const ACCESS_FACT_SEND_MAX_ATTEMPTS: usize = 4;
-const ACCESS_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const ACCESS_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 #[aura_macros::strong_reference(domain = "home_scope")]
@@ -36,50 +31,6 @@ fn map_runtime_error(
     error: impl std::error::Error + Send + Sync + 'static,
 ) -> AuraError {
     super::error::runtime_call(operation, error).into()
-}
-
-async fn send_relational_fact_with_retry(
-    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    peer: AuthorityId,
-    context_id: ContextId,
-    fact: &RelationalFact,
-) -> Result<(), AuraError> {
-    let retry_policy = workflow_retry_policy(
-        ACCESS_FACT_SEND_MAX_ATTEMPTS as u32,
-        std::time::Duration::from_millis(1),
-        std::time::Duration::from_millis(1),
-    )?;
-    execute_with_runtime_retry_budget(runtime, &retry_policy, |attempt| {
-        let runtime = Arc::clone(runtime);
-        async move {
-            if attempt > 0 {
-                converge_runtime(&runtime).await;
-                for _ in 0..ACCESS_FACT_SEND_YIELDS_PER_RETRY {
-                    cooperative_yield().await;
-                }
-            }
-            timeout_runtime_call(
-                &runtime,
-                "send_relational_fact_with_retry",
-                "send_chat_fact",
-                ACCESS_RUNTIME_TIMEOUT,
-                || runtime.send_chat_fact(peer, context_id, fact),
-            )
-            .await?
-            .map_err(|error| {
-                AuraError::from(super::error::WorkflowError::DeliveryFailed {
-                    peer: peer.to_string(),
-                    attempts: ACCESS_FACT_SEND_MAX_ATTEMPTS,
-                    source: AuraError::agent(error.to_string()),
-                })
-            })
-        }
-    })
-    .await
-    .map_err(|error| match error {
-        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-    })
 }
 
 async fn current_access_scope(app_core: &Arc<RwLock<AppCore>>) -> Result<AccessScope, AuraError> {
@@ -208,8 +159,10 @@ pub async fn configure_home_capabilities_resolved(
         if peer == actor {
             continue;
         }
-        // Committed above; delivery is best-effort and peers catch up via sync.
-        let _ = send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
+        // Committed above. One send for latency; relational-context sync
+        // delivers it if this send is lost.
+        let _ =
+            send_committed_fact(&runtime, "access_fact_send", peer, scope.context_id, &fact).await;
     }
 
     update_homes_projection_observed(app_core, |homes| {
@@ -347,8 +300,10 @@ pub async fn set_access_override_resolved(
         if peer == actor {
             continue;
         }
-        // Committed above; delivery is best-effort and peers catch up via sync.
-        let _ = send_relational_fact_with_retry(&runtime, peer, scope.context_id, &fact).await;
+        // Committed above. One send for latency; relational-context sync
+        // delivers it if this send is lost.
+        let _ =
+            send_committed_fact(&runtime, "access_fact_send", peer, scope.context_id, &fact).await;
     }
 
     update_homes_projection_observed(app_core, |homes| {

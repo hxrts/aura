@@ -13,7 +13,7 @@
 //! starts one (its tag), and a kick or `MemberLeft` revokes exactly the join
 //! tags of that member its writer observed. A rejoin the kicker never saw
 //! survives the kick in every arrival order, including a reinstalled member
-//! pulling the old kick back through home-context sync.
+//! pulling the old kick back through relational-context sync.
 //!
 //! The generic rules live in `aura_journal::causal_reduction`; this module
 //! binds them to the home governance fact family.

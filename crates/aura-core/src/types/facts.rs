@@ -626,6 +626,28 @@ mod tests {
     }
 
     #[test]
+    fn required_fact_decoder_retains_native_cbor_cause_through_both_entry_points() {
+        use std::error::Error;
+        let type_id = FactTypeId::new("test/v1");
+        let envelope = FactEnvelope {
+            type_id: type_id.clone(),
+            schema_version: 1,
+            encoding: FactEncoding::DagCbor,
+            payload: vec![0xff, 0x00, 0x01],
+        };
+        let encoded = crate::util::serialization::to_vec(&envelope).unwrap();
+        for failed in [
+            try_decode_envelope::<TestFact>(&type_id, 1, 1, &envelope).unwrap_err(),
+            try_decode_fact::<TestFact>(&type_id, 1, 1, &encoded).unwrap_err(),
+        ] {
+            assert!(matches!(&failed, FactError::Serialization(_)));
+            assert!(failed
+                .source()
+                .is_some_and(|source| source.is::<SerializationError>()));
+        }
+    }
+
+    #[test]
     fn test_decode_rejects_large_payload() {
         let type_id = FactTypeId::new("test/v1");
 

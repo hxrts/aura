@@ -6,8 +6,11 @@
 use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result, TrustedKeyResolver};
+use aura_journal::DomainFact;
 use aura_macros::tell;
 use aura_relational::RelationalContext;
+
+use crate::facts::{AuthFact, AUTH_FACT_TYPE_ID};
 use aura_signature::SecurityTranscript;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -306,37 +309,20 @@ pub struct GuardianAuthHandler {
     context: Arc<RelationalContext>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RecoveryRequestRecord {
-    guardian_id: AuthorityId,
-    account_id: AuthorityId,
-    requested_at: u64,
-    operation: GuardianOperation,
-}
-
 fn record_recovery_request(
     context: &RelationalContext,
+    request: &GuardianAuthRequest,
     guardian_id: AuthorityId,
-    account_id: AuthorityId,
-    operation: GuardianOperation,
-    requested_at: u64,
-) {
-    let record = RecoveryRequestRecord {
+    requested_at_ms: u64,
+) -> Result<()> {
+    context.add_domain_fact(&AuthFact::GuardianAuthRequestRecorded {
+        context_id: context.context_id,
+        request_id: request.request_id.clone(),
         guardian_id,
-        account_id,
-        requested_at,
-        operation,
-    };
-
-    if let Ok(binding_bytes) = serde_json::to_vec(&record) {
-        let envelope = aura_core::types::facts::FactEnvelope {
-            type_id: aura_core::types::facts::FactTypeId::from("recovery_request"),
-            schema_version: 1,
-            encoding: aura_core::types::facts::FactEncoding::Json,
-            payload: binding_bytes,
-        };
-        let _ = context.add_generic_fact_envelope(envelope);
-    }
+        account_id: request.account_id,
+        operation: request.operation.clone(),
+        requested_at_ms,
+    })
 }
 
 impl GuardianAuthHandler {
@@ -365,11 +351,10 @@ impl GuardianAuthHandler {
         // Record request for delay enforcement
         record_recovery_request(
             &self.context,
+            &request,
             guardian.authority_id(),
-            request.account_id,
-            request.operation.clone(),
             current_time_ms(time_effects).await,
-        );
+        )?;
 
         Ok(verified)
     }
@@ -394,18 +379,21 @@ impl GuardianAuthHandler {
                 let recovery_delay = binding.parameters.recovery_delay;
 
                 // Determine the latest recovery request for this guardian
-                let latest_request = self
+                let latest_request_time = self
                     .context
-                    .generic_fact_envelopes("recovery_request")
+                    .generic_fact_envelopes(AUTH_FACT_TYPE_ID)
                     .iter()
-                    .filter_map(|env| {
-                        serde_json::from_slice::<RecoveryRequestRecord>(&env.payload).ok()
+                    .filter_map(AuthFact::from_envelope)
+                    .filter_map(|fact| match fact {
+                        AuthFact::GuardianAuthRequestRecorded {
+                            guardian_id: recorded,
+                            requested_at_ms,
+                            ..
+                        } if recorded == guardian_id => Some(requested_at_ms),
+                        _ => None,
                     })
-                    .filter(|record| record.guardian_id == guardian_id)
-                    .max_by_key(|record| record.requested_at);
-
-                let latest_request_time =
-                    latest_request.as_ref().map(|r| r.requested_at).unwrap_or(0);
+                    .max()
+                    .unwrap_or(0);
 
                 let now = time_effects
                     .physical_time()
@@ -417,13 +405,11 @@ impl GuardianAuthHandler {
                     return Ok(false);
                 }
 
-                // Check if notification was required
-                if binding.parameters.notification_required {
-                    if let Some(ref req) = latest_request {
-                        if !self.guardian_notification_recorded(guardian_id, req.account_id) {
-                            return Ok(false);
-                        }
-                    }
+                // No guardian notification delivery is recorded anywhere, so a
+                // pending request under a notification-required binding
+                // cannot be approved yet.
+                if binding.parameters.notification_required && latest_request_time > 0 {
+                    return Ok(false);
                 }
 
                 // Approve only when binding parameters satisfy minimum safety window
@@ -459,23 +445,6 @@ impl GuardianAuthHandler {
                 Ok(true)
             }
         }
-    }
-
-    fn guardian_notification_recorded(
-        &self,
-        guardian_id: AuthorityId,
-        account_id: AuthorityId,
-    ) -> bool {
-        self.context
-            .generic_fact_envelopes("guardian_notification")
-            .iter()
-            .any(|env| {
-                serde_json::from_slice::<GuardianNotificationRecord>(&env.payload)
-                    .map(|record| {
-                        record.guardian_id == guardian_id && record.account_id == account_id
-                    })
-                    .unwrap_or(false)
-            })
     }
 }
 
@@ -514,11 +483,4 @@ mod tests {
         assert_ne!(bytes_a, bytes_b);
         assert_ne!(bytes_a, bytes_c);
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct GuardianNotificationRecord {
-    guardian_id: AuthorityId,
-    account_id: AuthorityId,
-    sent_at: u64,
 }

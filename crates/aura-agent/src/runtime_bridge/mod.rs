@@ -1016,70 +1016,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
         context: ContextId,
         channel: ChannelId,
     ) -> Result<Vec<AuthorityId>, RuntimeBridgeError> {
-        let effects = self.agent.runtime().effects();
-        let mut participants: BTreeSet<AuthorityId> =
-            aura_protocol::amp::list_channel_participants(&effects, context, channel)
-                .await
-                .map_err(|error| {
-                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
-                })?
-                .into_iter()
-                .collect();
-
         let invitation_service = self.agent.invitations().map_err(|e| {
             RuntimeBridgeError::with_source(
                 IntentError::service_error("Invitation service unavailable"),
                 e,
             )
         })?;
-        let local_authority = self.agent.authority_id();
-        for invitation in invitation_service
-            .list_channel_invitations_with_storage_required()
+        invitation_service
+            .channel_participants(context, channel)
             .await
-            .map_err(|error| {
-                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
-            })?
-        {
-            if invitation.status != aura_invitation::InvitationStatus::Accepted {
-                continue;
-            }
-            let aura_invitation::InvitationType::Channel { home_id, .. } =
-                invitation.invitation_type
-            else {
-                continue;
-            };
-            tracing::debug!(
-                query_context = %context,
-                invitation_context = %invitation.context_id,
-                query_channel = %channel,
-                invitation_channel = %home_id,
-                receiver_id = %invitation.receiver_id,
-                invitation_id = %invitation.invitation_id,
-                "considering accepted channel invitation for authoritative participant augmentation"
-            );
-            if invitation.context_id == context && home_id == channel {
-                let augmented_peer = if invitation.sender_id == local_authority {
-                    Some(invitation.receiver_id)
-                } else if invitation.receiver_id == local_authority {
-                    Some(invitation.sender_id)
-                } else {
-                    None
-                };
-                if let Some(peer_id) = augmented_peer {
-                    participants.insert(peer_id);
-                }
-                tracing::debug!(
-                    query_context = %context,
-                    query_channel = %channel,
-                    receiver_id = %invitation.receiver_id,
-                    sender_id = %invitation.sender_id,
-                    invitation_id = %invitation.invitation_id,
-                    "augmented authoritative participant set from accepted channel invitation"
-                );
-            }
-        }
-
-        Ok(participants.into_iter().collect())
+            .map(|participants| participants.into_iter().collect())
+            .map_err(|error| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error)))
     }
 
     async fn amp_channel_transition_diagnostics(

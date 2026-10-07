@@ -31,7 +31,7 @@ pub const DISPUTE_WINDOW_HOURS_MIN: u64 = 1;
 /// Prevents indefinite recovery windows that could block account access.
 pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 
-use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
+use crate::workflows::journal::{encode_fact_content, persist_fact_value};
 use aura_core::effects::{
     JournalEffects, LogicalClockEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects,
 };
@@ -39,13 +39,15 @@ use aura_core::frost::PublicKeyPackage;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::types::identifiers::{AuthorityId, ContextId, RecoveryId};
 use aura_core::{hash, AuraError, FactValue, Hash32};
+use aura_journal::fact::FactContent;
+use aura_journal::DomainFact;
+use aura_recovery::facts::RecoveryFact;
 use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
 use aura_recovery::recovery_protocol::{
     RecoveryProtocol, RecoveryProtocolHandler, RecoveryRequest,
 };
-use aura_recovery::types::{GuardianProfile, RecoveryEvidence, RecoveryShare};
+use aura_recovery::types::{GuardianProfile, RecoveryDispute, RecoveryEvidence, RecoveryShare};
 use aura_relational::RelationalContext;
-use serde::Serialize;
 
 // ============================================================================
 // Guardian Set Validation (re-exported from thresholds)
@@ -285,12 +287,12 @@ pub async fn list_recovery_fact_keys<E: JournalEffects>(
 }
 
 /// Record a recovery dispute fact after validating the dispute window.
-pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffects>(
+pub async fn record_recovery_dispute<E: JournalEffects + TimeEffects>(
     effects: &E,
     context_id: ContextId,
     evidence_id: &str,
     guardian_authority: AuthorityId,
-    dispute: &T,
+    dispute: &RecoveryDispute,
 ) -> Result<String, AuraError> {
     let dispute_journal = effects
         .get_journal()
@@ -329,7 +331,13 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
     }
 
     let dispute_key = format!("recovery_dispute.{evidence_id}.{guardian_authority}");
-    let fact_value = encode_relational_generic(context_id, "recovery_dispute", dispute)?;
+    let fact = RecoveryFact::recovery_dispute_filed_ms(
+        context_id,
+        dispute.guardian_id,
+        dispute.reason.clone(),
+        dispute.filed_at_ms,
+    );
+    let fact_value = encode_fact_content(FactContent::Relational(fact.to_generic()))?;
     persist_fact_value(effects, dispute_key.clone(), fact_value).await?;
 
     Ok(dispute_key)

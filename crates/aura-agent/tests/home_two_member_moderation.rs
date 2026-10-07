@@ -34,7 +34,7 @@ async fn moderation_reaches_member_after_delayed_fanout() -> Result<()> {
 
 /// The override and ban fanout is lost on the Alex<->Barbara link (a
 /// partition the sender cannot observe); after the link heals, Alex's
-/// home-context journal sync pulls the missed facts.
+/// relational-context sync pulls the missed facts.
 #[tokio::test(start_paused = true)]
 async fn moderation_reaches_member_after_lost_fanout() -> Result<()> {
     moderation_reaches_member(Some(LinkFault::Drop)).await

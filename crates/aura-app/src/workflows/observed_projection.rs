@@ -432,14 +432,20 @@ pub async fn reduce_chat_fact_observed(
 
     let reducer = ChatViewReducer;
     let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &envelope.payload, None);
-    let owner = app_core.read().await.projection_owner();
+    let (owner, local_authority) = {
+        let core = app_core.read().await;
+        (
+            core.projection_owner(),
+            core.runtime().map(|runtime| runtime.authority_id()),
+        )
+    };
     let (_, snapshot) = owner
         .update(ProjectionSlot::chat(), |state| {
             for delta in deltas {
                 let Some(chat_delta) = downcast_delta::<ChatDelta>(&delta) else {
                     continue;
                 };
-                apply_chat_delta_reduced(state, chat_delta.clone())?;
+                apply_chat_delta_reduced(local_authority, state, chat_delta.clone())?;
             }
             Ok::<(), AuraError>(())
         })
@@ -464,7 +470,13 @@ fn parse_authority_id(raw: &str) -> Result<AuthorityId, AuraError> {
 }
 
 #[allow(clippy::manual_unwrap_or_default)]
-fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(), AuraError> {
+/// `local_authority` marks the local user's own messages so delivery-status
+/// transitions (which apply only to own messages) take effect.
+fn apply_chat_delta_reduced(
+    local_authority: Option<AuthorityId>,
+    state: &mut ChatState,
+    delta: ChatDelta,
+) -> Result<(), AuraError> {
     match delta {
         ChatDelta::ChannelAdded(creation) => {
             state.materialize_canonical_channel(creation, None);
@@ -525,7 +537,7 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
                     content,
                     timestamp,
                     reply_to,
-                    is_own: false,
+                    is_own: local_authority == Some(sender_id),
                     is_read: false,
                     delivery_status: MessageDeliveryStatus::Sent,
                     epoch_hint,
@@ -546,16 +558,20 @@ fn apply_chat_delta_reduced(state: &mut ChatState, delta: ChatDelta) -> Result<(
             message_id,
             delivery_status,
         } => {
-            let channel_id = parse_channel_id(&channel_id)?;
-            if let Some(message) = state.message_mut(&channel_id, &message_id) {
-                message.delivery_status = match delivery_status {
-                    aura_chat::ChatMessageDeliveryStatus::Sent => MessageDeliveryStatus::Sent,
-                    aura_chat::ChatMessageDeliveryStatus::Delivered => {
-                        MessageDeliveryStatus::Delivered
-                    }
-                    aura_chat::ChatMessageDeliveryStatus::Read => MessageDeliveryStatus::Read,
-                    aura_chat::ChatMessageDeliveryStatus::Failed => MessageDeliveryStatus::Failed,
-                };
+            parse_channel_id(&channel_id)?;
+            // Same transition rules as the runtime chat view: a receipt
+            // clears Failed, and a failed send never overrides a receipt.
+            match delivery_status {
+                aura_chat::ChatMessageDeliveryStatus::Sent => {}
+                aura_chat::ChatMessageDeliveryStatus::Delivered => {
+                    state.mark_delivered(&message_id);
+                }
+                aura_chat::ChatMessageDeliveryStatus::Read => {
+                    state.mark_read_by_recipient(&message_id);
+                }
+                aura_chat::ChatMessageDeliveryStatus::Failed => {
+                    state.mark_failed(&message_id);
+                }
             }
         }
         ChatDelta::MessageRead {
@@ -765,6 +781,7 @@ mod tests {
         }]);
 
         apply_chat_delta_reduced(
+            None,
             &mut state,
             canonical_channel_added(
                 canonical_context,
@@ -790,6 +807,7 @@ mod tests {
         let mut state = ChatState::default();
 
         apply_chat_delta_reduced(
+            None,
             &mut state,
             ChatDelta::ChannelUpdated {
                 channel_id: channel_id.to_string(),
@@ -815,6 +833,7 @@ mod tests {
         let creation = canonical_channel_added(context_id, channel_id, "original", None, creator);
 
         apply_chat_delta_reduced(
+            None,
             &mut state,
             ChatDelta::ChannelUpdated {
                 channel_id: channel_id.to_string(),
@@ -828,6 +847,7 @@ mod tests {
         )
         .unwrap();
         apply_chat_delta_reduced(
+            None,
             &mut state,
             ChatDelta::MessageAdded {
                 channel_id: channel_id.to_string(),
@@ -847,13 +867,14 @@ mod tests {
         );
         assert_eq!(state.message_count(), 1, "message is held for replay");
 
-        apply_chat_delta_reduced(&mut state, creation.clone()).unwrap();
+        apply_chat_delta_reduced(None, &mut state, creation.clone()).unwrap();
         let channel = state.channel(&channel_id).unwrap();
         assert_eq!(channel.name, "newer");
         assert_eq!(channel.member_count, 3);
         assert_eq!(channel.last_message.as_deref(), Some("hello"));
 
         apply_chat_delta_reduced(
+            None,
             &mut state,
             ChatDelta::ChannelUpdated {
                 channel_id: channel_id.to_string(),
@@ -866,7 +887,7 @@ mod tests {
             },
         )
         .unwrap();
-        apply_chat_delta_reduced(&mut state, creation).unwrap();
+        apply_chat_delta_reduced(None, &mut state, creation).unwrap();
         let channel = state.channel(&channel_id).unwrap();
         assert_eq!(
             channel.name, "newer",
@@ -939,6 +960,7 @@ mod tests {
         }]);
 
         apply_chat_delta_reduced(
+            None,
             &mut state,
             canonical_channel_added(
                 ContextId::new_from_entropy([6u8; 32]),

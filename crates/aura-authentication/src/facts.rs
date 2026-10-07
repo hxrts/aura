@@ -32,6 +32,7 @@ use aura_macros::DomainFact;
 use aura_signature::session::SessionScope;
 use serde::{Deserialize, Serialize};
 
+use crate::guardian_auth_relational::GuardianOperation;
 use crate::guards::RecoveryOperationType;
 
 /// Fact type identifier for authentication facts
@@ -206,6 +207,23 @@ pub enum AuthFact {
         denied_at_ms: u64,
     },
 
+    /// A guardian authentication request was verified and recorded for
+    /// recovery-delay enforcement
+    GuardianAuthRequestRecorded {
+        /// Relational context for this auth fact
+        context_id: ContextId,
+        /// Request ID that was verified
+        request_id: String,
+        /// Guardian that authenticated
+        guardian_id: AuthorityId,
+        /// Account the request targets
+        account_id: AuthorityId,
+        /// Requested guardian operation
+        operation: GuardianOperation,
+        /// Timestamp of the request (ms)
+        requested_at_ms: u64,
+    },
+
     /// Recovery operation completed successfully
     RecoveryCompleted {
         /// Relational context for this auth fact
@@ -263,6 +281,7 @@ impl AuthFact {
             AuthFact::GuardianApprovalRequested { requester_id, .. } => *requester_id,
             AuthFact::GuardianApproved { guardian_id, .. } => *guardian_id,
             AuthFact::GuardianDenied { guardian_id, .. } => *guardian_id,
+            AuthFact::GuardianAuthRequestRecorded { guardian_id, .. } => *guardian_id,
             AuthFact::RecoveryCompleted { account_id, .. } => *account_id,
             AuthFact::RecoveryFailed { account_id, .. } => *account_id,
         }
@@ -284,6 +303,9 @@ impl AuthFact {
             } => *requested_at_ms,
             AuthFact::GuardianApproved { approved_at_ms, .. } => *approved_at_ms,
             AuthFact::GuardianDenied { denied_at_ms, .. } => *denied_at_ms,
+            AuthFact::GuardianAuthRequestRecorded {
+                requested_at_ms, ..
+            } => *requested_at_ms,
             AuthFact::RecoveryCompleted {
                 completed_at_ms, ..
             } => *completed_at_ms,
@@ -302,6 +324,7 @@ impl AuthFact {
             AuthFact::GuardianApprovalRequested { request_id, .. }
             | AuthFact::GuardianApproved { request_id, .. }
             | AuthFact::GuardianDenied { request_id, .. }
+            | AuthFact::GuardianAuthRequestRecorded { request_id, .. }
             | AuthFact::RecoveryCompleted { request_id, .. }
             | AuthFact::RecoveryFailed { request_id, .. } => (None, Some(request_id)),
         }
@@ -350,6 +373,7 @@ impl AuthFact {
             AuthFact::GuardianApprovalRequested { context_id, .. } => *context_id,
             AuthFact::GuardianApproved { context_id, .. } => *context_id,
             AuthFact::GuardianDenied { context_id, .. } => *context_id,
+            AuthFact::GuardianAuthRequestRecorded { context_id, .. } => *context_id,
             AuthFact::RecoveryCompleted { context_id, .. } => *context_id,
             AuthFact::RecoveryFailed { context_id, .. } => *context_id,
         }
@@ -397,6 +421,10 @@ impl AuthFact {
             },
             AuthFact::GuardianDenied { request_id, .. } => AuthFactKey {
                 sub_type: "auth-guardian-denied",
+                data: request_id.as_bytes().to_vec(),
+            },
+            AuthFact::GuardianAuthRequestRecorded { request_id, .. } => AuthFactKey {
+                sub_type: "auth-guardian-request-recorded",
                 data: request_id.as_bytes().to_vec(),
             },
             AuthFact::RecoveryCompleted { request_id, .. } => AuthFactKey {
@@ -506,7 +534,8 @@ impl AuthFactReducer {
             // Facts that don't produce view deltas
             AuthFact::ProofSubmitted { .. }
             | AuthFact::AuthVerified { .. }
-            | AuthFact::AuthFailed { .. } => AuthFactDelta::NoChange,
+            | AuthFact::AuthFailed { .. }
+            | AuthFact::GuardianAuthRequestRecorded { .. } => AuthFactDelta::NoChange,
         }
     }
 }

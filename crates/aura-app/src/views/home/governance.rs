@@ -1,7 +1,7 @@
 //! Pure home governance reduction over the whole governance fact set
 //! (docs/115 §3.4, docs/105 order-independent reduction).
 //!
-//! Late and out-of-order delivery through home-context sync cannot change the
+//! Late and out-of-order delivery through relational-context sync cannot change the
 //! result: the reducer recomputes overrides, capability configuration,
 //! moderator designations, bans, mutes and the kick history from the full
 //! fact set every time, and authorizes each fact against the moderator set
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn reinstalled_member_pulling_old_kick_stays_after_rejoin() {
         // The kicked member reinstalls (empty journal and roster), rejoins,
-        // and home-context sync then serves the old join and kick.
+        // and relational-context sync then serves the old join and kick.
         let old_join = join(10);
         let old_kick = kick(1, std::slice::from_ref(&old_join));
         let rejoin = join(30);

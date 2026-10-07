@@ -12,11 +12,11 @@
 use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
-    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactSchemaCompatibility,
+    try_decode_envelope, FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError,
     MAX_FACT_PAYLOAD_BYTES,
 };
 use aura_core::types::identifiers::AuthorityId;
-use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
+use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{ChunkId, ContentId, ContextId};
 use serde::{Deserialize, Serialize};
 
@@ -250,30 +250,12 @@ impl StorageFact {
     pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
         let envelope: FactEnvelope = from_slice(bytes)?;
 
-        if envelope.type_id.as_str() != storage_fact_type_id().as_str() {
-            return Err(FactError::TypeMismatch {
-                expected: storage_fact_type_id().to_string(),
-                actual: envelope.type_id.to_string(),
-            });
-        }
-
-        FactSchemaCompatibility::range(
+        try_decode_envelope(
+            storage_fact_type_id(),
             STORAGE_FACT_MIN_SUPPORTED_SCHEMA_VERSION,
             STORAGE_FACT_SCHEMA_VERSION,
+            &envelope,
         )
-        .ensure_supported(envelope.schema_version)?;
-
-        let fact = match envelope.encoding {
-            FactEncoding::DagCbor => from_slice::<Self>(&envelope.payload)?,
-            FactEncoding::Json => {
-                serde_json::from_slice::<Self>(&envelope.payload).map_err(|err| {
-                    FactError::Serialization(SerializationError::InvalidFormat(format!(
-                        "JSON decode failed: {err}"
-                    )))
-                })?
-            }
-        };
-        Ok(fact)
     }
 
     /// Encode this fact with proper error handling.

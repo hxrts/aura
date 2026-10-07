@@ -6,7 +6,8 @@
 //! keeping the implementation side-effect free for simulation.
 
 use async_trait::async_trait;
-use aura_amp::{get_channel_state, AmpJournalEffects};
+use aura_amp::journal::channel_membership_event;
+use aura_amp::{get_channel_state, AmpJournalEffects, ChannelParticipantEvent};
 use aura_core::effects::amp::{
     AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
     ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
@@ -19,27 +20,7 @@ use aura_core::Hash32;
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
 };
-use serde::{Deserialize, Serialize};
-
-/// Channel membership status for tracking participants
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MembershipStatus {
-    /// Participant has joined the channel
-    Joined,
-    /// Participant has left the channel
-    Left,
-}
-
-/// Data structure for channel membership facts
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChannelMembershipData {
-    /// The channel this membership relates to
-    pub channel: ChannelId,
-    /// The participant authority
-    pub participant: AuthorityId,
-    /// Current membership status
-    pub status: MembershipStatus,
-}
+use aura_journal::DomainFact;
 
 const DEFAULT_WINDOW: u32 = 1024;
 
@@ -164,37 +145,19 @@ where
     }
 
     async fn join_channel(&self, params: ChannelJoinParams) -> Result<(), AmpChannelError> {
-        // Verify the channel exists by getting its state
-        let _state = get_channel_state(&self.effects, params.context, params.channel)
-            .await
-            .map_err(map_err)?;
-
-        // Record channel membership fact using Generic relational fact
-        let membership_data = ChannelMembershipData {
-            channel: params.channel,
-            participant: params.participant,
-            status: MembershipStatus::Joined,
-        };
-
-        let payload = serde_json::to_vec(&membership_data).map_err(|error| {
-            AmpChannelError::Effect(aura_core::AuraError::Serialization {
-                message: format!("Serialization error: {error}"),
-                source: Some(std::sync::Arc::new(error)),
-            })
-        })?;
-
-        let envelope = aura_core::types::facts::FactEnvelope {
-            type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
-            schema_version: 1,
-            encoding: aura_core::types::facts::FactEncoding::Json,
-            payload,
-        };
-
+        // The canonical AMP membership event verifies the channel exists.
+        let membership = channel_membership_event(
+            &self.effects,
+            params.context,
+            params.channel,
+            params.participant,
+            ChannelParticipantEvent::Joined,
+            None,
+        )
+        .await
+        .map_err(map_err)?;
         self.effects
-            .insert_relational_fact(RelationalFact::Generic {
-                context_id: params.context,
-                envelope,
-            })
+            .insert_relational_fact(membership.to_generic())
             .await
             .map_err(map_err)?;
 
@@ -208,37 +171,19 @@ where
     }
 
     async fn leave_channel(&self, params: ChannelLeaveParams) -> Result<(), AmpChannelError> {
-        // Verify the channel exists by getting its state
-        let _state = get_channel_state(&self.effects, params.context, params.channel)
-            .await
-            .map_err(map_err)?;
-
-        // Record channel membership revocation fact using Generic relational fact
-        let membership_data = ChannelMembershipData {
-            channel: params.channel,
-            participant: params.participant,
-            status: MembershipStatus::Left,
-        };
-
-        let payload = serde_json::to_vec(&membership_data).map_err(|error| {
-            AmpChannelError::Effect(aura_core::AuraError::Serialization {
-                message: format!("Serialization error: {error}"),
-                source: Some(std::sync::Arc::new(error)),
-            })
-        })?;
-
-        let envelope = aura_core::types::facts::FactEnvelope {
-            type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
-            schema_version: 1,
-            encoding: aura_core::types::facts::FactEncoding::Json,
-            payload,
-        };
-
+        // The canonical AMP membership event verifies the channel exists.
+        let membership = channel_membership_event(
+            &self.effects,
+            params.context,
+            params.channel,
+            params.participant,
+            ChannelParticipantEvent::Left,
+            None,
+        )
+        .await
+        .map_err(map_err)?;
         self.effects
-            .insert_relational_fact(RelationalFact::Generic {
-                context_id: params.context,
-                envelope,
-            })
+            .insert_relational_fact(membership.to_generic())
             .await
             .map_err(map_err)?;
 

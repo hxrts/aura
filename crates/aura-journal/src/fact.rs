@@ -663,10 +663,9 @@ fn canonicalize_envelope_payload(envelope: &FactEnvelope) -> Option<Vec<u8>> {
                 aura_core::util::serialization::from_slice(&envelope.payload).ok()?;
             aura_core::util::serialization::to_vec(&value).ok()
         }
-        FactEncoding::Json => {
-            let value: JsonValue = serde_json::from_slice(&envelope.payload).ok()?;
-            aura_core::util::serialization::to_vec(&value).ok()
-        }
+        // Journaled facts are DAG-CBOR only; a JSON envelope is never
+        // canonicalized.
+        FactEncoding::Json => None,
     }
 }
 
@@ -2193,7 +2192,10 @@ pub struct SnapshotFact {
 mod tests {
     use super::*;
 
-    fn json_generic_fact(payload: &[u8]) -> Fact {
+    /// `{"channel":"alpha","epoch":1}` as canonical DAG-CBOR.
+    const CANONICAL: &[u8] = b"\xa2\x65epoch\x01\x67channel\x65alpha";
+
+    fn cbor_generic_fact(payload: &[u8]) -> Fact {
         Fact::new(
             OrderTime([7u8; 32]),
             TimeStamp::PhysicalClock(PhysicalTime {
@@ -2205,7 +2207,7 @@ mod tests {
                 envelope: FactEnvelope {
                     type_id: FactTypeId::from("test/v1"),
                     schema_version: 1,
-                    encoding: FactEncoding::Json,
+                    encoding: FactEncoding::DagCbor,
                     payload: payload.to_vec(),
                 },
             }),
@@ -2213,17 +2215,15 @@ mod tests {
     }
 
     #[test]
-    fn journal_rejects_duplicate_json_facts_with_noncanonical_payload_bytes() {
+    fn journal_ignores_duplicate_fact_inserts() {
         let namespace = JournalNamespace::Context(ContextId::new_from_entropy([1u8; 32]));
         let mut journal = Journal::new(namespace);
 
         journal
-            .add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+            .add_fact(cbor_generic_fact(CANONICAL))
             .expect("first insert succeeds");
         journal
-            .add_fact(json_generic_fact(
-                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
-            ))
+            .add_fact(cbor_generic_fact(CANONICAL))
             .expect("duplicate semantic insert is ignored");
 
         assert_eq!(journal.size(), 1);
@@ -2235,12 +2235,10 @@ mod tests {
         let mut left = Journal::new(namespace.clone());
         let mut right = Journal::new(namespace);
 
-        left.add_fact(json_generic_fact(br#"{"channel":"alpha","epoch":1}"#))
+        left.add_fact(cbor_generic_fact(CANONICAL))
             .expect("left insert succeeds");
         right
-            .add_fact(json_generic_fact(
-                br#"{ "channel" : "alpha", "epoch" : 1 }"#,
-            ))
+            .add_fact(cbor_generic_fact(CANONICAL))
             .expect("right duplicate insert succeeds");
 
         left.join_assign(right);

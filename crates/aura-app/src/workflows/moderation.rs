@@ -7,8 +7,6 @@
 //! UI state is updated by reactive views driven from the journal.
 use std::time::Duration;
 
-const MODERATION_FACT_SEND_MAX_ATTEMPTS: usize = 4;
-const MODERATION_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 const MODERATION_RUNTIME_TIMEOUT: Duration = Duration::from_millis(5_000);
 
 mod actions;

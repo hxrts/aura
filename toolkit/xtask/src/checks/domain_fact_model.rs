@@ -82,11 +82,7 @@ pub(crate) struct JsonCodecException {
     pub reason: &'static str,
 }
 
-pub(crate) const JSON_CODEC_EXCEPTIONS: &[JsonCodecException] = &[JsonCodecException {
-    path: "crates/aura-authentication/src/guardian_auth_relational.rs",
-    reason: "ad hoc recovery_request/guardian notification Generic records, not DomainFact \
-             payloads; typed replacement is work/8.md Task 135",
-}];
+pub(crate) const JSON_CODEC_EXCEPTIONS: &[JsonCodecException] = &[];
 
 const VERSION_FIELDS: &[&str] = &[
     "schema_version",

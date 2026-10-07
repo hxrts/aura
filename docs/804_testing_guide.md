@@ -1830,12 +1830,14 @@ that native causes are retained without advancing either projection revision.
 Invitation projection additionally validates the payload context against its
 journal wrapper. Codec failures are terminal outcomes, not display-only errors.
 
-The core regression
-`required_fact_json_decoder_retains_native_cause_through_both_entry_points`
-feeds the same malformed declared JSON through both the envelope and encoded
-fact APIs and requires the concrete JSON source. Domain projections must use
-required decoders on matching fact types; optional observational decoding does
-not establish processing success.
+The core regressions
+`required_fact_decoder_rejects_json_through_both_entry_points` and
+`required_fact_decoder_retains_native_cbor_cause_through_both_entry_points`
+feed declared JSON and malformed DAG-CBOR through both the envelope and encoded
+fact APIs: JSON is rejected as non-canonical, and a DAG-CBOR failure keeps its
+concrete serialization source.
+Domain projections must use required decoders on matching fact types; optional
+observational decoding does not establish processing success.
 
 The required source inventory includes actual matching Invitation/Chat projection
 codec faults and the core JSON decoder's native-source regression through both

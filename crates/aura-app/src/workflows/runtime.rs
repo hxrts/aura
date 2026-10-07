@@ -275,6 +275,31 @@ where
     }
 }
 
+/// Bound for one best-effort committed-fact send.
+const COMMITTED_FACT_SEND_TIMEOUT: Duration = Duration::from_millis(5_000);
+
+/// One best-effort send of an already committed relational fact to `peer`.
+/// It only cuts latency: relational-context sync (docs/111 §11.4) delivers a
+/// fact this send loses, so callers do not retry it and a failure never
+/// turns the committed action into a reported failure.
+pub(crate) async fn send_committed_fact(
+    runtime: &Arc<dyn RuntimeBridge>,
+    operation: &'static str,
+    peer: aura_core::types::identifiers::AuthorityId,
+    context: aura_core::types::identifiers::ContextId,
+    fact: &aura_journal::fact::RelationalFact,
+) -> Result<(), AuraError> {
+    timeout_runtime_call(
+        runtime,
+        operation,
+        "send_chat_fact",
+        COMMITTED_FACT_SEND_TIMEOUT,
+        || runtime.send_chat_fact(peer, context, fact),
+    )
+    .await?
+    .map_err(|error| crate::workflows::error::runtime_call(operation, error).into())
+}
+
 /// Causal metadata for a new order-independent fact (docs/105 §4.2.1): the
 /// runtime advances its logical clock past the facts of `key`'s family and
 /// records what the new fact revokes or supersedes.

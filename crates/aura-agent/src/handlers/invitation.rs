@@ -100,6 +100,7 @@ mod cache;
 mod channel;
 mod contact;
 pub(crate) mod contact_confirmation;
+mod context_sync;
 mod device_enrollment;
 pub(crate) use device_enrollment::EnrollmentVmTeardownFailure;
 pub(crate) mod enrollment_manifest_admission;
@@ -1949,27 +1950,6 @@ impl InvitationHandler {
         InvitationChannelHandler::new(self)
             .notify_channel_invitation_acceptance(effects, invitation_id)
             .await
-    }
-
-    /// Home-context journal sync (pull side): ask `peer` for the home
-    /// governance and moderation facts of `context_id` this authority lacks.
-    pub(crate) async fn request_home_context_sync(
-        &self,
-        effects: &AuraEffectSystem,
-        context_id: ContextId,
-        peer: AuthorityId,
-    ) -> AgentResult<()> {
-        InvitationContactHandler::new(self)
-            .request_home_context_sync(effects, context_id, peer)
-            .await
-    }
-
-    /// Home contexts in this authority's homes view with their sync peers.
-    pub(crate) async fn home_context_sync_targets(
-        effects: &AuraEffectSystem,
-        context_id: ContextId,
-    ) -> std::collections::BTreeSet<AuthorityId> {
-        InvitationContactHandler::home_context_peers(effects, context_id).await
     }
 
     /// Process sender-side contact invitation acceptances.

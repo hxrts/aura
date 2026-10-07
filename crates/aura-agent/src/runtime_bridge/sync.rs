@@ -114,8 +114,8 @@ pub(super) async fn get_sync_peers(
 )]
 pub(super) async fn trigger_sync(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     let _ = RUNTIME_BRIDGE_SYNC_TRIGGER_CAPABILITY;
-    // Home-context sync rides the authority transport, not the sync service.
-    sync_home_contexts(bridge, bridge.agent.runtime().sync()).await;
+    // Relational-context sync rides the authority transport, not the sync service.
+    sync_relational_contexts(bridge, bridge.agent.runtime().sync()).await;
     let sync = require_sync_service(bridge)?;
     exchange_facts_with_siblings(bridge, sync).await;
 
@@ -465,31 +465,16 @@ async fn exchange_facts_with_siblings(
     }
 }
 
-/// Home-context journal sync (docs/115 §3.2): for each home in this
-/// authority's view, ask each home peer for the governance and moderation
-/// facts of that home's context this authority lacks. Fanout at commit time
-/// only cuts latency; this pull is what makes a fanout lost to a partition
-/// converge. Coalesced per (context, peer) by the sync manager when present.
-async fn sync_home_contexts(
+/// Relational-context sync (docs/111 §11.4): for each home, channel and DM
+/// context this authority belongs to, ask each member it knows for the
+/// context facts it lacks. Sends at commit time only cut latency; this pull
+/// is what makes a send lost to a partition converge. Coalesced per
+/// (context, peer) by the sync manager when present.
+async fn sync_relational_contexts(
     bridge: &AgentRuntimeBridge,
     sync: Option<&crate::runtime::services::SyncServiceManager>,
 ) {
-    use aura_core::effects::reactive::ReactiveEffects;
     let effects = bridge.agent.runtime().effects();
-    let Ok(homes) = effects
-        .reactive_handler()
-        .read(&*aura_app::signal_defs::HOMES_SIGNAL)
-        .await
-    else {
-        return;
-    };
-    let contexts: std::collections::BTreeSet<ContextId> = homes
-        .all_homes()
-        .filter_map(|home| home.context_id)
-        .collect();
-    if contexts.is_empty() {
-        return;
-    }
     let own_authority = bridge.agent.authority_id();
     let Ok(handler) = crate::handlers::invitation::InvitationHandler::new(
         crate::core::AuthorityContext::new_with_device(
@@ -499,38 +484,37 @@ async fn sync_home_contexts(
     ) else {
         return;
     };
+    let contexts = handler.context_sync_contexts(effects.as_ref()).await;
+    if contexts.is_empty() {
+        return;
+    }
     let now_ms = effects
         .physical_time()
         .await
         .map(|time| time.ts_ms)
         .unwrap_or_default();
     for context_id in contexts {
-        let peers = crate::handlers::invitation::InvitationHandler::home_context_sync_targets(
-            effects.as_ref(),
-            context_id,
-        )
-        .await;
-        for peer in peers {
+        for peer in handler
+            .context_sync_peers(effects.as_ref(), context_id)
+            .await
+        {
             if peer == own_authority {
                 continue;
             }
             if let Some(sync) = sync {
-                if !sync
-                    .take_due_home_context_sync(context_id, peer, now_ms)
-                    .await
-                {
+                if !sync.take_due_context_sync(context_id, peer, now_ms).await {
                     continue;
                 }
             }
             if let Err(error) = handler
-                .request_home_context_sync(effects.as_ref(), context_id, peer)
+                .request_context_sync(effects.as_ref(), context_id, peer)
                 .await
             {
                 tracing::debug!(
                     peer = %peer,
                     context = %context_id,
                     error = %error,
-                    "home context sync request not sent"
+                    "context sync request not sent"
                 );
             }
         }
@@ -539,7 +523,7 @@ async fn sync_home_contexts(
 
 /// Start the runtime-owned periodic sync trigger (once per agent).
 ///
-/// Context sync (peer journals, sibling facts, home-context governance pulls)
+/// Context sync (peer journals, sibling facts, relational-context pulls)
 /// must not depend on a frontend calling `trigger_sync`. The task lives in the
 /// runtime task registry, is cancelled with the runtime, sleeps on the
 /// runtime's `PhysicalTimeEffects` (simulation time drives it), and holds only

@@ -38,9 +38,12 @@ const DEPENDENCY_SUITES: &[LifecycleSuite] = &[
 const CORE_SUITES: &[LifecycleSuite] = &[
     LifecycleSuite {
         source: "crates/aura-core/src/types/facts.rs",
-        functions: &["required_fact_json_decoder_retains_native_cause_through_both_entry_points"],
+        functions: &[
+            "required_fact_decoder_rejects_json_through_both_entry_points",
+            "required_fact_decoder_retains_native_cbor_cause_through_both_entry_points",
+        ],
         harness_prefix: "types::facts::tests::",
-        filter: "types::facts::tests::required_fact_json_decoder_retains_native_cause_through_both_entry_points",
+        filter: "types::facts::tests::required_fact_decoder_",
     },
     LifecycleSuite {
         source: "crates/aura-core/src/time/timeout.rs",

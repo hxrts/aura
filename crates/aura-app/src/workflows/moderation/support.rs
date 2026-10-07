@@ -3,15 +3,12 @@ use crate::workflows::home_scope::{identify_materialized_channel_hint, resolve_t
 use crate::workflows::observed_projection::{
     homes_signal_snapshot, try_update_homes_projection_observed,
 };
-use crate::workflows::runtime::{
-    converge_runtime, cooperative_yield, execute_with_runtime_retry_budget, timeout_runtime_call,
-    workflow_retry_policy,
-};
+use crate::workflows::runtime::{send_committed_fact, timeout_runtime_call};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
     types::identifiers::{AuthorityId, ChannelId},
-    AuraError, RetryRunError,
+    AuraError,
 };
 use aura_journal::fact::RelationalFact;
 use std::collections::BTreeSet;
@@ -147,50 +144,6 @@ pub(crate) async fn governance_causal(
     .await
 }
 
-pub(super) async fn send_moderation_fact_with_retry(
-    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
-    peer: AuthorityId,
-    context_id: aura_core::types::identifiers::ContextId,
-    fact: &RelationalFact,
-) -> Result<(), AuraError> {
-    let retry_policy = workflow_retry_policy(
-        super::MODERATION_FACT_SEND_MAX_ATTEMPTS as u32,
-        std::time::Duration::from_millis(1),
-        std::time::Duration::from_millis(1),
-    )?;
-    execute_with_runtime_retry_budget(runtime, &retry_policy, |attempt| {
-        let runtime = Arc::clone(runtime);
-        async move {
-            if attempt > 0 {
-                converge_runtime(&runtime).await;
-                for _ in 0..super::MODERATION_FACT_SEND_YIELDS_PER_RETRY {
-                    cooperative_yield().await;
-                }
-            }
-            timeout_runtime_call(
-                &runtime,
-                "send_moderation_fact_with_retry",
-                "send_chat_fact",
-                super::MODERATION_RUNTIME_TIMEOUT,
-                || runtime.send_chat_fact(peer, context_id, fact),
-            )
-            .await?
-            .map_err(|error| {
-                AuraError::from(super::super::error::WorkflowError::DeliveryFailed {
-                    peer: peer.to_string(),
-                    attempts: super::MODERATION_FACT_SEND_MAX_ATTEMPTS,
-                    source: AuraError::agent(error.to_string()),
-                })
-            })
-        }
-    })
-    .await
-    .map_err(|error| match error {
-        RetryRunError::Timeout(timeout_error) => timeout_error.into(),
-        RetryRunError::AttemptsExhausted { last_error, .. } => last_error,
-    })
-}
-
 pub(super) async fn commit_and_fanout(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     scope: &ModerationScope,
@@ -221,13 +174,19 @@ pub(super) async fn commit_and_fanout(
         }
     }
 
-    // The fact is committed; delivery to each peer is best-effort so an
-    // offline peer cannot turn a committed action into a reported failure
-    // (a retry would commit it twice). Immediate fanout only cuts latency: a
-    // peer that misses it converges through home-context journal sync.
+    // The fact is committed; one send per peer only cuts latency, and a
+    // failed send never turns the committed action into a reported failure
+    // (a retry would commit it twice). A peer that misses it converges
+    // through relational-context sync.
     for peer in fanout {
-        let delivery =
-            send_moderation_fact_with_retry(runtime, peer, scope.context_id, &fact).await;
+        let delivery = send_committed_fact(
+            runtime,
+            "moderation_fact_send",
+            peer,
+            scope.context_id,
+            &fact,
+        )
+        .await;
         #[cfg(feature = "instrumented")]
         if let Err(error) = &delivery {
             tracing::warn!(peer = %peer, error = %error, "moderation fact delivery deferred to sync");

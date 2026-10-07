@@ -226,8 +226,8 @@ struct SyncManagerShared {
     recent_sibling_exchanges: Mutex<HashMap<DeviceId, u64>>,
     /// Sibling devices with an exchange currently running.
     sibling_exchanges_in_flight: Mutex<std::collections::HashSet<DeviceId>>,
-    /// Wall-clock ms of the last home-context journal sync per (home context, peer).
-    recent_home_context_syncs:
+    /// Wall-clock ms of the last relational-context sync per (context, peer).
+    recent_context_syncs:
         Mutex<HashMap<(aura_core::types::identifiers::ContextId, AuthorityId), u64>>,
 }
 
@@ -380,7 +380,7 @@ impl SyncServiceManager {
             recent_peer_syncs: Mutex::new(HashMap::new()),
             recent_sibling_exchanges: Mutex::new(HashMap::new()),
             sibling_exchanges_in_flight: Mutex::new(std::collections::HashSet::new()),
-            recent_home_context_syncs: Mutex::new(HashMap::new()),
+            recent_context_syncs: Mutex::new(HashMap::new()),
         })
     }
 
@@ -849,16 +849,16 @@ impl SyncServiceManager {
         )
     }
 
-    /// Whether a home-context journal sync with `member` is due, coalesced
-    /// like peer syncs.
-    pub async fn take_due_home_context_sync(
+    /// Whether a relational-context sync with `member` is due, coalesced like
+    /// peer syncs.
+    pub async fn take_due_context_sync(
         &self,
         context: aura_core::types::identifiers::ContextId,
         member: AuthorityId,
         now_ms: u64,
     ) -> bool {
         !take_due_peers(
-            &mut *self.shared.recent_home_context_syncs.lock().await,
+            &mut *self.shared.recent_context_syncs.lock().await,
             vec![(context, member)],
             now_ms,
         )

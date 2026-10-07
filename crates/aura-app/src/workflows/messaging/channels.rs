@@ -189,30 +189,20 @@ pub async fn create_channel_with_authoritative_binding(
             // materializer. Membership/name hints may enrich it afterward.
             reduce_chat_fact_observed(app_core, &chat_fact).await?;
 
-            let mut attempted_fanout = 0usize;
-            let mut failed_fanout = Vec::new();
+            // One send per member for latency; members it misses receive the
+            // creation fact through relational-context sync.
             for peer in member_ids.iter().copied() {
                 if peer == runtime.authority_id() {
                     continue;
                 }
-                attempted_fanout = attempted_fanout.saturating_add(1);
-                if let Err(error) = timeout_runtime_call(
+                let _ = send_committed_fact(
                     &runtime,
                     "create_channel_with_authoritative_binding",
-                    "send_chat_fact",
-                    MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-                    || runtime.send_chat_fact(peer, context_id, &fact),
+                    peer,
+                    context_id,
+                    &fact,
                 )
-                .await
-                {
-                    failed_fanout.push(format!("{peer}: {error}"));
-                }
-            }
-            if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
-                tracing::warn!(
-                    "Channel create fanout unavailable for all recipients on {channel_id}: {}",
-                    failed_fanout.join("; ")
-                );
+                .await;
             }
         } else if !name.trim().is_empty() {
             channel_id = channel_id_from_input(name)?;
