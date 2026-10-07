@@ -249,3 +249,40 @@ async fn admitted_participant_becomes_member_then_moderator() -> Result<()> {
     }
     net.finish().await
 }
+
+// Task 47: `/invite` into a channel that already has members reaches a
+// successful terminal outcome, and the invitee joins and reads the channel.
+#[tokio::test(start_paused = true)]
+async fn invite_command_into_existing_channel_succeeds() -> Result<()> {
+    let net = SimNet::new();
+    let barbara = net.peer(141).await?;
+    let alex = net.peer(145).await?;
+    let carol = net.peer(149).await?;
+    link_contacts(&barbara, &alex).await?;
+    link_contacts(&barbara, &carol).await?;
+    let home = context::create_home(&barbara.app, Some("InvHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+
+    strong(
+        &barbara.app,
+        barbara.id,
+        home,
+        sc::ParsedCommand::Invite {
+            target: carol.id.to_string(),
+        },
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("/invite failed: {error}"))?;
+    wait_until("Carol accepts the channel invitation", || async {
+        aura_app::ui::workflows::invitation::accept_pending_channel_invitation(&carol.app)
+            .await
+            .is_ok()
+    })
+    .await?;
+    messaging::send_message_now_with_instance(&barbara.app, home, "hi invitee", None).await?;
+    wait_until("Carol reads the channel", || {
+        received(&carol, home, &barbara, "hi invitee")
+    })
+    .await?;
+    net.finish().await
+}
