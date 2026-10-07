@@ -31,6 +31,7 @@ Guardian-based recovery protocol enabling threshold key recovery through social 
 ## Invariants
 
 - Facts must be reduced under their matching `ContextId`.
+- `RecoveryState` reduction is a pure function of the fact set: responses that precede their setup fact are held, not dropped, and terminal states use explicit precedence (failure > completion > dispute > approval) instead of arrival order.
 - Recovery and guardian membership transitions are consensus-gated (Category C).
 - Guardian threshold must be satisfied for successful recovery.
 - `RecoveryProtocol`, `GuardianSetup`, and `GuardianCeremony` require the
@@ -114,6 +115,7 @@ cargo test -p aura-recovery
 | Recovery with < threshold guardians succeeds | `src/state.rs` `test_setup_threshold_met`, `test_setup_state_derivation` | Covered |
 | Duplicate share inflates count past threshold | `src/state.rs` `test_duplicate_share_submission_deduplicated` | Covered |
 | Fact reduces under wrong context | `src/facts.rs` `test_reducer_rejects_context_mismatch` | Covered |
+| Arrival order or post-terminal facts change derived state | `src/state.rs` `setup_after_approvals_holds_early_responses`, `post_terminal_setup_facts_do_not_change_terminal_state`, `concurrent_recovery_completion_and_failure_resolve_to_failure` | Covered |
 | Remove last guardian leaves unrecoverable | `src/guardian_membership.rs` `test_apply_remove_last_guardian_fails` | Covered |
 | Duplicate guardian inflates quorum | `src/guardian_membership.rs` `test_apply_add_duplicate_guardian_fails` | Covered |
 | Setup fails when guardians decline below threshold | `src/state.rs` `test_setup_failed` | Covered |

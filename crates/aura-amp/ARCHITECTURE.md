@@ -4,7 +4,7 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
-Channel membership uses the shared pure `ChannelMembershipObservations`
+`ChannelMembershipFact` (type id `amp-channel-membership`) is registered in the agent `FactRegistry` through `ChannelMembershipFactReducer`, which only indexes events; its schema version lives in the fact envelope alone. Channel membership uses the shared pure `ChannelMembershipObservations`
 reducer of membership episodes, scoped to exact context and channel. A join starts
 the episode it names (the accepted invitation id, schema v2) or the unnamed
 schema-one episode; a departure ends the unnamed episode and every named episode

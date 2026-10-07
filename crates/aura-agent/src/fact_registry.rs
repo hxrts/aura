@@ -29,6 +29,9 @@
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
 
+use aura_amp::{
+    ChannelMembershipFact, ChannelMembershipFactReducer, CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
+};
 use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_consensus::facts::{ConsensusFact, ConsensusFactReducer, CONSENSUS_FACT_TYPE_ID};
@@ -49,7 +52,7 @@ use aura_social::moderation::register_moderation_facts;
 /// Assembles the journal fact registry with all domain reducers.
 ///
 /// This is the central registration point for domain-specific fact types.
-/// Protocol-level facts (Guardian, Recovery, Consensus, AMP) are handled
+/// Protocol-level facts (Guardian, Recovery, Consensus, AMP epochs) are handled
 /// directly in `aura-journal/src/reduction.rs` and don't need registration.
 pub fn build_fact_registry() -> FactRegistry {
     let mut registry = FactRegistry::new();
@@ -79,6 +82,10 @@ pub fn build_fact_registry() -> FactRegistry {
     );
     registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
     registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
+    registry.register::<ChannelMembershipFact>(
+        CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
+        Box::new(ChannelMembershipFactReducer),
+    );
     register_moderation_facts(&mut registry);
 
     registry
@@ -105,6 +112,7 @@ mod tests {
         assert!(registry.is_registered(RECOVERY_GRANT_DETAILS_FACT_TYPE_ID));
         assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
         assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
+        assert!(registry.is_registered(CHANNEL_MEMBERSHIP_FACT_TYPE_ID));
         assert!(registry.is_registered("moderation:home-mute"));
         assert!(registry.is_registered("moderation:home-unmute"));
     }

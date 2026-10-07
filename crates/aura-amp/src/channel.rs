@@ -19,7 +19,8 @@ use aura_core::Hash32;
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
 };
-use aura_journal::DomainFact;
+use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
+use aura_journal::{DomainFact, FactReducer};
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -288,8 +289,6 @@ pub enum ChannelParticipantEvent {
     context = "context"
 )]
 pub struct ChannelMembershipFact {
-    #[serde(default = "channel_membership_schema_version")]
-    schema_version: u16,
     context: ContextId,
     channel: ChannelId,
     participant: AuthorityId,
@@ -314,7 +313,6 @@ impl ChannelMembershipFact {
         timestamp: TimeStamp,
     ) -> Self {
         Self {
-            schema_version: channel_membership_schema_version(),
             context,
             channel,
             participant,
@@ -413,8 +411,39 @@ impl ChannelMembershipFact {
     }
 }
 
-fn channel_membership_schema_version() -> u16 {
-    2
+/// Type identifier for AMP channel membership facts.
+pub const CHANNEL_MEMBERSHIP_FACT_TYPE_ID: &str = "amp-channel-membership";
+
+/// Registry reducer for [`ChannelMembershipFact`]. It indexes each event as a
+/// content-addressed binding; membership itself is reduced only by
+/// [`ChannelMembershipObservations`] over the whole fact set.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChannelMembershipFactReducer;
+
+impl FactReducer for ChannelMembershipFactReducer {
+    fn handles_type(&self) -> &'static str {
+        CHANNEL_MEMBERSHIP_FACT_TYPE_ID
+    }
+
+    fn reduce_envelope(
+        &self,
+        context_id: ContextId,
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Option<RelationalBinding> {
+        let fact = ChannelMembershipFact::from_envelope(envelope)?;
+        if fact.context != context_id {
+            return None;
+        }
+        let sub_type = match fact.event {
+            ChannelParticipantEvent::Joined => "amp-channel-joined",
+            ChannelParticipantEvent::Left => "amp-channel-left",
+        };
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(sub_type.to_string()),
+            context_id,
+            data: hash(&envelope.payload).to_vec(),
+        })
+    }
 }
 
 /// Membership episodes observed in one context and channel. This is neither
@@ -704,5 +733,31 @@ mod membership_tests {
             "all departed membership must not grant send authority"
         );
         assert_eq!(*effects.journal.lock().await, initial);
+    }
+
+    #[test]
+    fn registered_membership_reducer_uses_the_envelope_version_and_context() {
+        let (context, channel, participant) = scope();
+        let fact = ChannelMembershipFact::new(
+            context,
+            channel,
+            participant,
+            ChannelParticipantEvent::Left,
+            TimeStamp::OrderClock(aura_core::time::OrderTime([4; 32])),
+        );
+        assert_eq!(fact.type_id(), CHANNEL_MEMBERSHIP_FACT_TYPE_ID);
+        let envelope = fact.to_envelope();
+        assert_eq!(envelope.schema_version, 2);
+        let binding = ChannelMembershipFactReducer
+            .reduce_envelope(context, &envelope)
+            .expect("registered reducer decodes its own fact");
+        assert_eq!(
+            binding.binding_type,
+            RelationalBindingType::Generic("amp-channel-left".to_string())
+        );
+        let foreign = ContextId::new_from_entropy([7; 32]);
+        assert!(ChannelMembershipFactReducer
+            .reduce_envelope(foreign, &envelope)
+            .is_none());
     }
 }

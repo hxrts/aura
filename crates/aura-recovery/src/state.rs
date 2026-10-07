@@ -35,6 +35,11 @@
 //! `Approved -> Failed`
 //! `Disputed -> Failed`
 //!
+//! Reduction is a pure function of the fact set. Early responses are held
+//! until their setup/proposal/initiation fact is known, and terminal states
+//! use explicit precedence (failure over completion, completion over
+//! dispute) rather than arrival order; see [`RecoveryState::from_facts`].
+//!
 //! # Usage
 //!
 //! ```ignore
@@ -54,15 +59,6 @@ use aura_core::types::identifiers::{AuthorityId, ContextId};
 use aura_core::Hash32;
 use aura_journal::DomainFact;
 use std::collections::HashMap;
-
-fn push_unique_authority(target: &mut Vec<AuthorityId>, authority_id: AuthorityId) -> bool {
-    if target.contains(&authority_id) {
-        false
-    } else {
-        target.push(authority_id);
-        true
-    }
-}
 
 fn threshold_satisfied(count: usize, threshold: u16) -> bool {
     count >= threshold as usize
@@ -91,299 +87,56 @@ impl RecoveryState {
     pub fn new() -> Self {
         Self::default()
     }
-
     /// Derive recovery state from a list of serialized facts.
     ///
-    /// This is the primary entry point for state derivation. Facts should be
-    /// provided in causal order (as they appear in the journal).
+    /// The result is a pure function of the fact *set*: arrival order and
+    /// duplicates do not matter (see [`Self::from_facts`]).
     pub fn from_fact_bytes(facts: &[(String, Vec<u8>)]) -> Self {
-        let mut state = Self::new();
-
-        for (type_id, data) in facts {
-            if type_id == crate::facts::RECOVERY_FACT_TYPE_ID {
-                if let Some(fact) = RecoveryFact::from_bytes(data) {
-                    state.apply_fact(&fact);
-                }
-            }
-        }
-
-        state
+        let decoded: Vec<RecoveryFact> = facts
+            .iter()
+            .filter(|(type_id, _)| type_id == crate::facts::RECOVERY_FACT_TYPE_ID)
+            .filter_map(|(_, data)| RecoveryFact::from_bytes(data))
+            .collect();
+        Self::from_facts(&decoded)
     }
 
-    /// Derive recovery state from a list of RecoveryFact instances.
+    /// Derive recovery state from a set of `RecoveryFact`s.
+    ///
+    /// Reduction is order-independent. Facts are first grouped per context;
+    /// responses that arrive before their setup/proposal/initiation fact are
+    /// held in the group, not dropped, and are applied once the whole set is
+    /// known. Terminal states follow an explicit precedence policy instead of
+    /// arrival order:
+    ///
+    /// - setup: explicit `Failed` > `Completed` > quorum derived from the
+    ///   accepted/declined sets
+    /// - proposal: `Rejected` > `Approved` > `Pending`
+    /// - recovery: `Failed` > `Completed` > `Disputed` > `Approved` >
+    ///   `AwaitingShares`
+    ///
+    /// Among competing facts of the same kind (two initiations, two failure
+    /// reasons, two disputes) the winner is chosen by a total order (latest
+    /// physical timestamp for initiations, then canonical bytes), so every
+    /// replica derives the same state.
     pub fn from_facts(facts: &[RecoveryFact]) -> Self {
-        let mut state = Self::new();
+        let mut groups: HashMap<ContextId, ContextFacts<'_>> = HashMap::new();
         for fact in facts {
-            state.apply_fact(fact);
+            groups.entry(fact.context_id()).or_default().push(fact);
+        }
+
+        let mut state = Self::new();
+        for (context_id, group) in groups {
+            if let Some(setup) = group.reduce_setup(context_id) {
+                state.setups.insert(context_id, setup);
+            }
+            if let Some(proposal) = group.reduce_proposal(context_id) {
+                state.proposals.insert(context_id, proposal);
+            }
+            if let Some(recovery) = group.reduce_recovery(context_id) {
+                state.recoveries.insert(context_id, recovery);
+            }
         }
         state
-    }
-
-    /// Apply a single fact to update state.
-    fn apply_fact(&mut self, fact: &RecoveryFact) {
-        match fact {
-            // Guardian Setup
-            RecoveryFact::GuardianSetupInitiated {
-                context_id,
-                initiator_id,
-                guardian_ids,
-                threshold,
-                initiated_at,
-                ..
-            } => {
-                self.setups.insert(
-                    *context_id,
-                    SetupState {
-                        context_id: *context_id,
-                        initiator_id: *initiator_id,
-                        initiated_at: initiated_at.ts_ms,
-                        target_guardians: guardian_ids.clone(),
-                        accepted: Vec::new(),
-                        declined: Vec::new(),
-                        threshold: *threshold,
-                        status: SetupStatus::AwaitingResponses,
-                    },
-                );
-            }
-
-            RecoveryFact::GuardianAccepted {
-                context_id,
-                guardian_id,
-                ..
-            } => {
-                if let Some(setup) = self.setups.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(
-                            setup.status,
-                            SetupStatus::Completed | SetupStatus::Failed(_)
-                        ),
-                        "guardian acceptance arrived after setup reached terminal state"
-                    );
-                    push_unique_authority(&mut setup.accepted, *guardian_id);
-                    if !matches!(
-                        setup.status,
-                        SetupStatus::Completed | SetupStatus::Failed(_)
-                    ) {
-                        match setup.quorum_progress() {
-                            SetupQuorumProgress::ThresholdMet { .. } => {
-                                setup.status = SetupStatus::ThresholdMet;
-                            }
-                            SetupQuorumProgress::ThresholdImpossible { .. } => {
-                                setup.status =
-                                    SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
-                            }
-                            SetupQuorumProgress::AwaitingResponses { .. } => {}
-                        }
-                    }
-                }
-            }
-
-            RecoveryFact::GuardianDeclined {
-                context_id,
-                guardian_id,
-                ..
-            } => {
-                if let Some(setup) = self.setups.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(
-                            setup.status,
-                            SetupStatus::Completed | SetupStatus::Failed(_)
-                        ),
-                        "guardian decline arrived after setup reached terminal state"
-                    );
-                    push_unique_authority(&mut setup.declined, *guardian_id);
-                    if !matches!(
-                        setup.status,
-                        SetupStatus::Completed | SetupStatus::Failed(_)
-                    ) {
-                        match setup.quorum_progress() {
-                            SetupQuorumProgress::ThresholdMet { .. } => {
-                                setup.status = SetupStatus::ThresholdMet;
-                            }
-                            SetupQuorumProgress::ThresholdImpossible { .. } => {
-                                setup.status =
-                                    SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied);
-                            }
-                            SetupQuorumProgress::AwaitingResponses { .. } => {}
-                        }
-                    }
-                }
-            }
-
-            RecoveryFact::GuardianSetupCompleted { context_id, .. } => {
-                if let Some(setup) = self.setups.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(setup.status, SetupStatus::Failed(_)),
-                        "setup completion cannot follow a failed setup"
-                    );
-                    setup.status = SetupStatus::Completed;
-                }
-            }
-
-            RecoveryFact::GuardianSetupFailed { context_id, .. } => {
-                if let Some(setup) = self.setups.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(setup.status, SetupStatus::Completed),
-                        "setup failure cannot follow a completed setup"
-                    );
-                    if let RecoveryFact::GuardianSetupFailed { reason, .. } = fact {
-                        setup.status = SetupStatus::Failed(SetupFailure::Explicit {
-                            reason: reason.clone(),
-                        });
-                    }
-                }
-            }
-
-            // Membership Changes
-            RecoveryFact::MembershipChangeProposed {
-                context_id,
-                proposer_id,
-                change_type,
-                proposal_hash,
-                proposed_at,
-                ..
-            } => {
-                self.proposals.insert(
-                    *context_id,
-                    MembershipProposalState {
-                        context_id: *context_id,
-                        proposer_id: *proposer_id,
-                        proposal_hash: *proposal_hash,
-                        change_type: change_type.clone(),
-                        proposed_at: proposed_at.ts_ms,
-                        votes_for: Vec::new(),
-                        votes_against: Vec::new(),
-                        status: ProposalStatus::Pending,
-                    },
-                );
-            }
-
-            RecoveryFact::MembershipVoteCast {
-                context_id,
-                voter_id,
-                approved,
-                ..
-            } => {
-                if let Some(proposal) = self.proposals.get_mut(context_id) {
-                    if *approved {
-                        push_unique_authority(&mut proposal.votes_for, *voter_id);
-                    } else {
-                        push_unique_authority(&mut proposal.votes_against, *voter_id);
-                    }
-                }
-            }
-
-            RecoveryFact::MembershipChangeCompleted { context_id, .. } => {
-                if let Some(proposal) = self.proposals.get_mut(context_id) {
-                    proposal.status = ProposalStatus::Approved;
-                }
-            }
-
-            RecoveryFact::MembershipChangeRejected { context_id, .. } => {
-                if let Some(proposal) = self.proposals.get_mut(context_id) {
-                    if let RecoveryFact::MembershipChangeRejected { reason, .. } = fact {
-                        proposal.status = ProposalStatus::Rejected(ProposalRejection {
-                            reason: reason.clone(),
-                        });
-                    }
-                }
-            }
-
-            // Key Recovery
-            RecoveryFact::RecoveryInitiated {
-                context_id,
-                account_id,
-                request_hash,
-                initiated_at,
-                ..
-            } => {
-                self.recoveries.insert(
-                    *context_id,
-                    RecoveryOperationState {
-                        context_id: *context_id,
-                        account_id: *account_id,
-                        request_hash: *request_hash,
-                        initiated_at: initiated_at.ts_ms,
-                        shares_submitted: Vec::new(),
-                        disputes: Vec::new(),
-                        status: RecoveryStatus::AwaitingShares,
-                    },
-                );
-            }
-
-            RecoveryFact::RecoveryShareSubmitted {
-                context_id,
-                guardian_id,
-                ..
-            } => {
-                if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    push_unique_authority(&mut recovery.shares_submitted, *guardian_id);
-                }
-            }
-
-            RecoveryFact::RecoveryApproved { context_id, .. } => {
-                if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(
-                            recovery.status,
-                            RecoveryStatus::Completed | RecoveryStatus::Failed(_)
-                        ),
-                        "recovery approval cannot follow a terminal recovery state"
-                    );
-                    recovery.status = RecoveryStatus::Approved;
-                }
-            }
-
-            RecoveryFact::RecoveryDisputeFiled {
-                context_id,
-                disputer_id,
-                ..
-            } => {
-                if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(
-                            recovery.status,
-                            RecoveryStatus::Completed | RecoveryStatus::Failed(_)
-                        ),
-                        "recovery dispute cannot follow a terminal recovery state"
-                    );
-                    push_unique_authority(&mut recovery.disputes, *disputer_id);
-                    if let RecoveryFact::RecoveryDisputeFiled { reason, .. } = fact {
-                        recovery.status = RecoveryStatus::Disputed(RecoveryDispute {
-                            disputer_id: *disputer_id,
-                            reason: reason.clone(),
-                        });
-                    }
-                }
-            }
-
-            RecoveryFact::RecoveryCompleted { context_id, .. } => {
-                if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(recovery.status, RecoveryStatus::Failed(_)),
-                        "recovery completion cannot follow a failed recovery"
-                    );
-                    recovery.status = RecoveryStatus::Completed;
-                }
-            }
-
-            RecoveryFact::RecoveryFailed { context_id, .. } => {
-                if let Some(recovery) = self.recoveries.get_mut(context_id) {
-                    debug_assert!(
-                        !matches!(recovery.status, RecoveryStatus::Completed),
-                        "recovery failure cannot follow a completed recovery"
-                    );
-                    if let RecoveryFact::RecoveryFailed { reason, .. } = fact {
-                        recovery.status = RecoveryStatus::Failed(RecoveryFailure {
-                            reason: reason.clone(),
-                        });
-                    }
-                }
-            }
-
-            // Events that don't affect state tracking
-            RecoveryFact::GuardianInvitationSent { .. } => {}
-        }
     }
 
     // =========================================================================
@@ -448,6 +201,195 @@ impl RecoveryState {
                     RecoveryStatus::Completed | RecoveryStatus::Failed(_)
                 )
             })
+    }
+}
+
+/// All recovery facts for one context, collected before any are applied so
+/// that early responses are held rather than dropped.
+#[derive(Default)]
+struct ContextFacts<'a> {
+    setup_initiations: Vec<&'a RecoveryFact>,
+    accepted: Vec<AuthorityId>,
+    declined: Vec<AuthorityId>,
+    setup_completed: bool,
+    setup_failures: Vec<&'a str>,
+    proposals: Vec<&'a RecoveryFact>,
+    votes_for: Vec<AuthorityId>,
+    votes_against: Vec<AuthorityId>,
+    proposal_approved: bool,
+    proposal_rejections: Vec<&'a str>,
+    recovery_initiations: Vec<&'a RecoveryFact>,
+    shares: Vec<AuthorityId>,
+    recovery_approved: bool,
+    disputes: Vec<(AuthorityId, &'a str)>,
+    recovery_completed: bool,
+    recovery_failures: Vec<&'a str>,
+}
+
+/// Deterministic winner among competing facts of one kind: latest physical
+/// timestamp, ties broken by canonical encoding.
+fn latest_fact<'a>(facts: &[&'a RecoveryFact]) -> Option<&'a RecoveryFact> {
+    facts
+        .iter()
+        .copied()
+        .max_by_key(|fact| (fact.timestamp_ms(), fact.to_bytes()))
+}
+
+/// Canonical (sorted, deduplicated) authority set.
+fn canonical_set(mut ids: Vec<AuthorityId>) -> Vec<AuthorityId> {
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Deterministic choice among competing reason strings.
+fn canonical_reason(reasons: &[&str]) -> Option<String> {
+    reasons.iter().min().map(|reason| (*reason).to_string())
+}
+
+impl<'a> ContextFacts<'a> {
+    fn push(&mut self, fact: &'a RecoveryFact) {
+        match fact {
+            RecoveryFact::GuardianSetupInitiated { .. } => self.setup_initiations.push(fact),
+            RecoveryFact::GuardianInvitationSent { .. } => {}
+            RecoveryFact::GuardianAccepted { guardian_id, .. } => self.accepted.push(*guardian_id),
+            RecoveryFact::GuardianDeclined { guardian_id, .. } => self.declined.push(*guardian_id),
+            RecoveryFact::GuardianSetupCompleted { .. } => self.setup_completed = true,
+            RecoveryFact::GuardianSetupFailed { reason, .. } => self.setup_failures.push(reason),
+            RecoveryFact::MembershipChangeProposed { .. } => self.proposals.push(fact),
+            RecoveryFact::MembershipVoteCast {
+                voter_id, approved, ..
+            } => {
+                if *approved {
+                    self.votes_for.push(*voter_id);
+                } else {
+                    self.votes_against.push(*voter_id);
+                }
+            }
+            RecoveryFact::MembershipChangeCompleted { .. } => self.proposal_approved = true,
+            RecoveryFact::MembershipChangeRejected { reason, .. } => {
+                self.proposal_rejections.push(reason);
+            }
+            RecoveryFact::RecoveryInitiated { .. } => self.recovery_initiations.push(fact),
+            RecoveryFact::RecoveryShareSubmitted { guardian_id, .. } => {
+                self.shares.push(*guardian_id);
+            }
+            RecoveryFact::RecoveryApproved { .. } => self.recovery_approved = true,
+            RecoveryFact::RecoveryDisputeFiled {
+                disputer_id,
+                reason,
+                ..
+            } => self.disputes.push((*disputer_id, reason)),
+            RecoveryFact::RecoveryCompleted { .. } => self.recovery_completed = true,
+            RecoveryFact::RecoveryFailed { reason, .. } => self.recovery_failures.push(reason),
+        }
+    }
+
+    fn reduce_setup(&self, context_id: ContextId) -> Option<SetupState> {
+        let RecoveryFact::GuardianSetupInitiated {
+            initiator_id,
+            guardian_ids,
+            threshold,
+            initiated_at,
+            ..
+        } = latest_fact(&self.setup_initiations)?
+        else {
+            return None;
+        };
+        let mut setup = SetupState {
+            context_id,
+            initiator_id: *initiator_id,
+            initiated_at: initiated_at.ts_ms,
+            target_guardians: guardian_ids.clone(),
+            accepted: canonical_set(self.accepted.clone()),
+            declined: canonical_set(self.declined.clone()),
+            threshold: *threshold,
+            status: SetupStatus::AwaitingResponses,
+        };
+        setup.status = if let Some(reason) = canonical_reason(&self.setup_failures) {
+            SetupStatus::Failed(SetupFailure::Explicit { reason })
+        } else if self.setup_completed {
+            SetupStatus::Completed
+        } else {
+            match setup.quorum_progress() {
+                SetupQuorumProgress::ThresholdMet { .. } => SetupStatus::ThresholdMet,
+                SetupQuorumProgress::ThresholdImpossible { .. } => {
+                    SetupStatus::Failed(SetupFailure::ThresholdUnsatisfied)
+                }
+                SetupQuorumProgress::AwaitingResponses { .. } => SetupStatus::AwaitingResponses,
+            }
+        };
+        Some(setup)
+    }
+
+    fn reduce_proposal(&self, context_id: ContextId) -> Option<MembershipProposalState> {
+        let RecoveryFact::MembershipChangeProposed {
+            proposer_id,
+            change_type,
+            proposal_hash,
+            proposed_at,
+            ..
+        } = latest_fact(&self.proposals)?
+        else {
+            return None;
+        };
+        let status = if let Some(reason) = canonical_reason(&self.proposal_rejections) {
+            ProposalStatus::Rejected(ProposalRejection { reason })
+        } else if self.proposal_approved {
+            ProposalStatus::Approved
+        } else {
+            ProposalStatus::Pending
+        };
+        Some(MembershipProposalState {
+            context_id,
+            proposer_id: *proposer_id,
+            proposal_hash: *proposal_hash,
+            change_type: change_type.clone(),
+            proposed_at: proposed_at.ts_ms,
+            votes_for: canonical_set(self.votes_for.clone()),
+            votes_against: canonical_set(self.votes_against.clone()),
+            status,
+        })
+    }
+
+    fn reduce_recovery(&self, context_id: ContextId) -> Option<RecoveryOperationState> {
+        let RecoveryFact::RecoveryInitiated {
+            account_id,
+            request_hash,
+            initiated_at,
+            ..
+        } = latest_fact(&self.recovery_initiations)?
+        else {
+            return None;
+        };
+        let dispute = self
+            .disputes
+            .iter()
+            .min()
+            .map(|(disputer_id, reason)| RecoveryDispute {
+                disputer_id: *disputer_id,
+                reason: (*reason).to_string(),
+            });
+        let status = if let Some(reason) = canonical_reason(&self.recovery_failures) {
+            RecoveryStatus::Failed(RecoveryFailure { reason })
+        } else if self.recovery_completed {
+            RecoveryStatus::Completed
+        } else if let Some(dispute) = dispute {
+            RecoveryStatus::Disputed(dispute)
+        } else if self.recovery_approved {
+            RecoveryStatus::Approved
+        } else {
+            RecoveryStatus::AwaitingShares
+        };
+        Some(RecoveryOperationState {
+            context_id,
+            account_id: *account_id,
+            request_hash: *request_hash,
+            initiated_at: initiated_at.ts_ms,
+            shares_submitted: canonical_set(self.shares.clone()),
+            disputes: canonical_set(self.disputes.iter().map(|(id, _)| *id).collect()),
+            status,
+        })
     }
 }
 
@@ -1157,5 +1099,249 @@ mod tests {
 
         assert!(state.has_active_operation(&ctx1));
         assert!(!state.has_active_operation(&ctx2));
+    }
+
+    fn permutations(facts: &[RecoveryFact]) -> Vec<Vec<RecoveryFact>> {
+        if facts.len() <= 1 {
+            return vec![facts.to_vec()];
+        }
+        let mut out = Vec::new();
+        for i in 0..facts.len() {
+            let mut rest = facts.to_vec();
+            let head = rest.remove(i);
+            for mut tail in permutations(&rest) {
+                tail.insert(0, head.clone());
+                out.push(tail);
+            }
+        }
+        out
+    }
+
+    fn snapshot(state: &RecoveryState, ctx: &ContextId) -> String {
+        format!(
+            "{:?}|{:?}|{:?}",
+            state.setup_for_context(ctx),
+            state.proposal_for_context(ctx),
+            state.recovery_for_context(ctx)
+        )
+    }
+
+    /// Every permutation (plus a duplicated copy) reduces to one state.
+    fn assert_order_independent(facts: &[RecoveryFact]) -> RecoveryState {
+        let ctx = test_context_id();
+        let expected = RecoveryState::from_facts(facts);
+        let expected_snapshot = snapshot(&expected, &ctx);
+        for order in permutations(facts) {
+            assert_eq!(
+                snapshot(&RecoveryState::from_facts(&order), &ctx),
+                expected_snapshot
+            );
+            let mut doubled = order.clone();
+            doubled.extend(order);
+            assert_eq!(
+                snapshot(&RecoveryState::from_facts(&doubled), &ctx),
+                expected_snapshot
+            );
+        }
+        expected
+    }
+
+    #[test]
+    fn setup_after_approvals_holds_early_responses() {
+        let ctx = test_context_id();
+        let (g1, g2, g3) = (
+            test_authority_id(2),
+            test_authority_id(3),
+            test_authority_id(4),
+        );
+        let facts = vec![
+            RecoveryFact::GuardianAccepted {
+                context_id: ctx,
+                guardian_id: g1,
+                trace_id: None,
+                accepted_at: pt(2000),
+            },
+            RecoveryFact::GuardianAccepted {
+                context_id: ctx,
+                guardian_id: g2,
+                trace_id: None,
+                accepted_at: pt(2100),
+            },
+            RecoveryFact::GuardianDeclined {
+                context_id: ctx,
+                guardian_id: g3,
+                trace_id: None,
+                declined_at: pt(2200),
+            },
+            RecoveryFact::GuardianSetupInitiated {
+                context_id: ctx,
+                initiator_id: test_authority_id(1),
+                trace_id: None,
+                guardian_ids: vec![g1, g2, g3],
+                threshold: 2,
+                initiated_at: pt(1000),
+            },
+        ];
+        let state = assert_order_independent(&facts);
+        let setup = state.setup_for_context(&ctx).unwrap();
+        assert_eq!(setup.accepted.len(), 2);
+        assert_eq!(setup.declined, vec![g3]);
+        assert_eq!(setup.status, SetupStatus::ThresholdMet);
+    }
+
+    #[test]
+    fn post_terminal_setup_facts_do_not_change_terminal_state() {
+        let ctx = test_context_id();
+        let (g1, g2) = (test_authority_id(2), test_authority_id(3));
+        let facts = vec![
+            RecoveryFact::GuardianSetupInitiated {
+                context_id: ctx,
+                initiator_id: test_authority_id(1),
+                trace_id: None,
+                guardian_ids: vec![g1, g2],
+                threshold: 2,
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::GuardianAccepted {
+                context_id: ctx,
+                guardian_id: g1,
+                trace_id: None,
+                accepted_at: pt(2000),
+            },
+            RecoveryFact::GuardianSetupCompleted {
+                context_id: ctx,
+                guardian_ids: vec![g1],
+                trace_id: None,
+                threshold: 2,
+                completed_at: pt(3000),
+            },
+            RecoveryFact::GuardianDeclined {
+                context_id: ctx,
+                guardian_id: g2,
+                trace_id: None,
+                declined_at: pt(4000),
+            },
+        ];
+        let state = assert_order_independent(&facts);
+        assert_eq!(
+            state.setup_for_context(&ctx).unwrap().status,
+            SetupStatus::Completed
+        );
+    }
+
+    #[test]
+    fn concurrent_recovery_completion_and_failure_resolve_to_failure() {
+        let ctx = test_context_id();
+        let account = test_authority_id(1);
+        let facts = vec![
+            RecoveryFact::RecoveryShareSubmitted {
+                context_id: ctx,
+                guardian_id: test_authority_id(2),
+                trace_id: None,
+                share_hash: test_hash(3),
+                submitted_at: pt(1500),
+            },
+            RecoveryFact::RecoveryInitiated {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                request_hash: test_hash(1),
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::RecoveryCompleted {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                evidence_hash: test_hash(2),
+                completed_at: pt(3000),
+            },
+            RecoveryFact::RecoveryFailed {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                reason: "b".to_string(),
+                failed_at: pt(3000),
+            },
+            RecoveryFact::RecoveryFailed {
+                context_id: ctx,
+                account_id: account,
+                trace_id: None,
+                reason: "a".to_string(),
+                failed_at: pt(2900),
+            },
+            RecoveryFact::RecoveryDisputeFiled {
+                context_id: ctx,
+                disputer_id: test_authority_id(4),
+                trace_id: None,
+                reason: "late".to_string(),
+                filed_at: pt(4000),
+            },
+        ];
+        let state = assert_order_independent(&facts);
+        let recovery = state.recovery_for_context(&ctx).unwrap();
+        assert_eq!(
+            recovery.status,
+            RecoveryStatus::Failed(RecoveryFailure {
+                reason: "a".to_string()
+            })
+        );
+        assert_eq!(recovery.shares_submitted.len(), 1);
+        assert_eq!(recovery.disputes.len(), 1);
+    }
+
+    #[test]
+    fn concurrent_setup_completion_and_failure_and_proposal_outcomes() {
+        let ctx = test_context_id();
+        let g1 = test_authority_id(2);
+        let facts = vec![
+            RecoveryFact::GuardianSetupInitiated {
+                context_id: ctx,
+                initiator_id: test_authority_id(1),
+                trace_id: None,
+                guardian_ids: vec![g1],
+                threshold: 1,
+                initiated_at: pt(1000),
+            },
+            RecoveryFact::GuardianSetupCompleted {
+                context_id: ctx,
+                guardian_ids: vec![g1],
+                trace_id: None,
+                threshold: 1,
+                completed_at: pt(2000),
+            },
+            RecoveryFact::GuardianSetupFailed {
+                context_id: ctx,
+                reason: "timeout".to_string(),
+                trace_id: None,
+                failed_at: pt(2000),
+            },
+            RecoveryFact::MembershipChangeCompleted {
+                context_id: ctx,
+                proposal_hash: test_hash(5),
+                trace_id: None,
+                new_guardian_ids: vec![g1],
+                new_threshold: 1,
+                completed_at: pt(2500),
+            },
+            RecoveryFact::MembershipChangeProposed {
+                context_id: ctx,
+                proposer_id: g1,
+                trace_id: None,
+                change_type: MembershipChangeType::UpdateThreshold { new_threshold: 1 },
+                proposal_hash: test_hash(5),
+                proposed_at: pt(2100),
+            },
+        ];
+        let state = assert_order_independent(&facts);
+        assert_eq!(
+            state.setup_for_context(&ctx).unwrap().status,
+            SetupStatus::Failed(SetupFailure::Explicit {
+                reason: "timeout".to_string()
+            })
+        );
+        assert_eq!(
+            state.proposal_for_context(&ctx).unwrap().status,
+            ProposalStatus::Approved
+        );
     }
 }

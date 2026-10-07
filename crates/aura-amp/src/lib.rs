@@ -69,8 +69,8 @@ pub use evidence::{
 // ============================================================================
 
 pub use channel::{
-    AmpChannelCoordinator, ChannelMembershipFact, ChannelMembershipObservations,
-    ChannelParticipantEvent,
+    AmpChannelCoordinator, ChannelMembershipFact, ChannelMembershipFactReducer,
+    ChannelMembershipObservations, ChannelParticipantEvent, CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
 };
 
 // ============================================================================

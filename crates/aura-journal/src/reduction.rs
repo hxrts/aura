@@ -741,7 +741,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => {
-                                channel_bootstraps.insert(bootstrap.channel, bootstrap.clone());
+                                merge_channel_bootstrap(&mut channel_bootstraps, bootstrap);
                                 continue;
                             }
                             crate::fact::ProtocolRelationalFact::LeakageEvent(event) => {
@@ -917,6 +917,28 @@ fn highest_reduced_epoch(
         }
     }
     epoch
+}
+
+/// Fold one bootstrap fact into the per-channel canonical bootstrap. Bootstrap
+/// facts carry no causal stamp and physical time is not an ordering input, so
+/// concurrent bootstraps resolve by the deterministic tie-break: the smallest
+/// `bootstrap_id`, then the full fact order. The result is a function of the
+/// fact set.
+fn merge_channel_bootstrap(
+    bootstraps: &mut BTreeMap<ChannelId, ChannelBootstrap>,
+    bootstrap: &ChannelBootstrap,
+) {
+    let precedes = |candidate: &ChannelBootstrap, current: &ChannelBootstrap| {
+        (&candidate.bootstrap_id, candidate) < (&current.bootstrap_id, current)
+    };
+    bootstraps
+        .entry(bootstrap.channel)
+        .and_modify(|existing| {
+            if precedes(bootstrap, existing) {
+                *existing = bootstrap.clone();
+            }
+        })
+        .or_insert_with(|| bootstrap.clone());
 }
 
 fn canonical_checkpoint(
@@ -1483,4 +1505,58 @@ fn convert_to_core_fact(
     );
 
     Ok(core_fact)
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+    use crate::causal_reduction::assert_permutation_invariant;
+    use aura_core::time::PhysicalTime;
+
+    fn bootstrap(channel: u8, id: u8, ts_ms: u64) -> ChannelBootstrap {
+        ChannelBootstrap {
+            context: ContextId::new_from_entropy([1; 32]),
+            channel: ChannelId::from_bytes([channel; 32]),
+            bootstrap_id: Hash32::new([id; 32]),
+            dealer: AuthorityId::new_from_entropy([id; 32]),
+            recipients: vec![AuthorityId::new_from_entropy([9; 32])],
+            created_at: PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            },
+            expires_at: None,
+        }
+    }
+
+    fn reduce(facts: &[ChannelBootstrap]) -> BTreeMap<ChannelId, ChannelBootstrap> {
+        let mut out = BTreeMap::new();
+        for fact in facts {
+            merge_channel_bootstrap(&mut out, fact);
+        }
+        out
+    }
+
+    #[test]
+    fn channel_bootstrap_reduction_is_order_independent() {
+        let facts = [
+            bootstrap(1, 3, 20),
+            bootstrap(1, 2, 10),
+            bootstrap(1, 1, 30),
+            bootstrap(2, 7, 1),
+            bootstrap(2, 6, 5),
+        ];
+        let reduced = assert_permutation_invariant(&facts, reduce);
+        let first = &reduced[&ChannelId::from_bytes([1; 32])];
+        assert_eq!(
+            first.bootstrap_id,
+            Hash32::new([1; 32]),
+            "smallest bootstrap_id wins"
+        );
+        let second = &reduced[&ChannelId::from_bytes([2; 32])];
+        assert_eq!(
+            second.bootstrap_id,
+            Hash32::new([6; 32]),
+            "wall-clock order is not an input"
+        );
+    }
 }
