@@ -7954,13 +7954,74 @@ large_stack_async_test!(chat_intake_rejections_are_recorded_as_message_drops, {
     ));
     assert_eq!(
         drops[1].reason,
-        MessageDropReason::ModerationActorMismatch {
-            claimed_actor: impostor
+        MessageDropReason::AuthorMismatch {
+            claimed_author: impostor
         }
     );
     let committed = effects.load_committed_facts(authority).await.unwrap();
     assert!(!committed.iter().any(|fact| matches!(
         &fact.content,
         FactContent::Relational(relational) if *relational == forged
+    )));
+});
+
+// Task 137: a member relaying a channel membership fact whose author is
+// another member (a forged leave in the participant's name, or a leave
+// attributed to a third party) is refused at intake, recorded in the
+// dropped-message log, and not committed.
+large_stack_async_test!(relayed_channel_membership_fact_from_non_author_is_dropped, {
+    use crate::reactive::MessageDropReason;
+    use aura_amp::{ChannelMembershipFact, ChannelParticipantEvent};
+    let authority = AuthorityId::new_from_entropy([216u8; 32]);
+    let relayer = AuthorityId::new_from_entropy([217u8; 32]);
+    let victim = AuthorityId::new_from_entropy([218u8; 32]);
+    let moderator = AuthorityId::new_from_entropy([219u8; 32]);
+    let config = AgentConfig::default();
+    let effects =
+        Arc::new(AuraEffectSystem::simulation_for_test_for_authority(&config, authority).unwrap());
+    let _pipeline = start_test_reactive_pipeline(&effects).await;
+    let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+    let context_id = ContextId::new_from_entropy([220u8; 32]);
+    let channel_id = ChannelId::from_bytes([221u8; 32]);
+    let leave = || {
+        ChannelMembershipFact::new(
+            context_id,
+            channel_id,
+            victim,
+            ChannelParticipantEvent::Left,
+            aura_core::time::TimeStamp::OrderClock(aura_core::time::OrderTime([9; 32])),
+        )
+    };
+    // The victim's own leave, and a kick authored by a moderator, both
+    // relayed by `relayer`.
+    let forged = leave().to_generic();
+    let relayed = leave().authored_by(moderator).to_generic();
+    send_peer_relational_fact(&effects, authority, relayer, context_id, &forged, 1).await;
+    send_peer_relational_fact(&effects, authority, relayer, context_id, &relayed, 2).await;
+    let processed = handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+    assert_eq!(processed, 0, "relayed membership facts are not processed");
+
+    let (drops, total) = effects.message_drops();
+    assert_eq!(total, 2);
+    assert!(drops.iter().all(|drop| drop.peer_id == Some(relayer)));
+    assert_eq!(
+        drops[0].reason,
+        MessageDropReason::AuthorMismatch {
+            claimed_author: victim
+        }
+    );
+    assert_eq!(
+        drops[1].reason,
+        MessageDropReason::AuthorMismatch {
+            claimed_author: moderator
+        }
+    );
+    let committed = effects.load_committed_facts(authority).await.unwrap();
+    assert!(!committed.iter().any(|fact| matches!(
+        &fact.content,
+        FactContent::Relational(relational) if *relational == forged || *relational == relayed
     )));
 });

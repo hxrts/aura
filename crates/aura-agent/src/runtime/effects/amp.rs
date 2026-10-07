@@ -224,8 +224,9 @@ impl AmpChannelEffects for AuraEffectSystem {
 
 impl AuraEffectSystem {
     /// Record a channel membership event (a join naming `episode`, or a
-    /// departure ending the observed episodes) in the context journal AMP
-    /// state reads, and commit it for the chat projection.
+    /// departure ending the observed episodes), authored by this authority,
+    /// in the context journal AMP state reads, and commit it for the chat
+    /// projection.
     pub(crate) async fn commit_channel_membership(
         &self,
         context: aura_core::ContextId,
@@ -244,6 +245,7 @@ impl AuraEffectSystem {
         )
         .await
         .map_err(amp_membership_error)?
+        .authored_by(self.authority_id)
         .to_generic();
         self.insert_relational_fact(membership.clone())
             .await

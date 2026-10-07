@@ -20,7 +20,6 @@ use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_effects::RealCryptoHandler;
 use aura_journal::fact::{FactContent, RelationalFact};
@@ -99,13 +98,13 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
         .with_authority(authority_id)
         .build_testing_async(&ctx)
         .await?;
-    let effects = agent.runtime().effects();
-    effects.bootstrap_authority(&authority_id).await?;
-    let participants = vec![ParticipantIdentity::guardian(authority_id)];
-    let (epoch, _, _) = effects
-        .rotate_keys(&authority_id, 1, 1, &participants)
+    // Bootstrap as a real account does, so the device roster and signing
+    // policy agree for enrollment and descriptor publication.
+    agent
+        .runtime()
+        .threshold_signing()
+        .bootstrap_authority(&authority_id)
         .await?;
-    effects.commit_key_rotation(&authority_id, epoch).await?;
     Ok(Arc::new(agent))
 }
 
@@ -190,7 +189,7 @@ fn test_two_agent_invitation_flow() -> TestResult {
         // User A exports invitation as shareable code
         let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
 
-        assert!(code.starts_with("aura:v1:"));
+        assert!(code.starts_with(&format!("aura:v{}:", ShareableInvitation::CURRENT_VERSION)));
 
         // User B imports the invite code
         let shareable = InvitationServiceApi::import_code(&code)?;

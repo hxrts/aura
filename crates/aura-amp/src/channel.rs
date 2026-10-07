@@ -299,6 +299,11 @@ pub struct ChannelMembershipFact {
     /// Named episodes a departure ends (schema v2).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     ends: BTreeSet<String>,
+    /// Authority that wrote this event when it is not the participant (an
+    /// inviter recording an acceptor's join, a moderator's kick); `None`
+    /// means the participant wrote it. Receivers bind it to the sender.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    author: Option<AuthorityId>,
 }
 
 impl ChannelMembershipFact {
@@ -319,7 +324,22 @@ impl ChannelMembershipFact {
             timestamp,
             episode: None,
             ends: BTreeSet::new(),
+            author: None,
         }
+    }
+
+    /// This event as written by `author`.
+    #[must_use]
+    pub fn authored_by(mut self, author: AuthorityId) -> Self {
+        self.author = (author != self.participant).then_some(author);
+        self
+    }
+
+    /// Authority that wrote this event: the recorded author, else the
+    /// participant itself.
+    #[must_use]
+    pub fn author(&self) -> AuthorityId {
+        self.author.unwrap_or(self.participant)
     }
 
     /// Join that starts the episode named by an accepted invitation.

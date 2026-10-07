@@ -174,9 +174,17 @@ if [[ "${1:-}" != build ]]; then
   exec "$dx_bin" "$@"
 fi
 
+# dx defaults to --debug-symbols true, which keeps DWARF through wasm-bindgen
+# and runs wasm-opt with --debuginfo instead of --strip-debug, so release
+# bundles ship unstripped. Strip them unless a caller asks otherwise.
+build_args=("$@")
+if [[ " $* " == *" --release "* && " $* " != *" --debug-symbols"* ]]; then
+  build_args+=(--debug-symbols false)
+fi
+
 # Builds leave a new content-hashed bundle behind each time; keep the newest.
 status=0
-"$dx_bin" "$@" || status=$?
+"$dx_bin" "${build_args[@]}" || status=$?
 if [[ "$status" -eq 0 ]]; then
   bash "$script_dir/prune-dx-assets.sh" "$CARGO_TARGET_DIR"
 fi

@@ -1,25 +1,147 @@
 //! Membership-checked relational-context sync for home, channel and DM
 //! contexts (docs/111 §11.4).
 //!
-//! A member sends a peer the digests of the context-sync facts it holds for a
-//! context; the peer, if it counts the requester as a member of that context,
-//! answers with the facts the requester lacks. Commit-time sends to peers only
-//! cut latency: this pull, run by the runtime-owned periodic sync, is what
-//! makes a lost send converge.
+//! A member pulls the context-sync facts it lacks from a peer that counts it
+//! as a member of the context. Requests stay bounded however long the
+//! context's history is: the requester sends a fixed-size summary (a hash of
+//! its fact digests in each of [`DIGEST_BUCKETS`] buckets, split by digest
+//! prefix); the peer names the buckets whose hashes differ from its own; the
+//! requester then sends its digests in those buckets only, in ranged pages of
+//! at most [`MAX_PAGE_DIGESTS`]; the peer answers each page with the facts in
+//! its range the requester lacks. Equal histories cost one summary message.
+//! Commit-time sends to peers only cut latency: this pull, run by the
+//! runtime-owned periodic sync, is what makes a lost send (or a lost sync
+//! message) converge on a later round.
 
 use super::*;
 use aura_journal::fact::RelationalFact;
 use aura_protocol::amp::AmpJournalEffects;
 use std::collections::BTreeSet;
 
-/// Context sync request content type.
+/// Context sync message content type.
 pub(super) const CONTEXT_SYNC_CONTENT_TYPE: &str = "application/aura-context-sync";
 
-/// A member's digest of the context-sync facts it holds for `context_id`.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct ContextSyncRequest {
-    pub(super) context_id: ContextId,
-    pub(super) held: BTreeSet<Hash32>,
+/// Number of digest buckets a summary covers (the digest's top four bits).
+const DIGEST_BUCKETS: usize = 16;
+
+/// Hard cap on the fact digests one page carries; a page above it is refused.
+pub(super) const MAX_PAGE_DIGESTS: usize = 256;
+
+/// One context-sync message between members of `context_id`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum ContextSyncMessage {
+    /// Requester to peer: the hash of the requester's digests per bucket.
+    Summary {
+        context_id: ContextId,
+        bucket_hashes: Vec<Hash32>,
+    },
+    /// Peer to requester: the buckets whose hashes differ from the peer's.
+    Differing {
+        context_id: ContextId,
+        buckets: BTreeSet<u8>,
+    },
+    /// Requester to peer: the requester's digests in one range of a bucket.
+    Page {
+        context_id: ContextId,
+        page: DigestPage,
+    },
+}
+
+impl ContextSyncMessage {
+    fn context_id(&self) -> ContextId {
+        match self {
+            Self::Summary { context_id, .. }
+            | Self::Differing { context_id, .. }
+            | Self::Page { context_id, .. } => *context_id,
+        }
+    }
+}
+
+/// The requester's digests in the range `(after, upto]` of `bucket` (an
+/// absent bound is the bucket's edge). The pages of a bucket cover it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) struct DigestPage {
+    bucket: u8,
+    after: Option<Hash32>,
+    upto: Option<Hash32>,
+    held: BTreeSet<Hash32>,
+}
+
+impl DigestPage {
+    /// Whether a fact with `digest` is in this page's range and missing
+    /// from the requester.
+    fn wants(&self, digest: &Hash32) -> bool {
+        digest_bucket(digest) == self.bucket
+            && self.after.map_or(true, |after| *digest > after)
+            && self.upto.map_or(true, |upto| *digest <= upto)
+            && !self.held.contains(digest)
+    }
+
+    fn within_cap(&self) -> bool {
+        usize::from(self.bucket) < DIGEST_BUCKETS && self.held.len() <= MAX_PAGE_DIGESTS
+    }
+}
+
+fn digest_bucket(digest: &Hash32) -> u8 {
+    digest.as_bytes()[0] >> 4
+}
+
+/// Hash of the sorted digests in each bucket.
+fn bucket_hashes(digests: &BTreeSet<Hash32>) -> Vec<Hash32> {
+    let mut buckets = vec![Vec::new(); DIGEST_BUCKETS];
+    for digest in digests {
+        buckets[usize::from(digest_bucket(digest))].extend_from_slice(digest.as_bytes());
+    }
+    buckets
+        .iter()
+        .map(|bytes| Hash32::from_bytes(bytes))
+        .collect()
+}
+
+/// Buckets whose hash in `remote` differs from this side's (none for a
+/// malformed summary).
+fn differing_buckets(local: &BTreeSet<Hash32>, remote: &[Hash32]) -> BTreeSet<u8> {
+    if remote.len() != DIGEST_BUCKETS {
+        return BTreeSet::new();
+    }
+    bucket_hashes(local)
+        .iter()
+        .zip(remote)
+        .zip(0u8..)
+        .filter(|((local, remote), _)| local != remote)
+        .map(|(_, bucket)| bucket)
+        .collect()
+}
+
+/// Pages of at most [`MAX_PAGE_DIGESTS`] digests covering `bucket`.
+fn bucket_pages(held: &BTreeSet<Hash32>, bucket: u8) -> Vec<DigestPage> {
+    let in_bucket: Vec<Hash32> = held
+        .iter()
+        .filter(|digest| digest_bucket(digest) == bucket)
+        .copied()
+        .collect();
+    if in_bucket.is_empty() {
+        return vec![DigestPage {
+            bucket,
+            after: None,
+            upto: None,
+            held: BTreeSet::new(),
+        }];
+    }
+    let chunks: Vec<&[Hash32]> = in_bucket.chunks(MAX_PAGE_DIGESTS).collect();
+    let last = chunks.len() - 1;
+    chunks
+        .iter()
+        .enumerate()
+        .map(|(index, chunk)| DigestPage {
+            bucket,
+            after: index
+                .checked_sub(1)
+                .and_then(|prev| chunks[prev].last().copied()),
+            upto: (index != last).then(|| chunk.last().copied()).flatten(),
+            held: chunk.iter().copied().collect(),
+        })
+        .collect()
 }
 
 pub(super) struct InvitationContextSync<'a> {
@@ -64,15 +186,31 @@ fn is_context_sync_envelope(envelope: &aura_core::types::facts::FactEnvelope) ->
         || is_channel_membership_envelope(envelope)
 }
 
-/// Whether `own_authority` may serve `envelope` to a syncing member. A
-/// receiver requires a moderation fact's actor to be its sender, so a
-/// moderation fact is served only by its author.
+/// The author a peer fact claims, for kinds that name one: a moderation
+/// fact's actor, or the writer of an AMP channel membership event. The
+/// envelope receipt binds the sender, so a receiver requires the claimed
+/// author to be the sender (and a member relaying another member's event, or
+/// forging one in their name, is refused).
+pub(super) fn claimed_fact_author(
+    envelope: &aura_core::types::facts::FactEnvelope,
+) -> Option<AuthorityId> {
+    use aura_journal::DomainFact;
+    aura_social::moderation::facts::claimed_moderation_actor(envelope).or_else(|| {
+        is_channel_membership_envelope(envelope)
+            .then(|| aura_amp::ChannelMembershipFact::from_envelope(envelope))
+            .flatten()
+            .map(|membership| membership.author())
+    })
+}
+
+/// Whether `own_authority` may serve `envelope` to a syncing member: a fact
+/// claiming an author is served only by that author.
 fn may_serve_context_fact(
     envelope: &aura_core::types::facts::FactEnvelope,
     own_authority: AuthorityId,
 ) -> bool {
-    if let Some(actor) = aura_social::moderation::facts::claimed_moderation_actor(envelope) {
-        return actor == own_authority;
+    if let Some(author) = claimed_fact_author(envelope) {
+        return author == own_authority;
     }
     is_context_sync_envelope(envelope)
 }
@@ -244,68 +382,144 @@ impl<'a> InvitationContextSync<'a> {
         peers
     }
 
+    /// Digests of the context-sync facts of `context_id` held here.
+    async fn held_digests(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+    ) -> AgentResult<BTreeSet<Hash32>> {
+        self.context_facts(effects, context_id)
+            .await?
+            .iter()
+            .map(context_fact_digest)
+            .collect()
+    }
+
     /// Ask `peer` for the context-sync facts of `context_id` this authority
-    /// lacks (pull side).
+    /// lacks (pull side): send the fixed-size bucket summary.
     pub(super) async fn request(
         &self,
         effects: &AuraEffectSystem,
         context_id: ContextId,
         peer: AuthorityId,
     ) -> AgentResult<()> {
-        let mut held = BTreeSet::new();
-        for fact in self.context_facts(effects, context_id).await? {
-            held.insert(context_fact_digest(&fact)?);
+        let held = self.held_digests(effects, context_id).await?;
+        self.send_message(
+            effects,
+            peer,
+            &ContextSyncMessage::Summary {
+                context_id,
+                bucket_hashes: bucket_hashes(&held),
+            },
+        )
+        .await
+    }
+
+    /// Handle a verified context-sync message from `peer`, who must be a
+    /// member of the context here. A summary is answered with the differing
+    /// buckets, differing buckets with this side's digest pages, and a page
+    /// with the facts in its range the peer lacks and this authority may
+    /// serve. Delivery is best-effort; the next round repairs any gap.
+    pub(super) async fn handle(
+        &self,
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        message: ContextSyncMessage,
+    ) -> AgentResult<()> {
+        let context_id = message.context_id();
+        if !self
+            .context_peers(effects, context_id)
+            .await
+            .contains(&peer)
+        {
+            tracing::debug!(
+                peer = %peer,
+                context = %context_id,
+                "Ignored context sync message from a non-member"
+            );
+            return Ok(());
         }
-        let payload =
-            aura_core::util::serialization::to_vec(&ContextSyncRequest { context_id, held })
-                .map_err(|error| AgentError::internal(error.to_string()))?;
+        match message {
+            ContextSyncMessage::Summary { bucket_hashes, .. } => {
+                let held = self.held_digests(effects, context_id).await?;
+                let buckets = differing_buckets(&held, &bucket_hashes);
+                if buckets.is_empty() {
+                    return Ok(());
+                }
+                self.send_message(
+                    effects,
+                    peer,
+                    &ContextSyncMessage::Differing {
+                        context_id,
+                        buckets,
+                    },
+                )
+                .await
+            }
+            ContextSyncMessage::Differing { buckets, .. } => {
+                let held = self.held_digests(effects, context_id).await?;
+                for bucket in buckets
+                    .into_iter()
+                    .filter(|bucket| usize::from(*bucket) < DIGEST_BUCKETS)
+                {
+                    for page in bucket_pages(&held, bucket) {
+                        self.send_message(
+                            effects,
+                            peer,
+                            &ContextSyncMessage::Page { context_id, page },
+                        )
+                        .await?;
+                    }
+                }
+                Ok(())
+            }
+            ContextSyncMessage::Page { page, .. } => {
+                if !page.within_cap() {
+                    tracing::debug!(
+                        peer = %peer,
+                        context = %context_id,
+                        held = page.held.len(),
+                        "Ignored context sync page over the digest cap"
+                    );
+                    return Ok(());
+                }
+                let own = self.own_authority();
+                let served = self
+                    .send_context_facts(effects, context_id, peer, |fact, envelope| {
+                        may_serve_context_fact(envelope, own)
+                            && context_fact_digest(fact).is_ok_and(|digest| page.wants(&digest))
+                    })
+                    .await?;
+                tracing::debug!(
+                    peer = %peer,
+                    context = %context_id,
+                    bucket = page.bucket,
+                    held = page.held.len(),
+                    served,
+                    "Served context sync page"
+                );
+                Ok(())
+            }
+        }
+    }
+
+    async fn send_message(
+        &self,
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        message: &ContextSyncMessage,
+    ) -> AgentResult<()> {
+        let payload = aura_core::util::serialization::to_vec(message)
+            .map_err(|error| AgentError::internal(error.to_string()))?;
         self.send(
             effects,
             peer,
             payload,
             CONTEXT_SYNC_CONTENT_TYPE,
-            context_id,
-            "context sync request send failed",
+            message.context_id(),
+            "context sync message send failed",
         )
         .await
-    }
-
-    /// Serve a verified request: the requester must be a member of the
-    /// context here; it receives the facts it lacks that this authority may
-    /// serve. Delivery is best-effort per fact; the next round repairs gaps.
-    pub(super) async fn serve(
-        &self,
-        effects: &AuraEffectSystem,
-        requester: AuthorityId,
-        request: ContextSyncRequest,
-    ) -> AgentResult<()> {
-        if !self
-            .context_peers(effects, request.context_id)
-            .await
-            .contains(&requester)
-        {
-            tracing::debug!(
-                requester = %requester,
-                context = %request.context_id,
-                "Ignored context sync request from a non-member"
-            );
-            return Ok(());
-        }
-        let own = self.own_authority();
-        let served = self
-            .send_context_facts(effects, request.context_id, requester, |fact, envelope| {
-                may_serve_context_fact(envelope, own)
-                    && context_fact_digest(fact).is_ok_and(|digest| !request.held.contains(&digest))
-            })
-            .await?;
-        tracing::debug!(
-            requester = %requester,
-            context = %request.context_id,
-            held = request.held.len(),
-            served,
-            "Served context sync request"
-        );
-        Ok(())
     }
 
     /// Send a newly joined home member the home's governance facts this
@@ -500,5 +714,148 @@ impl InvitationHandler {
         InvitationContextSync::new(self)
             .request(effects, context_id, peer)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn digests(range: std::ops::Range<u32>) -> BTreeSet<Hash32> {
+        range
+            .map(|index| Hash32::from_bytes(&index.to_le_bytes()))
+            .collect()
+    }
+
+    fn encoded_len(message: &ContextSyncMessage) -> usize {
+        aura_core::util::serialization::to_vec(message)
+            .expect("context sync message encodes")
+            .len()
+    }
+
+    /// One pull round of `requester` against `server`, returning the facts
+    /// served, each delivered unless `drop` says it is lost. Asserts every
+    /// requester message stays within the per-message bound.
+    fn pull_round(
+        context_id: ContextId,
+        requester: &BTreeSet<Hash32>,
+        server: &BTreeSet<Hash32>,
+        max_message_len: usize,
+        drop: impl Fn(&Hash32) -> bool,
+    ) -> (BTreeSet<Hash32>, usize) {
+        let summary = ContextSyncMessage::Summary {
+            context_id,
+            bucket_hashes: bucket_hashes(requester),
+        };
+        assert!(encoded_len(&summary) <= max_message_len);
+        let ContextSyncMessage::Summary { bucket_hashes, .. } = summary else {
+            unreachable!()
+        };
+        let mut delivered = BTreeSet::new();
+        let mut pages = 0;
+        for bucket in differing_buckets(server, &bucket_hashes) {
+            for page in bucket_pages(requester, bucket) {
+                assert!(page.within_cap());
+                let message = ContextSyncMessage::Page { context_id, page };
+                assert!(encoded_len(&message) <= max_message_len);
+                let ContextSyncMessage::Page { page, .. } = message else {
+                    unreachable!()
+                };
+                pages += 1;
+                delivered.extend(
+                    server
+                        .iter()
+                        .filter(|digest| page.wants(digest) && !drop(digest))
+                        .copied(),
+                );
+            }
+        }
+        (delivered, pages)
+    }
+
+    // Task 136: with a long history, every context-sync message stays under
+    // a fixed bound, equal histories cost no pages, and a member missing
+    // facts converges even when a round's deliveries are dropped.
+    #[test]
+    fn large_history_sync_messages_are_bounded_and_converge_after_drops() {
+        let context_id = ContextId::new_from_entropy([42u8; 32]);
+        let server = digests(0..20_000);
+        // Bound: a page of MAX_PAGE_DIGESTS digests plus framing.
+        let max_message_len = MAX_PAGE_DIGESTS * 70 + 512;
+        // The summary is DIGEST_BUCKETS hashes whatever the history length.
+        let summary_bound = DIGEST_BUCKETS * 70 + 128;
+        for history in [digests(0..3), server.clone()] {
+            let summary = ContextSyncMessage::Summary {
+                context_id,
+                bucket_hashes: bucket_hashes(&history),
+            };
+            assert!(encoded_len(&summary) <= summary_bound);
+        }
+
+        let (served, pages) = pull_round(context_id, &server, &server, max_message_len, |_| false);
+        assert!(
+            served.is_empty() && pages == 0,
+            "equal histories exchange no pages"
+        );
+
+        // The requester lacks every 97th fact and holds a few the server
+        // does not.
+        let mut requester: BTreeSet<Hash32> = server
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| index % 97 != 0)
+            .map(|(_, digest)| *digest)
+            .collect();
+        requester.extend(digests(50_000..50_010));
+        let missing: BTreeSet<Hash32> = server.difference(&requester).copied().collect();
+        assert!(!missing.is_empty());
+
+        // First round: every other served fact is dropped in transit.
+        let (served, _) = pull_round(context_id, &requester, &server, max_message_len, |digest| {
+            digest.as_bytes()[31] % 2 == 0
+        });
+        assert!(served.is_subset(&missing));
+        assert!(served.len() < missing.len(), "the drop lost some facts");
+        requester.extend(served);
+
+        // Later rounds repair the gap.
+        let (served, _) = pull_round(context_id, &requester, &server, max_message_len, |_| false);
+        requester.extend(served);
+        assert!(server.is_subset(&requester), "the requester converged");
+        let (served, _) = pull_round(context_id, &requester, &server, max_message_len, |_| false);
+        assert!(served.is_empty());
+    }
+
+    #[test]
+    fn pages_cover_a_bucket_and_respect_the_cap() {
+        let held = digests(0..10_000);
+        for bucket in 0..DIGEST_BUCKETS as u8 {
+            let pages = bucket_pages(&held, bucket);
+            assert!(pages.iter().all(DigestPage::within_cap));
+            let covered: BTreeSet<Hash32> = pages
+                .iter()
+                .flat_map(|page| page.held.iter().copied())
+                .collect();
+            let in_bucket: BTreeSet<Hash32> = held
+                .iter()
+                .filter(|digest| digest_bucket(digest) == bucket)
+                .copied()
+                .collect();
+            assert_eq!(covered, in_bucket);
+            // Each digest of the bucket falls in exactly one page's range.
+            for digest in digests(20_000..21_000)
+                .iter()
+                .filter(|digest| digest_bucket(digest) == bucket)
+            {
+                assert_eq!(pages.iter().filter(|page| page.wants(digest)).count(), 1);
+            }
+        }
+        let oversized = DigestPage {
+            bucket: 0,
+            after: None,
+            upto: None,
+            held: digests(0..(MAX_PAGE_DIGESTS as u32 + 1)),
+        };
+        assert!(!oversized.within_cap());
     }
 }

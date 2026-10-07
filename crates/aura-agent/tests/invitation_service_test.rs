@@ -16,14 +16,13 @@
 use aura_agent::handlers::{invitation::ShareableInvitationSenderProof, ShareableInvitation};
 use aura_agent::{
     core::config::StorageConfig, AgentBuilder, AgentConfig, AuraAgent, AuthorityId, EffectContext,
-    ExecutionMode, InvitationStatus, InvitationType,
+    ExecutionMode, InvitationStatus, InvitationType, SharedTransport,
 };
 use aura_core::effects::amp::ChannelCreateParams;
 use aura_core::effects::AmpChannelEffects;
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::threshold::ParticipantIdentity;
 use aura_core::types::identifiers::{ChannelId, ContextId, InvitationId};
 use aura_effects::RealCryptoHandler;
 use std::future::Future;
@@ -64,9 +63,22 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 
 /// Helper to create a properly initialized test agent.
 ///
-/// This sets up Biscuit tokens and key rotation which are required for
-/// authorization guards to function correctly.
+/// Canonical bootstrap sets up the Biscuit tokens and signing policy that
+/// authorization guards and enrollment require.
 async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
+    create_agent(seed, None).await
+}
+
+/// Like [`create_test_agent`], on a transport shared with other agents so an
+/// inviter can confirm a contact acceptance.
+async fn create_networked_agent(
+    seed: u8,
+    transport: SharedTransport,
+) -> TestResult<Arc<AuraAgent>> {
+    create_agent(seed, Some(transport)).await
+}
+
+async fn create_agent(seed: u8, transport: Option<SharedTransport>) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
     let ctx = test_context(authority_id);
     let config = AgentConfig {
@@ -80,18 +92,24 @@ async fn create_test_agent(seed: u8) -> TestResult<Arc<AuraAgent>> {
         },
         ..Default::default()
     };
-    let agent = AgentBuilder::new()
+    let builder = AgentBuilder::new()
         .with_config(config)
-        .with_authority(authority_id)
-        .build_testing_async(&ctx)
+        .with_authority(authority_id);
+    let agent = match transport {
+        Some(transport) => {
+            builder
+                .build_simulation_async_with_shared_transport(u64::from(seed), &ctx, transport)
+                .await?
+        }
+        None => builder.build_testing_async(&ctx).await?,
+    };
+    // Bootstrap as a real account does, so the device roster and signing
+    // policy agree for enrollment and descriptor publication.
+    agent
+        .runtime()
+        .threshold_signing()
+        .bootstrap_authority(&authority_id)
         .await?;
-    let effects = agent.runtime().effects();
-    effects.bootstrap_authority(&authority_id).await?;
-    let participants = vec![ParticipantIdentity::guardian(authority_id)];
-    let (epoch, _, _) = effects
-        .rotate_keys(&authority_id, 1, 1, &participants)
-        .await?;
-    effects.commit_key_rotation(&authority_id, epoch).await?;
     Ok(Arc::new(agent))
 }
 
@@ -269,8 +287,10 @@ fn test_invite_to_channel_rejects_invalid_home_id() -> TestResult {
 fn test_accept_invitation_via_agent() -> TestResult {
     run_async_test_on_large_stack(async move {
         // Entropy range: 240-241
-        let sender = create_test_agent(240).await?;
-        let receiver = create_test_agent(241).await?;
+        // The inviter confirms a contact acceptance over the transport.
+        let transport = SharedTransport::new();
+        let sender = create_networked_agent(240, transport.clone()).await?;
+        let receiver = create_networked_agent(241, transport).await?;
 
         let sender_invitations = sender.invitations()?;
         let receiver_invitations = receiver.invitations()?;
@@ -278,7 +298,9 @@ fn test_accept_invitation_via_agent() -> TestResult {
         let invitation = sender_invitations
             .invite_as_contact(receiver_id, None, None, None, None)
             .await?;
-        let code = encode_signed_invite_code(&ShareableInvitation::from(&invitation)).await?;
+        let code = sender_invitations
+            .export_code(&invitation.invitation_id)
+            .await?;
         let imported = receiver_invitations.import_and_cache(&code).await?;
 
         let result = receiver_invitations.accept(&imported.invitation_id).await?;

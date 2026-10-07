@@ -2,7 +2,9 @@ use super::contact_confirmation::{
     contact_acceptance_digest, settled_contact_invitation_decision, ContactInvitationDecision,
     CONTACT_INVITATION_RESPONSE_CONTENT_TYPE,
 };
-use super::context_sync::{ContextSyncRequest, InvitationContextSync, CONTEXT_SYNC_CONTENT_TYPE};
+use super::context_sync::{
+    claimed_fact_author, ContextSyncMessage, InvitationContextSync, CONTEXT_SYNC_CONTENT_TYPE,
+};
 use super::*;
 use crate::reactive::{MessageDrop, MessageDropReason};
 use aura_journal::fact::RelationalFact;
@@ -1015,28 +1017,28 @@ impl<'a> InvitationContactHandler<'a> {
                     let Some(envelope) = in_flight_envelope.take() else {
                         continue;
                     };
-                    let request: ContextSyncRequest = match from_slice(&envelope.payload) {
-                        Ok(request) => request,
+                    let message: ContextSyncMessage = match from_slice(&envelope.payload) {
+                        Ok(message) => message,
                         Err(error) => {
-                            tracing::warn!(error = %error, "Invalid context sync request");
+                            tracing::warn!(error = %error, "Invalid context sync message");
                             continue;
                         }
                     };
-                    let request = match self.verified_invitation_payload(&envelope, request) {
-                        Ok(request) => request.payload().clone(),
+                    let message = match self.verified_invitation_payload(&envelope, message) {
+                        Ok(message) => message.payload().clone(),
                         Err(error) => {
                             tracing::warn!(
                                 error = %error,
-                                "Rejected unverified context sync request"
+                                "Rejected unverified context sync message"
                             );
                             continue;
                         }
                     };
                     if let Err(error) = InvitationContextSync::new(self.handler)
-                        .serve(effects.as_ref(), envelope.source, request)
+                        .handle(effects.as_ref(), envelope.source, message)
                         .await
                     {
-                        tracing::debug!(error = %error, "context sync not served");
+                        tracing::debug!(error = %error, "context sync message not handled");
                     }
                     processed = processed.saturating_add(1);
                     continue;
@@ -1106,18 +1108,17 @@ impl<'a> InvitationContactHandler<'a> {
                         continue;
                     }
                     // The receipt binds the envelope source to the sender, so a
-                    // moderation fact must name that sender as its actor.
+                    // moderation or channel membership fact must name that
+                    // sender as its author.
                     if let RelationalFact::Generic { envelope: inner, .. } = fact {
-                        if let Some(actor) =
-                            aura_social::moderation::facts::claimed_moderation_actor(inner)
-                        {
-                            if actor != sender {
+                        if let Some(author) = claimed_fact_author(inner) {
+                            if author != sender {
                                 effects.record_message_drop(MessageDrop::inbound_intake(
                                     sender,
                                     context,
                                     Some(fact),
-                                    MessageDropReason::ModerationActorMismatch {
-                                        claimed_actor: actor,
+                                    MessageDropReason::AuthorMismatch {
+                                        claimed_author: author,
                                     },
                                 ));
                                 in_flight_envelope = None;

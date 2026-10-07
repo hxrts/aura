@@ -1483,8 +1483,9 @@ pub enum MessageDropReason {
     UnverifiedEnvelope { detail: String },
     /// Intake: the fact failed the peer-fact ingress check.
     PeerFactRejected { detail: String },
-    /// Intake: a moderation fact names an actor other than its sender.
-    ModerationActorMismatch { claimed_actor: AuthorityId },
+    /// Intake: a moderation or channel membership fact names an author
+    /// other than its sender.
+    AuthorMismatch { claimed_author: AuthorityId },
     /// Outbound: the message could not be delivered to the peer.
     OutboundDelivery(aura_app::runtime_bridge::OutboundDeliveryFailureCause),
 }
@@ -1539,8 +1540,8 @@ impl std::fmt::Display for MessageDropReason {
             Self::InvalidPayload { detail } => write!(f, "invalid_payload: {detail}"),
             Self::UnverifiedEnvelope { detail } => write!(f, "unverified_envelope: {detail}"),
             Self::PeerFactRejected { detail } => write!(f, "peer_fact_rejected: {detail}"),
-            Self::ModerationActorMismatch { claimed_actor } => {
-                write!(f, "moderation_actor_mismatch claimed_actor={claimed_actor}")
+            Self::AuthorMismatch { claimed_author } => {
+                write!(f, "author_mismatch claimed_author={claimed_author}")
             }
             Self::OutboundDelivery(cause) => write!(f, "{cause}"),
         }
