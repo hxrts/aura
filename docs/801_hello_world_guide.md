@@ -374,6 +374,8 @@ aura home invite AUTHORITY
 aura slash "/topic welcome" --channel general
 ```
 
+The other command groups follow the TUI's screens: `account create|refresh`, `profile nick`, `settings show|mfa`, `contact list|rename|remove|whois|read-receipts`, `friend send|accept|decline|revoke`, `chat dm|join|close|members|retry|mark-read`, `home enter`, `neighborhood create|add|link`, `mod kick|ban|unban|mute|unmute|pin|unpin|op|deop|admit`, `access set`, `peer list|discover`, `device threshold|remove`, `guardians set`, `rotation cancel`, `budget` and `notifications list`. `aura account create --nickname NAME` creates an account the same way the TUI does, so the TUI opens it afterwards.
+
 Every account command runs the same `aura_app::ui::workflows` functions as the TUI and web, through one typed request model.
 
 ### Driving a node from a program

@@ -16,6 +16,7 @@ use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs, ThresholdArgs};
 use aura_terminal::command::{
     confirm, execute, with_timeout, CommandContext, CommandError, ErrorCode, Outcome, OutputMode,
+    Request,
 };
 use aura_terminal::handlers::{tui::open_production_runtime, CliOutput};
 use aura_terminal::ids;
@@ -161,6 +162,26 @@ async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
             )
         });
     init_tracing(verbose, json);
+    if let Commands::AccountCreate { nickname } = &command {
+        // The TUI's own creation path: runtime-free staging, then the first
+        // production launch initializes the runtime account.
+        if rpc_socket::call(
+            &rpc_socket::socket_path(&storage_base_path),
+            &Request::Status,
+            None,
+        )
+        .await?
+        .is_some()
+        {
+            return Err(CommandError::invalid(format!(
+                "a node already runs the account at {}",
+                storage_base_path.display()
+            )));
+        }
+        aura_terminal::handlers::tui::create_new_account(&storage_base_path, nickname).await?;
+        return run_account_command(Commands::Run(Request::Status), &storage_base_path, timeout)
+            .await;
+    }
     if matches!(command, Commands::Run(_) | Commands::Rpc | Commands::Serve) {
         return run_account_command(command, &storage_base_path, timeout).await;
     }
@@ -377,6 +398,7 @@ async fn dispatch(
         | Commands::Rpc
         | Commands::Serve
         | Commands::SyncDaemon(_)
+        | Commands::AccountCreate { .. }
         | Commands::Replay(_)
         | Commands::Version => Err(aura_terminal::TerminalError::Operation(
             "command reached the offline tool dispatch".into(),

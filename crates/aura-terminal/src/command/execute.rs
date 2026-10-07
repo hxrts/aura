@@ -7,7 +7,7 @@
 use super::request::{ExportFormat, InviteRole, Request};
 use super::response::{
     AccountView, AmpChannelView, AuthorityView, ChannelView, ContactView, InvitationView,
-    MessageView, OperationView, RecoveryView, Response,
+    MessageView, NotificationView, OperationView, RecoveryView, Response, SettingsView,
 };
 use super::{CommandError, ErrorCode};
 use crate::handlers::AuraEffectSystem;
@@ -15,14 +15,17 @@ use async_lock::RwLock;
 use aura_app::ui::contract::{
     SemanticFailureCode, WorkflowTerminalOutcome, WorkflowTerminalStatus,
 };
-use aura_app::ui::signals::SyncStatus;
+use aura_app::ui::signals::{SyncStatus, CONTACTS_SIGNAL};
 use aura_app::ui::types::{
-    AppCore, Channel, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, Message,
+    format_budget_status, AccessLevel, AppCore, Channel, Contact, ContactRelationshipState,
+    ContactsState, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, InvitationsState,
+    Message, ReadReceiptPolicy, RecoveryState,
 };
+use aura_app::ui::workflows::signals::read_signal_or_default;
 use aura_app::ui::workflows::strong_command::CommandResolver;
 use aura_app::ui::workflows::{
-    admin, amp, context, invitation, messaging, network, query, recovery, settings, slash_commands,
-    snapshot, sync, time,
+    access, admin, amp, budget, ceremonies, contacts, context, invitation, messaging, moderation,
+    moderator, network, query, recovery, settings, slash_commands, snapshot, sync, system, time,
 };
 use aura_core::types::identifiers::{
     AccountId, AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
@@ -147,6 +150,76 @@ pub(crate) fn channel_view(channel: &Channel, with_members: bool) -> ChannelView
             Vec::new()
         },
     }
+}
+
+fn contact_view(c: &Contact) -> ContactView {
+    ContactView {
+        authority_id: c.id.to_string(),
+        nickname: if c.nickname.is_empty() {
+            c.nickname_suggestion.clone().unwrap_or_default()
+        } else {
+            c.nickname.clone()
+        },
+        is_guardian: c.is_guardian,
+        is_member: c.is_member,
+    }
+}
+
+/// The contact a user named (nickname or authority), as its authority string
+/// for the contact workflows.
+async fn contact_id(ctx: &CommandContext, target: &str) -> Result<String, CommandError> {
+    Ok(query::resolve_contact(&ctx.app_core, target)
+        .await?
+        .id
+        .to_string())
+}
+
+async fn current_home(ctx: &CommandContext) -> Result<String, CommandError> {
+    Ok(context::current_home_id(&ctx.app_core).await?.to_string())
+}
+
+fn notifications(
+    contacts: &ContactsState,
+    invitations: &InvitationsState,
+    recovery: &RecoveryState,
+) -> Vec<NotificationView> {
+    let mut items: Vec<NotificationView> = contacts
+        .all_contacts()
+        .filter(|c| c.relationship_state == ContactRelationshipState::PendingInbound)
+        .map(|c| NotificationView {
+            kind: "friend_request".into(),
+            id: c.id.to_string(),
+            title: format!("Friend request from {}", contact_view(c).nickname),
+        })
+        .collect();
+    items.extend(invitations.all_pending().iter().map(|i| NotificationView {
+        kind: "invitation_received".into(),
+        id: i.id.clone(),
+        title: format!("{:?} invitation from {}", i.invitation_type, i.from_name),
+    }));
+    items.extend(invitations.all_sent().iter().map(|i| NotificationView {
+        kind: "invitation_sent".into(),
+        id: i.id.clone(),
+        title: format!(
+            "{:?} invitation to {}",
+            i.invitation_type,
+            i.to_name.clone().unwrap_or_default()
+        ),
+    }));
+    items.extend(
+        recovery
+            .pending_requests()
+            .iter()
+            .map(|p| NotificationView {
+                kind: "recovery_request".into(),
+                id: p.id.to_string(),
+                title: format!(
+                    "Recovery for {} ({} of {} approvals)",
+                    p.account_id, p.approvals_received, p.approvals_required
+                ),
+            }),
+    );
+    items
 }
 
 pub(crate) fn message_view(message: &Message) -> MessageView {
@@ -300,17 +373,8 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
         Request::ContactList => {
             let mut contacts: Vec<ContactView> = query::list_contacts(app)
                 .await
-                .into_iter()
-                .map(|c| ContactView {
-                    authority_id: c.id.to_string(),
-                    nickname: if c.nickname.is_empty() {
-                        c.nickname_suggestion.clone().unwrap_or_default()
-                    } else {
-                        c.nickname.clone()
-                    },
-                    is_guardian: c.is_guardian,
-                    is_member: c.is_member,
-                })
+                .iter()
+                .map(contact_view)
                 .collect();
             contacts.sort_by(|a, b| a.authority_id.cmp(&b.authority_id));
             Ok(Response::Contacts(contacts))
@@ -544,7 +608,7 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 code,
             })
         }
-        Request::InviteImport { code } => {
+        Request::InviteImport { code, accept } => {
             let handle = invitation::import_invitation_details(app, code.trim())
                 .await
                 .map_err(|e| {
@@ -554,7 +618,21 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                     }
                     error
                 })?;
-            Ok(Response::Invitation(invitation_view(handle.info())))
+            let view = invitation_view(handle.info());
+            if !accept {
+                return Ok(Response::Invitation(view));
+            }
+            let ((), operation) = settle(
+                invitation::accept_imported_invitation_with_terminal_status(app, handle, None)
+                    .await,
+            )?;
+            Ok(done(
+                format!(
+                    "Accepted invitation {} from {}",
+                    view.invitation_id, view.sender_id
+                ),
+                operation,
+            ))
         }
 
         Request::HomeCreate { name } => {
@@ -588,6 +666,299 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 None => None,
             };
             slash(ctx, &command, hint).await
+        }
+
+        Request::ContactRename { contact, nickname } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::update_contact_nickname(app, &id, &nickname, now_ms(ctx).await?).await?;
+            Ok(done(format!("Renamed {id} to {nickname}"), None))
+        }
+        Request::ContactRemove { contact } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::remove_contact(app, &id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Removed contact {id}"), None))
+        }
+        Request::FriendRequest { contact } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::send_friend_request(app, &id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Friend request sent to {id}"), None))
+        }
+        Request::FriendAccept { contact } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::accept_friend_request(app, &id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Accepted friend request from {id}"), None))
+        }
+        Request::FriendDecline { contact } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::decline_friend_request(app, &id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Declined friend request from {id}"), None))
+        }
+        Request::FriendRevoke { contact } => {
+            let id = contact_id(ctx, &contact).await?;
+            contacts::revoke_friendship(app, &id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Ended friendship with {id}"), None))
+        }
+        Request::ReadReceipts { contact, enabled } => {
+            let id = contact_id(ctx, &contact).await?;
+            let policy = if enabled {
+                ReadReceiptPolicy::Enabled
+            } else {
+                ReadReceiptPolicy::Disabled
+            };
+            contacts::set_read_receipt_policy(app, &id, policy).await?;
+            Ok(done(
+                format!(
+                    "Read receipts to {id} {}",
+                    if enabled { "on" } else { "off" }
+                ),
+                None,
+            ))
+        }
+        Request::Whois { target } => Ok(Response::Contact(contact_view(
+            &query::get_user_info(app, &target).await?,
+        ))),
+
+        Request::ChatDm { contact, message } => {
+            let channel_id =
+                messaging::send_direct_message(app, &contact, &message, now_ms(ctx).await?).await?;
+            Ok(Response::MessageSent {
+                channel_id,
+                message_id: String::new(),
+                operation: None,
+            })
+        }
+        Request::ChatJoin { channel: name } => {
+            let joined = messaging::join_channel_by_name(app, &name).await?;
+            Ok(done(format!("Joined {name} ({joined})"), None))
+        }
+        Request::ChatClose { channel: selector } => {
+            let channel = channel(ctx, &selector).await?;
+            messaging::close_channel(app, channel.id, now_ms(ctx).await?).await?;
+            Ok(done(format!("Closed {}", channel.name), None))
+        }
+        Request::ChatMembers { channel: selector } => {
+            let channel = channel(ctx, &selector).await?;
+            Ok(Response::Members(
+                query::list_participants_by_channel_id(app, channel.id).await?,
+            ))
+        }
+        Request::ChatRetry {
+            channel: selector,
+            message_id,
+        } => {
+            let channel = channel(ctx, &selector).await?;
+            let content = messaging::channel_history(app, channel.id, None, None)
+                .await
+                .into_iter()
+                .find(|m| m.id == message_id)
+                .map(|m| m.content)
+                .ok_or_else(|| CommandError::not_found(format!("message {message_id}")))?;
+            let (message_id, operation) = settle(
+                messaging::retry_message_with_terminal_status(app, channel.id, &content, None)
+                    .await,
+            )?;
+            Ok(Response::MessageSent {
+                channel_id: channel.id.to_string(),
+                message_id,
+                operation,
+            })
+        }
+        Request::ChatMarkRead { channel: selector } => {
+            let channel = channel(ctx, &selector).await?;
+            let marked = contacts::mark_channel_viewed(app, channel.id).await?;
+            Ok(done(format!("Marked {marked} messages read"), None))
+        }
+
+        Request::ProfileNick { nickname } => {
+            settings::update_nickname(app, nickname.clone()).await?;
+            Ok(done(format!("Nickname set to {nickname}"), None))
+        }
+        Request::SettingsShow => {
+            settings::refresh_settings_from_runtime(app).await?;
+            let s = settings::get_settings(app).await?;
+            Ok(Response::Settings(SettingsView {
+                nickname: s.nickname_suggestion,
+                threshold_k: s.threshold_k,
+                threshold_n: s.threshold_n,
+                mfa_policy: s.mfa_policy,
+                devices: s
+                    .devices
+                    .iter()
+                    .map(|d| {
+                        let current = if d.is_current { " (this device)" } else { "" };
+                        format!("{} {}{current}", d.id, d.name)
+                    })
+                    .collect(),
+                contacts: s.contact_count,
+            }))
+        }
+        Request::SettingsMfa { require } => {
+            settings::update_mfa_policy(app, require).await?;
+            Ok(done(
+                format!(
+                    "Multifactor approval {}",
+                    if require { "required" } else { "not required" }
+                ),
+                None,
+            ))
+        }
+        Request::AccountRefresh => {
+            system::refresh_account(app).await?;
+            Ok(done("Account refreshed", None))
+        }
+
+        Request::NeighborhoodCreate { name } => Ok(Response::NeighborhoodCreated {
+            neighborhood_id: context::create_neighborhood(app, name).await?,
+        }),
+        Request::NeighborhoodAdd { home } => {
+            context::add_home_to_neighborhood(app, &home).await?;
+            Ok(done(format!("Added {home} to the neighborhood"), None))
+        }
+        Request::NeighborhoodLink { home } => {
+            context::link_home_one_hop_link(app, &home).await?;
+            Ok(done(format!("Linked {home}"), None))
+        }
+        Request::HomeEnter { home, depth } => {
+            let depth = depth.unwrap_or_else(|| "full".to_string());
+            let reached = context::move_position(app, &home, &depth).await?;
+            Ok(done(format!("Entered {home} at depth {reached}"), None))
+        }
+
+        Request::ModKick {
+            target,
+            channel: selector,
+            reason,
+        } => {
+            let channel = match selector {
+                Some(selector) => self::channel(ctx, &selector).await?.id.to_string(),
+                None => current_home(ctx).await?,
+            };
+            moderation::kick_user(
+                app,
+                &channel,
+                &target,
+                reason.as_deref(),
+                now_ms(ctx).await?,
+            )
+            .await?;
+            Ok(done(format!("Kicked {target}"), None))
+        }
+        Request::ModBan { target, reason } => {
+            moderation::ban_user(app, &target, reason.as_deref(), now_ms(ctx).await?).await?;
+            Ok(done(format!("Banned {target}"), None))
+        }
+        Request::ModUnban { target } => {
+            moderation::unban_user(app, &target).await?;
+            Ok(done(format!("Unbanned {target}"), None))
+        }
+        Request::ModMute {
+            target,
+            duration_secs,
+        } => {
+            moderation::mute_user(app, &target, duration_secs, now_ms(ctx).await?).await?;
+            Ok(done(format!("Muted {target}"), None))
+        }
+        Request::ModUnmute { target } => {
+            moderation::unmute_user(app, &target).await?;
+            Ok(done(format!("Unmuted {target}"), None))
+        }
+        Request::ModPin { message_id } => {
+            moderation::pin_message(app, &message_id).await?;
+            Ok(done(format!("Pinned {message_id}"), None))
+        }
+        Request::ModUnpin { message_id } => {
+            moderation::unpin_message(app, &message_id).await?;
+            Ok(done(format!("Unpinned {message_id}"), None))
+        }
+        Request::ModOp { target } => {
+            moderator::grant_moderator(app, &target).await?;
+            Ok(done(format!("{target} is now a moderator"), None))
+        }
+        Request::ModDeop { target } => {
+            moderator::revoke_moderator(app, &target).await?;
+            Ok(done(format!("{target} is no longer a moderator"), None))
+        }
+        Request::ModAdmit { target } => {
+            moderator::admit_member(app, &target).await?;
+            Ok(done(format!("Admitted {target}"), None))
+        }
+        Request::AccessSet {
+            target,
+            level,
+            home,
+        } => {
+            let authority = parse_authority("target", &target)?;
+            let level = match level.trim().to_ascii_lowercase().as_str() {
+                "limited" => AccessLevel::Limited,
+                "partial" => AccessLevel::Partial,
+                "full" => AccessLevel::Full,
+                other => {
+                    return Err(CommandError::invalid(format!(
+                        "unknown access level {other}; expected limited, partial or full"
+                    )))
+                }
+            };
+            access::set_access_override(app, home.as_deref(), authority, level).await?;
+            Ok(done(
+                format!("Access for {authority} set to {level:?}"),
+                None,
+            ))
+        }
+
+        Request::PeerList => Ok(Response::PeerList(
+            network::list_peers(app, now_ms(ctx).await?).await?,
+        )),
+        Request::PeerDiscover => {
+            let found = network::discover_peers(app, now_ms(ctx).await?).await?;
+            Ok(done(format!("Discovered {found} peers"), None))
+        }
+
+        Request::ThresholdSet { k, n } => {
+            settings::update_threshold(app, k, n).await?;
+            Ok(done(format!("Threshold set to {k} of {n}"), None))
+        }
+        Request::GuardiansSet {
+            guardians,
+            threshold,
+        } => {
+            let guardians = parse_authorities("guardian", &guardians)?;
+            let total = u16::try_from(guardians.len())
+                .map_err(|_| CommandError::invalid("too many guardians"))?;
+            let threshold = FrostThreshold::new(threshold)
+                .map_err(|e| CommandError::invalid(format!("invalid threshold: {e:?}")))?;
+            let handle =
+                ceremonies::start_guardian_ceremony(app, threshold, total, guardians).await?;
+            Ok(Response::CeremonyStarted {
+                ceremony_id: handle.ceremony_id().to_string(),
+            })
+        }
+        Request::DeviceRemove { device } => {
+            let handle = ceremonies::start_device_removal_ceremony(app, device).await?;
+            Ok(Response::CeremonyStarted {
+                ceremony_id: handle.ceremony_id().to_string(),
+            })
+        }
+        Request::RotationCancel { ceremony_id } => {
+            ceremonies::cancel_key_rotation_ceremony_by_id(
+                app,
+                CeremonyId::new(ceremony_id.trim().to_string()),
+            )
+            .await?;
+            Ok(done(format!("Cancelled ceremony {ceremony_id}"), None))
+        }
+
+        Request::Budget => Ok(Response::Budget {
+            summary: format_budget_status(&budget::get_current_budget(app).await),
+        }),
+        Request::NotificationsList => {
+            let contacts = read_signal_or_default(app, &*CONTACTS_SIGNAL).await;
+            let invitations = invitation::list_invitations(app).await;
+            let recovery = recovery::get_recovery_status(app).await?;
+            Ok(Response::Notifications(notifications(
+                &contacts,
+                &invitations,
+                &recovery,
+            )))
         }
 
         Request::RecoveryStart {

@@ -312,6 +312,21 @@ pub async fn create_account_in(
     create_account_with_pending_bootstrap(store, pending_bootstrap, None).await
 }
 
+/// Stage a new production account at `base_path`, refusing when one exists.
+pub async fn create_new_account(
+    base_path: &Path,
+    nickname_suggestion: &str,
+) -> Result<(AuthorityId, ContextId), AuraError> {
+    let store = ProfileStore::production(base_path)?;
+    if let AccountLoadResult::Loaded { authority, .. } = try_load_account(store.storage()).await? {
+        return Err(AuraError::invalid(format!(
+            "an account ({authority}) already exists at {}",
+            base_path.display()
+        )));
+    }
+    create_account_in(&store, nickname_suggestion).await
+}
+
 /// Stage a new production account at `base_path`, owning the profile only
 /// while writing.
 pub async fn create_account(

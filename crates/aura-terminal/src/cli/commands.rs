@@ -5,8 +5,10 @@ use crate::cli::{
     chat::chat_parser,
     init::{init_parser, InitArgs},
     requests::{
-        admin_parser, amp_parser, authority_parser, contact_parser, context_parser, home_parser,
-        invite_parser, recovery_parser, slash_parser, status_parser,
+        access_parser, account_parser, admin_parser, amp_parser, authority_parser, contact_parser,
+        context_parser, device_parser, friend_parser, guardians_parser, home_parser, invite_parser,
+        moderation_parser, neighborhood_parser, notifications_parser, peer_parser, profile_parser,
+        recovery_parser, rotation_parser, settings_parser, slash_parser, status_parser,
     },
     sync::{sync_parser, SyncDaemonArgs},
     tui::tui_parser,
@@ -51,6 +53,10 @@ pub struct ReplayArgs {
 pub enum Commands {
     /// A workflow-backed account command.
     Run(Request),
+    /// `aura account create`: create an account where none exists.
+    AccountCreate {
+        nickname: String,
+    },
     Init(InitArgs),
     /// `aura rpc`: JSON-lines requests on stdin/stdout.
     Rpc,
@@ -160,6 +166,32 @@ fn commands_parser() -> impl Parser<Commands> {
     let contact = request_command("contact", "Contacts", contact_parser());
     let home = request_command("home", "Homes: create, invite, accept", home_parser());
     let slash = request_command("slash", "Run a chat slash command", slash_parser());
+    let friend = request_command("friend", "Friend requests", friend_parser());
+    let neighborhood = request_command("neighborhood", "Neighborhoods", neighborhood_parser());
+    let moderation = request_command("mod", "Home moderation", moderation_parser());
+    let access = request_command("access", "Home access levels", access_parser());
+    let peer = request_command("peer", "Peers", peer_parser());
+    let notifications = request_command(
+        "notifications",
+        "Pending friend requests, invitations and recovery requests",
+        notifications_parser(),
+    );
+    let social = construct!([
+        friend,
+        neighborhood,
+        moderation,
+        access,
+        peer,
+        notifications
+    ]);
+    let profile = request_command("profile", "Profile", profile_parser());
+    let settings = request_command("settings", "Account settings", settings_parser());
+    let device = request_command("device", "Devices and signing threshold", device_parser());
+    let guardians = request_command("guardians", "Guardians", guardians_parser());
+    let rotation = request_command("rotation", "Key-rotation ceremonies", rotation_parser());
+    let budget = request_command("budget", "Home storage budget", pure(Request::Budget));
+    let account = account_command();
+    let account = construct!([account, profile, settings, device, guardians, rotation, budget]);
     let base = construct!([
         init_command(),
         status,
@@ -179,6 +211,8 @@ fn commands_parser() -> impl Parser<Commands> {
         contact,
         home,
         slash,
+        social,
+        account,
         sync_command(),
     ]);
 
@@ -197,6 +231,23 @@ fn init_command() -> impl Parser<Commands> {
         .command("init")
         .help("Initialize threshold device configs (offline)")
         .map(Commands::Init)
+}
+
+/// `aura account create --nickname N` (runtime-free creation, then the
+/// first production launch) and `aura account refresh`.
+fn account_command() -> impl Parser<Commands> {
+    let create = long("nickname")
+        .help("Nickname for the new account")
+        .argument::<String>("NICKNAME")
+        .map(|nickname| Commands::AccountCreate { nickname })
+        .to_options()
+        .command("create")
+        .help("Create an account in the data directory");
+    let refresh = account_parser().map(Commands::Run);
+    construct!([create, refresh])
+        .to_options()
+        .command("account")
+        .help("Create or refresh the account")
 }
 
 fn rpc_command() -> impl Parser<Commands> {

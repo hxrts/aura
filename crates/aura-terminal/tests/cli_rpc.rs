@@ -278,6 +278,82 @@ async fn cli_send_reaches_the_same_outcome_as_tui_send() -> Result<()> {
     outcome
 }
 
+/// Friend requests, contact nicknames, direct messages, members, settings,
+/// notifications, budget and peers, all through `aura rpc` (Tasks 149-155).
+#[tokio::test(start_paused = true)]
+async fn social_and_account_commands_through_rpc() -> Result<()> {
+    let net = SimNet::new();
+    let alex = net.peer(81).await?;
+    let barbara = net.peer(85).await?;
+    let (alex_id, barbara_id) = (alex.id.to_string(), barbara.id.to_string());
+    let (mut a, alex_server) = RpcClient::connect(&alex).await?;
+    let (mut b, barbara_server) = RpcClient::connect(&barbara).await?;
+
+    let script = async move {
+        b.ok("subscribe", json!({"topics": ["messages"]})).await?;
+        let home_id = link_and_share_home(&mut b, &mut a, &barbara_id, &alex_id).await?;
+
+        // Friend request: Alex asks, Barbara sees it in her notifications and accepts.
+        a.ok("friend_request", json!({"contact": barbara_id}))
+            .await?;
+        b.call_until(
+            "Barbara's notifications list Alex's friend request",
+            "notifications_list",
+            Value::Null,
+            |r| lists(r, "kind", "friend_request"),
+        )
+        .await?;
+        b.ok("friend_accept", json!({"contact": alex_id})).await?;
+
+        // A local nickname shows in the contact list.
+        a.ok(
+            "contact_rename",
+            json!({"contact": barbara_id, "nickname": "Barb"}),
+        )
+        .await?;
+        a.call_until("the nickname shows", "contact_list", Value::Null, |r| {
+            lists(r, "nickname", "Barb")
+        })
+        .await?;
+        let whois = a.ok("whois", json!({"target": barbara_id})).await?;
+        assert_eq!(whois["type"], "contact");
+
+        // Direct message reaches Barbara as an event.
+        a.ok(
+            "chat_dm",
+            json!({"contact": barbara_id, "message": "dm hi"}),
+        )
+        .await?;
+        b.wait_event("Barbara receives the DM", |e| {
+            e["topic"] == "messages" && e["data"]["content"] == "dm hi"
+        })
+        .await?;
+
+        // Read-side account commands answer with their typed responses.
+        let members = b.ok("chat_members", json!({"channel": home_id})).await?;
+        assert_eq!(members["type"], "members");
+        assert_eq!(a.ok("budget", Value::Null).await?["type"], "budget");
+        // Simulation runtimes run no rendezvous service: a typed failure.
+        let peers = a.call("peer_list", Value::Null).await?;
+        assert!(
+            peers["result"]["type"] == "peer_list" || peers["error"]["code"].is_string(),
+            "{peers}"
+        );
+        assert_eq!(
+            a.ok("chat_mark_read", json!({"channel": home_id})).await?["type"],
+            "done"
+        );
+
+        a.shutdown().await?;
+        b.shutdown().await?;
+        Ok::<(), anyhow::Error>(())
+    };
+    let (outcome, alex_served, barbara_served) = tokio::join!(script, alex_server, barbara_server);
+    alex_served?;
+    barbara_served?;
+    outcome
+}
+
 /// A request line with a bad parameter fails with a typed error carrying
 /// its id; the session continues.
 #[tokio::test(start_paused = true)]

@@ -64,9 +64,9 @@ use demo_mode::seed_realistic_demo_world;
 use tui_tracing::init_tui_tracing;
 
 pub use account::{
-    create_account, create_account_in, export_account_backup, import_account_backup,
-    persist_completed_enrollment_runtime_identity, restore_recovered_account,
-    stage_account_for_bootstrap, ProfileStore,
+    create_account, create_account_in, create_new_account, export_account_backup,
+    import_account_backup, persist_completed_enrollment_runtime_identity,
+    restore_recovered_account, stage_account_for_bootstrap, ProfileStore,
 };
 
 pub use aura_app::ui::types::{

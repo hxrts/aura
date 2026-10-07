@@ -60,6 +60,25 @@ pub struct ContactView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SettingsView {
+    pub nickname: String,
+    pub threshold_k: u8,
+    pub threshold_n: u8,
+    pub mfa_policy: String,
+    pub devices: Vec<String>,
+    pub contacts: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct NotificationView {
+    /// `friend_request`, `invitation_received`, `invitation_sent` or
+    /// `recovery_request`.
+    pub kind: String,
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelView {
     pub channel_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -127,6 +146,23 @@ pub enum Response {
     Account(AccountView),
     Authorities(Vec<AuthorityView>),
     Contacts(Vec<ContactView>),
+    Contact(ContactView),
+    /// A channel's participants.
+    Members(Vec<String>),
+    Settings(SettingsView),
+    /// Known peer authorities.
+    PeerList(Vec<String>),
+    CeremonyStarted {
+        ceremony_id: String,
+    },
+    NeighborhoodCreated {
+        neighborhood_id: String,
+    },
+    /// Home storage budget, as text.
+    Budget {
+        summary: String,
+    },
+    Notifications(Vec<NotificationView>),
     Channels(Vec<ChannelView>),
     Channel(ChannelView),
     Messages(Vec<MessageView>),

@@ -77,6 +77,56 @@ pub fn render(response: &Response) -> CliOutput {
                 .collect();
             out.table(&["Name", "Authority", "Roles"], &rows);
         }
+        Response::Contact(c) => {
+            out.section(&c.nickname);
+            out.kv("Authority", &c.authority_id);
+            out.kv("Guardian", c.is_guardian.to_string());
+            out.kv("Home member", c.is_member.to_string());
+        }
+        Response::Members(members) => {
+            out.section(format!("Members ({})", members.len()));
+            for member in members {
+                out.println(format!("  - {member}"));
+            }
+        }
+        Response::Settings(s) => {
+            out.section("Settings");
+            out.kv("Nickname", &s.nickname);
+            out.kv(
+                "Threshold",
+                format!("{} of {}", s.threshold_k, s.threshold_n),
+            );
+            out.kv("MFA policy", &s.mfa_policy);
+            out.kv("Contacts", s.contacts.to_string());
+            out.kv("Devices", s.devices.len().to_string());
+            for device in &s.devices {
+                out.println(format!("  - {device}"));
+            }
+        }
+        Response::PeerList(peers) => {
+            out.section(format!("Peers ({})", peers.len()));
+            for peer in peers {
+                out.println(format!("  - {peer}"));
+            }
+        }
+        Response::CeremonyStarted { ceremony_id } => {
+            out.kv("Ceremony started", ceremony_id);
+        }
+        Response::NeighborhoodCreated { neighborhood_id } => {
+            out.kv("Created neighborhood", neighborhood_id);
+        }
+        Response::Budget { summary } => {
+            out.section("Home Storage Budget");
+            out.println(summary);
+        }
+        Response::Notifications(items) => {
+            out.section(format!("Notifications ({})", items.len()));
+            let rows: Vec<Vec<String>> = items
+                .iter()
+                .map(|n| vec![n.kind.clone(), n.title.clone(), n.id.clone()])
+                .collect();
+            out.table(&["Kind", "Title", "ID"], &rows);
+        }
         Response::Channels(channels) => {
             out.section(format!("Channels ({})", channels.len()));
             out.table(

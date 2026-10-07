@@ -152,6 +152,59 @@ fn export() -> impl Parser<Request> {
         .help("Print a channel's history in a portable format")
 }
 
+fn dm() -> impl Parser<Request> {
+    let contact = positional::<String>("CONTACT").help("Contact name or authority");
+    let message = positional::<String>("MESSAGE").help("Message text");
+    construct!(Request::ChatDm { contact, message })
+        .to_options()
+        .command("dm")
+        .help("Send a direct message to a contact")
+}
+
+fn join() -> impl Parser<Request> {
+    let channel = positional::<String>("NAME").help("Channel name");
+    construct!(Request::ChatJoin { channel })
+        .to_options()
+        .command("join")
+        .help("Join a channel by name")
+}
+
+fn close() -> impl Parser<Request> {
+    let channel = channel();
+    construct!(Request::ChatClose { channel })
+        .to_options()
+        .command("close")
+        .help("Close a channel you own (confirm with --yes)")
+}
+
+fn members() -> impl Parser<Request> {
+    let channel = channel();
+    construct!(Request::ChatMembers { channel })
+        .to_options()
+        .command("members")
+        .help("List a channel's participants")
+}
+
+fn retry() -> impl Parser<Request> {
+    let channel = channel();
+    let message_id = positional::<String>("MESSAGE_ID").help("Message to resend");
+    construct!(Request::ChatRetry {
+        channel,
+        message_id
+    })
+    .to_options()
+    .command("retry")
+    .help("Resend a message that failed to deliver")
+}
+
+fn mark_read() -> impl Parser<Request> {
+    let channel = channel();
+    construct!(Request::ChatMarkRead { channel })
+        .to_options()
+        .command("mark-read")
+        .help("Mark a channel's messages read")
+}
+
 #[must_use]
 pub fn chat_parser() -> impl Parser<Request> {
     construct!([
@@ -164,6 +217,12 @@ pub fn chat_parser() -> impl Parser<Request> {
         leave(),
         update(),
         search(),
-        export()
+        export(),
+        dm(),
+        join(),
+        close(),
+        members(),
+        retry(),
+        mark_read()
     ])
 }

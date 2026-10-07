@@ -568,6 +568,11 @@
               },
               "params": {
                 "properties": {
+                  "accept": {
+                    "default": false,
+                    "description": "Accept it right away.",
+                    "type": "boolean"
+                  },
                   "code": {
                     "type": "string"
                   }
@@ -677,6 +682,1043 @@
             "required": [
               "method",
               "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Give a contact a local nickname.",
+            "properties": {
+              "method": {
+                "const": "contact_rename",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  },
+                  "nickname": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact",
+                  "nickname"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Remove a contact.",
+            "properties": {
+              "method": {
+                "const": "contact_remove",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Ask a contact to become a friend.",
+            "properties": {
+              "method": {
+                "const": "friend_request",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Accept a contact's friend request.",
+            "properties": {
+              "method": {
+                "const": "friend_accept",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Decline a contact's friend request.",
+            "properties": {
+              "method": {
+                "const": "friend_decline",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "End a friendship.",
+            "properties": {
+              "method": {
+                "const": "friend_revoke",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Send read receipts to a contact, or stop.",
+            "properties": {
+              "method": {
+                "const": "read_receipts",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "contact",
+                  "enabled"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A contact's details by name or authority.",
+            "properties": {
+              "method": {
+                "const": "whois",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Send a direct message to a contact (opening the DM if needed).",
+            "properties": {
+              "method": {
+                "const": "chat_dm",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "contact": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contact",
+                  "message"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Join a channel by name.",
+            "properties": {
+              "method": {
+                "const": "chat_join",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Close a channel this account owns.",
+            "properties": {
+              "method": {
+                "const": "chat_close",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A channel's participants.",
+            "properties": {
+              "method": {
+                "const": "chat_members",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Resend a message that failed to deliver.",
+            "properties": {
+              "method": {
+                "const": "chat_retry",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "message_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "message_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Mark a channel's messages read.",
+            "properties": {
+              "method": {
+                "const": "chat_mark_read",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Set this account's nickname.",
+            "properties": {
+              "method": {
+                "const": "profile_nick",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "nickname": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "nickname"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Account settings.",
+            "properties": {
+              "method": {
+                "const": "settings_show",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Require multifactor approval, or stop.",
+            "properties": {
+              "method": {
+                "const": "settings_mfa",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "require": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "require"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Refresh account state from the runtime.",
+            "properties": {
+              "method": {
+                "const": "account_refresh",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Create a neighborhood.",
+            "properties": {
+              "method": {
+                "const": "neighborhood_create",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Add a home to the neighborhood.",
+            "properties": {
+              "method": {
+                "const": "neighborhood_add",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "home": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "home"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Link a home one hop from the current one.",
+            "properties": {
+              "method": {
+                "const": "neighborhood_link",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "home": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "home"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Move to a home (`depth`: limited, partial or full).",
+            "properties": {
+              "method": {
+                "const": "home_enter",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "depth": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "home": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "home"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Remove a member from a home channel (default: the current home).",
+            "properties": {
+              "method": {
+                "const": "mod_kick",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "channel": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Ban an authority from the current home.",
+            "properties": {
+              "method": {
+                "const": "mod_ban",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "reason": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Lift a ban.",
+            "properties": {
+              "method": {
+                "const": "mod_unban",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Mute an authority in the current home.",
+            "properties": {
+              "method": {
+                "const": "mod_mute",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "duration_secs": {
+                    "default": null,
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Lift a mute.",
+            "properties": {
+              "method": {
+                "const": "mod_unmute",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Pin a message in the current home.",
+            "properties": {
+              "method": {
+                "const": "mod_pin",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "message_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Unpin a message.",
+            "properties": {
+              "method": {
+                "const": "mod_unpin",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "message_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "message_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Make a member a moderator.",
+            "properties": {
+              "method": {
+                "const": "mod_op",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Revoke moderator.",
+            "properties": {
+              "method": {
+                "const": "mod_deop",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Admit a participant as a home member.",
+            "properties": {
+              "method": {
+                "const": "mod_admit",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Override an authority's access level (limited, partial, full).",
+            "properties": {
+              "method": {
+                "const": "access_set",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "home": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "level": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target",
+                  "level"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Known peers.",
+            "properties": {
+              "method": {
+                "const": "peer_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Discover peers now.",
+            "properties": {
+              "method": {
+                "const": "peer_discover",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Change the device signing threshold (k of n).",
+            "properties": {
+              "method": {
+                "const": "threshold_set",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "k": {
+                    "format": "uint8",
+                    "maximum": 255,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "n": {
+                    "format": "uint8",
+                    "maximum": 255,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "k",
+                  "n"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Set this account's guardians (k of the listed guardians).",
+            "properties": {
+              "method": {
+                "const": "guardians_set",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "guardians": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "threshold": {
+                    "format": "uint16",
+                    "maximum": 65535,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "guardians",
+                  "threshold"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Remove a device from this account.",
+            "properties": {
+              "method": {
+                "const": "device_remove",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "device": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "device"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Cancel a key-rotation ceremony.",
+            "properties": {
+              "method": {
+                "const": "rotation_cancel",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Home storage budget.",
+            "properties": {
+              "method": {
+                "const": "budget",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Pending friend requests, invitations and recovery requests.",
+            "properties": {
+              "method": {
+                "const": "notifications_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
             ],
             "type": "object"
           },
@@ -1412,6 +2454,26 @@
         ],
         "type": "object"
       },
+      "NotificationView": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`friend_request`, `invitation_received`, `invitation_sent` or\n`recovery_request`.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "title"
+        ],
+        "type": "object"
+      },
       "OperationView": {
         "description": "Terminal lifecycle of the semantic operation a command ran.",
         "properties": {
@@ -1511,6 +2573,170 @@
               },
               "type": {
                 "const": "contacts",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/ContactView"
+              },
+              "type": {
+                "const": "contact",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A channel's participants.",
+            "properties": {
+              "data": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "members",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/SettingsView"
+              },
+              "type": {
+                "const": "settings",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Known peer authorities.",
+            "properties": {
+              "data": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "peer_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "ceremony_started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "neighborhood_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "neighborhood_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "neighborhood_created",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Home storage budget, as text.",
+            "properties": {
+              "data": {
+                "properties": {
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "budget",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/NotificationView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "notifications",
                 "type": "string"
               }
             },
@@ -2023,6 +3249,48 @@
             "type": "object"
           }
         ]
+      },
+      "SettingsView": {
+        "properties": {
+          "contacts": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "devices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "mfa_policy": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": "string"
+          },
+          "threshold_k": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "threshold_n": {
+            "format": "uint8",
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nickname",
+          "threshold_k",
+          "threshold_n",
+          "mfa_policy",
+          "devices",
+          "contacts"
+        ],
+        "type": "object"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",

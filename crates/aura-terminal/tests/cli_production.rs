@@ -114,3 +114,28 @@ fn cli_opens_a_created_account_in_production_and_routes_to_a_running_node() {
         "the socket is removed when the node stops"
     );
 }
+
+/// `aura account create` takes the same creation path and the account then
+/// opens in production; creating over an existing account is refused.
+#[test]
+fn cli_account_create_opens_in_production_and_refuses_overwrite() {
+    let keyring = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let created = aura_json(
+        keyring.path(),
+        data.path(),
+        &["account", "create", "--nickname", "Barbara"],
+    );
+    assert_eq!(created["data"]["nickname"], "Barbara");
+    assert_eq!(
+        aura_json(keyring.path(), data.path(), &["status"])["data"]["nickname"],
+        "Barbara"
+    );
+    let again = aura(keyring.path(), data.path())
+        .args(["--json", "account", "create", "--nickname", "Other"])
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(doc["ok"], false, "{doc}");
+    assert_eq!(doc["error"]["code"], "invalid_input", "{doc}");
+}
