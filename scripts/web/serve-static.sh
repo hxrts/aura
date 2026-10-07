@@ -121,7 +121,7 @@ case "$build_profile" in
     release)
         public_dir="$repo_root/target/dx/aura-web/release/web/public"
         if [[ ! -f "$public_dir/index.html" ]]; then
-            NO_COLOR=true ../../scripts/web/dx.sh build --release --platform web --package aura-web --bin aura-web --features web,harness
+            NO_COLOR=true ../../scripts/web/dx.sh build --release --profile wasm --platform web --package aura-web --bin aura-web --features web,harness
         else
             echo "[serve-web-static] reusing prebuilt release web assets at $public_dir"
         fi
