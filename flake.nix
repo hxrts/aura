@@ -203,8 +203,18 @@
           };
 
           # Core applications
-          aura-agent = cargoNix.workspaceMembers.aura-agent.build;
+          aura-agent = cargoNix.workspaceMembers.hxrts-aura-agent.build;
           aura-simulator = cargoNix.workspaceMembers.aura-simulator.build;
+
+          # LAN harness artifacts shipped with `nix copy`
+          # (scripts/harness/lan/ship.sh). Feature sets match the live lanes:
+          # terminal-only `aura` and the default-feature harness `tool_repl`.
+          # Each crate is its own derivation, so unchanged crates are reused
+          # across worktrees and hosts; builds use committed source only.
+          aura-lan-terminal = cargoNix.workspaceMembers.aura-terminal.build.override {
+            features = [ "terminal" ];
+          };
+          aura-lan-harness = cargoNix.workspaceMembers.aura-harness.build;
 
           # Development tools
           regenerate-cargo-nix = pkgs.writeScriptBin "regenerate-cargo-nix" ''

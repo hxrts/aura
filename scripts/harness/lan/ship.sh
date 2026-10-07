@@ -5,9 +5,18 @@
 #
 # Usage: AURA_E2E_REMOTE=user@host scripts/harness/lan/ship.sh [--no-build]
 #
-# Shipped: bin/aura, target/release/tool_repl, the web release bundle and the
-# untracked tailwind.css it links to. Shipped files are touched after the
+# The terminal `aura` and harness `tool_repl` are built hermetically from the
+# committed tree with crate2nix (`nix build .#aura-lan-terminal
+# .#aura-lan-harness`): each crate is its own derivation, so unchanged crates
+# are reused across worktrees and hosts. Their closures go to the remote with
+# `nix copy`, which also carries every runtime library they link. The web
+# release bundle stays on dx (build.sh web-live) and is rsynced with the
+# untracked tailwind.css it links to. Installed files are touched after the
 # remote checkout moves so the web freshness check sees them as current.
+#
+# `nix copy` needs the remote user to be a Nix trusted-user (or a signing key
+# the remote trusts). AURA_NIX_REMOTE_PROGRAM overrides the remote daemon path
+# for non-login ssh shells without nix on PATH.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=env.sh
@@ -26,13 +35,16 @@ remote_platform="$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" 'uname -sm')"
   echo "ship: platform mismatch: local $local_platform, remote $remote_platform" >&2; exit 1;
 }
 
+nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/default/bin/nix')}"
+links=.nix-ship
+terminal_link="$links/aura-lan-terminal"
+harness_link="$links/aura-lan-harness"
 if [ "$build" = 1 ]; then
-  # Approved cleanup: keep the shared target under budget before release builds.
-  nix develop -c cargo sweep --maxsize 20GiB . >/dev/null 2>&1 || true
-  for lane in terminal-live web-live; do
-    AURA_EXPECT_COMMIT="$commit" nix develop -c bash "$here/build.sh" "$lane"
-  done
-  AURA_EXPECT_COMMIT="$commit" nix develop -c just e2e-build-harness-live
+  mkdir -p "$links"
+  # The out-links are GC roots: `just nix-store-gc --apply` keeps the shipped build.
+  "$nix_bin" build ".#aura-lan-terminal" --out-link "$terminal_link"
+  "$nix_bin" build ".#aura-lan-harness" --out-link "$harness_link"
+  AURA_EXPECT_COMMIT="$commit" "$nix_bin" develop -c bash "$here/build.sh" web-live
 fi
 
 # Agents may edit the tree while a long build runs; refuse to ship a mixed build.
@@ -40,30 +52,34 @@ fi
   echo "ship: checkout changed during the build; rebuild from a clean commit" >&2; exit 1;
 }
 
+terminal_out="$(readlink "$terminal_link" || true)"
+harness_out="$(readlink "$harness_link" || true)"
 web_public="target/dx/aura-web/release/web/public"
 tailwind="crates/aura-web/public/assets/tailwind.css"
-for f in bin/aura target/release/tool_repl "$web_public/index.html" "$tailwind"; do
-  [ -e "$f" ] || { echo "ship: missing artifact $f" >&2; exit 1; }
+for f in "$terminal_out/bin/aura" "$harness_out/bin/tool_repl" "$web_public/index.html" "$tailwind"; do
+  [ -e "$f" ] || { echo "ship: missing artifact $f (run without --no-build)" >&2; exit 1; }
 done
 
-# Every dynamic library outside the system must exist on the remote host.
-for lib in $(otool -L bin/aura target/release/tool_repl | awk '/^\t\/nix\//{print $1}' | sort -u); do
-  ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "test -e '$lib'" || {
-    echo "ship: remote host lacks $lib" >&2; exit 1;
-  }
-done
+remote_program="${AURA_NIX_REMOTE_PROGRAM:-/nix/var/nix/profiles/default/bin/nix-daemon}"
+"$nix_bin" copy --to "ssh-ng://$AURA_E2E_REMOTE?remote-program=$remote_program" \
+  "$terminal_out" "$harness_out"
 
 remote_root="$AURA_E2E_REMOTE_ROOT"
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && git fetch -q origin && \
   [ -z \"\$(git status --porcelain --untracked-files=no)\" ] && git checkout -q main && git merge -q --ff-only $commit && \
-  mkdir -p bin target/release $web_public crates/aura-web/public/assets"
+  mkdir -p bin target/release $web_public crates/aura-web/public/assets && \
+  install -m 0755 '$terminal_out/bin/aura' bin/aura && \
+  install -m 0755 '$harness_out/bin/tool_repl' target/release/tool_repl"
 
-rsync -a bin/aura "$AURA_E2E_REMOTE:$remote_root/bin/aura"
-rsync -a target/release/tool_repl "$AURA_E2E_REMOTE:$remote_root/target/release/tool_repl"
 rsync -a "$tailwind" "$AURA_E2E_REMOTE:$remote_root/$tailwind"
 rsync -a --delete --links "$web_public/" "$AURA_E2E_REMOTE:$remote_root/$web_public/"
 
 ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && \
   find bin/aura target/release/tool_repl $web_public -exec touch {} + && \
   test \"\$(git rev-parse HEAD)\" = $commit"
-echo "ship: $commit shipped to $AURA_E2E_REMOTE"
+
+# Run the same binaries locally as on the remote host.
+mkdir -p bin target/release
+install -m 0755 "$terminal_out/bin/aura" bin/aura
+install -m 0755 "$harness_out/bin/tool_repl" target/release/tool_repl
+echo "ship: $commit shipped to $AURA_E2E_REMOTE ($terminal_out, $harness_out)"

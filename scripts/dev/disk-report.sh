@@ -33,6 +33,7 @@ printf 'Checkout: %s KiB\n' "$(size_kib "$root")"
 sccache_dir="${SCCACHE_DIR:-$HOME/.cache/aura-sccache}"
 printf 'Shared sccache (all worktrees, cap %s): %s KiB  %s\n' "${SCCACHE_CACHE_SIZE:-10G}" "$(size_kib "$sccache_dir")" "$sccache_dir"
 printf 'Compiler wrapper: %s\n' "${RUSTC_WRAPPER:-none}"
+printf 'Nix store (crate2nix builds): see just nix-store-gc (dry run) / just nix-store-gc --apply\n'
 
 printf 'Other linked Aura worktrees (separate build caches, KiB):\n'
 printf 'Checkout\tTarget\tDebug deps\tDebug incremental\tTrybuild\tPath\n'
