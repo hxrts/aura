@@ -22,6 +22,7 @@ use aura_journal::fact::{
 use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{config::AmpRuntimeConfig, get_channel_state, AmpJournalEffects};
 
@@ -272,10 +273,18 @@ pub enum ChannelParticipantEvent {
 }
 
 /// Domain fact that records AMP channel membership events.
+///
+/// Membership is a set of episodes per participant. A join starts the
+/// episode its `episode` names (the accepted invitation id; `None` is the
+/// unnamed schema-one episode). A departure ends the unnamed episode and the
+/// named episodes in `ends`, which are those its writer observed. A
+/// participant is a member while one of its episodes is live, so a fresh
+/// invitation re-admits a departed member while a replayed one cannot.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
     type_id = "amp-channel-membership",
-    schema_version = 1,
+    schema_version = 2,
+    min_supported_schema_version = 2,
     context = "context"
 )]
 pub struct ChannelMembershipFact {
@@ -286,9 +295,17 @@ pub struct ChannelMembershipFact {
     participant: AuthorityId,
     event: ChannelParticipantEvent,
     timestamp: TimeStamp,
+    /// Episode a join starts (schema v2); `None` is the unnamed episode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    episode: Option<String>,
+    /// Named episodes a departure ends (schema v2).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    ends: BTreeSet<String>,
 }
 
 impl ChannelMembershipFact {
+    /// Membership event in the unnamed episode (a join that names no
+    /// invitation, or a departure that ends no named episode).
     pub fn new(
         context: ContextId,
         channel: ChannelId,
@@ -303,6 +320,46 @@ impl ChannelMembershipFact {
             participant,
             event,
             timestamp,
+            episode: None,
+            ends: BTreeSet::new(),
+        }
+    }
+
+    /// Join that starts the episode named by an accepted invitation.
+    pub fn joined_episode(
+        context: ContextId,
+        channel: ChannelId,
+        participant: AuthorityId,
+        episode: String,
+        timestamp: TimeStamp,
+    ) -> Self {
+        Self {
+            episode: Some(episode),
+            ..Self::new(
+                context,
+                channel,
+                participant,
+                ChannelParticipantEvent::Joined,
+                timestamp,
+            )
+        }
+    }
+
+    /// Departure that ends the participant's episodes in `observed`.
+    pub fn departure(
+        observed: &ChannelMembershipObservations,
+        participant: AuthorityId,
+        timestamp: TimeStamp,
+    ) -> Self {
+        Self {
+            ends: observed.named_episodes(participant),
+            ..Self::new(
+                observed.context,
+                observed.channel,
+                participant,
+                ChannelParticipantEvent::Left,
+                timestamp,
+            )
         }
     }
 
@@ -348,31 +405,37 @@ impl ChannelMembershipFact {
     pub fn timestamp(&self) -> TimeStamp {
         self.timestamp.clone()
     }
+
+    /// Episode a join starts (`None`: the unnamed episode).
+    #[must_use]
+    pub fn episode(&self) -> Option<&str> {
+        self.episode.as_deref()
+    }
 }
 
 fn channel_membership_schema_version() -> u16 {
-    1
+    2
 }
 
-/// Pure schema-one membership observations scoped to one context and channel.
-/// This is neither authorization nor canonical channel creation evidence.
-/// Departures are permanent within this unversioned observation set; opaque
-/// order tokens never establish successor membership or causal rejoin.
+/// Membership episodes observed in one context and channel. This is neither
+/// authorization nor canonical channel creation evidence. Episode ends are
+/// permanent; opaque order tokens never order a join after a departure, only
+/// a join naming a fresh episode re-admits a departed participant.
 #[derive(Debug, Clone)]
-pub struct SchemaOneChannelMembership {
+pub struct ChannelMembershipObservations {
     context: ContextId,
     channel: ChannelId,
-    joined: std::collections::BTreeSet<AuthorityId>,
-    departed: std::collections::BTreeSet<AuthorityId>,
+    started: BTreeMap<AuthorityId, BTreeSet<Option<String>>>,
+    ended: BTreeMap<AuthorityId, BTreeSet<Option<String>>>,
 }
-impl SchemaOneChannelMembership {
+impl ChannelMembershipObservations {
     /// Begin empty observations for an exact context and channel.
     pub fn new(context: ContextId, channel: ChannelId) -> Self {
         Self {
             context,
             channel,
-            joined: std::collections::BTreeSet::default(),
-            departed: std::collections::BTreeSet::default(),
+            started: BTreeMap::new(),
+            ended: BTreeMap::new(),
         }
     }
     /// Observe an exact-scope fact; foreign context/channel facts are rejected.
@@ -383,29 +446,57 @@ impl SchemaOneChannelMembership {
         }
         match fact.event() {
             ChannelParticipantEvent::Joined => {
-                self.joined.insert(fact.participant());
+                self.started
+                    .entry(fact.participant())
+                    .or_default()
+                    .insert(fact.episode.clone());
             }
             ChannelParticipantEvent::Left => {
-                self.departed.insert(fact.participant());
+                let ended = self.ended.entry(fact.participant()).or_default();
+                ended.insert(None);
+                ended.extend(fact.ends.iter().cloned().map(Some));
             }
         }
         true
     }
-    /// Sorted observed joins with all observed departures removed.
+    /// Sorted participants with a live episode.
     pub fn participants(&self) -> impl Iterator<Item = AuthorityId> + '_ {
-        self.joined.difference(&self.departed).copied()
+        self.started
+            .keys()
+            .copied()
+            .filter(|participant| self.contains(*participant))
     }
-    /// Whether this scope retains a departure for the exact participant.
+    /// Whether the participant departed and has no live episode.
     pub fn departed(&self, participant: AuthorityId) -> bool {
-        self.departed.contains(&participant)
+        self.ended.contains_key(&participant) && !self.contains(participant)
+    }
+    /// Whether the participant's `episode` was ended by an observed departure.
+    pub fn episode_ended(&self, participant: AuthorityId, episode: Option<&str>) -> bool {
+        self.ended
+            .get(&participant)
+            .is_some_and(|ended| ended.iter().any(|ended| ended.as_deref() == episode))
+    }
+    /// Named episodes started for the participant.
+    fn named_episodes(&self, participant: AuthorityId) -> BTreeSet<String> {
+        self.started
+            .get(&participant)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .cloned()
+            .collect()
     }
     /// Whether any join or departure evidence has been observed.
     pub fn has_observations(&self) -> bool {
-        !self.joined.is_empty() || !self.departed.is_empty()
+        !self.started.is_empty() || !self.ended.is_empty()
     }
-    /// Whether the participant belongs to observed schema-one membership.
+    /// Whether the participant has a live episode.
     pub fn contains(&self, participant: AuthorityId) -> bool {
-        self.joined.contains(&participant) && !self.departed.contains(&participant)
+        self.started.get(&participant).is_some_and(|started| {
+            started
+                .iter()
+                .any(|episode| !self.episode_ended(participant, episode.as_deref()))
+        })
     }
 }
 
@@ -420,24 +511,15 @@ async fn persist_channel_membership_event<E: AmpJournalEffects>(
     participant: AuthorityId,
     event: ChannelParticipantEvent,
 ) -> aura_core::Result<()> {
-    let _state = get_channel_state(effects, context, channel).await?;
-    if matches!(event, ChannelParticipantEvent::Joined)
-        && crate::journal::channel_participant_departed(effects, context, channel, participant)
-            .await?
-    {
-        return Err(aura_core::AuraError::Invalid {
-            message: "schema-one membership cannot authorize rejoin".into(),
-            source: Some(std::sync::Arc::new(
-                AmpChannelError::RejoinRequiresMembershipEvidence {
-                    context,
-                    channel,
-                    participant,
-                },
-            )),
-        });
-    }
-    let timestamp = ChannelMembershipFact::random_timestamp(effects).await?;
-    let membership = ChannelMembershipFact::new(context, channel, participant, event, timestamp);
+    let membership = crate::journal::channel_membership_event(
+        effects,
+        context,
+        channel,
+        participant,
+        event,
+        None,
+    )
+    .await?;
     effects
         .insert_relational_fact(membership.to_generic())
         .await

@@ -1623,7 +1623,7 @@ pub struct ChatSignalView {
     update_gate: Mutex<()>,
     state: Mutex<ChatState>,
     hidden_channels_after_leave: Mutex<BTreeSet<ChannelId>>,
-    membership: Mutex<BTreeMap<(ContextId, ChannelId), aura_amp::SchemaOneChannelMembership>>,
+    membership: Mutex<BTreeMap<(ContextId, ChannelId), aura_amp::ChannelMembershipObservations>>,
     effects: Arc<AuraEffectSystem>,
 }
 
@@ -1675,6 +1675,12 @@ impl ChatSignalView {
             changed |= channel.member_ids != before || channel.member_count != old_count;
         }
         let mut hidden = self.hidden_channels_after_leave.lock().await;
+        // A fresh membership episode (an accepted invitation) re-admits us.
+        hidden.retain(|channel| {
+            !observations.iter().any(|((_, id), membership)| {
+                id == channel && membership.contains(self.own_authority)
+            })
+        });
         for channel in removed {
             hidden.insert(channel);
             changed |= state.remove_channel(&channel).is_some();
@@ -1885,7 +1891,7 @@ impl ReactiveView for ChatSignalView {
                         observations
                             .entry((membership.context(), membership.channel()))
                             .or_insert_with(|| {
-                                aura_amp::SchemaOneChannelMembership::new(
+                                aura_amp::ChannelMembershipObservations::new(
                                     membership.context(),
                                     membership.channel(),
                                 )

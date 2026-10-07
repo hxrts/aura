@@ -15,11 +15,13 @@ use super::resolved_refs::ResolvedCommand;
 #[cfg(feature = "signals")]
 use crate::core::StateSnapshot;
 #[cfg(feature = "signals")]
-use crate::signal_defs::{CHAT_SIGNAL, CHAT_SIGNAL_NAME};
+use crate::signal_defs::{CHAT_SIGNAL, CHAT_SIGNAL_NAME, HOMES_SIGNAL};
 #[cfg(feature = "signals")]
 use crate::workflows::observed_projection::homes_signal_snapshot;
 #[cfg(feature = "signals")]
-use crate::workflows::runtime::{converge_runtime, cooperative_yield, require_runtime};
+use crate::workflows::runtime::{
+    converge_runtime, execute_with_runtime_timeout_budget, require_runtime, workflow_timeout_budget,
+};
 #[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 #[cfg(feature = "signals")]
@@ -70,34 +72,87 @@ pub(super) async fn wait_for_consistency(
         return CommandCompletionOutcome::Satisfied(ConsistencyWitness::Accepted);
     }
 
-    const CONSISTENCY_MAX_PASSES: usize = 8;
-    let mut runtime_available = false;
-    for _pass in 0..CONSISTENCY_MAX_PASSES {
-        if consistency_invariant_holds(app_core, plan).await {
-            return CommandCompletionOutcome::Satisfied(match requirement {
-                ConsistencyRequirement::Accepted => ConsistencyWitness::Accepted,
-                ConsistencyRequirement::Replicated => ConsistencyWitness::Replicated,
-                ConsistencyRequirement::Enforced => ConsistencyWitness::Enforced,
-            });
-        }
-
-        if let Ok(runtime) = require_runtime(app_core).await {
-            runtime_available = true;
-            converge_runtime(&runtime).await;
-        } else if !runtime_available {
-            #[cfg(feature = "instrumented")]
-            tracing::warn!("consistency wait: no runtime available, returning degraded outcome");
-            return CommandCompletionOutcome::Degraded {
-                requirement,
-                reason: ConsistencyDegradedReason::RuntimeUnavailable,
-            };
-        }
-        cooperative_yield().await;
-    }
-
-    CommandCompletionOutcome::Degraded {
+    let satisfied = CommandCompletionOutcome::Satisfied(match requirement {
+        ConsistencyRequirement::Accepted => ConsistencyWitness::Accepted,
+        ConsistencyRequirement::Replicated => ConsistencyWitness::Replicated,
+        ConsistencyRequirement::Enforced => ConsistencyWitness::Enforced,
+    });
+    let degraded = |reason| CommandCompletionOutcome::Degraded {
         requirement,
-        reason: ConsistencyDegradedReason::OperationTimedOut,
+        reason,
+    };
+
+    // Subscribe before the first check so no projection update between the
+    // check and the wait can be missed.
+    let updates = projection_updates(app_core, plan).await;
+    if consistency_invariant_holds(app_core, plan).await {
+        return satisfied;
+    }
+    let Ok(runtime) = require_runtime(app_core).await else {
+        #[cfg(feature = "instrumented")]
+        tracing::warn!("consistency wait: no runtime available, returning degraded outcome");
+        return degraded(ConsistencyDegradedReason::RuntimeUnavailable);
+    };
+    // Without the projection signal the invariant can never be observed.
+    let Some(mut updates) = updates else {
+        return degraded(ConsistencyDegradedReason::OperationTimedOut);
+    };
+    let Ok(budget) = workflow_timeout_budget(&runtime, CONSISTENCY_WAIT).await else {
+        return degraded(ConsistencyDegradedReason::OperationTimedOut);
+    };
+    // Pull peer state once; the reducer then publishes the projection the
+    // invariant reads, and every publication re-checks it.
+    converge_runtime(&runtime).await;
+    loop {
+        if consistency_invariant_holds(app_core, plan).await {
+            return satisfied;
+        }
+        let update =
+            execute_with_runtime_timeout_budget(&runtime, &budget, || updates.next()).await;
+        if update.is_err() {
+            return degraded(ConsistencyDegradedReason::OperationTimedOut);
+        }
+    }
+}
+
+/// Bound on waiting for the projection a strong command's invariant reads.
+#[cfg(feature = "signals")]
+const CONSISTENCY_WAIT: std::time::Duration = std::time::Duration::from_millis(5_000);
+
+/// Publications of the projection a plan's consistency invariant reads.
+#[cfg(feature = "signals")]
+enum ProjectionUpdates {
+    Chat(aura_core::effects::reactive::SignalStream<crate::views::chat::ChatState>),
+    Homes(aura_core::effects::reactive::SignalStream<crate::views::home::HomesState>),
+}
+
+#[cfg(feature = "signals")]
+impl ProjectionUpdates {
+    async fn next(&mut self) -> Result<(), aura_core::effects::reactive::ReactiveError> {
+        match self {
+            Self::Chat(stream) => stream.recv().await.map(|_| ()),
+            Self::Homes(stream) => stream.recv().await.map(|_| ()),
+        }
+    }
+}
+
+#[cfg(feature = "signals")]
+async fn projection_updates(
+    app_core: &Arc<RwLock<AppCore>>,
+    plan: &PlannedCommand,
+) -> Option<ProjectionUpdates> {
+    use aura_core::effects::reactive::ReactiveEffects;
+    let core = app_core.read().await;
+    match plan {
+        PlannedCommand::Membership(_) => core
+            .subscribe(&*CHAT_SIGNAL)
+            .ok()
+            .map(ProjectionUpdates::Chat),
+        PlannedCommand::Moderation(_) | PlannedCommand::Moderator(_) => core
+            .subscribe(&*HOMES_SIGNAL)
+            .ok()
+            .map(ProjectionUpdates::Homes),
+        PlannedCommand::General(_) => None,
     }
 }
 

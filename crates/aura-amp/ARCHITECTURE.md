@@ -4,11 +4,14 @@ AMP lifecycle failures retain concrete effect causes through the native runtime 
 
 ## Purpose
 
-Schema-one channel membership uses the shared pure `SchemaOneChannelMembership`
-observation reducer: joins minus retained departures, scoped to exact context and
-channel. Opaque order tokens are noncausal and cannot authorize rejoin. Native
-joins retain a typed `RejoinRequiresMembershipEvidence` refusal; certified transition
-membership remains the sole successor contract. Observed all-departed membership
+Channel membership uses the shared pure `ChannelMembershipObservations`
+reducer of membership episodes, scoped to exact context and channel. A join starts
+the episode it names (the accepted invitation id, schema v2) or the unnamed
+schema-one episode; a departure ends the unnamed episode and every named episode
+its writer observed. A participant is a member while one episode is live. Opaque
+order tokens are noncausal and cannot authorize rejoin: only a join naming a fresh
+episode re-admits a departed participant, while unnamed or replayed joins keep the
+typed `RejoinRequiresMembershipEvidence` refusal (`journal::channel_membership_event`). Observed all-departed membership
 fails sender checks before ratchet advancement. Required order-token errors keep
 native sources and cannot append a zero-token membership event.
 

@@ -443,7 +443,7 @@ async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()>
         .await?;
     }
 
-    strong(
+    let kick = strong(
         &barbara.app,
         barbara.id,
         home,
@@ -453,11 +453,46 @@ async fn kick_ends_the_shared_membership_episode_on_both_clients() -> Result<()>
         },
     )
     .await?;
+    assert!(
+        matches!(
+            kick.completion_outcome,
+            sc::CommandCompletionOutcome::Satisfied(_)
+        ),
+        "kick must observe the member's removal: {:?}",
+        kick.completion_outcome
+    );
     for (who, app) in [("Barbara", &barbara.app), ("Alex", &alex.app)] {
         wait_until(&format!("{who} drops kicked Alex"), || async {
             home_view(app, home)
                 .await
                 .is_some_and(|h| h.member(&alex.id).is_none() && h.kick_log.len() == 1)
+        })
+        .await?;
+    }
+
+    // Task 128: a fresh home invitation starts a new membership episode, so
+    // the kicked member rejoins the home and its channel.
+    join_home(&barbara, &alex, home).await?;
+    for (who, app) in [("Barbara", &barbara.app), ("Alex", &alex.app)] {
+        wait_until(&format!("{who} lists rejoined Alex"), || async {
+            home_view(app, home)
+                .await
+                .is_some_and(|h| h.member(&alex.id).is_some())
+        })
+        .await?;
+    }
+    for (from, to, text) in [
+        (&alex, &barbara, "back from alex"),
+        (&barbara, &alex, "welcome back"),
+    ] {
+        messaging::send_message_now_with_instance(&from.app, home, text, None).await?;
+        wait_until(&format!("{text:?} is received"), || async {
+            let chat = to.app.read().await.read(&*CHAT_SIGNAL).await;
+            chat.is_ok_and(|c| {
+                c.messages_for_channel(&home)
+                    .iter()
+                    .any(|m| m.sender_id == from.id && m.content == text)
+            })
         })
         .await?;
     }

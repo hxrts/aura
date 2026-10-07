@@ -6,7 +6,7 @@
 //! - Inserting relational facts (checkpoints, bumps, policies)
 //! - Channel state reduction via journal queries
 
-use crate::ChannelMembershipFact;
+use crate::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_core::effects::{JournalEffects, OrderClockEffects};
 use aura_core::hash::hash;
 use aura_core::time::{OrderTime, TimeStamp};
@@ -230,17 +230,57 @@ pub async fn list_channel_participants<A: AmpJournalEffects>(
         .collect())
 }
 
-/// Whether original schema-one departure evidence prevents an unversioned rejoin.
-/// Opaque order tokens cannot prove that a join supersedes a departure.
-pub async fn channel_participant_departed<A: AmpJournalEffects>(
+/// Membership fact recording `event` for `participant`, from the observed
+/// episodes. A join names its episode (the accepted invitation id, or `None`
+/// for the unnamed episode) and is refused when it would not leave the
+/// participant a member, i.e. it names an episode a departure already ended
+/// (an unnamed rejoin, or a replayed invitation). Opaque order tokens never
+/// order a join after a departure. A departure ends every observed episode.
+pub async fn channel_membership_event<A: AmpJournalEffects>(
     effects: &A,
     context: ContextId,
     channel: ChannelId,
     participant: AuthorityId,
-) -> Result<bool> {
+    event: ChannelParticipantEvent,
+    episode: Option<String>,
+) -> Result<ChannelMembershipFact> {
     let _canonical = get_channel_state(effects, context, channel).await?;
     let journal = effects.fetch_context_journal(context).await?;
-    Ok(reduce_membership(&journal, context, channel).departed(participant))
+    let observed = reduce_membership(&journal, context, channel);
+    match event {
+        ChannelParticipantEvent::Joined => {
+            if observed.episode_ended(participant, episode.as_deref())
+                && !observed.contains(participant)
+            {
+                return Err(AuraError::Invalid {
+                    message: "an ended membership episode cannot authorize rejoin".into(),
+                    source: Some(std::sync::Arc::new(
+                        aura_core::effects::amp::AmpChannelError::RejoinRequiresMembershipEvidence {
+                            context,
+                            channel,
+                            participant,
+                        },
+                    )),
+                });
+            }
+            let timestamp = ChannelMembershipFact::random_timestamp(effects).await?;
+            Ok(match episode {
+                Some(episode) => ChannelMembershipFact::joined_episode(
+                    context,
+                    channel,
+                    participant,
+                    episode,
+                    timestamp,
+                ),
+                None => ChannelMembershipFact::new(context, channel, participant, event, timestamp),
+            })
+        }
+        ChannelParticipantEvent::Left => Ok(ChannelMembershipFact::departure(
+            &observed,
+            participant,
+            ChannelMembershipFact::random_timestamp(effects).await?,
+        )),
+    }
 }
 
 /// Reject an observed departed or foreign sender without treating an empty
@@ -261,8 +301,8 @@ fn reduce_membership(
     journal: &FactJournal,
     context: ContextId,
     channel: ChannelId,
-) -> crate::channel::SchemaOneChannelMembership {
-    let mut observations = crate::channel::SchemaOneChannelMembership::new(context, channel);
+) -> crate::channel::ChannelMembershipObservations {
+    let mut observations = crate::channel::ChannelMembershipObservations::new(context, channel);
 
     for fact in journal.iter_facts() {
         let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
@@ -488,5 +528,64 @@ mod schema_one_membership_tests {
                 assert!(!attempted_rejoin.contains(participant));
             }
         }
+    }
+
+    /// A departure ends the episodes its writer observed; a fresh invitation
+    /// episode re-admits the member in any observation order, while a
+    /// replayed episode cannot.
+    #[test]
+    fn fresh_episode_readmits_departed_member_and_replay_does_not() {
+        let context = ContextId::new_from_entropy(hash(b"aura-amp.episodes.context"));
+        let channel = ChannelId::from_bytes(hash(b"aura-amp.episodes.channel"));
+        let member = AuthorityId::new_from_entropy(hash(b"aura-amp.episodes.member"));
+        let token = |byte| TimeStamp::OrderClock(OrderTime([byte; 32]));
+        let first = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            member,
+            "inv-first".into(),
+            token(200),
+        );
+        let mut writer = crate::ChannelMembershipObservations::new(context, channel);
+        assert!(writer.observe(&first));
+        let kick = ChannelMembershipFact::departure(&writer, member, token(100));
+        let second = ChannelMembershipFact::joined_episode(
+            context,
+            channel,
+            member,
+            "inv-second".into(),
+            token(1),
+        );
+        let observe = |facts: &[&ChannelMembershipFact]| {
+            let mut observed = crate::ChannelMembershipObservations::new(context, channel);
+            for fact in facts {
+                assert!(observed.observe(fact));
+            }
+            observed
+        };
+        for order in [
+            [&first, &kick, &second],
+            [&second, &kick, &first],
+            [&kick, &second, &first],
+        ] {
+            let observed = observe(&order);
+            assert!(observed.contains(member), "fresh episode re-admits");
+            assert!(!observed.departed(member));
+            assert!(observed.episode_ended(member, Some("inv-first")));
+            assert!(!observed.episode_ended(member, Some("inv-second")));
+        }
+        let replay = observe(&[&first, &kick, &first]);
+        assert!(replay.departed(member), "a replayed episode stays ended");
+        let unnamed = ChannelMembershipFact::new(
+            context,
+            channel,
+            member,
+            ChannelParticipantEvent::Joined,
+            token(250),
+        );
+        assert!(observe(&[&first, &kick, &unnamed]).departed(member));
+        let leave =
+            ChannelMembershipFact::departure(&observe(&[&first, &kick, &second]), member, token(3));
+        assert!(observe(&[&first, &kick, &second, &leave]).departed(member));
     }
 }

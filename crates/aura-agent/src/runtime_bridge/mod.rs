@@ -67,8 +67,7 @@ use aura_journal::fact::{
 use aura_journal::DomainFact;
 use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::{
-    commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects, ChannelMembershipFact,
-    ChannelParticipantEvent,
+    commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects, ChannelParticipantEvent,
 };
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
@@ -1393,48 +1392,28 @@ impl RuntimeBridge for AgentRuntimeBridge {
         params: ChannelJoinParams,
     ) -> Result<(), RuntimeBridgeError> {
         let effects = self.agent.runtime().effects();
-        if aura_protocol::amp::journal::channel_participant_departed(
-            &effects,
-            params.context,
-            params.channel,
-            params.participant,
-        )
-        .await
-        .map_err(|source| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(source)))?
-        {
-            return Err(map_amp_error(
-                aura_core::effects::amp::AmpChannelError::RejoinRequiresMembershipEvidence {
-                    context: params.context,
-                    channel: params.channel,
-                    participant: params.participant,
-                },
-            ));
-        }
-        let _canonical =
-            aura_protocol::amp::get_channel_state(&effects, params.context, params.channel)
-                .await
-                .map_err(|error| {
-                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
-                })?;
-        let timestamp = execute_with_effect_timeout(
+        let membership = execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
-            || async { ChannelMembershipFact::random_timestamp(&effects).await },
+            || async {
+                aura_protocol::amp::journal::channel_membership_event(
+                    &effects,
+                    params.context,
+                    params.channel,
+                    params.participant,
+                    ChannelParticipantEvent::Joined,
+                    None,
+                )
+                .await
+            },
         )
         .await
         .map_err(|error| match error {
             TimeoutRunError::Timeout(error) => amp::map_amp_budget_error(error),
             TimeoutRunError::Operation(error) => {
-                map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(error))
+                map_amp_error(crate::runtime::effects::amp_membership_error(error))
             }
         })?;
-        let membership = ChannelMembershipFact::new(
-            params.context,
-            params.channel,
-            params.participant,
-            ChannelParticipantEvent::Joined,
-            timestamp,
-        );
         execute_with_effect_timeout(
             &effects,
             Duration::from_millis(AMP_REPAIR_MEMBERSHIP_STAGE_TIMEOUT_MS),
@@ -1475,22 +1454,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .ok()
             .and_then(|chat| chat.channel(&params.channel).map(|c| c.member_ids.clone()))
             .unwrap_or_default();
-        let (context, channel, participant) = (params.context, params.channel, params.participant);
-        effects.leave_channel(params).await.map_err(map_amp_error)?;
-
-        // Best effort: other members drop us from their member lists.
-        let membership = ChannelMembershipFact::new(
+        let ChannelLeaveParams {
             context,
             channel,
             participant,
-            ChannelParticipantEvent::Left,
-            ChannelMembershipFact::random_timestamp(&effects)
-                .await
-                .map_err(|source| {
-                    map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(source))
-                })?,
-        )
-        .to_generic();
+        } = params;
+        let membership = effects
+            .commit_channel_membership(
+                context,
+                channel,
+                participant,
+                ChannelParticipantEvent::Left,
+                None,
+            )
+            .await
+            .map_err(map_amp_error)?;
+
+        // Best effort: other members drop us from their member lists.
         for member in members.into_iter().filter(|member| *member != participant) {
             if let Err(error) = self.send_chat_fact(member, context, &membership).await {
                 tracing::debug!(%member, %error, "channel leave notification not sent");

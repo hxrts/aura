@@ -111,6 +111,7 @@ impl From<BiscuitStartupRecordError> for AuraError {
 }
 
 mod amp;
+pub(crate) use amp::amp_membership_error;
 mod aura;
 mod choreography;
 mod crypto;

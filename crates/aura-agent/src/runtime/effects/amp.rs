@@ -8,7 +8,7 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 use aura_core::{AuraError, ChannelId, Hash32};
 use aura_journal::DomainFact;
-use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
+use aura_protocol::amp::{AmpJournalEffects, ChannelParticipantEvent};
 use aura_protocol::effects::TreeEffects;
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -169,83 +169,38 @@ impl AmpChannelEffects for AuraEffectSystem {
     }
 
     async fn join_channel(&self, params: ChannelJoinParams) -> Result<(), AmpChannelError> {
-        aura_protocol::amp::get_channel_state(self, params.context, params.channel)
-            .await
-            .map_err(map_amp_err)?;
-        if aura_protocol::amp::journal::channel_participant_departed(
-            self,
-            params.context,
-            params.channel,
-            params.participant,
-        )
-        .await
-        .map_err(map_amp_err)?
-        {
-            return Err(AmpChannelError::RejoinRequiresMembershipEvidence {
-                context: params.context,
-                channel: params.channel,
-                participant: params.participant,
-            });
-        }
-        let timestamp = ChannelMembershipFact::random_timestamp(self)
-            .await
-            .map_err(map_amp_err)?;
-        let membership = ChannelMembershipFact::new(
+        self.commit_channel_membership(
             params.context,
             params.channel,
             params.participant,
             ChannelParticipantEvent::Joined,
-            timestamp,
-        );
-        self.insert_relational_fact(membership.to_generic())
-            .await
-            .map_err(map_amp_err)?;
-        // AMP state reads the context journal above; the chat projection reads
-        // committed facts, so commit (persist and publish) there as well.
-        self.commit_relational_facts(vec![membership.to_generic()])
-            .await
-            .map_err(AmpChannelError::Effect)?;
-
+            None,
+        )
+        .await?;
         tracing::debug!(
             "Participant {:?} joined channel {:?} in context {:?}",
             params.participant,
             params.channel,
             params.context
         );
-
         Ok(())
     }
 
     async fn leave_channel(&self, params: ChannelLeaveParams) -> Result<(), AmpChannelError> {
-        aura_protocol::amp::get_channel_state(self, params.context, params.channel)
-            .await
-            .map_err(map_amp_err)?;
-        let timestamp = ChannelMembershipFact::random_timestamp(self)
-            .await
-            .map_err(map_amp_err)?;
-        let membership = ChannelMembershipFact::new(
+        self.commit_channel_membership(
             params.context,
             params.channel,
             params.participant,
             ChannelParticipantEvent::Left,
-            timestamp,
-        );
-        self.insert_relational_fact(membership.to_generic())
-            .await
-            .map_err(map_amp_err)?;
-        // AMP state reads the context journal above; the chat projection reads
-        // committed facts, so commit (persist and publish) there as well.
-        self.commit_relational_facts(vec![membership.to_generic()])
-            .await
-            .map_err(|e| AmpChannelError::Storage(e.to_string()))?;
-
+            None,
+        )
+        .await?;
         tracing::debug!(
             "Participant {:?} left channel {:?} in context {:?}",
             params.participant,
             params.channel,
             params.context
         );
-
         Ok(())
     }
 
@@ -267,8 +222,52 @@ impl AmpChannelEffects for AuraEffectSystem {
     }
 }
 
+impl AuraEffectSystem {
+    /// Record a channel membership event (a join naming `episode`, or a
+    /// departure ending the observed episodes) in the context journal AMP
+    /// state reads, and commit it for the chat projection.
+    pub(crate) async fn commit_channel_membership(
+        &self,
+        context: aura_core::ContextId,
+        channel: ChannelId,
+        participant: aura_core::AuthorityId,
+        event: ChannelParticipantEvent,
+        episode: Option<String>,
+    ) -> Result<aura_journal::fact::RelationalFact, AmpChannelError> {
+        let membership = aura_protocol::amp::journal::channel_membership_event(
+            self,
+            context,
+            channel,
+            participant,
+            event,
+            episode,
+        )
+        .await
+        .map_err(amp_membership_error)?
+        .to_generic();
+        self.insert_relational_fact(membership.clone())
+            .await
+            .map_err(map_amp_err)?;
+        self.commit_relational_facts(vec![membership.clone()])
+            .await
+            .map_err(map_amp_err)?;
+        Ok(membership)
+    }
+}
+
 fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {
     AmpChannelError::Effect(e)
+}
+
+/// AMP error for a failed membership event: the rejoin refusal it carries, or
+/// the effect failure.
+pub(crate) fn amp_membership_error(error: AuraError) -> AmpChannelError {
+    match std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<AmpChannelError>())
+    {
+        Some(rejoin @ AmpChannelError::RejoinRequiresMembershipEvidence { .. }) => rejoin.clone(),
+        _ => map_amp_err(error),
+    }
 }
 
 #[cfg(test)]

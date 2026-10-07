@@ -5,7 +5,7 @@ use super::contact_confirmation::{
 use super::*;
 use crate::reactive::{MessageDrop, MessageDropReason};
 use aura_journal::fact::RelationalFact;
-use aura_protocol::amp::{ChannelMembershipFact, ChannelParticipantEvent};
+use aura_protocol::amp::ChannelParticipantEvent;
 use aura_protocol::{
     DecodedIngress, IngressSource, IngressVerificationEvidence, VerifiedIngress,
     VerifiedIngressMetadata,
@@ -875,32 +875,24 @@ impl<'a> InvitationContactHandler<'a> {
                     .await?;
                     effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
 
-                    if aura_protocol::amp::journal::channel_participant_departed(effects.as_ref(), acceptance.context_id, acceptance.channel_id, acceptance.acceptor_id).await.map_err(AgentError::from)? {
-                        return Err(AgentError::from(aura_core::AuraError::Invalid {
-                            message: "contact acceptance cannot supersede original channel departure".into(),
-                            source: Some(Arc::new(aura_core::effects::amp::AmpChannelError::RejoinRequiresMembershipEvidence {
-                                context: acceptance.context_id, channel: acceptance.channel_id, participant: acceptance.acceptor_id,
-                            })),
-                        }));
-                    }
-                    let timestamp = ChannelMembershipFact::random_timestamp(effects.as_ref()).await.map_err(AgentError::from)?;
-                    let membership = ChannelMembershipFact::new(
-                        acceptance.context_id,
-                        acceptance.channel_id,
-                        acceptance.acceptor_id,
-                        ChannelParticipantEvent::Joined,
-                        timestamp,
-                    )
-                    .to_generic();
-
+                    // The accepted invitation starts a new membership episode, so it
+                    // re-admits a member whose earlier episode a kick or leave ended;
+                    // a replayed acceptance names an ended episode and is refused.
                     effects
-                        .insert_relational_fact(membership.clone())
+                        .commit_channel_membership(
+                            acceptance.context_id,
+                            acceptance.channel_id,
+                            acceptance.acceptor_id,
+                            ChannelParticipantEvent::Joined,
+                            Some(acceptance.invitation_id.to_string()),
+                        )
                         .await
-                        .map_err(AgentError::from)?;
-                    effects
-                        .commit_relational_facts(vec![membership])
-                        .await
-                        .map_err(AgentError::from)?;
+                        .map_err(|error| {
+                            AgentError::from(aura_core::AuraError::Invalid {
+                                message: "record channel invitation membership episode".into(),
+                                source: Some(Arc::new(error)),
+                            })
+                        })?;
                     effects.await_reactive_publications_in_original_window(&budget).await.map_err(AgentError::from)?;
 
                     let now_ms =

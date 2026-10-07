@@ -1852,8 +1852,9 @@ optional migration-field omission, preserving immutable protected-record
 digests. Confirmed agreement is derived from the original verified receipt and
 activation owner; the signed original configuration is never rewritten.
 
-ChatSignalView retains the shared compact SchemaOneChannelMembership observations
-per exact context/channel. Whole incoming batches are observed before metadata or
+ChatSignalView retains the shared compact ChannelMembershipObservations episodes
+per exact context/channel; a fresh accepted channel invitation starts a new episode
+that re-admits a departed member. Whole incoming batches are observed before metadata or
 message admission. Departures persist across batches and replay, and canonical
 channel metadata cannot reintroduce members or unhide local departure. Historical
 invitation visibility cannot admit an observed departed sender. No membership
