@@ -1,376 +1,121 @@
 //! # CLI Test Harness
 //!
-//! Deterministic CLI command testing without subprocess execution.
-//!
-//! ## Overview
-//!
-//! This module provides:
-//! - `CliTestHarness`: A wrapper around `CliHandler` with output capture
-//! - Command execution with deterministic mock effects
-//! - Output assertion utilities
-//!
-//! ## Usage
+//! Runs typed CLI requests in-process against a testing runtime, through the
+//! same command model (`crate::command`) as the `aura` binary and `aura rpc`.
 //!
 //! ```rust,ignore
+//! use aura_terminal::command::Request;
 //! use aura_terminal::testing::cli::CliTestHarness;
 //!
-//! #[tokio::test]
-//! async fn test_version_command() {
-//!     let mut harness = CliTestHarness::new();
-//!
-//!     harness.exec_version().await.unwrap();
-//!
-//!     harness.assert_stdout_contains("aura");
-//!     harness.assert_no_stderr();
-//! }
+//! let harness = CliTestHarness::new().await?;
+//! let response = harness.exec(Request::Status).await?;
 //! ```
-//!
-//! ## Why Deterministic CLI Tests?
-//!
-//! Subprocess-based CLI tests are:
-//! - **Slow**: Need to spawn processes, wait for startup
-//! - **Flaky**: Timing issues, environment dependencies
-//! - **Hard to debug**: Output mixed with test runner output
-//!
-//! Effect-based tests are:
-//! - **Deterministic**: Mock effects return predictable results
-//! - **Fast**: No process spawning, direct function calls
-//! - **Easy to debug**: Full visibility into captured output
 
-use crate::error::TerminalResult;
-use crate::handlers::{CliHandler, CliOutput, EffectContext};
-use crate::{ids, ContextAction, RecoveryAction};
+use crate::command::{execute, render, CommandContext, CommandError, Request, Response};
+use crate::ids;
 
 use async_lock::RwLock;
-use aura_agent::AgentBuilder;
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_app::ui::prelude::*;
 use aura_core::effects::ExecutionMode;
 use aura_core::types::identifiers::DeviceId;
-use std::path::Path;
 use std::sync::Arc;
 
-/// Captured output from CLI command execution
-#[derive(Debug, Clone, Default)]
-pub struct CapturedOutput {
-    /// Standard output lines
-    pub stdout: Vec<String>,
-    /// Standard error lines
-    pub stderr: Vec<String>,
-}
-
-impl CapturedOutput {
-    /// Get all stdout as a single string
-    pub fn stdout_str(&self) -> String {
-        self.stdout.join("\n")
-    }
-
-    /// Get all stderr as a single string
-    pub fn stderr_str(&self) -> String {
-        self.stderr.join("\n")
-    }
-
-    /// Check if stdout is empty
-    pub fn stdout_is_empty(&self) -> bool {
-        self.stdout.is_empty() || self.stdout.iter().all(|s| s.is_empty())
-    }
-
-    /// Check if stderr is empty
-    pub fn stderr_is_empty(&self) -> bool {
-        self.stderr.is_empty() || self.stderr.iter().all(|s| s.is_empty())
-    }
-}
-
-/// Test harness for deterministic CLI testing
-///
-/// Provides a clean interface for testing CLI commands with:
-/// - Deterministic mock effects
-/// - Output capture and assertion
-/// - Predictable device IDs
+/// In-process runner for typed CLI requests.
 pub struct CliTestHarness {
-    handler: CliHandler,
-    output: CapturedOutput,
+    ctx: CommandContext,
 }
 
 impl CliTestHarness {
-    /// Create a new test harness with default configuration
-    ///
-    /// This is async because agent construction requires an async runtime context.
+    /// A harness on a fresh testing runtime.
     pub async fn new() -> anyhow::Result<Self> {
         Self::with_device_id(DeviceId::from_bytes([0u8; 32])).await
     }
 
-    /// Create a test harness with a specific device ID
-    ///
-    /// This is async because agent construction requires an async runtime context.
+    /// A harness on a fresh testing runtime for `device_id`.
     pub async fn with_device_id(device_id: DeviceId) -> anyhow::Result<Self> {
         let authority_id = ids::authority_id(&format!("cli:test-authority:{device_id}"));
         let context_id = ids::context_id(&format!("cli:test-context:{device_id}"));
         let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-
-        // Build agent using async builder to avoid runtime-in-runtime issue
-        let agent = AgentBuilder::new()
-            .with_authority(authority_id)
-            .build_testing_async(&effect_context)
-            .await?;
-        let agent = Arc::new(agent);
-
-        // Create AppCore with the runtime bridge
-        let config = AppConfig::default();
-        let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())?;
-        let app_core = Arc::new(RwLock::new(app_core));
-
-        let handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
-
+        let agent = Arc::new(
+            AgentBuilder::new()
+                .with_authority(authority_id)
+                .build_testing_async(&effect_context)
+                .await?,
+        );
+        let app_core = Arc::new(RwLock::new(AppCore::with_runtime(
+            AppConfig::default(),
+            agent.clone().as_runtime_bridge(),
+        )?));
+        AppCore::init_signals_with_hooks(&app_core).await?;
         Ok(Self {
-            handler,
-            output: CapturedOutput::default(),
+            ctx: CommandContext::new(app_core, agent.runtime().effects(), authority_id),
         })
     }
 
-    /// Get the underlying CLI handler
-    pub fn handler(&self) -> &CliHandler {
-        &self.handler
+    /// The command context requests run against.
+    #[must_use]
+    pub fn context(&self) -> &CommandContext {
+        &self.ctx
     }
 
-    /// Get the captured output
-    pub fn output(&self) -> &CapturedOutput {
-        &self.output
+    /// Run one request.
+    pub async fn exec(&self, request: Request) -> Result<Response, CommandError> {
+        execute(&self.ctx, request).await
     }
 
-    /// Clear captured output for a new command
-    pub fn clear_output(&mut self) {
-        self.output = CapturedOutput::default();
-    }
-
-    // =========================================================================
-    // Command execution methods
-    // =========================================================================
-
-    fn capture(&mut self, output: CliOutput) {
-        self.output = CapturedOutput {
-            stdout: output.stdout_lines(),
-            stderr: output.stderr_lines(),
-        };
-    }
-
-    /// Execute the version command
-    #[allow(clippy::unused_async)]
-    pub async fn exec_version(&mut self) -> TerminalResult<()> {
-        self.capture(crate::handlers::version::version_output());
-        Ok(())
-    }
-
-    /// Execute the init command
-    pub async fn exec_init(
-        &mut self,
-        num_devices: u32,
-        threshold: u32,
-        output_path: &std::path::Path,
-    ) -> TerminalResult<()> {
-        self.clear_output();
-        let output = self
-            .handler
-            .handle_init(num_devices, threshold, output_path)
-            .await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    /// Execute the status command
-    pub async fn exec_status(&mut self, config_path: &std::path::Path) -> TerminalResult<()> {
-        self.clear_output();
-        let output = self.handler.handle_status(config_path).await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    /// Execute the recovery command
-    pub async fn exec_recovery(&mut self, action: &RecoveryAction) -> TerminalResult<()> {
-        self.clear_output();
-        let output = self.handler.handle_recovery(action).await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    /// Execute the authority list command
-    pub async fn exec_authority_list(&mut self) -> TerminalResult<()> {
-        self.clear_output();
-        let output = self
-            .handler
-            .handle_authority(&crate::AuthorityCommands::List)
-            .await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    /// Execute the context inspect command
-    pub async fn exec_context_inspect(
-        &mut self,
-        context_id: String,
-        state_file: &Path,
-    ) -> TerminalResult<()> {
-        self.clear_output();
-        let action = ContextAction::Inspect {
-            context: context_id,
-            state_file: state_file.to_path_buf(),
-        };
-        let output = self.handler.handle_context(&action).await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    /// Execute the context receipts command
-    pub async fn exec_context_receipts(
-        &mut self,
-        context_id: String,
-        state_file: &Path,
-        detailed: bool,
-    ) -> TerminalResult<()> {
-        self.clear_output();
-        let action = ContextAction::Receipts {
-            context: context_id,
-            state_file: state_file.to_path_buf(),
-            detailed,
-        };
-        let output = self.handler.handle_context(&action).await?;
-        self.capture(output);
-        Ok(())
-    }
-
-    // =========================================================================
-    // Assertion methods
-    // =========================================================================
-
-    /// Assert stdout contains the expected substring
-    pub fn assert_stdout_contains(&self, expected: &str) {
-        let stdout = self.output.stdout_str();
-        assert!(
-            stdout.contains(expected),
-            "Expected stdout to contain '{expected}', but got:\n{stdout}"
-        );
-    }
-
-    /// Assert stdout does not contain the substring
-    pub fn assert_stdout_not_contains(&self, unexpected: &str) {
-        let stdout = self.output.stdout_str();
-        assert!(
-            !stdout.contains(unexpected),
-            "Expected stdout to NOT contain '{unexpected}', but got:\n{stdout}"
-        );
-    }
-
-    /// Assert stderr contains the expected substring
-    pub fn assert_stderr_contains(&self, expected: &str) {
-        let stderr = self.output.stderr_str();
-        assert!(
-            stderr.contains(expected),
-            "Expected stderr to contain '{expected}', but got:\n{stderr}"
-        );
-    }
-
-    /// Assert stderr is empty
-    pub fn assert_no_stderr(&self) {
-        let stderr = self.output.stderr_str();
-        assert!(
-            self.output.stderr_is_empty(),
-            "Expected no stderr output, but got:\n{stderr}"
-        );
-    }
-
-    /// Assert stdout is empty
-    pub fn assert_no_stdout(&self) {
-        let stdout = self.output.stdout_str();
-        assert!(
-            self.output.stdout_is_empty(),
-            "Expected no stdout output, but got:\n{stdout}"
-        );
-    }
-
-    /// Assert stdout matches expected lines exactly
-    pub fn assert_stdout_lines(&self, expected: &[&str]) {
-        let actual: Vec<&str> = self.output.stdout.iter().map(|s| s.as_str()).collect();
-        assert_eq!(
-            actual, expected,
-            "Stdout lines don't match.\nExpected: {expected:?}\nActual: {actual:?}"
-        );
-    }
-
-    /// Assert command succeeded (no errors)
-    pub fn assert_success(&self) {
-        // Success means no error output
-        if !self.output.stderr_is_empty() {
-            let stderr = self.output.stderr_str();
-            panic!("Expected success but got stderr:\n{stderr}");
-        }
+    /// Run one request and return its text rendering.
+    pub async fn exec_text(&self, request: Request) -> Result<String, CommandError> {
+        Ok(render(&self.exec(request).await?).stdout_lines().join("\n"))
     }
 }
-
-// Note: No Default impl because construction is async.
-// Use `CliTestHarness::new().await` instead.
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_cli_harness_creation() {
-        let harness = CliTestHarness::new().await;
-        assert!(harness.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_version_command() {
-        let mut harness = CliTestHarness::new().await.unwrap();
-
-        let result = harness.exec_version().await;
-        assert!(result.is_ok());
-
-        harness.assert_stdout_contains("aura");
-        harness.assert_no_stderr();
-    }
-
-    #[test]
-    fn test_captured_output_helpers() {
-        let output = CapturedOutput {
-            stdout: vec!["line 1".to_string(), "line 2".to_string()],
-            stderr: vec![],
-        };
-
-        assert_eq!(output.stdout_str(), "line 1\nline 2");
-        assert!(output.stderr_is_empty());
-        assert!(!output.stdout_is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_output_clearing() {
-        let mut harness = CliTestHarness::new().await.unwrap();
-
-        // First command
-        harness.exec_version().await.unwrap();
-        assert!(!harness.output().stdout_is_empty());
-
-        // Clear and verify
-        harness.clear_output();
-        assert!(harness.output().stdout_is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_authority_list_deterministic() {
-        let harness1 = CliTestHarness::new().await.unwrap();
-        let harness2 = CliTestHarness::new().await.unwrap();
-
-        // Same device ID should give same handler configuration
+    async fn fresh_runtime_has_no_channels() {
+        let harness = CliTestHarness::new().await.unwrap();
         assert_eq!(
-            harness1.handler().device_id(),
-            harness2.handler().device_id()
+            harness.exec(Request::ChatList).await.unwrap(),
+            Response::Channels(Vec::new())
         );
     }
 
     #[tokio::test]
-    async fn test_with_specific_device_id() {
-        let device_id = DeviceId::from_bytes([42u8; 32]);
-        let harness = CliTestHarness::with_device_id(device_id).await.unwrap();
+    async fn fresh_runtime_has_no_pending_invitations() {
+        let harness = CliTestHarness::new().await.unwrap();
+        assert_eq!(
+            harness.exec(Request::InviteList).await.unwrap(),
+            Response::Invitations(Vec::new())
+        );
+    }
 
-        assert_eq!(harness.handler().device_id(), device_id);
+    #[tokio::test]
+    async fn unknown_channels_are_not_found() {
+        let harness = CliTestHarness::new().await.unwrap();
+        let error = harness
+            .exec(Request::ChatHistory {
+                channel: "no-such-channel".into(),
+                limit: None,
+                sender: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::command::ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn bad_identifiers_are_invalid_input() {
+        let harness = CliTestHarness::new().await.unwrap();
+        let error = harness
+            .exec(Request::AmpInspect {
+                context: "bad".into(),
+                channel: "bad".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, crate::command::ErrorCode::InvalidInput);
     }
 }

@@ -7,6 +7,8 @@ use std::{
 
 #[path = "authoritative_fact_scope.rs"]
 mod authoritative_fact_scope;
+#[path = "cli_workflow_facade.rs"]
+mod cli_workflow_facade;
 #[path = "runtime_entropy_scope.rs"]
 mod runtime_entropy_scope;
 #[path = "security_test_scope.rs"]
@@ -757,8 +759,11 @@ pub fn run_runtime_shutdown_order() -> Result<()> {
     }
     let reactive = first_match_line(&target, ".stop_with_original_budget(original.budget())")?
         .context("runtime-shutdown-order: missing reactive pipeline shutdown step")?;
-    let task_tree = first_match_line(&target, ".shutdown_with_original_budget(self.effect_system.as_ref(), original.budget())")?
-        .context("runtime-shutdown-order: missing runtime task tree shutdown step")?;
+    let task_tree = first_match_line(
+        &target,
+        ".shutdown_with_original_budget(self.effect_system.as_ref(), original.budget())",
+    )?
+    .context("runtime-shutdown-order: missing runtime task tree shutdown step")?;
     let stop_services = first_match_line(&target, "self.stop_services(&original)")?
         .context("runtime-shutdown-order: missing stop_services step")?;
     let lifecycle = first_match_line(&target, "lifecycle_manager.shutdown(ctx)")?
@@ -7731,6 +7736,10 @@ pub fn run_tui_observation_channel() -> Result<()> {
 
     println!("harness tui observation channel: clean");
     Ok(())
+}
+
+pub fn run_cli_workflow_facade() -> Result<()> {
+    cli_workflow_facade::run(&repo_root()?)
 }
 
 pub fn run_tui_product_path() -> Result<()> {

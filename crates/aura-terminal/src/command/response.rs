@@ -1,0 +1,185 @@
+//! Typed command responses.
+//!
+//! Every [`Request`](super::Request) succeeds with one [`Response`]. The CLI
+//! renders it as text (or prints it under `--json`); `aura rpc` sends it as
+//! the `result` of a response line.
+
+use aura_app::ui::contract::{
+    SemanticOperationError, SemanticOperationKind, SemanticOperationPhase, WorkflowTerminalStatus,
+};
+use serde::{Deserialize, Serialize};
+
+/// Terminal lifecycle of the semantic operation a command ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperationView {
+    pub kind: SemanticOperationKind,
+    pub phase: SemanticOperationPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<SemanticOperationError>,
+}
+
+impl From<WorkflowTerminalStatus> for OperationView {
+    fn from(terminal: WorkflowTerminalStatus) -> Self {
+        Self {
+            kind: terminal.status.kind,
+            phase: terminal.status.phase,
+            error: terminal.status.error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountView {
+    pub authority_id: String,
+    pub nickname: String,
+    pub threshold_k: u8,
+    pub threshold_n: u8,
+    pub devices: usize,
+    pub contacts: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityView {
+    pub authority_id: String,
+    pub nickname: String,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactView {
+    pub authority_id: String,
+    pub nickname: String,
+    pub is_guardian: bool,
+    pub is_member: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelView {
+    pub channel_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    pub is_dm: bool,
+    pub member_count: u32,
+    pub unread: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageView {
+    pub message_id: String,
+    pub channel_id: String,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub content: String,
+    pub timestamp_ms: u64,
+    pub is_own: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InvitationView {
+    pub invitation_id: String,
+    pub kind: String,
+    pub sender_id: String,
+    pub receiver_id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryView {
+    pub guardians: Vec<String>,
+    pub threshold: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_ceremony: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approvals: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AmpChannelView {
+    pub context_id: String,
+    pub channel_id: String,
+    pub epoch: u64,
+    pub generation: u64,
+    pub last_checkpoint_generation: u64,
+    pub skip_window: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_bump: Option<String>,
+}
+
+/// The successful outcome of a request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum Response {
+    Account(AccountView),
+    Authorities(Vec<AuthorityView>),
+    Contacts(Vec<ContactView>),
+    Channels(Vec<ChannelView>),
+    Channel(ChannelView),
+    Messages(Vec<MessageView>),
+    MessageSent {
+        channel_id: String,
+        message_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<OperationView>,
+    },
+    ChannelCreated {
+        channel_id: String,
+        context_id: String,
+    },
+    InvitationCreated {
+        invitation_id: String,
+        code: String,
+    },
+    Invitations(Vec<InvitationView>),
+    Invitation(InvitationView),
+    InvitationCode {
+        invitation_id: String,
+        code: String,
+    },
+    Export {
+        format: super::ExportFormat,
+        body: String,
+    },
+    HomeCreated {
+        home_id: String,
+    },
+    RecoveryStarted {
+        ceremony_id: String,
+    },
+    Recovery(RecoveryView),
+    Sync {
+        status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    Peers {
+        connected: usize,
+    },
+    AmpChannel(AmpChannelView),
+    AmpBumpProposed {
+        parent_epoch: u64,
+        new_epoch: u64,
+        bump_id: String,
+    },
+    AmpCheckpoint {
+        epoch: u64,
+        base_generation: u64,
+    },
+    SnapshotProposed {
+        proposal_id: String,
+    },
+    /// The request ran; `summary` says what happened.
+    Done {
+        summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        operation: Option<OperationView>,
+    },
+}

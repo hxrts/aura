@@ -8,8 +8,16 @@
 //!   own clock.
 
 pub mod error;
+pub mod execute;
+pub mod render;
+pub mod request;
+pub mod response;
 
 pub use error::{CommandError, ErrorCode};
+pub use execute::{execute, CommandContext};
+pub use render::render;
+pub use request::{ExportFormat, InviteRole, Request};
+pub use response::Response;
 
 use crate::handlers::CliOutput;
 use async_lock::RwLock;
@@ -22,6 +30,51 @@ use serde_json::json;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// A successful command's output: its text rendering and its `--json`
+/// result.
+#[derive(Debug, Clone)]
+pub struct Outcome {
+    /// Human-readable output.
+    pub text: CliOutput,
+    /// The `result` of the `--json` document.
+    pub json: serde_json::Value,
+    /// The command already wrote its output (`aura rpc`).
+    pub quiet: bool,
+}
+
+impl Outcome {
+    /// A typed response: rendered for text, serialized as-is for JSON.
+    #[must_use]
+    pub fn from_response(response: &Response) -> Self {
+        Self {
+            text: render(response),
+            json: serde_json::to_value(response).unwrap_or(serde_json::Value::Null),
+            quiet: false,
+        }
+    }
+
+    /// A command that already wrote its own output.
+    #[must_use]
+    pub fn quiet() -> Self {
+        Self {
+            text: CliOutput::new(),
+            json: serde_json::Value::Null,
+            quiet: true,
+        }
+    }
+}
+
+impl From<CliOutput> for Outcome {
+    fn from(text: CliOutput) -> Self {
+        let json = text.to_json();
+        Self {
+            text,
+            json,
+            quiet: false,
+        }
+    }
+}
 
 /// How a command reports its outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,8 +99,8 @@ impl OutputMode {
 
     /// The success document for `output` under `--json`.
     #[must_use]
-    pub fn success_document(output: &CliOutput) -> serde_json::Value {
-        json!({ "ok": true, "result": output.to_json() })
+    pub fn success_document(result: &serde_json::Value) -> serde_json::Value {
+        json!({ "ok": true, "result": result })
     }
 
     /// The failure document for `error` under `--json`.
@@ -57,10 +110,13 @@ impl OutputMode {
     }
 
     /// Print a successful command's output.
-    pub fn emit_success(self, output: &CliOutput) {
+    pub fn emit_success(self, outcome: &Outcome) {
+        if outcome.quiet {
+            return;
+        }
         match self {
-            Self::Text => output.render(),
-            Self::Json => println!("{}", Self::success_document(output)),
+            Self::Text => outcome.text.render(),
+            Self::Json => println!("{}", Self::success_document(&outcome.json)),
         }
     }
 

@@ -945,6 +945,7 @@ ci-observed-layer-boundaries:
 
 ci-frontend-handoff-boundary:
     just _ownership-lint frontend-semantic-handoff-boundary crates/aura-terminal crates/aura-web
+    just _policy-check check cli-workflow-facade
 
 ci-parity-critical-callback-settlement:
     just _ownership-lint parity-critical-callback-settlement crates/aura-terminal/src/tui/callbacks

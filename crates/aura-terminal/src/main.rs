@@ -14,21 +14,24 @@ use aura_agent::core::AgentConfig;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs, ThresholdArgs};
-use aura_terminal::command::{with_timeout, CommandError, OutputMode};
+use aura_terminal::command::{
+    confirm, execute, with_timeout, CommandContext, CommandError, ErrorCode, Outcome, OutputMode,
+};
 use aura_terminal::handlers::{tui::try_load_account_from_path, CliOutput};
 use aura_terminal::ids;
-use aura_terminal::{CliHandler, SyncAction};
+use aura_terminal::CliHandler;
 use bpaf::{Args, Parser};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-const USAGE: &str = r#"usage: aura [-v] [--json] [--yes] [--timeout SECONDS] [-c CONFIG] [--data-dir DIR] COMMAND [OPTIONS]
+const USAGE: &str = r#"usage: aura [-v] [--json] [--yes] [--timeout SECONDS] [--data-dir DIR] COMMAND [OPTIONS]
 
 commands:
     init        Initialize a new threshold account
     status      Show account status
-    node        Run node/agent daemon
+    rpc         JSON-lines requests on stdin/stdout, node online
+    serve       Keep the node online without a client
     tui         Interactive terminal user interface
     chat        Secure messaging
     sync        Journal synchronization
@@ -92,8 +95,8 @@ async fn async_main() -> i32 {
     let mode = OutputMode::from_json_flag(args.json);
     let verbose = args.verbose;
     match run(args).await {
-        Ok(output) => {
-            mode.emit_success(&output);
+        Ok(outcome) => {
+            mode.emit_success(&outcome);
             0
         }
         Err(error) => {
@@ -103,10 +106,9 @@ async fn async_main() -> i32 {
     }
 }
 
-async fn run(args: GlobalArgs) -> Result<CliOutput, CommandError> {
+async fn run(args: GlobalArgs) -> Result<Outcome, CommandError> {
     let GlobalArgs {
         verbose,
-        config: global_config,
         data_dir,
         json,
         yes,
@@ -116,8 +118,8 @@ async fn run(args: GlobalArgs) -> Result<CliOutput, CommandError> {
 
     // Commands that need no account or runtime.
     match &command {
-        Commands::Replay(replay) => return Ok(handle_replay_command(replay).await?),
-        Commands::Version => return Ok(aura_terminal::handlers::version::version_output()),
+        Commands::Replay(replay) => return Ok(handle_replay_command(replay).await?.into()),
+        Commands::Version => return Ok(aura_terminal::handlers::version::version_output().into()),
         #[cfg(feature = "terminal")]
         Commands::Tui(tui_args) => {
             // The global `--data-dir` may capture the flag written after `tui`.
@@ -128,12 +130,18 @@ async fn run(args: GlobalArgs) -> Result<CliOutput, CommandError> {
                     .map(|dir| dir.to_string_lossy().into_owned());
             }
             aura_terminal::handlers::tui::handle_tui(&tui_args).await?;
-            return Ok(CliOutput::new());
+            return Ok(CliOutput::new().into());
         }
         Commands::Init(init) if init.output.is_absolute() => {
             return Err(CommandError::invalid(
                 "--output must be a relative path; init writes it under the data directory",
             ));
+        }
+        // Ask before opening the runtime, so a refusal costs nothing.
+        Commands::Run(request) => {
+            if let Some(prompt) = request.confirmation() {
+                confirm(&prompt, yes)?;
+            }
         }
         _ => {}
     }
@@ -144,13 +152,16 @@ async fn run(args: GlobalArgs) -> Result<CliOutput, CommandError> {
     // location so subcommands find the account the TUI created.
     let storage_base_path = data_dir
         .clone()
-        .or_else(|| derive_storage_base_path(&command, global_config.as_ref()))
+        .or_else(|| derive_storage_base_path(&command))
         .unwrap_or_else(|| {
             aura_terminal::handlers::tui::resolve_storage_path(
                 None,
                 aura_terminal::handlers::tui::TuiMode::Production,
             )
         });
+    // Seam for Task 160: when a node (TUI or `aura serve`) already runs on
+    // this data directory, account requests go to it over its local RPC
+    // socket instead of opening the profile here.
     let loaded_account = try_load_account_from_path(&storage_base_path)
         .await
         .map_err(|e| AuraError::agent(format!("failed to load persisted account: {e}")))?;
@@ -213,45 +224,57 @@ async fn run(args: GlobalArgs) -> Result<CliOutput, CommandError> {
         subscriber.with_writer(std::io::stdout).try_init()
     };
 
-    let cli_handler =
-        CliHandler::with_agent(app_core.clone(), agent, device_id, effect_context).assume_yes(yes);
-    with_timeout(&app_core, timeout.map(Duration::from_secs), || async {
-        dispatch(&cli_handler, command, global_config.as_ref())
+    let timeout = timeout.map(Duration::from_secs);
+    if matches!(command, Commands::Run(_) | Commands::Rpc | Commands::Serve) {
+        // Workflow-backed account commands: the same observed state the TUI
+        // reads, then the shared command model.
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .map_err(|e| AuraError::agent(format!("initialize app signals: {e}")))?;
+        let ctx = CommandContext::new(app_core.clone(), agent.runtime().effects(), authority_id);
+        return match command {
+            Commands::Run(request) => {
+                let response = with_timeout(&app_core, timeout, || execute(&ctx, request)).await?;
+                Ok(Outcome::from_response(&response))
+            }
+            Commands::Rpc => {
+                let stdin = tokio::io::BufReader::new(tokio::io::stdin());
+                aura_terminal::rpc::serve(&ctx, stdin, tokio::io::stdout())
+                    .await
+                    .map_err(|e| CommandError::new(ErrorCode::Unavailable, format!("rpc: {e}")))?;
+                Ok(Outcome::quiet())
+            }
+            _ => {
+                eprintln!("aura serve: {authority_id} online; Ctrl+C to stop");
+                tokio::signal::ctrl_c()
+                    .await
+                    .map_err(|e| CommandError::new(ErrorCode::Failed, format!("serve: {e}")))?;
+                let mut summary = CliOutput::new();
+                summary.kv("Stopped", authority_id.to_string());
+                Ok(summary.into())
+            }
+        };
+    }
+
+    let cli_handler = CliHandler::with_agent(app_core.clone(), agent, device_id, effect_context);
+    with_timeout(&app_core, timeout, || async {
+        dispatch(&cli_handler, command)
             .await
             .map_err(CommandError::from)
     })
     .await
+    .map(Outcome::from)
 }
 
-/// Execute a runtime-backed command.
+/// Execute an offline tool or long-running mode.
 async fn dispatch(
     cli_handler: &CliHandler,
     command: Commands,
-    global_config: Option<&PathBuf>,
 ) -> aura_terminal::TerminalResult<CliOutput> {
     match command {
         Commands::Init(init) => {
             cli_handler
                 .handle_init(init.num_devices, init.threshold, &init.output)
-                .await
-        }
-        Commands::Status(status) => {
-            match resolve_config_path(status.config.as_ref(), global_config) {
-                Some(config_path) => cli_handler.handle_status(&config_path).await,
-                // No device config: report the loaded account itself.
-                None => cli_handler.handle_account_status().await,
-            }
-        }
-        Commands::Node(node) => {
-            let config_path =
-                resolve_config_path(node.config.as_ref(), global_config).ok_or_else(|| {
-                    aura_terminal::TerminalError::Input(
-                        "No config file specified. Use -c or --config to specify a config file."
-                            .into(),
-                    )
-                })?;
-            cli_handler
-                .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
                 .await
         }
         Commands::Threshold(ThresholdArgs {
@@ -273,29 +296,17 @@ async fn dispatch(
                 )
                 .await
         }
+        Commands::SyncDaemon(args) => cli_handler.handle_sync_daemon(&args).await,
         #[cfg(feature = "development")]
         Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await,
         #[cfg(feature = "development")]
         Commands::Demo { command } => cli_handler.handle_demo(&command).await,
-        Commands::Snapshot { action } => cli_handler.handle_snapshot(&action).await,
-        Commands::Admin { action } => cli_handler.handle_admin(&action).await,
-        Commands::Recovery { action } => cli_handler.handle_recovery(&action).await,
-        Commands::Invite { action } => cli_handler.handle_invitation(&action).await,
-        Commands::Authority { command } => cli_handler.handle_authority(&command).await,
-        Commands::Context { action } => cli_handler.handle_context(&action).await,
-        Commands::Amp { action } => cli_handler.handle_amp(&action).await,
-        Commands::Chat { command } => cli_handler.handle_chat(&command).await,
-        Commands::Sync { action } => {
-            // Default to daemon mode if no subcommand specified
-            let sync_action = action.unwrap_or(SyncAction::Daemon {
-                interval: 60,
-                max_concurrent: 5,
-                peers: None,
-            });
-            cli_handler.handle_sync(&sync_action).await
-        }
-        Commands::Replay(_) | Commands::Version => Err(aura_terminal::TerminalError::Operation(
-            "offline command reached runtime dispatch".into(),
+        Commands::Run(_)
+        | Commands::Rpc
+        | Commands::Serve
+        | Commands::Replay(_)
+        | Commands::Version => Err(aura_terminal::TerminalError::Operation(
+            "command reached the offline tool dispatch".into(),
         )),
         #[cfg(feature = "terminal")]
         Commands::Tui(_) => Err(aura_terminal::TerminalError::Operation(
@@ -304,30 +315,14 @@ async fn dispatch(
     }
 }
 
-fn derive_storage_base_path(
-    command: &Commands,
-    global_config: Option<&PathBuf>,
-) -> Option<PathBuf> {
+fn derive_storage_base_path(command: &Commands) -> Option<PathBuf> {
     match command {
         Commands::Init(init) => Some(init.output.clone()),
-        Commands::Status(status) => resolve_config_path(status.config.as_ref(), global_config)
-            .and_then(base_from_config_path),
-        Commands::Node(node) => {
-            resolve_config_path(node.config.as_ref(), global_config).and_then(base_from_config_path)
-        }
         Commands::Threshold(ThresholdArgs { configs, .. }) => {
             first_config_path(configs).and_then(base_from_config_path)
         }
         _ => None,
     }
-}
-
-/// The command's own `--config`, else the global one.
-fn resolve_config_path(
-    cmd_config: Option<&PathBuf>,
-    global_config: Option<&PathBuf>,
-) -> Option<PathBuf> {
-    cmd_config.or(global_config).cloned()
 }
 
 fn first_config_path(configs: &str) -> Option<PathBuf> {
@@ -528,34 +523,71 @@ mod tests {
             .is_err());
     }
 
+    fn parse(argv: &[&str]) -> Commands {
+        cli_parser()
+            .to_options()
+            .run_inner(Args::from(argv))
+            .unwrap_or_else(|e| panic!("{argv:?}: {e:?}"))
+            .command
+    }
+
     #[test]
-    fn removed_dead_flags_are_rejected() {
+    fn account_commands_parse_into_typed_requests() {
+        use aura_terminal::command::Request;
+        let cases: Vec<(&[&str], Request)> = vec![
+            (&["status"], Request::Status),
+            (
+                &["chat", "send", "general", "hello there"],
+                Request::ChatSend {
+                    channel: "general".into(),
+                    message: "hello there".into(),
+                },
+            ),
+            (
+                &["chat", "history", "--limit", "5", "#general"],
+                Request::ChatHistory {
+                    channel: "#general".into(),
+                    limit: Some(5),
+                    sender: None,
+                },
+            ),
+            (
+                &["invite", "accept", "--invitation-id", "inv-1"],
+                Request::InviteAccept {
+                    invitation_id: "inv-1".into(),
+                },
+            ),
+            (
+                &["sync", "once", "--peers", "a,b"],
+                Request::SyncOnce {
+                    peers: vec!["a".into(), "b".into()],
+                },
+            ),
+            (
+                &["recovery", "start", "--guardians", "g1,g2"],
+                Request::RecoveryStart {
+                    guardians: vec!["g1".into(), "g2".into()],
+                    threshold: 2,
+                },
+            ),
+        ];
+        for (argv, expected) in cases {
+            match parse(argv) {
+                Commands::Run(request) => assert_eq!(request, expected, "{argv:?}"),
+                other => panic!("{argv:?} parsed as {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn removed_service_only_commands_are_rejected() {
         for argv in [
-            &[
-                "chat",
-                "leave",
-                "--group-id",
-                "00000000-0000-0000-0000-000000000001",
-                "--force",
-            ][..],
-            &[
-                "chat",
-                "send",
-                "-g",
-                "00000000-0000-0000-0000-000000000001",
-                "-m",
-                "hi",
-                "--reply-to",
-                "00000000-0000-0000-0000-000000000002",
-            ][..],
-            &[
-                "chat",
-                "history",
-                "-g",
-                "00000000-0000-0000-0000-000000000001",
-                "--before",
-                "2026-01-01",
-            ][..],
+            &["chat", "edit", "general", "x"][..],
+            &["chat", "delete", "general", "x"][..],
+            &["chat", "leave", "general", "--force"][..],
+            &["authority", "create"][..],
+            &["context", "receipts", "--context", "c"][..],
+            &["recovery", "approve", "--request-file", "r.json"][..],
         ] {
             assert!(
                 cli_parser()
@@ -565,6 +597,15 @@ mod tests {
                 "{argv:?} should not parse"
             );
         }
+    }
+
+    #[test]
+    fn sync_defaults_to_the_daemon() {
+        assert!(matches!(parse(&["sync"]), Commands::SyncDaemon(args) if args.interval == 60));
+        assert!(matches!(
+            parse(&["sync", "daemon", "--interval", "30", "--max-concurrent", "3"]),
+            Commands::SyncDaemon(args) if args.interval == 30 && args.max_concurrent == 3
+        ));
     }
 
     #[test]
@@ -605,67 +646,6 @@ mod tests {
             assert_eq!(init.output, PathBuf::from("/tmp/test"));
         } else {
             panic!("Expected Init command");
-        }
-    }
-
-    #[test]
-    fn test_cli_sync_default() {
-        // Test that `aura sync` parses with no subcommand (daemon mode default)
-        let args = cli_parser()
-            .to_options()
-            .run_inner(Args::from(&["sync"]))
-            .unwrap();
-        if let Commands::Sync { action } = args.command {
-            assert!(action.is_none());
-        } else {
-            panic!("Expected Sync command");
-        }
-    }
-
-    #[test]
-    fn test_cli_sync_daemon() {
-        // Test explicit daemon subcommand with options
-        let args = cli_parser()
-            .to_options()
-            .run_inner(Args::from(&[
-                "sync",
-                "daemon",
-                "--interval",
-                "30",
-                "--max-concurrent",
-                "3",
-            ]))
-            .unwrap();
-        if let Commands::Sync {
-            action:
-                Some(SyncAction::Daemon {
-                    interval,
-                    max_concurrent,
-                    ..
-                }),
-        } = args.command
-        {
-            assert_eq!(interval, 30);
-            assert_eq!(max_concurrent, 3);
-        } else {
-            panic!("Expected Sync daemon command");
-        }
-    }
-
-    #[test]
-    fn test_cli_sync_once() {
-        // Test one-shot sync mode
-        let args = cli_parser()
-            .to_options()
-            .run_inner(Args::from(&["sync", "once", "--peers", "peer1,peer2"]))
-            .unwrap();
-        if let Commands::Sync {
-            action: Some(SyncAction::Once { peers, .. }),
-        } = args.command
-        {
-            assert_eq!(peers, "peer1,peer2");
-        } else {
-            panic!("Expected Sync once command");
         }
     }
 

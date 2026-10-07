@@ -2,20 +2,16 @@ use bpaf::{construct, long, pure, short, Parser};
 use std::path::PathBuf;
 
 use crate::cli::{
-    amp::amp_parser,
-    authority::authority_parser,
     chat::chat_parser,
-    context::context_parser,
     init::{init_parser, InitArgs},
-    node::{node_parser, NodeArgs},
-    status::{status_parser, StatusArgs},
-    sync::sync_action_parser,
+    requests::{
+        admin_parser, amp_parser, authority_parser, contact_parser, context_parser, home_parser,
+        invite_parser, recovery_parser, slash_parser, status_parser,
+    },
+    sync::{sync_parser, SyncDaemonArgs},
     tui::tui_parser,
 };
-use crate::{
-    AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, InvitationAction,
-    RecoveryAction, SnapshotAction, SyncAction,
-};
+use crate::command::Request;
 
 #[cfg(feature = "development")]
 use crate::cli::demo::demo_parser;
@@ -47,12 +43,21 @@ pub struct ReplayArgs {
 }
 
 /// Top-level CLI commands exposed to the terminal.
+///
+/// Account commands parse straight into a typed [`Request`] (`Run`) that the
+/// shared command model executes through the app workflows; the remaining
+/// variants are offline tools or long-running modes.
 #[derive(Debug, Clone)]
 pub enum Commands {
+    /// A workflow-backed account command.
+    Run(Request),
     Init(InitArgs),
-    Status(StatusArgs),
-    Node(NodeArgs),
+    /// `aura rpc`: JSON-lines requests on stdin/stdout.
+    Rpc,
+    /// `aura serve`: stay online without a client.
+    Serve,
     Threshold(ThresholdArgs),
+    SyncDaemon(SyncDaemonArgs),
     #[cfg(feature = "development")]
     Scenarios {
         action: ScenarioAction,
@@ -61,35 +66,8 @@ pub enum Commands {
     Demo {
         command: DemoCommands,
     },
-    Snapshot {
-        action: SnapshotAction,
-    },
-    Admin {
-        action: AdminAction,
-    },
-    Recovery {
-        action: RecoveryAction,
-    },
-    Invite {
-        action: InvitationAction,
-    },
-    Authority {
-        command: AuthorityCommands,
-    },
     Replay(ReplayArgs),
     Version,
-    Context {
-        action: ContextAction,
-    },
-    Amp {
-        action: AmpAction,
-    },
-    Chat {
-        command: ChatCommands,
-    },
-    Sync {
-        action: Option<SyncAction>,
-    },
     #[cfg(feature = "terminal")]
     Tui(TuiArgs),
 }
@@ -97,7 +75,6 @@ pub enum Commands {
 #[derive(Debug, Clone)]
 pub struct GlobalArgs {
     pub verbose: bool,
-    pub config: Option<PathBuf>,
     /// Account data directory shared with the TUI (`aura tui --data-dir`).
     pub data_dir: Option<PathBuf>,
     /// Print one JSON document per command instead of text.
@@ -115,11 +92,6 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
         .long("verbose")
         .help("Enable verbose logging")
         .switch();
-    let config = long("config")
-        .short('c')
-        .help("Global config file")
-        .argument::<PathBuf>("CONFIG")
-        .optional();
     let data_dir = long("data-dir")
         .help("Account data directory (same as `aura tui --data-dir`)")
         .argument::<PathBuf>("DIR")
@@ -142,7 +114,6 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
     let command = commands_parser();
     construct!(GlobalArgs {
         verbose,
-        config,
         data_dir,
         json,
         yes,
@@ -151,22 +122,63 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
     })
 }
 
+/// A workflow-backed command group.
+fn request_command(
+    name: &'static str,
+    help: &'static str,
+    parser: impl Parser<Request> + 'static,
+) -> impl Parser<Commands> {
+    parser
+        .to_options()
+        .command(name)
+        .help(help)
+        .map(Commands::Run)
+}
+
 fn commands_parser() -> impl Parser<Commands> {
+    let status = request_command("status", "Show account status", status_parser());
+    let snapshot = request_command(
+        "snapshot",
+        "Record a snapshot proposal",
+        pure(Request::SnapshotPropose),
+    );
+    let admin = request_command("admin", "Replace the account admin", admin_parser());
+    let recovery = request_command("recovery", "Guardian recovery flows", recovery_parser());
+    let invite = request_command(
+        "invite",
+        "Contact, guardian and channel invitations",
+        invite_parser(),
+    );
+    let authority = request_command(
+        "authority",
+        "Authorities known to this runtime",
+        authority_parser(),
+    );
+    let context = request_command("context", "Inspect relational contexts", context_parser());
+    let amp = request_command("amp", "AMP channel inspection and bump flows", amp_parser());
+    let chat = request_command("chat", "Secure chat messaging", chat_parser());
+    let contact = request_command("contact", "Contacts", contact_parser());
+    let home = request_command("home", "Homes: create, invite, accept", home_parser());
+    let slash = request_command("slash", "Run a chat slash command", slash_parser());
     let base = construct!([
         init_command(),
-        status_command(),
-        node_command(),
+        status,
+        rpc_command(),
+        serve_command(),
         threshold_command(),
-        snapshot_command(),
-        admin_command(),
-        recovery_command(),
-        invite_command(),
-        authority_command(),
+        snapshot,
+        admin,
+        recovery,
+        invite,
+        authority,
         replay_command(),
         version_command(),
-        context_command(),
-        amp_command(),
-        chat_command(),
+        context,
+        amp,
+        chat,
+        contact,
+        home,
+        slash,
         sync_command(),
     ]);
 
@@ -183,24 +195,29 @@ fn init_command() -> impl Parser<Commands> {
     init_parser()
         .to_options()
         .command("init")
-        .help("Initialize a new threshold account")
+        .help("Initialize threshold device configs (offline)")
         .map(Commands::Init)
 }
 
-fn status_command() -> impl Parser<Commands> {
-    status_parser()
+fn rpc_command() -> impl Parser<Commands> {
+    pure(Commands::Rpc)
         .to_options()
-        .command("status")
-        .help("Show account status")
-        .map(Commands::Status)
+        .command("rpc")
+        .help("Serve JSON-lines requests on stdin/stdout with the node online")
 }
 
-fn node_command() -> impl Parser<Commands> {
-    node_parser()
+fn serve_command() -> impl Parser<Commands> {
+    pure(Commands::Serve)
         .to_options()
-        .command("node")
-        .help("Run node/agent daemon")
-        .map(Commands::Node)
+        .command("serve")
+        .help("Keep the node online without a client until Ctrl+C")
+}
+
+fn sync_command() -> impl Parser<Commands> {
+    sync_parser()
+        .to_options()
+        .command("sync")
+        .help("Journal synchronization (daemon by default)")
 }
 
 fn threshold_command() -> impl Parser<Commands> {
@@ -258,199 +275,6 @@ fn demo_command() -> impl Parser<Commands> {
         .map(|command| Commands::Demo { command })
 }
 
-fn snapshot_command() -> impl Parser<Commands> {
-    pure(SnapshotAction::Propose)
-        .to_options()
-        .command("snapshot")
-        .help("Snapshot maintenance flows")
-        .map(|action| Commands::Snapshot { action })
-}
-
-fn admin_command() -> impl Parser<Commands> {
-    let account = long("account")
-        .help("Account identifier (UUID string)")
-        .argument::<String>("ACCOUNT");
-    let new_admin = long("new-admin")
-        .help("Device ID of the new admin (UUID string)")
-        .argument::<String>("DEVICE");
-    let activation_epoch = long("activation-epoch")
-        .help("Epoch when the new admin becomes authoritative")
-        .argument::<u64>("EPOCH");
-
-    construct!(AdminAction::Replace {
-        account,
-        new_admin,
-        activation_epoch
-    })
-    .to_options()
-    .command("admin")
-    .help("Admin maintenance")
-    .map(|action| Commands::Admin { action })
-}
-
-fn recovery_command() -> impl Parser<Commands> {
-    let start = {
-        let account = long("account")
-            .help("Account identifier to recover")
-            .argument::<String>("ACCOUNT");
-        let guardians = long("guardians")
-            .help("Comma separated guardian device IDs")
-            .argument::<String>("GUARDIANS");
-        let threshold = long("threshold")
-            .help("Required guardian threshold (default 2)")
-            .argument::<u32>("THRESHOLD")
-            .fallback(2);
-        let priority = long("priority")
-            .help("Recovery priority (normal|urgent|emergency)")
-            .argument::<String>("PRIORITY")
-            .fallback("normal".to_string());
-        let dispute_hours = long("dispute-hours")
-            .help("Dispute window in hours (default 48)")
-            .argument::<u64>("HOURS")
-            .fallback(48);
-        let justification = long("justification")
-            .help("Optional human readable justification")
-            .argument::<String>("TEXT")
-            .optional();
-        construct!(RecoveryAction::Start {
-            account,
-            guardians,
-            threshold,
-            priority,
-            dispute_hours,
-            justification
-        })
-        .to_options()
-        .command("start")
-    };
-
-    let approve = {
-        let request_file = long("request-file")
-            .help("Path to a serialized recovery request (JSON)")
-            .argument::<PathBuf>("FILE");
-        construct!(RecoveryAction::Approve { request_file })
-            .to_options()
-            .command("approve")
-    };
-
-    let status = pure(RecoveryAction::Status).to_options().command("status");
-
-    let dispute = {
-        let evidence = long("evidence")
-            .help("Evidence identifier returned by 'aura recovery start'")
-            .argument::<String>("EVIDENCE");
-        let reason = long("reason")
-            .help("Human readable reason included in the dispute log")
-            .argument::<String>("REASON");
-        construct!(RecoveryAction::Dispute { evidence, reason })
-            .to_options()
-            .command("dispute")
-    };
-
-    construct!([start, approve, status, dispute])
-        .to_options()
-        .command("recovery")
-        .help("Guardian recovery flows")
-        .map(|action| Commands::Recovery { action })
-}
-
-fn invite_command() -> impl Parser<Commands> {
-    let create = {
-        let account = long("account")
-            .help("Subject account authority (the guardian role protects it)")
-            .argument::<String>("ACCOUNT");
-        let invitee = long("invitee")
-            .help("Authority ID of the invitee")
-            .argument::<String>("INVITEE");
-        let role = long("role")
-            .help("Role granted to the invitee")
-            .argument::<String>("ROLE")
-            .fallback("contact".to_string());
-        let ttl = long("ttl")
-            .help("Optional TTL in seconds")
-            .argument::<u64>("SECONDS")
-            .optional();
-        construct!(InvitationAction::Create {
-            account,
-            invitee,
-            role,
-            ttl
-        })
-        .to_options()
-        .command("create")
-        .help("Invite an authority as a contact, guardian or channel member")
-    };
-
-    let accept = {
-        let invitation_id = long("invitation-id")
-            .help("Invitation identifier to accept")
-            .argument::<String>("INVITATION_ID");
-        construct!(InvitationAction::Accept { invitation_id })
-            .to_options()
-            .command("accept")
-            .help("Accept a received invitation")
-    };
-
-    let decline = {
-        let invitation_id = long("invitation-id")
-            .help("Invitation identifier to decline")
-            .argument::<String>("INVITATION_ID");
-        construct!(InvitationAction::Decline { invitation_id })
-            .to_options()
-            .command("decline")
-            .help("Decline a received invitation")
-    };
-
-    let cancel = {
-        let invitation_id = long("invitation-id")
-            .help("Invitation identifier to cancel (must be sender)")
-            .argument::<String>("INVITATION_ID");
-        construct!(InvitationAction::Cancel { invitation_id })
-            .to_options()
-            .command("cancel")
-            .help("Cancel an invitation you sent")
-    };
-
-    let list = pure(InvitationAction::List)
-        .to_options()
-        .command("list")
-        .help("List pending invitations");
-
-    let export = {
-        let invitation_id = long("invitation-id")
-            .help("Invitation ID to export as shareable code")
-            .argument::<String>("INVITATION_ID");
-        construct!(InvitationAction::Export { invitation_id })
-            .to_options()
-            .command("export")
-            .help("Export invitation as shareable code for out-of-band transfer")
-    };
-
-    let import = {
-        let code = long("code")
-            .help("Shareable invite code (format: aura:v<version>:<base64>)")
-            .argument::<String>("CODE");
-        construct!(InvitationAction::Import { code })
-            .to_options()
-            .command("import")
-            .help("Import a shareable invite code and show its details")
-    };
-
-    construct!([create, accept, decline, cancel, list, export, import])
-        .to_options()
-        .command("invite")
-        .help("Contact, guardian and channel invitations")
-        .map(|action| Commands::Invite { action })
-}
-
-fn authority_command() -> impl Parser<Commands> {
-    authority_parser()
-        .to_options()
-        .command("authority")
-        .help("Authority management")
-        .map(|command| Commands::Authority { command })
-}
-
 fn replay_command() -> impl Parser<Commands> {
     let trace_file = long("trace-file")
         .help("Path to a conformance/effect trace artifact (json|cbor)")
@@ -483,39 +307,6 @@ fn version_command() -> impl Parser<Commands> {
         .to_options()
         .command("version")
         .help("Show version information")
-}
-
-fn context_command() -> impl Parser<Commands> {
-    context_parser()
-        .to_options()
-        .command("context")
-        .help("Inspect relational contexts and rendezvous state")
-        .map(|action| Commands::Context { action })
-}
-
-fn amp_command() -> impl Parser<Commands> {
-    amp_parser()
-        .to_options()
-        .command("amp")
-        .help("AMP channel inspection and bump flows")
-        .map(|action| Commands::Amp { action })
-}
-
-fn chat_command() -> impl Parser<Commands> {
-    chat_parser()
-        .to_options()
-        .command("chat")
-        .help("Secure chat messaging")
-        .map(|command| Commands::Chat { command })
-}
-
-fn sync_command() -> impl Parser<Commands> {
-    sync_action_parser()
-        .optional()
-        .to_options()
-        .command("sync")
-        .help("Journal synchronization (daemon by default)")
-        .map(|action| Commands::Sync { action })
 }
 
 #[cfg(feature = "terminal")]

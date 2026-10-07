@@ -6,6 +6,7 @@
 //! error chain as copyable detail.
 
 use crate::error::TerminalError;
+use aura_app::ui::contract::SemanticOperationError;
 use aura_app::ui::types::ErrorCategory;
 use aura_app::ui::workflows::user_errors::{classify, UserFacingError};
 use aura_core::{AuraError, TimeoutBudgetError};
@@ -78,6 +79,9 @@ pub struct CommandError {
     /// The raw error chain, when it says more than `message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// The typed semantic failure the workflow published, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<SemanticOperationError>,
 }
 
 impl CommandError {
@@ -87,6 +91,7 @@ impl CommandError {
             code,
             message: message.into(),
             detail: None,
+            failure: None,
         }
     }
 
@@ -121,6 +126,7 @@ impl CommandError {
             code,
             message,
             detail,
+            failure: None,
         }
     }
 

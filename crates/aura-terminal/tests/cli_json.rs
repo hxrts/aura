@@ -83,38 +83,24 @@ async fn every_command_emits_valid_json() {
         "aura-terminal"
     );
 
+    // Account commands print their typed response.
     let status = ok(&["status"]);
+    assert_eq!(status["result"]["type"], "account");
+    assert_eq!(status["result"]["data"]["nickname"], "JsonTester");
+    let authorities = ok(&["authority", "list"]);
+    assert_eq!(authorities["result"]["data"][0]["current"], true);
+    assert_eq!(ok(&["chat", "list"])["result"]["type"], "channels");
     assert_eq!(
-        status["result"]["sections"][0]["fields"]["Nickname"],
-        "JsonTester"
+        ok(&["invite", "list"])["result"],
+        serde_json::json!({"type": "invitations", "data": []})
     );
-
-    ok(&["authority", "list"]);
-    ok(&["chat", "list"]);
-    ok(&["invite", "list"]);
-    ok(&["sync", "status"]);
-    ok(&["recovery", "status"]);
+    assert_eq!(ok(&["sync", "status"])["result"]["type"], "sync");
+    assert_eq!(ok(&["recovery", "status"])["result"]["type"], "recovery");
+    ok(&["chat", "search", "anything"]);
 
     // The rest of the command surface: valid documents whatever the outcome.
     for args in [
         &["snapshot"][..],
-        &[
-            "context",
-            "inspect",
-            "--context",
-            "ctx",
-            "--state-file",
-            "/nonexistent.json",
-        ][..],
-        &[
-            "context",
-            "receipts",
-            "--context",
-            "ctx",
-            "--state-file",
-            "/nonexistent.json",
-        ][..],
-        &["amp", "inspect", "--context", "bad", "--channel", "bad"][..],
         &[
             "threshold",
             "--configs",
@@ -124,38 +110,24 @@ async fn every_command_emits_valid_json() {
             "--mode",
             "verify",
         ][..],
-        &[
-            "authority",
-            "status",
-            "--authority-id",
-            "authority-00000000-0000-0000-0000-000000000001",
-        ][..],
-        &[
-            "chat",
-            "history",
-            "--group-id",
-            "00000000-0000-0000-0000-000000000001",
-        ][..],
         &["invite", "accept", "--invitation-id", "missing"][..],
     ] {
         aura_json(&data_dir, args);
     }
-    fails(&["node"], 2);
 
     // Failures are documents too, with distinct exit codes.
+    fails(&["node"], 2);
     fails(&["no-such-command"], 2);
     fails(&["replay", "--trace-file", "/nonexistent/trace.json"], 2);
     fails(&["invite", "import", "--code", "not-a-code"], 2);
-    // Destructive commands need --yes without a terminal.
     fails(
-        &[
-            "chat",
-            "leave",
-            "--group-id",
-            "00000000-0000-0000-0000-000000000001",
-        ],
+        &["amp", "inspect", "--context", "bad", "--channel", "bad"],
         2,
     );
+    fails(&["context", "inspect", "--context", "bad"], 2);
+    fails(&["chat", "history", "no-such-channel"], 3);
+    // Destructive commands need --yes without a terminal.
+    fails(&["chat", "leave", "general"], 2);
 
     drop(env);
     let _ = std::fs::remove_dir_all(&data_dir);

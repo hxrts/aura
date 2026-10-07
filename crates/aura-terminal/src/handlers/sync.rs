@@ -5,11 +5,11 @@
 //!
 //! Returns structured `CliOutput` for testability.
 
-use crate::cli::sync::SyncAction;
+use crate::cli::sync::SyncDaemonArgs;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
-use aura_agent::{AdmittedSyncCommandCapability, ServiceHealth, SyncManagerConfig};
+use aura_agent::{AdmittedSyncCommandCapability, SyncManagerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::types::identifiers::DeviceId;
 
@@ -132,43 +132,17 @@ async fn required_sync_tick<E: PhysicalTimeEffects + ?Sized>(
     Ok(elapsed / 1000)
 }
 
-/// Handle sync operations through effects
+/// Run the sync daemon in the foreground until Ctrl+C.
 ///
-/// Returns `CliOutput` instead of printing directly.
-///
-/// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_sync(
+/// Progress goes to stderr while running; the returned output is the
+/// final summary.
+pub async fn handle_daemon_mode(
     ctx: &HandlerContext<'_>,
-    action: &SyncAction,
+    args: &SyncDaemonArgs,
 ) -> TerminalResult<CliOutput> {
-    match action {
-        SyncAction::Daemon {
-            interval,
-            max_concurrent,
-            peers,
-        } => handle_daemon_mode(ctx, *interval, *max_concurrent, peers.as_deref()).await,
-
-        SyncAction::Once { peers } => handle_once_mode(ctx, peers).await,
-
-        SyncAction::Status => handle_status(ctx),
-
-        SyncAction::AddPeer { peer } => handle_add_peer(ctx, peer),
-
-        SyncAction::RemovePeer { peer } => handle_remove_peer(ctx, peer),
-    }
-}
-
-/// Run sync daemon mode (default)
-///
-/// Note: Daemon mode prints continuously during operation and returns
-/// summary output when shutting down. The periodic status messages
-/// are printed in real-time.
-async fn handle_daemon_mode(
-    ctx: &HandlerContext<'_>,
-    interval_secs: u64,
-    max_concurrent: usize,
-    peers: Option<&str>,
-) -> TerminalResult<CliOutput> {
+    let interval_secs = args.interval;
+    let max_concurrent = args.max_concurrent;
+    let peers = args.peers.as_deref();
     if interval_secs == 0 {
         return Err(TerminalError::Input(
             "Sync interval must be positive".into(),
@@ -252,103 +226,6 @@ async fn handle_daemon_mode(
     // Progress went to stderr while running; stdout gets one summary.
     output.println("Sync daemon stopped.");
     output.kv("Total ticks", tick_count.to_string());
-    Ok(output)
-}
-
-/// Perform a one-shot sync with specific peers
-async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    output.println("Performing one-shot sync...");
-
-    // Parse peers
-    let peers: Vec<DeviceId> = peers_str
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| ids::device_id(s.trim()))
-        .collect();
-
-    if peers.is_empty() {
-        return Err(TerminalError::Input("No peers specified for sync".into()));
-    }
-
-    output.kv("Peers", peers.len().to_string());
-
-    // Configure for one-shot (no auto sync)
-    let config = SyncManagerConfig::manual_only();
-    let manager = admit_sync_command(ctx, config).await?;
-
-    run_sync_with_cleanup(
-        async {
-            manager.sync_with_peers(peers).await?;
-
-            // Show completion
-            let health = manager.health().await;
-            output.kv("Sync service health", format_service_health(&health));
-
-            Ok::<(), aura_core::AuraError>(())
-        },
-        || manager.stop(),
-    )
-    .await?;
-
-    output.println("One-shot sync complete.");
-    Ok(output)
-}
-
-fn format_service_health(health: &ServiceHealth) -> &'static str {
-    match health {
-        ServiceHealth::Healthy => "healthy",
-        ServiceHealth::Degraded { .. } => "degraded",
-        ServiceHealth::Unhealthy { .. } => "unhealthy",
-        ServiceHealth::NotStarted => "not started",
-        ServiceHealth::Starting => "starting",
-        ServiceHealth::Stopping => "stopping",
-        ServiceHealth::Stopped => "stopped",
-    }
-}
-
-/// Show sync status and metrics
-fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    output.section("Sync Service Status");
-
-    // Status query requires a running sync daemon (started via `aura sync daemon`).
-    // Without a daemon, show usage instructions.
-    output.println("Note: Full status requires a running sync daemon.");
-    output.blank();
-    output.println("To start the sync daemon:");
-    output.println("  aura sync daemon");
-    output.blank();
-    output.println("To sync once with specific peers:");
-    output.println("  aura sync once --peers <device-id-1>,<device-id-2>");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
-}
-
-/// Add a peer to the sync list
-fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Added peer to sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
-    Ok(output)
-}
-
-/// Remove a peer from the sync list
-fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
-    let mut output = CliOutput::new();
-
-    let peer_id = ids::device_id(peer_str);
-    output.kv("Removed peer from sync list", peer_id.to_string());
-    output.println("Note: This will take effect on the next sync daemon start.");
-
-    let _ = ctx; // Acknowledge context
     Ok(output)
 }
 

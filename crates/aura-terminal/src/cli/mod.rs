@@ -1,41 +1,26 @@
 //! Layer 7: CLI Argument Parsing - User-Facing Interface
 //!
-//! **Responsibility**: This module defines Clap command-line argument structures only.
-//! It does NOT contain implementation logic.
+//! **Responsibility**: bpaf argument parsers only, no implementation logic.
 //!
-//! **Separation of Concerns**:
-//! - `cli/` - Argument parsing (Clap definitions) - THIS MODULE
-//! - `handlers/` - Implementation logic (effect calls, business logic)
-//!
-//! User-facing argument groups by domain: **amp** (scenarios), **authority** (inspection),
-//! **context** (relational context management).
-//!
-//! **Integration Flow** (per docs/001_system_architecture.md):
-//! CLI Args → Handlers → Effects → Facts → Views → UI
-//!
-//! Commands drive aura-agent (Layer 6) effect system via CLI handlers (aura-terminal/handlers).
-//! Messages flow through guards (aura-protocol/guards) for authorization and flow control.
+//! Account commands parse straight into a typed [`crate::command::Request`];
+//! the shared command model (`crate::command`) executes it through the
+//! `aura_app::ui::workflows` the TUI and web use, and renders the typed
+//! response. Offline tools (`init`, `threshold`, `replay`) and long-running
+//! modes (`tui`, `sync daemon`) have their own argument types.
 
-pub mod amp;
-pub mod authority;
 pub mod chat;
 pub mod commands;
-pub mod context;
 #[cfg(feature = "development")]
 pub mod demo;
 pub mod init;
-pub mod node;
-pub mod status;
+
+pub mod requests;
 pub mod sync;
 #[cfg(feature = "terminal")]
 pub mod tui;
 
-pub use amp::AmpAction;
-pub use authority::AuthorityCommands;
-pub use chat::ChatCommands;
-pub use context::ContextAction;
 #[cfg(feature = "development")]
 pub use demo::DemoCommands;
-pub use sync::SyncAction;
+pub use sync::SyncDaemonArgs;
 #[cfg(feature = "terminal")]
 pub use tui::TuiArgs;

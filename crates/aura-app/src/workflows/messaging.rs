@@ -89,6 +89,7 @@ mod channel_refs;
 mod channels;
 mod followups;
 mod invites;
+mod queries;
 mod readiness;
 mod routing;
 mod send;
@@ -130,6 +131,7 @@ pub use invites::{
     invite_user_to_channel, invite_user_to_channel_with_context,
     invite_user_to_channel_with_context_terminal_status,
 };
+pub use queries::{channel_history, observed_chat, resolve_channel, search_messages};
 #[cfg(test)]
 use readiness::{
     authoritative_send_readiness_for_channel, channel_id_from_pending_channel_invitation,

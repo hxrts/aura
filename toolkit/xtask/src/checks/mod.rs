@@ -116,6 +116,7 @@ pub fn run(name: &str, args: &[String]) -> Result<()> {
         "shared-raw-quarantine" => policy::run_shared_raw_quarantine(),
         "shared-semantic-dedup" => policy::run_shared_semantic_dedup(),
         "testing-exception-boundary" => policy::run_testing_exception_boundary(),
+        "cli-workflow-facade" => policy::run_cli_workflow_facade(),
         "tui-observation-channel" => policy::run_tui_observation_channel(),
         "tui-product-path" => policy::run_tui_product_path(),
         "tui-selection-contract" => policy::run_tui_selection_contract(),

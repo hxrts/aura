@@ -180,6 +180,12 @@ Published workspace crates use `hxrts-aura-*` Cargo package names even though th
   sanctioned terminal/browser submission boundaries; callback factories and
   bridge helpers must go through the exported submit helpers instead of
   allocating owners ad hoc
+- **CLI workflow facade**: `aura` account commands and `aura rpc` are typed
+  `aura-terminal::command::Request` values executed only through
+  `aura_app::ui::workflows`; add new commands to the command model, not to
+  `src/handlers`. `just ci-frontend-handoff-boundary` runs the
+  `cli-workflow-facade` check, which rejects agent APIs, crate-root
+  `aura_app::*` reach-ins, agent service accessors and local files there
 - **Account creation handoff**: `CreateAccountCallback` requires a workflow
   handoff owner. Runtime-free native staging delegates actual profile writes to
   the app-owned producer and preserves its original operation instance through

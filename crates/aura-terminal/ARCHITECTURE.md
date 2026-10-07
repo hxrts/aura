@@ -27,6 +27,21 @@ Terminal-based CLI and TUI interfaces for account management, authentication, re
 
 ## Invariants
 
+- Account commands are typed `command::Request` values executed by
+  `command::execute` through `aura_app::ui::workflows` only, the functions
+  the TUI and web call; `command::Response` is the typed result. The bpaf
+  parsers build requests and nothing else, and `aura rpc` reads the same
+  `Request` from JSON lines, so CLI and RPC responses are identical. The
+  `cli-workflow-facade` check (`just ci-frontend-handoff-boundary`) rejects
+  agent APIs, crate-root `aura_app::*` reach-ins, agent service accessors and
+  local file access in `src/command`, `src/cli` and `src/rpc`, and any new
+  module under `src/handlers` (offline tools and long-running modes only).
+
+- `aura rpc` keeps one runtime online across requests. RPC events derive
+  from the reactive signals the TUI observes; each subscription has a bounded
+  queue and a lagging subscriber receives one `resync` snapshot instead of
+  the dropped events.
+
 - Every CLI command ends in one outcome: its structured `CliOutput` (text,
   or one `{"ok":true,"result":..}` document under `--json`) with exit code 0,
   or a typed `command::CommandError` whose `ErrorCode` fixes the exit code and
@@ -178,6 +193,8 @@ cargo test -p aura-terminal
 | Guardian ceremony no-peers regression | `tests/regression/regression_guardian_ceremony_no_peers.rs` | Covered |
 | ITF trace verification wrong | `tests/verification_demo_itf.rs` | Covered |
 | CLI `--json` output or exit codes wrong | `tests/cli_json.rs`, `src/command/error.rs` | Covered |
+| CLI and RPC drift, RPC flows or events broken, CLI send differs from TUI send | `tests/cli_rpc.rs` (virtual-time two-runtime fixture) | Covered |
+| CLI bypasses the app workflows | `toolkit/xtask` `cli-workflow-facade` | Covered |
 
 ## References
 

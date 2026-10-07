@@ -357,15 +357,36 @@ View the account:
 aura --data-dir ~/.aura status
 ```
 
-This prints the account's authority, nickname, threshold, device count and contact count. Pass `-c CONFIG` to report a device config file instead.
+This prints the account's authority, nickname, threshold, device count and contact count.
 
-Inspect chat, invitations and the authority:
+Inspect and use chat, contacts, invitations and homes. Channels are named by name or id:
 
 ```bash
 aura chat list
-aura invite list
-aura authority list
+aura chat send general "hello"
+aura chat history general --limit 20
+aura contact list
+aura invite create --invitee AUTHORITY      # prints a shareable code
+aura invite import --code CODE
+aura invite accept --invitation-id ID
+aura home create --name Home
+aura home invite AUTHORITY
+aura slash "/topic welcome" --channel general
 ```
+
+Every account command runs the same `aura_app::ui::workflows` functions as the TUI and web, through one typed request model.
+
+### Driving a node from a program
+
+`aura rpc` keeps one runtime online and reads one JSON request per line on stdin; `aura serve` keeps it online without a client:
+
+```bash
+aura rpc
+{"id":1,"method":"chat_send","params":{"channel":"general","message":"hi"}}
+{"id":2,"method":"subscribe","params":{"topics":["messages"]}}
+```
+
+The first line written is a hello line with the protocol version, methods and event topics. Each response carries the request's `id` and the same `result` or `error` that `aura --json` prints. After `subscribe`, event lines (`{"type":"event","topic":"messages",...}`) interleave with responses; a subscriber that falls behind gets one `resync` event with a fresh snapshot. The session ends on EOF or `{"method":"shutdown"}`.
 
 Command output is printed plainly. Add `-v` to also print runtime diagnostics.
 
@@ -373,7 +394,7 @@ For scripts, the global flags make every command machine-readable:
 
 ```bash
 aura --json status            # {"ok":true,"result":{...}} on stdout
-aura --yes chat leave -g ID   # confirm a destructive command without a prompt
+aura --yes chat leave general  # confirm a destructive command without a prompt
 aura --timeout 30 sync once --peers PEER
 ```
 
