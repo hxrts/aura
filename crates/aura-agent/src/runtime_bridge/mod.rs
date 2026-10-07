@@ -3822,6 +3822,22 @@ impl RuntimeBridge for AgentRuntimeBridge {
         identity::set_mfa_policy(self, policy).await
     }
 
+    async fn set_peer_flow_allowance(
+        &self,
+        context: ContextId,
+        peer: AuthorityId,
+        window: u64,
+    ) -> Result<(), aura_app::runtime_bridge::RuntimeBridgeError> {
+        self.agent
+            .runtime()
+            .effects()
+            .set_flow_allowance(context, peer, window)
+            .await
+            .map_err(|error| {
+                bridge_runtime_internal("Commit flow allowance override failed", error)
+            })
+    }
+
     // =========================================================================
     // Recovery Operations
     // =========================================================================
@@ -4279,19 +4295,35 @@ impl AgentRuntimeBridge {
             "device_epoch_rotation.{}.{}",
             request.ceremony_id, request.participant_device_id
         );
+        let ceremony_runner = self.agent.runtime().ceremony_runner().clone();
+        // A failed initiator session ends the tracked ceremony with a typed
+        // terminal instead of leaving it pending until its deadline.
+        let fut = async move {
+            let ceremony_id = request.ceremony_id.clone();
+            if let Err(error) = service.execute_initiator(request).await {
+                let reason = if error.is_timeout() {
+                    aura_app::runtime_bridge::CeremonyFailureReason::TimedOut
+                } else {
+                    aura_app::runtime_bridge::CeremonyFailureReason::RuntimeFailed
+                };
+                tracing::warn!(error = ?error, ceremony_id = %ceremony_id, "device epoch rotation initiator failed");
+                if let Err(settle_error) = ceremony_runner
+                    .fail_with_reason(&ceremony_id, reason, Some(error.to_string()))
+                    .await
+                {
+                    tracing::warn!(
+                        error = %settle_error,
+                        ceremony_id = %ceremony_id,
+                        "device epoch rotation terminal outcome publication failed"
+                    );
+                }
+            }
+        };
         cfg_if::cfg_if! {
             if #[cfg(target_arch = "wasm32")] {
-                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, async move {
-                    if let Err(error) = service.execute_initiator(request).await {
-                        tracing::warn!(error = %error, "device epoch rotation initiator failed");
-                    }
-                });
+                let _task_handle = self.agent.runtime().tasks().spawn_local_named(task_name, fut);
             } else {
-                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, async move {
-                    if let Err(error) = service.execute_initiator(request).await {
-                        tracing::warn!(error = %error, "device epoch rotation initiator failed");
-                    }
-                });
+                let _task_handle = self.agent.runtime().tasks().spawn_named(task_name, fut);
             }
         }
     }

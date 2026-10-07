@@ -2881,6 +2881,160 @@ fn runtime_enrollment_refused_acceptance_is_terminal_on_both_sides() {
     });
 }
 
+/// Tasks 7, 8, 33, 35: two connected runtimes run a genuine enrollment
+/// end to end. The invitee's accept succeeds only after the signed
+/// choreography, the initiator reaches a committed completion terminal, and
+/// both devices hold the same active authority public package and epoch.
+#[test]
+fn runtime_enrollment_success_commits_on_both_sides_with_agreed_authority_package() {
+    run_async_test_on_large_stack(async move {
+        use aura_app::ui_contract::{OperationId, SemanticOperationPhase};
+        use aura_core::effects::ThresholdSigningEffects;
+        let (issuer, invitee, invitation, start, _accept, _witness) =
+            crate::handlers::invitation::tests::actual_pinned_device_enrollment_fixture(
+                "successful-enrollment",
+            )
+            .await;
+        let authority = issuer.authority_id();
+        let invitee_bridge = Arc::new(AgentRuntimeBridge::new(invitee.clone()));
+        // Accounts created through onboarding carry a nickname suggestion.
+        AgentRuntimeBridge::new(issuer.clone())
+            .initialize_account("Initiator")
+            .await
+            .expect("initiator nickname");
+        invitee_bridge
+            .initialize_account("Joiner")
+            .await
+            .expect("invitee nickname");
+        let info = invitee_bridge
+            .try_list_pending_invitations()
+            .await
+            .expect("invitee pending invitations")
+            .into_iter()
+            .find(|info| info.invitation_id == invitation.invitation_id)
+            .expect("imported enrollment invitation");
+        let invitee_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(aura_app::AppConfig::default(), invitee_bridge)
+                .unwrap(),
+        ));
+        aura_app::ui::workflows::invitation::accept_device_enrollment_invitation(
+            &invitee_app,
+            &info,
+        )
+        .await
+        .expect("a genuine signed acceptance completes on the invitee");
+        let succeeded = {
+            let core = invitee_app.read().await;
+            core.authoritative_semantic_facts().iter().any(|fact| {
+                matches!(fact,
+                    aura_app::ui_contract::AuthoritativeSemanticFact::OperationStatus {
+                        operation_id, status, ..
+                    } if operation_id == &OperationId::device_enrollment()
+                        && status.phase == SemanticOperationPhase::Succeeded)
+            })
+        };
+        assert!(succeeded, "invitee publishes Succeeded");
+
+        let issuer_app = Arc::new(async_lock::RwLock::new(
+            aura_app::AppCore::with_runtime(
+                aura_app::AppConfig::default(),
+                Arc::new(AgentRuntimeBridge::new(issuer.clone())),
+            )
+            .unwrap(),
+        ));
+        let observed =
+            aura_app::ui::workflows::ceremonies::observe_device_enrollment_completion_with_terminal_status(
+                &issuer_app,
+                &start.ceremony_id,
+                aura_app::ui_contract::OperationInstanceId("successful-enrollment".into()),
+            )
+            .await;
+        observed.result.expect("initiator observation");
+        let terminal = observed.terminal.expect("initiator typed terminal");
+        assert_eq!(terminal.status.phase, SemanticOperationPhase::Succeeded);
+        assert_eq!(
+            issuer
+                .runtime()
+                .ceremony_runner()
+                .terminal_outcome(&start.ceremony_id)
+                .await
+                .unwrap(),
+            Some(aura_app::runtime_bridge::CeremonyTerminalOutcome::Committed)
+        );
+
+        // Task 33: both devices install the same trusted authority package.
+        let issuer_signing = issuer.runtime().threshold_signing();
+        let invitee_signing = invitee.runtime().threshold_signing();
+        let issuer_state = issuer_signing
+            .threshold_state(&authority)
+            .await
+            .expect("initiator authority state");
+        let invitee_state = invitee_signing
+            .threshold_state(&authority)
+            .await
+            .expect("joined device authority state");
+        assert_eq!(issuer_state.epoch, invitee_state.epoch, "authority epoch");
+        assert_eq!(
+            issuer_state.threshold, invitee_state.threshold,
+            "authority threshold"
+        );
+        let issuer_package = issuer_signing
+            .public_key_package(&authority)
+            .await
+            .expect("initiator package");
+        let invitee_package = invitee_signing
+            .public_key_package(&authority)
+            .await
+            .expect("joined device package");
+        assert_eq!(
+            hash(&issuer_package),
+            hash(&invitee_package),
+            "both devices must trust the same authority public package"
+        );
+
+        // Tasks 33/35 (L9/K3): a device-threshold ceremony on the now 2-of-2
+        // authority reaches a typed terminal on the initiator instead of
+        // staying pending. Signing its proposal needs the coordinated quorum
+        // owner (QuorumOwnerRequired), so today that terminal is Failed;
+        // completing the rotation remains open under Task 33.
+        let status = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+            &issuer_app,
+            aura_core::types::FrostThreshold::new(2).expect("threshold"),
+            2,
+            vec![
+                issuer.context().device_id().to_string(),
+                start.device_id.to_string(),
+            ],
+        )
+        .await
+        .expect("device threshold ceremony starts")
+        .status_handle();
+        let mut rounds_left = 200_u32;
+        loop {
+            let state = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                &issuer_app,
+                &status,
+            )
+            .await
+            .expect("ceremony status");
+            if state.has_failed {
+                assert!(
+                    state.error_message.is_some(),
+                    "typed failure carries a reason"
+                );
+                break;
+            }
+            if state.is_complete {
+                break;
+            }
+            rounds_left = rounds_left
+                .checked_sub(1)
+                .expect("device threshold ceremony must reach a terminal outcome");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+}
+
 #[test]
 fn runtime_enrollment_selector_rejects_foreign_runtime_before_terminal_mutation() {
     run_async_test_on_large_stack(async move {
