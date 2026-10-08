@@ -298,6 +298,8 @@ pub struct AuraEffectSystem {
     /// Facts received from peers and rejected at ingress (see
     /// [`AuraEffectSystem::admit_peer_fact`]).
     rejected_peer_facts: std::sync::atomic::AtomicU64,
+    /// Owners of this runtime's AMP send generations (Task 172).
+    amp_send_sequencer: aura_protocol::amp::AmpSendSequencer,
     /// Dropped chat messages, inbound and outbound (see
     /// [`AuraEffectSystem::record_message_drop`]).
     message_drops: std::sync::Mutex<MessageDropLog>,
@@ -1297,6 +1299,7 @@ impl AuraEffectSystem {
             crypto,
             enrollment_generation_gate: tokio::sync::Mutex::new(()),
             rejected_peer_facts: std::sync::atomic::AtomicU64::new(0),
+            amp_send_sequencer: aura_protocol::amp::AmpSendSequencer::default(),
             message_drops: std::sync::Mutex::new(MessageDropLog::default()),
             #[cfg(all(test, not(target_arch = "wasm32")))]
             enrollment_retirement_fault: std::sync::Mutex::new(None),
