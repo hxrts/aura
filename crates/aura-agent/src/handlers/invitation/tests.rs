@@ -8028,9 +8028,12 @@ large_stack_async_test!(relayed_channel_membership_fact_from_non_author_is_dropp
 
 // Task 162: a membership event written for another participant is accepted
 // only when its author has standing: a join from an admitted member (the
-// inviter), a departure from a home moderator. A stranger's join for a friend
-// and a kick by a member who does not moderate are refused at intake,
-// recorded in the dropped-message log, and not committed.
+// inviter), a departure from a home moderator. A kick by a member who does
+// not moderate is refused at intake, recorded in the dropped-message log and
+// not committed. Task 199: a join whose author's standing is not observed yet
+// (a stranger's join for a friend) is deferred, neither committed nor logged
+// as a drop, and is admitted when sync offers it again after the author's
+// own join.
 large_stack_async_test!(membership_written_for_another_requires_author_standing, {
     use crate::reactive::MessageDropReason;
     use aura_amp::{ChannelMembershipFact, ChannelParticipantEvent};
@@ -8093,18 +8096,10 @@ large_stack_async_test!(membership_written_for_another_requires_author_standing,
     assert_eq!(processed, 2, "the inviter's join and invited join are processed");
 
     let (drops, total) = effects.message_drops();
-    assert_eq!(total, 2);
-    assert_eq!(drops[0].peer_id, Some(stranger));
+    assert_eq!(total, 1, "only the kick is refused; the stranger's join waits");
+    assert_eq!(drops[0].peer_id, Some(inviter));
     assert_eq!(
         drops[0].reason,
-        MessageDropReason::MembershipAuthorWithoutStanding {
-            author: stranger,
-            participant: friend,
-        }
-    );
-    assert_eq!(drops[1].peer_id, Some(inviter));
-    assert_eq!(
-        drops[1].reason,
         MessageDropReason::MembershipAuthorWithoutStanding {
             author: inviter,
             participant: acceptor,
@@ -8130,4 +8125,29 @@ large_stack_async_test!(membership_written_for_another_requires_author_standing,
             .unwrap();
     assert!(participants.contains(acceptor));
     assert!(!participants.contains(friend));
+
+    // The stranger's own join arrives, then sync offers the deferred join
+    // again: now its author has standing and it is admitted, with no drop.
+    let stranger_self_join = ChannelMembershipFact::new(
+        context_id,
+        channel_id,
+        stranger,
+        ChannelParticipantEvent::Joined,
+        token(5),
+    )
+    .to_generic();
+    send_peer_relational_fact(&effects, authority, stranger, context_id, &stranger_self_join, 5)
+        .await;
+    send_peer_relational_fact(&effects, authority, stranger, context_id, &stranger_join, 6).await;
+    let processed = handler
+        .process_contact_invitation_acceptances(effects.clone())
+        .await
+        .unwrap();
+    assert_eq!(processed, 2, "the stranger's join and the deferred join");
+    assert_eq!(effects.message_drops().1, 1, "the deferral was never a drop");
+    let participants =
+        aura_amp::channel_membership_observations(effects.as_ref(), context_id, channel_id)
+            .await
+            .unwrap();
+    assert!(participants.contains(friend));
 });

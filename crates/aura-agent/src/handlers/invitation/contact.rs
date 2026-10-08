@@ -1142,18 +1142,31 @@ impl<'a> InvitationContactHandler<'a> {
                         }
                         // A membership event written for someone else needs
                         // an author with standing (inviter or moderator).
-                        if let Some(reason) =
-                            super::context_sync::membership_standing_refusal(effects.as_ref(), inner)
-                                .await?
+                        match super::context_sync::membership_standing(effects.as_ref(), inner)
+                            .await?
                         {
-                            effects.record_message_drop(MessageDrop::inbound_intake(
-                                sender,
-                                context,
-                                Some(fact),
-                                reason,
-                            ));
-                            in_flight_envelope = None;
-                            continue;
+                            super::context_sync::MembershipStanding::Admitted => {}
+                            // Standing not observed yet: leave the event for
+                            // the next sync round, which offers it again.
+                            super::context_sync::MembershipStanding::NotYetObserved => {
+                                tracing::debug!(
+                                    peer = %sender,
+                                    context = %context,
+                                    "membership event deferred until its author's standing is observed"
+                                );
+                                in_flight_envelope = None;
+                                continue;
+                            }
+                            super::context_sync::MembershipStanding::Refused(reason) => {
+                                effects.record_message_drop(MessageDrop::inbound_intake(
+                                    sender,
+                                    context,
+                                    Some(fact),
+                                    reason,
+                                ));
+                                in_flight_envelope = None;
+                                continue;
+                            }
                         }
                     }
 
