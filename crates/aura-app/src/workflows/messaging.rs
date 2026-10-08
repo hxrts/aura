@@ -677,33 +677,6 @@ pub mod handoff {
     }
 }
 
-/// Start a direct chat with a contact
-///
-/// **What it does**: Creates a DM channel and selects it
-/// **Returns**: DM channel ID
-/// **Signal pattern**: Updates ViewState; signal forwarding handles CHAT_SIGNAL
-///
-/// This operation:
-/// 1. Gets contact name from ViewState
-/// 2. Creates DM channel if it doesn't exist
-/// 3. Selects the channel for active conversation
-/// 4. ViewState update auto-forwards to CHAT_SIGNAL for UI updates
-///
-/// # Arguments
-/// * `app_core` - The application core
-/// * `contact_id` - Contact ID to start chat with
-/// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
-///
-/// Get current chat state
-///
-/// **What it does**: Reads chat state from ViewState
-/// **Returns**: Current chat state with channels and messages
-/// **Signal pattern**: Read-only operation (no emission)
-// OWNERSHIP: observed
-pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState, AuraError> {
-    Ok(observed_chat_snapshot(app_core).await)
-}
-
 #[cfg(test)]
 #[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
