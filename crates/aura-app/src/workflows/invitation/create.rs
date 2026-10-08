@@ -493,7 +493,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     bootstrap: Option<ChannelBootstrapPackage>,
     stage_tracker: &Option<WorkflowStageTracker>,
     deadline: Option<TimeoutBudget>,
-) -> Result<(ContextId, ChannelBootstrapPackage), ChannelInvitationBootstrapError> {
+) -> Result<(ContextId, Option<ChannelBootstrapPackage>), ChannelInvitationBootstrapError> {
     let requested_context = context_id;
     #[allow(unused_mut)]
     let mut resolved_context = match context_id {
@@ -523,7 +523,7 @@ async fn ensure_channel_invitation_context_and_bootstrap(
     };
 
     if let Some(bootstrap) = bootstrap {
-        return Ok((resolved_context, bootstrap));
+        return Ok((resolved_context, Some(bootstrap)));
     }
 
     let mut runtime_resolved_context = None;
@@ -828,7 +828,7 @@ pub(in crate::workflows) async fn create_channel_invitation_owned(
                         home_id,
                         Some(context_id),
                         channel_name_hint.clone(),
-                        Some(bootstrap),
+                        bootstrap.clone(),
                         message,
                         ttl_ms,
                     )

@@ -191,6 +191,11 @@ fn is_context_sync_envelope(envelope: &aura_core::types::facts::FactEnvelope) ->
         || aura_social::moderation::facts::claimed_moderation_actor(envelope).is_some()
         || envelope.type_id.as_str() == CHAT_FACT_TYPE_ID
         || is_channel_membership_envelope(envelope)
+        || is_channel_epoch_commit_envelope(envelope)
+}
+
+fn is_channel_epoch_commit_envelope(envelope: &aura_core::types::facts::FactEnvelope) -> bool {
+    envelope.type_id.as_str() == aura_amp::CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID
 }
 
 /// The author a peer fact claims, for kinds that name one: a moderation
@@ -626,7 +631,9 @@ impl<'a> InvitationContextSync<'a> {
     }
 
     /// A synced AMP channel membership fact also enters the AMP context
-    /// journal, which the authoritative participant set reduces.
+    /// journal, which the authoritative participant set reduces; a synced
+    /// epoch commit enters it as the committed bump and its consensus
+    /// evidence (it was verified on intake).
     pub(super) async fn admit_membership_fact(
         effects: &AuraEffectSystem,
         fact: &RelationalFact,
@@ -634,13 +641,57 @@ impl<'a> InvitationContextSync<'a> {
         let RelationalFact::Generic { envelope, .. } = fact else {
             return Ok(());
         };
-        if !is_channel_membership_envelope(envelope) {
-            return Ok(());
+        if is_channel_membership_envelope(envelope) {
+            return effects
+                .insert_relational_fact(fact.clone())
+                .await
+                .map_err(|error| AgentError::effects(error.to_string()));
         }
-        effects
-            .insert_relational_fact(fact.clone())
-            .await
-            .map_err(|error| AgentError::effects(error.to_string()))
+        if is_channel_epoch_commit_envelope(envelope) {
+            use aura_journal::DomainFact;
+            let Some(commit) = aura_amp::ChannelEpochCommitFact::from_envelope(envelope) else {
+                return Ok(());
+            };
+            effects
+                .insert_relational_fact(commit.committed_bump_fact())
+                .await
+                .map_err(|error| AgentError::effects(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Why a synced epoch commit is refused: it must verify against the
+    /// new epoch's group key this member holds from its own key ceremony
+    /// (a member not on the new roster holds none and refuses it).
+    pub(super) async fn epoch_commit_refusal(
+        effects: &AuraEffectSystem,
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> Option<String> {
+        use aura_journal::DomainFact;
+        if !is_channel_epoch_commit_envelope(envelope) {
+            return None;
+        }
+        let Some(commit) = aura_amp::ChannelEpochCommitFact::from_envelope(envelope) else {
+            return Some("undecodable channel epoch commit".to_string());
+        };
+        let scope = crate::runtime::context_dkg::ChannelKeyScope {
+            context: commit.context(),
+            channel: commit.channel(),
+        };
+        let trusted = match crate::runtime::context_dkg::load_roster(
+            effects,
+            scope,
+            commit.committed().new_epoch,
+        )
+        .await
+        {
+            Ok((_, public)) => aura_core::crypto::tree_signing::PublicKeyPackage::from(public),
+            Err(error) => return Some(format!("no key for the committed epoch: {error}")),
+        };
+        commit
+            .verify_with(&trusted)
+            .err()
+            .map(|error| error.to_string())
     }
 
     async fn send_context_facts(

@@ -893,20 +893,18 @@ fn highest_reduced_epoch(
     channel: ChannelId,
     amp_transitions: &BTreeMap<AmpTransitionParentKey, AmpTransitionReduction>,
 ) -> u64 {
-    let mut epoch = 0u64;
-    loop {
-        let finalized = amp_transitions.values().any(|transition| {
+    // The latest consensus-finalized successor. A member that joined later
+    // holds only the commits from its join on (it has no key to verify the
+    // earlier ones), so the epoch does not require the chain from epoch 0.
+    amp_transitions
+        .values()
+        .filter(|transition| {
             transition.parent.channel == channel
-                && transition.parent.parent_epoch == epoch
                 && transition.status == AmpTransitionReductionStatus::A3Finalized
-        });
-        if finalized {
-            epoch += 1;
-        } else {
-            break;
-        }
-    }
-    epoch
+        })
+        .map(|transition| transition.parent.parent_epoch + 1)
+        .max()
+        .unwrap_or(0)
 }
 
 /// Fold one bootstrap fact into the per-channel canonical bootstrap. Bootstrap

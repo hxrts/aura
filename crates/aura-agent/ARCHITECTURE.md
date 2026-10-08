@@ -763,6 +763,16 @@ Response acceptance uses transcript domain `aura.invitation.device-enrollment-ac
 
 These locks serialize one runtime's profile owners. They do not establish exclusive profile opening across concurrent operating-system processes. Quorum enrollment remains a separate integration requirement; unsigned participant responses are still rejected.
 
+Channel keys follow membership (Task 164, docs/112 §1.2.1).
+- `runtime::channel_rekey`: when a channel's observed members differ from its current key roster, the lowest member authority coordinates the next epoch. The roster is the bootstrap dealer and recipients at epoch 0, and the key-ceremony roster after that.
+- `runtime::channel_key_ceremony` and `runtime::context_dkg`: a per-(channel, epoch) DKG over transport. Round-two packages are sealed to verified device keys, and each attempt is bound to a fresh ceremony id. Each member stores its share and derives the epoch base key through the threshold PRF.
+- `runtime::channel_consensus` (with `aura-consensus::distributed`): Aura Consensus on the bump among the new roster. Each witness signs with its own share, and the commit verifies against the epoch group key.
+- `runtime::device_key_exchange`: device keys are fetched over authenticated transport, only from contacts or members with standing in the channel.
+- The committed epoch travels as `aura_amp::ChannelEpochCommitFact` through context sync. A receiver admits it only if it verifies against the group key that receiver holds.
+- Sibling devices receive the epoch keys sealed, alongside bootstrap keys (`runtime_bridge::sibling_facts`).
+- A late joiner never receives the epoch-0 key, so `amp_create_channel_bootstrap` returns `None` for an existing bootstrap.
+- Test: `home_flows::home_membership::late_joiner_reads_only_post_join_messages_and_kick_rekeys`.
+
 Device quorum signing (`runtime::services::threshold_signing::device_quorum`, Task 163) produces a multi-device authority signature for tree operations and typed messages. The coordinator proves each request and round with its own share, and the co-signer authenticates against its own retained verifying shares and recomputes the message. The co-signer contributes only under its device-local `DeviceSigningConsent`: escalate to the user by default, or auto-sign after verification. The setting is never replicated and escalation is never bypassed. Nonces live in memory, are created after consent and are consumed by one share. A rotation participant accepts with a share-possession proof and stores its rotated share wrapped like any participant share. Co-signer requests are processed on their own maintenance loop (`device_quorum_signing`), so a participant waiting inside its rotation session still signs its initiator's commit. Tests: `runtime_bridge::tests::two_runtime_two_of_two_rotation_signs_with_both_device_shares`, `two_runtime_rotation_waits_for_user_consent_and_honors_decline`, and `device_quorum::tests::co_signer_refuses_requests_without_the_coordinators_exact_proof`.
 
 ### Owned persistent profile construction

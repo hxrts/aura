@@ -272,24 +272,22 @@ pub async fn create_channel_with_authoritative_binding(
             ));
 
             let bootstrap = if bootstrap_required_for_recipients(member_ids.len()) {
-                Some(
-                    timeout_runtime_call(
-                        &runtime,
-                        "create_channel_with_authoritative_binding",
-                        "amp_create_channel_bootstrap",
-                        MESSAGING_RUNTIME_OPERATION_TIMEOUT,
-                        || {
-                            runtime.amp_create_channel_bootstrap(
-                                context_id,
-                                channel_id,
-                                member_ids.clone(),
-                            )
-                        },
-                    )
-                    .await
-                    .map_err(|e| error::runtime_call("bootstrap channel", e))?
-                    .map_err(|e| error::runtime_call("bootstrap channel", e))?,
+                timeout_runtime_call(
+                    &runtime,
+                    "create_channel_with_authoritative_binding",
+                    "amp_create_channel_bootstrap",
+                    MESSAGING_RUNTIME_OPERATION_TIMEOUT,
+                    || {
+                        runtime.amp_create_channel_bootstrap(
+                            context_id,
+                            channel_id,
+                            member_ids.clone(),
+                        )
+                    },
                 )
+                .await
+                .map_err(|e| error::runtime_call("bootstrap channel", e))?
+                .map_err(|e| error::runtime_call("bootstrap channel", e))?
             } else {
                 None
             };

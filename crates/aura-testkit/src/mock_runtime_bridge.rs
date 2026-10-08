@@ -772,11 +772,11 @@ impl RuntimeBridge for MockRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
         _recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, aura_app::runtime_bridge::RuntimeBridgeError> {
-        Ok(ChannelBootstrapPackage {
+    ) -> Result<Option<ChannelBootstrapPackage>, aura_app::runtime_bridge::RuntimeBridgeError> {
+        Ok(Some(ChannelBootstrapPackage {
             bootstrap_id: Hash32::default(),
             key: vec![0u8; 32],
-        })
+        }))
     }
 
     async fn amp_channel_state_exists(

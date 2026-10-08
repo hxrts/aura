@@ -53,8 +53,10 @@ pub mod simulation_factory;
 // Cross-cutting concerns
 pub(crate) mod channel_consensus;
 pub(crate) mod channel_key_ceremony;
+pub(crate) mod channel_rekey;
 pub(crate) mod context_dkg;
 pub mod contracts;
+pub(crate) mod device_key_exchange;
 pub mod diagnostics;
 pub mod errors;
 pub(crate) mod flow_ingress;

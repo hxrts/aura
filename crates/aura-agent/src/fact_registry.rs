@@ -32,7 +32,9 @@
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
 
 use aura_amp::{
-    ChannelMembershipFact, ChannelMembershipFactReducer, CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
+    ChannelEpochCommitFact, ChannelEpochCommitFactReducer, ChannelMembershipFact,
+    ChannelMembershipFactReducer, CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID,
+    CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
 };
 use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
@@ -97,6 +99,10 @@ pub fn build_fact_registry() -> FactRegistry {
         CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
         Box::new(ChannelMembershipFactReducer),
     );
+    registry.register::<ChannelEpochCommitFact>(
+        CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID,
+        Box::new(ChannelEpochCommitFactReducer),
+    );
     registry.register::<SocialFact>(SOCIAL_FACT_TYPE_ID, Box::new(SocialFactReducer));
     registry.register::<MaintenanceJournalFact>(
         maintenance_journal_fact_type_id(),
@@ -130,6 +136,7 @@ mod tests {
         assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
         assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
         assert!(registry.is_registered(CHANNEL_MEMBERSHIP_FACT_TYPE_ID));
+        assert!(registry.is_registered(CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID));
         assert!(registry.is_registered(SOCIAL_FACT_TYPE_ID));
         assert!(registry.is_registered(maintenance_journal_fact_type_id()));
         assert!(registry.is_registered("moderation:home-mute"));

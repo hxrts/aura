@@ -4210,7 +4210,6 @@ fn completeness_violations(repo_root: &Path, mode: &str) -> Result<Vec<String>> 
                 "crates/aura-app/src/workflows/semantic_facts/proofs/proof_issuance.rs:issue_device_enrollment_started_proof",
                 "crates/aura-app/src/workflows/semantic_facts/proofs/proof_issuance.rs:issue_message_committed_proof",
                 "crates/aura-app/src/workflows/semantic_facts/proofs/proof_issuance.rs:issue_device_enrollment_imported_proof",
-                "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_boundary",
                 "crates/aura-agent/src/runtime_bridge/mod.rs:secure_storage_bootstrap_store_capabilities",
                 "crates/aura-agent/src/runtime_bridge/identity.rs:get_settings",
                 "crates/aura-agent/src/runtime_bridge/identity.rs:list_devices",

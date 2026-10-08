@@ -1,9 +1,9 @@
 //! Home membership beyond the first invitation.
 //!
-//! - Late joiner (work/8.md Tasks 31/55): Barbara creates a home, invites
-//!   Alex, and once the channel has traffic she invites Carol. The home's AMP
-//!   channel already has its epoch-0 bootstrap; Carol must still join, read
-//!   and send, and all three must see each other's messages.
+//! - Late joiner (Task 164): Barbara creates a home, invites Alex, and once
+//!   the channel has traffic she invites Carol. Carol reads only what is
+//!   sent after she joins (the channel rekeys among its members); a kicked
+//!   member reads nothing sent after the kick.
 //! - Participant to member (Task 62): `/admit` turns a participant into a
 //!   member, who can then be designated moderator.
 
@@ -52,8 +52,56 @@ async fn wait_lists_member(
     Ok(())
 }
 
+/// The home channel's reduced AMP epoch on `peer`.
+async fn channel_epoch(peer: &Peer, home: aura_core::types::identifiers::ChannelId) -> Option<u64> {
+    let context = home_view(&peer.app, home).await?.context_id?;
+    aura_protocol::amp::get_channel_state(&peer.agent.runtime().effects(), context, home)
+        .await
+        .ok()
+        .map(|state| state.chan_epoch)
+}
+
+/// Wait until every one of `peers` has moved the home channel to `epoch`.
+async fn wait_epoch(
+    peers: &[&Peer],
+    home: aura_core::types::identifiers::ChannelId,
+    epoch: u64,
+) -> Result<()> {
+    for peer in peers {
+        wait_until(
+            &format!("{} reaches channel epoch {epoch}", peer.id),
+            || async { channel_epoch(peer, home).await.is_some_and(|e| e >= epoch) },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Send `text` from `from` and wait until each of `to` reads it.
+async fn exchange(
+    home: aura_core::types::identifiers::ChannelId,
+    from: &Peer,
+    text: &str,
+    to: &[&Peer],
+) -> Result<()> {
+    messaging::send_message_now_with_instance(&from.app, home, text, None).await?;
+    for peer in to {
+        wait_until(&format!("{text:?} reaches {}", peer.id), || {
+            received(peer, home, from, text)
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+// Task 164: a late joiner reads only what is sent after it joins. Carol's
+// join moves the home channel to a new epoch keyed by a ceremony among the
+// members (Carol never receives the epoch-0 key); she reads post-join
+// messages but not the earlier one, while Barbara and Alex keep their
+// history. A kicked member is left out of the next epoch's key and reads
+// nothing sent after the kick.
 #[tokio::test(start_paused = true)]
-async fn late_joiner_joins_home_and_exchanges_messages() -> Result<()> {
+async fn late_joiner_reads_only_post_join_messages_and_kick_rekeys() -> Result<()> {
     let net = SimNet::new();
     let barbara = net.peer(111).await?;
     let alex = net.peer(115).await?;
@@ -63,32 +111,45 @@ async fn late_joiner_joins_home_and_exchanges_messages() -> Result<()> {
 
     let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
     join_home(&barbara, &alex, home).await?;
-    messaging::send_message_now_with_instance(&alex.app, home, "before carol", None).await?;
-    wait_until("Barbara receives Alex's first message", || {
-        received(&barbara, home, &alex, "before carol")
-    })
-    .await?;
+    exchange(home, &alex, "before carol", &[&barbara]).await?;
 
-    // The channel's bootstrap already exists: Carol joins late.
+    // Carol joins late: the members rekey the channel to epoch 1.
     join_home(&barbara, &carol, home).await?;
     wait_lists_member(&[&barbara, &alex, &carol], home, &carol).await?;
+    wait_epoch(&[&barbara, &alex, &carol], home, 1).await?;
 
-    for (from, text) in [
-        (&carol, "hello from carol"),
-        (&barbara, "welcome carol"),
-        (&alex, "hi carol"),
-    ] {
-        messaging::send_message_now_with_instance(&from.app, home, text, None).await?;
-        for to in [&barbara, &alex, &carol] {
-            if to.id == from.id {
-                continue;
-            }
-            wait_until(&format!("{text:?} reaches {}", to.id), || {
-                received(to, home, from, text)
-            })
-            .await?;
-        }
+    exchange(home, &carol, "hello from carol", &[&barbara, &alex]).await?;
+    exchange(home, &barbara, "welcome carol", &[&alex, &carol]).await?;
+    exchange(home, &alex, "hi carol", &[&barbara, &carol]).await?;
+    assert!(
+        !received(&carol, home, &alex, "before carol").await,
+        "a late joiner cannot read messages from before it joined"
+    );
+    for member in [&barbara, &alex] {
+        assert!(
+            received(member, home, &alex, "before carol").await || member.id == alex.id,
+            "existing members keep their history"
+        );
     }
+
+    // Barbara kicks Alex: Barbara and Carol rekey to epoch 2 without him.
+    aura_app::ui::workflows::moderation::kick_user_resolved(
+        &barbara.app,
+        home,
+        alex.id,
+        None,
+        10_000,
+    )
+    .await?;
+    wait_epoch(&[&barbara, &carol], home, 2).await?;
+    exchange(home, &barbara, "after the kick", &[&carol]).await?;
+    for _ in 0..20 {
+        support::quiesce().await;
+    }
+    assert!(
+        !received(&alex, home, &barbara, "after the kick").await,
+        "a kicked member cannot read messages sent after the kick"
+    );
     net.finish().await
 }
 
@@ -279,6 +340,8 @@ async fn invite_command_into_existing_channel_succeeds() -> Result<()> {
             .is_ok()
     })
     .await?;
+    // Carol reads only what is sent after her join's key epoch (Task 164).
+    wait_epoch(&[&barbara, &carol], home, 1).await?;
     messaging::send_message_now_with_instance(&barbara.app, home, "hi invitee", None).await?;
     wait_until("Carol reads the channel", || {
         received(&carol, home, &barbara, "hi invitee")
