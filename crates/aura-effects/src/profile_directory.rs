@@ -1525,9 +1525,24 @@ fn post_link_process_checkpoint(name: &std::ffi::OsStr) -> std::io::Result<()> {
     {
         return Ok(());
     }
-    let marker = std::env::var_os("AURA_LIFETIME_PRELINK_MARKER")
-        .ok_or_else(|| std::io::Error::other("post-link fixture marker absent"))?;
-    std::fs::write(marker, target)?;
+    park_at_process_checkpoint(&target)
+}
+
+#[cfg(test)]
+pub(crate) const PROCESS_CHECKPOINT_SENTINEL: &str = "aura-lifetime-process-checkpoint:";
+
+/// Announce an exact killed-process fixture checkpoint on stdout and park.
+///
+/// The parent test reads this line as its authoritative readiness signal, so
+/// reaching the checkpoint never races a wall-clock budget under build load.
+/// Direct stdout writes bypass libtest's `print!` capture.
+#[cfg(test)]
+pub(crate) fn park_at_process_checkpoint(target: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    writeln!(stdout, "{PROCESS_CHECKPOINT_SENTINEL}{target}")?;
+    stdout.flush()?;
+    drop(stdout);
     loop {
         std::thread::park();
     }
