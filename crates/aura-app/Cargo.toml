@@ -64,6 +64,7 @@ aura-social = { package = "hxrts-aura-social", path = "../aura-social", version 
 aura-maintenance = { package = "hxrts-aura-maintenance", path = "../aura-maintenance", version = "=0.2.0" }
 aura-protocol = { package = "hxrts-aura-protocol", path = "../aura-protocol", version = "=0.2.0" }
 aura-recovery = { package = "hxrts-aura-recovery", path = "../aura-recovery", version = "=0.2.0" }
+aura-sync = { package = "hxrts-aura-sync", path = "../aura-sync", version = "=0.2.0" }
 aura-macros = { package = "hxrts-aura-macros", path = "../aura-macros", version = "=0.2.0" }
 
 serde = { workspace = true }

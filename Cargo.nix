@@ -13001,6 +13001,11 @@ library used by the other higher-level Hickory DNS crates.
             rename = "aura-social";
           }
           {
+            name = "hxrts-aura-sync";
+            packageId = "hxrts-aura-sync";
+            rename = "aura-sync";
+          }
+          {
             name = "js-sys";
             packageId = "js-sys";
             optional = true;

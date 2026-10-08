@@ -7,8 +7,8 @@
 use super::request::{ExportFormat, InviteRole, Request};
 use super::response::{
     AccountView, AmpChannelView, AuthorityView, CeremonyStatusView, ChannelView, ContactView,
-    InvitationView, MessageView, NotificationView, OperationView, RecoveryView, Response,
-    SettingsView,
+    InvitationView, MessageView, NotificationView, OperationView, OtaReleaseView, OtaUpgradeView,
+    RecoveryView, Response, SettingsView,
 };
 use super::{CommandError, ErrorCode};
 use crate::handlers::AuraEffectSystem;
@@ -26,13 +26,18 @@ use aura_app::ui::workflows::signals::read_signal_or_default;
 use aura_app::ui::workflows::strong_command::CommandResolver;
 use aura_app::ui::workflows::{
     access, admin, amp, budget, ceremonies, contacts, context, invitation, messaging, moderation,
-    moderator, network, query, recovery, settings, slash_commands, snapshot, sync, system, time,
+    moderator, network, ota, query, recovery, settings, slash_commands, snapshot, sync, system,
+    time,
 };
 use aura_core::types::identifiers::{
     AccountId, AuthorityId, CeremonyId, ChannelId, ContextId, InvitationId,
 };
 use aura_core::types::FrostThreshold;
-use aura_core::AuraError;
+use aura_core::{AuraError, Hash32};
+use aura_maintenance::{
+    AuraActivationScope, AuraPolicyScope, AuraReleaseId, AuraReleaseManifest, OtaScopeStage,
+};
+use base64::Engine as _;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -124,6 +129,18 @@ fn settle<T>(
         Ok(value) => Ok((value, outcome.terminal.map(OperationView::from))),
         Err(error) => Err(terminal_failure(error, outcome.terminal.as_ref())),
     }
+}
+
+/// A release id as typed: the hex of its hash.
+fn parse_release_id(raw: &str) -> Result<AuraReleaseId, CommandError> {
+    Hash32::from_hex(raw.trim())
+        .map(AuraReleaseId::new)
+        .map_err(|_| CommandError::invalid(format!("invalid release id {raw:?}")))
+}
+
+/// The activation scope the CLI stages and reports: this authority.
+fn own_activation_scope(authority_id: AuthorityId) -> AuraActivationScope {
+    AuraActivationScope::AuthorityLocal { authority_id }
 }
 
 async fn now_ms(ctx: &CommandContext) -> Result<u64, CommandError> {
@@ -1126,6 +1143,101 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
                 format!("Admin {new_admin} activates at epoch {activation_epoch}"),
                 None,
             ))
+        }
+
+        Request::OtaList => {
+            let view = ota::ota_view(ctx.effects.as_ref()).await?;
+            let mine = AuraPolicyScope::Authority {
+                authority_id: ctx.authority_id,
+            };
+            Ok(Response::OtaReleases(
+                view.releases
+                    .values()
+                    .map(|r| OtaReleaseView {
+                        release_id: r.release_id.as_hash().to_string(),
+                        series_id: r.series_id.as_hash().to_string(),
+                        version: r.version.to_string(),
+                        declared_by: r.declared_by.iter().map(ToString::to_string).collect(),
+                        artifacts: view.artifacts.get(&r.release_id).map_or(0, |a| a.len()),
+                        certificates: view.certificates.get(&r.release_id).map_or(0, |c| c.len()),
+                        recommended: view
+                            .recommendations
+                            .iter()
+                            .any(|rec| rec.release_id == r.release_id && rec.scope == mine),
+                    })
+                    .collect(),
+            ))
+        }
+        Request::OtaStatus => {
+            let view = ota::ota_view(ctx.effects.as_ref()).await?;
+            let mine = own_activation_scope(ctx.authority_id);
+            Ok(Response::OtaUpgrades(
+                view.upgrades
+                    .values()
+                    .filter(|u| u.scope == mine)
+                    .map(|u| OtaUpgradeView {
+                        scope: format!("authority {}", ctx.authority_id),
+                        to_release_id: u.to_release_id.as_hash().to_string(),
+                        from_release_id: u.from_release_id.map(|f| f.as_hash().to_string()),
+                        stage: match u.stage {
+                            OtaScopeStage::Staged => "staged",
+                            OtaScopeStage::CutoverApproved => "cutover_approved",
+                            OtaScopeStage::CutoverCompleted => "cutover_completed",
+                            OtaScopeStage::RolledBack => "rolled_back",
+                        }
+                        .to_string(),
+                        approvals: u.approvals.len(),
+                        rollbacks: u.rollbacks.iter().cloned().collect(),
+                    })
+                    .collect(),
+            ))
+        }
+        Request::OtaPublish {
+            manifest,
+            artifacts,
+        } => {
+            let manifest: AuraReleaseManifest = serde_json::from_value(manifest)
+                .map_err(|e| CommandError::invalid(format!("invalid release manifest: {e}")))?;
+            let blobs = artifacts
+                .iter()
+                .map(|blob| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(blob)
+                        .map_err(|e| CommandError::invalid(format!("invalid artifact base64: {e}")))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let release_id =
+                ota::publish_release(ctx.effects.as_ref(), ctx.authority_id, &manifest, blobs)
+                    .await?;
+            Ok(Response::OtaPublished {
+                release_id: release_id.as_hash().to_string(),
+            })
+        }
+        Request::OtaRecommend { release } => {
+            let release_id = parse_release_id(&release)?;
+            ota::recommend_release(
+                ctx.effects.as_ref(),
+                ctx.authority_id,
+                release_id,
+                AuraPolicyScope::Authority {
+                    authority_id: ctx.authority_id,
+                },
+            )
+            .await?;
+            Ok(done(format!("Recommended release {release}"), None))
+        }
+        Request::OtaStage { release, from } => {
+            let release_id = parse_release_id(&release)?;
+            let from = from.as_deref().map(parse_release_id).transpose()?;
+            ota::stage_release(
+                ctx.effects.as_ref(),
+                ctx.authority_id,
+                own_activation_scope(ctx.authority_id),
+                release_id,
+                from,
+            )
+            .await?;
+            Ok(done(format!("Staged release {release}"), None))
         }
     }
 }

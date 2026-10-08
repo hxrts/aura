@@ -289,6 +289,27 @@ pub enum Request {
     /// Progress of a key-rotation ceremony this account runs.
     RotationStatus { ceremony_id: String },
 
+    /// Declared OTA releases and their published evidence.
+    OtaList,
+    /// This account's scoped OTA upgrades.
+    OtaStatus,
+    /// Publish a signed release manifest and artifact blobs (base64); the
+    /// CLI reads them from files.
+    OtaPublish {
+        manifest: serde_json::Value,
+        #[serde(default)]
+        artifacts: Vec<String>,
+    },
+    /// Recommend a declared release to this account.
+    OtaRecommend { release: String },
+    /// Stage a declared release for this account; `from` is the release it
+    /// runs, when no completed cutover records it.
+    OtaStage {
+        release: String,
+        #[serde(default)]
+        from: Option<String>,
+    },
+
     /// Home storage budget.
     Budget,
     /// Pending friend requests, invitations and recovery requests.
@@ -511,6 +532,17 @@ pub fn all_request_examples() -> Vec<Request> {
         Request::DeviceRemove { device: s() },
         Request::RotationCancel { ceremony_id: s() },
         Request::RotationStatus { ceremony_id: s() },
+        Request::OtaList,
+        Request::OtaStatus,
+        Request::OtaPublish {
+            manifest: serde_json::Value::Null,
+            artifacts: Vec::new(),
+        },
+        Request::OtaRecommend { release: s() },
+        Request::OtaStage {
+            release: s(),
+            from: None,
+        },
         Request::Budget,
         Request::NotificationsList,
         Request::RecoveryStart {
@@ -613,6 +645,11 @@ pub fn all_request_examples() -> Vec<Request> {
             | Request::DeviceRemove { .. }
             | Request::RotationCancel { .. }
             | Request::RotationStatus { .. }
+            | Request::OtaList
+            | Request::OtaStatus
+            | Request::OtaPublish { .. }
+            | Request::OtaRecommend { .. }
+            | Request::OtaStage { .. }
             | Request::Budget
             | Request::NotificationsList
             | Request::RecoveryStart { .. }

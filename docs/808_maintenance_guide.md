@@ -178,6 +178,18 @@ There is no network-wide authoritative cutover phase for the whole Aura network.
 
 The upgrade classification (soft fork vs hard fork) is defined in [Distributed Maintenance Architecture](116_maintenance.md).
 
+### Releases from the CLI
+
+`aura ota` drives release distribution and staging for the account (also as `ota_*` methods over `aura rpc`). Each command commits maintenance facts through `aura_app::ui::workflows::ota`, and `list` and `status` read the state reduced from those facts (`aura_maintenance::OtaView`).
+
+- `aura ota publish --manifest FILE [--artifact FILE]...` verifies a signed release manifest (provenance-derived release id and signature) and each artifact's hash and size, stores the bundle, and commits its distribution facts.
+- `aura ota list` shows declared releases with their artifact and certificate counts and whether they are recommended to this account.
+- `aura ota recommend RELEASE` recommends a declared release to this account.
+- `aura ota stage RELEASE [--from RELEASE]` stages a declared release for this account. `--from` names the running release when no completed cutover records it.
+- `aura ota status` shows this account's staged, approved, completed or rolled-back upgrades.
+
+Cutover and rollback execution stay with the updater/launcher control plane and the runtime's activation ceremony.
+
 ### Basic Upgrade Operation
 
 ```rust

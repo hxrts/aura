@@ -136,6 +136,38 @@ pub fn render(response: &Response) -> CliOutput {
                 out.kv("Error", error);
             }
         }
+        Response::OtaReleases(releases) => {
+            out.section("Releases");
+            if releases.is_empty() {
+                out.println("No releases declared");
+            }
+            for r in releases {
+                let mark = if r.recommended { " (recommended)" } else { "" };
+                out.println(format!(
+                    "{} v{}{mark}: {} artifact(s), {} certificate(s)",
+                    r.release_id, r.version, r.artifacts, r.certificates
+                ));
+            }
+        }
+        Response::OtaUpgrades(upgrades) => {
+            out.section("Upgrades");
+            if upgrades.is_empty() {
+                out.println("No staged upgrades");
+            }
+            for u in upgrades {
+                let from = u.from_release_id.as_deref().unwrap_or("?");
+                out.println(format!(
+                    "{}: {from} -> {} [{}]",
+                    u.scope, u.to_release_id, u.stage
+                ));
+                for rollback in &u.rollbacks {
+                    out.println(format!("  rolled back: {rollback}"));
+                }
+            }
+        }
+        Response::OtaPublished { release_id } => {
+            out.kv("Published release", release_id);
+        }
         Response::NeighborhoodCreated { neighborhood_id } => {
             out.kv("Created neighborhood", neighborhood_id);
         }

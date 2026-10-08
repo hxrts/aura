@@ -1722,6 +1722,119 @@
             "type": "object"
           },
           {
+            "description": "Declared OTA releases and their published evidence.",
+            "properties": {
+              "method": {
+                "const": "ota_list",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "This account's scoped OTA upgrades.",
+            "properties": {
+              "method": {
+                "const": "ota_status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "method"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Publish a signed release manifest and artifact blobs (base64); the\nCLI reads them from files.",
+            "properties": {
+              "method": {
+                "const": "ota_publish",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "artifacts": {
+                    "default": [],
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "manifest": true
+                },
+                "required": [
+                  "manifest"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Recommend a declared release to this account.",
+            "properties": {
+              "method": {
+                "const": "ota_recommend",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "release": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "release"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Stage a declared release for this account; `from` is the release it\nruns, when no completed cutover records it.",
+            "properties": {
+              "method": {
+                "const": "ota_stage",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "from": {
+                    "default": null,
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "release": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "release"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
             "description": "Home storage budget.",
             "properties": {
               "method": {
@@ -2587,6 +2700,88 @@
         ],
         "type": "object"
       },
+      "OtaReleaseView": {
+        "properties": {
+          "artifacts": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "certificates": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "declared_by": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "recommended": {
+            "description": "Recommended to this account.",
+            "type": "boolean"
+          },
+          "release_id": {
+            "type": "string"
+          },
+          "series_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "release_id",
+          "series_id",
+          "version",
+          "declared_by",
+          "artifacts",
+          "certificates",
+          "recommended"
+        ],
+        "type": "object"
+      },
+      "OtaUpgradeView": {
+        "properties": {
+          "approvals": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "from_release_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rollbacks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "stage": {
+            "description": "`staged`, `cutover_approved`, `cutover_completed` or `rolled_back`.",
+            "type": "string"
+          },
+          "to_release_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "to_release_id",
+          "stage",
+          "approvals",
+          "rollbacks"
+        ],
+        "type": "object"
+      },
       "RecoveryView": {
         "properties": {
           "active_ceremony": {
@@ -2779,6 +2974,68 @@
               },
               "type": {
                 "const": "ceremony_status",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/OtaReleaseView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "ota_releases",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "items": {
+                  "$ref": "#/$defs/OtaUpgradeView"
+                },
+                "type": "array"
+              },
+              "type": {
+                "const": "ota_upgrades",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "properties": {
+                  "release_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "release_id"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "const": "ota_published",
                 "type": "string"
               }
             },

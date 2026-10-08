@@ -7,8 +7,9 @@ use crate::cli::{
     requests::{
         access_parser, account_parser, admin_parser, amp_parser, authority_parser, contact_parser,
         context_parser, device_parser, friend_parser, guardians_parser, home_parser, invite_parser,
-        moderation_parser, neighborhood_parser, notifications_parser, peer_parser, profile_parser,
-        recovery_parser, rotation_parser, settings_parser, slash_parser, status_parser,
+        moderation_parser, neighborhood_parser, notifications_parser, ota_parser, peer_parser,
+        profile_parser, recovery_parser, rotation_parser, settings_parser, slash_parser,
+        status_parser,
     },
     sync::{sync_parser, SyncDaemonArgs},
     tui::tui_parser,
@@ -56,6 +57,12 @@ pub enum Commands {
     /// `aura account create`: create an account where none exists.
     AccountCreate {
         nickname: String,
+    },
+    /// `aura ota publish`: the manifest and artifact files are read by the
+    /// binary and sent as a `Request::OtaPublish`.
+    OtaPublish {
+        manifest: std::path::PathBuf,
+        artifacts: Vec<std::path::PathBuf>,
     },
     Init(InitArgs),
     /// `aura rpc`: JSON-lines requests on stdin/stdout.
@@ -191,7 +198,9 @@ fn commands_parser() -> impl Parser<Commands> {
     let rotation = request_command("rotation", "Key-rotation ceremonies", rotation_parser());
     let budget = request_command("budget", "Home storage budget", pure(Request::Budget));
     let account = account_command();
-    let account = construct!([account, profile, settings, device, guardians, rotation, budget]);
+    let ota = ota_command();
+    let account =
+        construct!([account, profile, settings, device, guardians, rotation, budget, ota]);
     let base = construct!([
         init_command(),
         status,
@@ -248,6 +257,28 @@ fn account_command() -> impl Parser<Commands> {
         .to_options()
         .command("account")
         .help("Create or refresh the account")
+}
+
+fn ota_command() -> impl Parser<Commands> {
+    let manifest = long("manifest")
+        .help("Signed release manifest (JSON)")
+        .argument::<std::path::PathBuf>("FILE");
+    let artifacts = long("artifact")
+        .help("Artifact file described by the manifest (repeatable)")
+        .argument::<std::path::PathBuf>("FILE")
+        .many();
+    let publish = construct!(Commands::OtaPublish {
+        manifest,
+        artifacts
+    })
+    .to_options()
+    .command("publish")
+    .help("Publish a signed release and its artifacts");
+    let requests = ota_parser().map(Commands::Run);
+    construct!([publish, requests])
+        .to_options()
+        .command("ota")
+        .help("Over-the-air releases (docs/116)")
 }
 
 fn rpc_command() -> impl Parser<Commands> {
