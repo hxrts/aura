@@ -218,11 +218,6 @@ impl ViewState {
         &self.homes
     }
 
-    /// Get mutable homes state
-    pub(crate) fn homes_mut(&mut self) -> &mut HomesState {
-        &mut self.homes
-    }
-
     /// Update homes state
     pub(crate) fn set_homes(&mut self, state: HomesState) {
         self.homes = state;

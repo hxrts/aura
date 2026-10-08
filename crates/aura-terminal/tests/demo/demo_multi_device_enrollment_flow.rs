@@ -55,12 +55,13 @@ async fn setup_test_env() -> TestEnv {
 
     let device_id_str = "test-device-a".to_string();
     let nickname_suggestion = "DemoUser-A".to_string();
-    let (authority_id, context_id) = create_account(&test_dir, &nickname_suggestion)
-        .await
-        .expect("Failed to create account");
+    let seed = 2024u64;
+    let (authority_id, context_id) =
+        create_account(&test_dir, TuiMode::Demo { seed }, &nickname_suggestion)
+            .await
+            .expect("Failed to create account");
 
     let shared_transport = SharedTransport::new();
-    let seed = 2024u64;
     let effect_ctx =
         EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 

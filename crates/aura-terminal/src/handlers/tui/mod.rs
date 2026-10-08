@@ -1037,6 +1037,7 @@ async fn handle_tui_launch_with_bootstrap(
                 &device_label,
                 has_existing_account,
                 pending_runtime_bootstrap,
+                &profile,
                 simulator.as_ref(),
                 signed_codes,
             )?;
@@ -1179,7 +1180,9 @@ mod tests {
     #[tokio::test]
     async fn production_runtime_opens_a_newly_created_account() {
         let dir = tempfile::tempdir().unwrap();
-        super::create_account(dir.path(), "Alex").await.unwrap();
+        super::create_account(dir.path(), super::TuiMode::Production, "Alex")
+            .await
+            .unwrap();
         let runtime = super::open_production_runtime(dir.path())
             .await
             .unwrap()

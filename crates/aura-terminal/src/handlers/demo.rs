@@ -62,6 +62,7 @@ impl DemoHandler {
                 detailed_report,
             })
             .await
+            .map(drop)
             .map_err(|e| AuraError::internal(format!("Recovery workflow failed: {e}")))
     }
 

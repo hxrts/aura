@@ -36,7 +36,7 @@ use aura_app::ui_contract::AuthoritativeSemanticFact;
 use aura_app::views::chat::ChannelType;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::identifiers::{AuthorityId, ChannelId};
-use aura_terminal::handlers::tui::create_account;
+use aura_terminal::handlers::tui::{create_account, TuiMode};
 use aura_terminal::tui::effects::EffectCommand;
 
 #[allow(clippy::duplicate_mod)]
@@ -797,7 +797,7 @@ async fn test_account_backup_roundtrip() {
         .build()
         .await;
     let ctx = env.ctx.clone();
-    create_account(&env.test_dir, "TestUser-backup")
+    create_account(&env.test_dir, TuiMode::Production, "TestUser-backup")
         .await
         .expect("Failed to create persisted account for backup test");
     ctx.set_account_created();

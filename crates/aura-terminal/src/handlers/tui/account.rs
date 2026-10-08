@@ -327,13 +327,20 @@ pub async fn create_new_account(
     create_account_in(&store, nickname_suggestion).await
 }
 
-/// Stage a new production account at `base_path`, owning the profile only
-/// while writing.
+/// Stage a new account at `base_path` in the profile store `mode` launches
+/// with (`ProfileStore::for_mode`, as the TUI launcher does), owning the
+/// profile only while writing. A demo or simulation runtime must be staged
+/// with its demo mode; a production runtime with `TuiMode::Production`.
 pub async fn create_account(
     base_path: &Path,
+    mode: super::TuiMode,
     nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
-    create_account_in(&ProfileStore::production(base_path)?, nickname_suggestion).await
+    create_account_in(
+        &ProfileStore::for_mode(base_path, mode)?,
+        nickname_suggestion,
+    )
+    .await
 }
 
 /// Native configured staging adapter. Semantic completion belongs to the app producer.
@@ -795,9 +802,10 @@ mod tests {
     async fn create_account_persists_pending_bootstrap_and_account() {
         let temp_dir = tempdir().expect("create temp dir");
 
-        let (authority_id, context_id) = create_account(temp_dir.path(), "Alice")
-            .await
-            .expect("create account");
+        let (authority_id, context_id) =
+            create_account(temp_dir.path(), super::super::TuiMode::Production, "Alice")
+                .await
+                .expect("create account");
 
         let storage = open_bootstrap_storage(temp_dir.path());
         let pending = load_pending_account_bootstrap(&storage)
@@ -825,9 +833,10 @@ mod tests {
     async fn try_load_account_from_path_loads_persisted_identity() {
         let temp_dir = tempdir().expect("create temp dir");
 
-        let (authority_id, context_id) = create_account(temp_dir.path(), "Alice")
-            .await
-            .expect("create account");
+        let (authority_id, context_id) =
+            create_account(temp_dir.path(), super::super::TuiMode::Production, "Alice")
+                .await
+                .expect("create account");
 
         let loaded = try_load_account_from_path(temp_dir.path())
             .await

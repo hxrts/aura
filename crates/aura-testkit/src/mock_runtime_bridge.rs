@@ -33,9 +33,7 @@ use aura_app::runtime_bridge::{
 };
 use aura_app::signal_defs::CONTACTS_SIGNAL;
 use aura_app::ui_contract::AmpChannelTransitionSnapshot;
-use aura_app::views::contacts::{
-    Contact, ContactRelationshipState, ContactsState, ReadReceiptPolicy,
-};
+use aura_app::views::contacts::{Contact, ContactRelationshipState, ContactsState};
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
 use aura_core::domain::Hash32;
@@ -1485,28 +1483,42 @@ impl RuntimeBridge for MockRuntimeBridge {
                 InvitationBridgeType::Guardian { .. }
             );
 
-            let new_contact = Contact {
-                id: invitation.sender_id,
-                nickname,
-                nickname_suggestion: invitation.message.clone(),
-                is_guardian,
-                is_member: false,
-                last_interaction: Some(self.now_ms()),
-                is_online: false,
-                read_receipt_policy: ReadReceiptPolicy::default(),
-                relationship_state: ContactRelationshipState::Contact,
-                invitation_code: None,
-            };
-
-            // Add to contacts list, avoiding duplicates
-            {
-                let mut contacts = self.contacts.write().await;
-                if !contacts.iter().any(|c| c.id == new_contact.id) {
-                    contacts.push(new_contact);
+            // Like the runtime, acceptance commits the contact's Added fact;
+            // the contact comes from reducing the committed contact facts, so
+            // later facts about it (a rename) reduce against this add.
+            let contact_id = invitation.sender_id;
+            let already_added = self
+                .tagged_contact_facts()
+                .await
+                .iter()
+                .any(|fact| fact.fact().contact_id() == contact_id);
+            if !already_added {
+                let added = ContactFact::added_ms(
+                    ContextId::new_from_entropy([0u8; 32]),
+                    self.authority_id,
+                    contact_id,
+                    nickname,
+                    self.now_ms(),
+                    aura_relational::contacts::test_support::fresh(1),
+                )
+                .to_generic();
+                if let RelationalFact::Generic { envelope, .. } = &added {
+                    self.facts.write().await.push(added.clone());
+                    self.process_contact_fact_envelope(envelope).await;
                 }
             }
+            // Enrichment the contact fact does not carry.
+            if let Some(contact) = self
+                .contacts
+                .write()
+                .await
+                .iter_mut()
+                .find(|c| c.id == contact_id)
+            {
+                contact.nickname_suggestion = invitation.message.clone();
+                contact.is_guardian |= is_guardian;
+            }
 
-            // Emit CONTACTS_SIGNAL
             self.emit_contacts_signal().await;
         }
 
