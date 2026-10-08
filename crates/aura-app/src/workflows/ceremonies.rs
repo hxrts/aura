@@ -1168,7 +1168,7 @@ pub async fn get_key_rotation_ceremony_status(
     let core = app_core.read().await;
     core.get_key_rotation_ceremony_status(handle.ceremony_id())
         .await
-        .map_err(|e| ceremony_op("get ceremony status", e).into())
+        .map_err(|e| super::error::native_runtime_call("get ceremony status", e).into())
 }
 
 /// Observe a ceremony the runtime tracks, given only its id (for example one a
@@ -1184,7 +1184,9 @@ pub async fn observe_key_rotation_ceremony(
         let core = app_core.read().await;
         core.get_key_rotation_ceremony_status(&ceremony_id)
             .await
-            .map_err(|e| AuraError::from(ceremony_op("get ceremony status", e)))?
+            .map_err(|e| {
+                AuraError::from(super::error::native_runtime_call("get ceremony status", e))
+            })?
     };
     Ok((CeremonyStatusHandle::new(ceremony_id, status.kind), status))
 }

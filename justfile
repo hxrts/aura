@@ -511,6 +511,7 @@ ci-build-cache-policy:
     bash scripts/dev/test-lan-retention.sh
     bash scripts/dev/test-install-aura-binary.sh
     bash scripts/dev/test-compare-release-scopes.sh
+    bash scripts/dev/test-nested-worktree-manifests.sh
     bash scripts/dev/compare-debug-incremental.sh --dry-run
 
 # Build check

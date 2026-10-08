@@ -678,6 +678,14 @@ assert!(matches!(response, Response::Channels(_)));
   events or bounded `call_until` re-checks at quiescent points, never wall
   clock sleeps. It also checks that CLI and RPC give identical responses and
   that a CLI send matches the TUI send's semantic outcome.
+- Failures keep their typed category end to end: assert the RPC error
+  `code` (for example `not_found` for an unknown ceremony id) and, with the
+  real binary in `tests/cli_production.rs`, the process exit code it maps to
+  (`not_found` exits 3).
+- A slash command whose target does not resolve settles its semantic
+  operation failed with an error toast
+  (`tests/unit_slash_commands.rs`), so lastop never keeps showing an earlier
+  operation.
 - `tests/cli_json.rs` and `tests/cli_socket.rs` run the real `aura` binary
   against a node serving the socket.
 - `tests/cli_production.rs` creates an account through the TUI's staging

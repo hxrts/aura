@@ -321,6 +321,36 @@ expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$
   --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.waited-ran"'
 [[ -e "$FREE_FILE.waited-ran" ]]
 wait
+# Gates also wait out volume admission: another build's live reservation
+# (20 - 6 < 15 GiB) blocks until that build exits.
+reset_case
+mkdir -p "$AURA_BUILD_SHARED_DIR/reservations"
+sleep 3 &
+holder_pid=$!
+printf '%s\n' $((6 * 1024 * 1024)) > "$AURA_BUILD_SHARED_DIR/reservations/$holder_pid"
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=20 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --no-prune -- sh -c 'touch "$FREE_FILE.admitted-ran"'
+[[ -e "$FREE_FILE.admitted-ran" ]]
+wait "$holder_pid" 2>/dev/null || true
+# Task 209: a transient builder in this checkout (e.g. rust-analyzer's rustc)
+# is waited out under AURA_BUILD_WAIT_SECONDS, both before the build and in
+# the over-cap sweep; without a wait the build is refused at once.
+reset_case
+printf 'rustc\n' > "$ACTIVE_FILE"
+expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.busy-ran"'
+[[ ! -e "$FREE_FILE.busy-ran" ]]
+rg -q 'another builder or harness consumer is active' "$test_root/output"
+for size_gib in 6 9; do
+  reset_case
+  printf '%s\n' $((size_gib * 1024 * 1024)) > "$SIZE_FILE"
+  printf 'rustc\n' > "$ACTIVE_FILE"
+  (sleep 2; rm -f "$ACTIVE_FILE") &
+  expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=10 bash "$repo_root/scripts/dev/build-budget.sh" \
+    --root "$project" --lane test -- sh -c 'touch "$FREE_FILE.idle-ran"'
+  [[ -e "$FREE_FILE.idle-ran" ]]
+  rm -f "$FREE_FILE.idle-ran"
+  wait
+done
 # The gate recipes' cargo goes through the budget.
 for recipe in _policy-check _ownership-lint web-check; do
   awk -v r="$recipe" '$0 ~ "^"r"[ :]" {on=1; next} on && /^[^ \t]/ {on=0} on' "$repo_root/justfile" \

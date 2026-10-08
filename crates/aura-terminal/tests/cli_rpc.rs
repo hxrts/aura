@@ -414,7 +414,7 @@ async fn rotation_status_observes_a_started_guardian_ceremony() -> Result<()> {
                 json!({"ceremony_id": "no-such-ceremony"}),
             )
             .await?;
-        assert!(unknown["error"]["code"].is_string(), "{unknown}");
+        assert_eq!(unknown["error"]["code"], "not_found", "{unknown}");
 
         a.shutdown().await?;
         b.shutdown().await?;

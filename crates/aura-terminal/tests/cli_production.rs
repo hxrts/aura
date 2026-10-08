@@ -139,4 +139,14 @@ fn cli_account_create_opens_in_production_and_refuses_overwrite() {
     let doc: Value = serde_json::from_slice(&again.stdout).unwrap();
     assert_eq!(doc["ok"], false, "{doc}");
     assert_eq!(doc["error"]["code"], "invalid_input", "{doc}");
+
+    // An unknown ceremony id is typed not_found end to end, exit code 3
+    // (Task 185).
+    let unknown = aura(keyring.path(), data.path())
+        .args(["--json", "rotation", "status", "no-such-ceremony"])
+        .output()
+        .unwrap();
+    let doc: Value = serde_json::from_slice(&unknown.stdout).unwrap();
+    assert_eq!(doc["error"]["code"], "not_found", "{doc}");
+    assert_eq!(unknown.status.code(), Some(3), "{doc}");
 }

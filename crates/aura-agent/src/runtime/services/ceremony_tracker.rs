@@ -2429,7 +2429,7 @@ impl CeremonyTracker {
             .ceremonies
             .get(ceremony_id)
             .cloned()
-            .ok_or_else(|| AuraError::invalid(format!("Ceremony {} not found", ceremony_id)))
+            .ok_or_else(|| AuraError::not_found(format!("Ceremony {} not found", ceremony_id)))
     }
 
     /// Get ceremony status for UI display
@@ -2729,7 +2729,7 @@ impl CeremonyTracker {
             &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-                    AuraError::invalid(format!("Ceremony {} not found", ceremony_id))
+                    AuraError::not_found(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
                 if state.terminal_outcome.is_some() {
@@ -2805,7 +2805,7 @@ impl CeremonyTracker {
             &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-                    AuraError::invalid(format!("Ceremony {} not found", ceremony_id))
+                    AuraError::not_found(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
                 if let Some(committed_at) = committed_at {
@@ -3164,7 +3164,7 @@ impl CeremonyTracker {
                     }
                 }
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-                    AuraError::invalid(format!("Ceremony {} not found", ceremony_id))
+                    AuraError::not_found(format!("Ceremony {} not found", ceremony_id))
                 })?;
                 if let Some(existing) = state.terminal_outcome {
                     return if existing == outcome {
@@ -3311,7 +3311,7 @@ impl CeremonyTracker {
             &self.shared.state,
             |tracker| {
                 let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-                    AuraError::invalid(format!("Ceremony {} not found", ceremony_id))
+                    AuraError::not_found(format!("Ceremony {} not found", ceremony_id))
                 })?;
                 if state.error_message.is_none() {
                     state.error_message = error_message;
@@ -3366,7 +3366,7 @@ impl CeremonyTracker {
                     tracker.retired_enrollment_ids.insert(ceremony_id.clone());
                 }
                 tracker.ceremonies.remove(ceremony_id).ok_or_else(|| {
-                    AuraError::invalid(format!("Ceremony {} not found", ceremony_id))
+                    AuraError::not_found(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
                 tracker.enrollment_responses.remove(ceremony_id);
