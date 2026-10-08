@@ -212,6 +212,21 @@ ceremony outcome. Invalid possession signatures or bindings yield
 `InvalidArgument`. Bounded deadlines yield `OperationTimedOut` with the original
 typed cause retained through the standard error source chain.
 
+Enrollment completion is owned by the app workflow layer, not by a frontend.
+Its operation instance is keyed by ceremony ID, so a replayed older ceremony
+cannot overwrite a newer ceremony's snapshot. The runtime ceremony tracker
+retains the first terminal result (committed, cancelled, rejected or timed
+out) and rejects a conflicting later result. The app-owned completion hook
+survives UI remount, browser rebootstrap and runtime restart; frontends only
+observe it. The invitee acceptance path keeps its supplied handoff instance and
+typed cause instead of minting a fresh error owner.
+
+Guardian acceptance has its own follow-up owner with a distinct operation kind.
+Local acceptance only starts the guardian choreography. Success requires the
+principal's verified binding acknowledgment, and a runtime failure settles the
+same instance with a typed ceremony failure. Moderation commands settle with
+exhaustive, stable failure codes; list or count changes are diagnostics only.
+
 Terminality alone is not strong enough. Aura also requires owner-internal liveness: a legal owner may not contain unbounded internal work that can keep an operation in `OperationState::Submitting` forever. If the owner can hang indefinitely while still technically being the "right" owner, the architecture is incomplete.
 
 Timeout-triggered returns do not relax this rule. A timeout may fail an
