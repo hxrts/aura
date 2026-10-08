@@ -285,30 +285,48 @@ impl CryptoExtendedEffects for CompositeTestHandler {
             .await
     }
 
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_generate_nonces(
+        &self,
+        key_package: &[u8],
+    ) -> Result<aura_core::effects::crypto::FrostNonces, CryptoError> {
         self.crypto.frost_generate_nonces(key_package).await
     }
 
-    async fn frost_create_signing_package(
+    async fn frost_create_public_signing_package(
         &self,
         message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
+        commitments: &[aura_core::effects::crypto::FrostPublicCommitment],
         public_key_package: &[u8],
+        threshold: u16,
     ) -> Result<FrostSigningPackage, CryptoError> {
         self.crypto
-            .frost_create_signing_package(message, nonces, participants, public_key_package)
+            .frost_create_public_signing_package(
+                message,
+                commitments,
+                public_key_package,
+                threshold,
+            )
             .await
     }
 
-    async fn frost_sign_share(
+    async fn frost_sign_share_for_message(
         &self,
-        signing_package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
+        package: &FrostSigningPackage,
+        local_key_share: &[u8],
+        nonces: aura_core::effects::crypto::RetiredFrostNonces,
+        expected_message: &[u8],
+        expected_public_key_package: &[u8],
+        expected_threshold: u16,
     ) -> Result<Vec<u8>, CryptoError> {
         self.crypto
-            .frost_sign_share(signing_package, key_share, nonces)
+            .frost_sign_share_for_message(
+                package,
+                local_key_share,
+                nonces,
+                expected_message,
+                expected_public_key_package,
+                expected_threshold,
+            )
             .await
     }
 

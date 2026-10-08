@@ -20,7 +20,8 @@ use aura_consensus::distributed::{
 };
 use aura_consensus::CommitFact;
 use aura_core::crypto::tree_signing::{
-    NonceCommitment, NonceToken, PartialSignature, PublicKeyPackage, Share,
+    FrostNonces, NonceCommitment, PartialSignature, ProcessFrostNonceRetirement, PublicKeyPackage,
+    Share,
 };
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{PhysicalTimeEffects, RandomCoreEffects};
@@ -171,8 +172,8 @@ pub(crate) async fn coordinate_channel_consensus(
         send(effects, *witness, &execute).await?;
     }
 
-    let (own_commitment, own_token) = witness_commit(&share, effects).await?;
-    let mut commitments = BTreeMap::from([(me, own_commitment)]);
+    let own_nonces = witness_commit(&share, effects).await?;
+    let mut commitments = BTreeMap::from([(me, own_nonces.commitment().clone())]);
     let id = round.consensus_id;
     collect(
         effects,
@@ -198,9 +199,13 @@ pub(crate) async fn coordinate_channel_consensus(
     for witness in &witnesses {
         send(effects, *witness, &sign_request).await?;
     }
+    // The coordinator's nonces never leave this call.
+    let own_nonces = own_nonces
+        .retire(&ProcessFrostNonceRetirement::default())
+        .await?;
     let mut partials = BTreeMap::from([(
         me,
-        witness_sign(&round, &share, own_token, &commitment_list, &group)?,
+        witness_sign(&round, &share, own_nonces, &commitment_list, &group)?,
     )]);
     collect(
         effects,
@@ -272,19 +277,21 @@ async fn collect(
     ))
 }
 
-/// A witness's open round: the round and the nonce token for its share.
+/// A witness's open round: the round and the single-use nonces for its share.
 struct OpenRound {
     coordinator: AuthorityId,
     scope: ChannelKeyScope,
     key_epoch: u64,
     round: ConsensusRound,
-    token: Option<NonceToken>,
+    token: Option<FrostNonces>,
 }
 
 /// Witness-side state, owned by the runtime's witness loop.
 #[derive(Clone, Default)]
 pub(crate) struct ChannelConsensusWitness {
     open: Arc<Mutex<HashMap<aura_consensus::ConsensusId, OpenRound>>>,
+    /// Retirement log for witness nonces, which never leave process memory.
+    nonce_retirement: Arc<ProcessFrostNonceRetirement>,
 }
 
 impl ChannelConsensusWitness {
@@ -369,7 +376,8 @@ impl ChannelConsensusWitness {
                 "channel consensus round is not for this epoch's key or its coordinator lacks standing",
             ));
         }
-        let (commitment, token) = witness_commit(&share, effects).await?;
+        let nonces = witness_commit(&share, effects).await?;
+        let commitment = nonces.commitment().clone();
         let consensus_id = round.consensus_id;
         self.open.lock().await.insert(
             consensus_id,
@@ -378,7 +386,7 @@ impl ChannelConsensusWitness {
                 scope,
                 key_epoch,
                 round,
-                token: Some(token),
+                token: Some(nonces),
             },
         );
         send(
@@ -418,6 +426,7 @@ impl ChannelConsensusWitness {
         {
             return Err(AuraError::invalid("sign request omits this witness"));
         }
+        let token = token.retire(self.nonce_retirement.as_ref()).await?;
         let partial = witness_sign(&open.round, &share, token, &commitments, &group)?;
         send(
             effects,

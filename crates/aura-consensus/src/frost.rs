@@ -12,7 +12,9 @@ use super::{
 };
 use async_lock::RwLock;
 use aura_core::{
-    crypto::tree_signing::{frost_aggregate, frost_verify_aggregate, NonceToken},
+    crypto::tree_signing::{
+        frost_aggregate, frost_verify_aggregate, FrostNonces, ProcessFrostNonceRetirement,
+    },
     effects::{PhysicalTimeEffects, RandomEffects},
     frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share, ThresholdSignature},
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
@@ -47,6 +49,9 @@ pub struct FrostConsensusOrchestrator {
 
     /// Active consensus instances
     instances: RwLock<HashMap<ConsensusId, ConsensusInstance>>,
+
+    /// Retirement log for witness nonces, which never leave process memory.
+    nonce_retirement: ProcessFrostNonceRetirement,
 }
 
 /// State for a single consensus instance
@@ -77,6 +82,7 @@ impl FrostConsensusOrchestrator {
             key_packages,
             group_public_key,
             instances: RwLock::new(HashMap::new()),
+            nonce_retirement: ProcessFrostNonceRetirement::default(),
         })
     }
 
@@ -217,12 +223,12 @@ impl FrostConsensusOrchestrator {
         // Generate signatures
         for witness_id in self.config.witness_set.iter() {
             if let Some(share) = self.key_packages.get(witness_id) {
-                // Take cached nonce for signing
-                let mut witness_state = self
+                // Move the cached nonce out of the witness state for signing
+                if let Some(nonces) = self
                     .witness_set
-                    .get_or_create_state(*witness_id, self.config.epoch)
-                    .await;
-                if let Some((commitment, token)) = witness_state.take_nonce(self.config.epoch) {
+                    .take_witness_nonce(*witness_id, self.config.epoch)
+                    .await
+                {
                     // Generate partial signature
                     let transcript = consensus_commit_transcript_bytes(
                         consensus_id,
@@ -231,15 +237,18 @@ impl FrostConsensusOrchestrator {
                         &request.operation_bytes,
                         self.config.threshold(),
                     )?;
-                    let signature =
-                        self.sign_with_nonce(&transcript, share, &token, &aggregated_nonces)?;
+                    let signature = self
+                        .sign_with_nonce(&transcript, share, nonces, &aggregated_nonces)
+                        .await?;
 
                     // Use operation_hash as result_id (deterministic execution assumption)
                     let _ = tracker.add_signature(*witness_id, signature, request.operation_hash);
 
                     // Generate and cache next round commitment for pipelining
-                    let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
-                    witness_state.set_next_nonce(next_commitment, next_token, self.config.epoch);
+                    let next = self.generate_nonce(share, random).await?;
+                    self.witness_set
+                        .update_witness_nonce(*witness_id, next, self.config.epoch)
+                        .await?;
                 }
             }
         }
@@ -279,9 +288,9 @@ impl FrostConsensusOrchestrator {
 
         for witness_id in self.config.witness_set.iter() {
             if let Some(share) = self.key_packages.get(witness_id) {
-                let (commitment, token) = self.generate_nonce(share, random).await?;
-                tracker.add_nonce(*witness_id, commitment);
-                nonce_tokens.insert(*witness_id, token);
+                let nonces = self.generate_nonce(share, random).await?;
+                tracker.add_nonce(*witness_id, nonces.commitment().clone());
+                nonce_tokens.insert(*witness_id, nonces);
             }
         }
 
@@ -292,7 +301,7 @@ impl FrostConsensusOrchestrator {
         // Phase 2: Generate signatures
         let aggregated_nonces = tracker.get_nonces();
 
-        for (witness_id, token) in nonce_tokens {
+        for (witness_id, nonces) in nonce_tokens {
             if let Some(share) = self.key_packages.get(&witness_id) {
                 let transcript = consensus_commit_transcript_bytes(
                     consensus_id,
@@ -301,21 +310,17 @@ impl FrostConsensusOrchestrator {
                     &request.operation_bytes,
                     self.config.threshold(),
                 )?;
-                let signature =
-                    self.sign_with_nonce(&transcript, share, &token, &aggregated_nonces)?;
+                let signature = self
+                    .sign_with_nonce(&transcript, share, nonces, &aggregated_nonces)
+                    .await?;
 
                 // Use operation_hash as result_id (deterministic execution assumption)
                 let _ = tracker.add_signature(witness_id, signature, request.operation_hash);
 
                 // Generate and cache next round commitment for future pipelining
-                let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
+                let next = self.generate_nonce(share, random).await?;
                 self.witness_set
-                    .update_witness_nonce(
-                        witness_id,
-                        next_commitment,
-                        next_token,
-                        self.config.epoch,
-                    )
+                    .update_witness_nonce(witness_id, next, self.config.epoch)
                     .await?;
             }
         }
@@ -397,16 +402,16 @@ impl FrostConsensusOrchestrator {
         &self,
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
-    ) -> Result<(NonceCommitment, NonceToken)> {
+    ) -> Result<FrostNonces> {
         witness_nonce(share, random).await
     }
 
-    /// Sign with a pre-generated nonce
-    pub(crate) fn sign_with_nonce(
+    /// Sign once with pre-generated nonces: retire them, then consume them.
+    pub(crate) async fn sign_with_nonce(
         &self,
         message: &[u8],
         share: &Share,
-        token: &NonceToken,
+        nonces: FrostNonces,
         aggregated_nonces: &[NonceCommitment],
     ) -> Result<PartialSignature> {
         // Reconstruct FROST signing share and identifier
@@ -465,10 +470,9 @@ impl FrostConsensusOrchestrator {
         // Build signing package
         let signing_package = frost_ed25519::SigningPackage::new(frost_commitments, message);
 
-        // Perform FROST signing with the provided nonces
-        let nonces = token.clone().into_frost();
-        let sig_share = frost_ed25519::round2::sign(&signing_package, &nonces, &key_package)
-            .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
+        // Perform FROST signing, consuming the retired nonces
+        let nonces = nonces.retire(&self.nonce_retirement).await?;
+        let sig_share = nonces.sign(&signing_package, &key_package)?;
 
         Ok(PartialSignature::from_frost(identifier, sig_share))
     }
@@ -627,25 +631,18 @@ pub(crate) fn verify_partial_signature(
         .map_err(|e| AuraError::crypto(format!("Partial signature verification failed: {e}")))
 }
 
-/// A witness's nonce commitment and one-use token for `share`, seeded from
-/// the caller's random effect.
+/// A witness's single-use FROST nonces for `share`, seeded from the
+/// caller's random effect.
 pub async fn witness_nonce(
     share: &Share,
     random: &(impl RandomEffects + ?Sized),
-) -> Result<(NonceCommitment, NonceToken)> {
+) -> Result<FrostNonces> {
     let signing_share = share
         .to_frost()
         .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
+    let identifier = share.frost_identifier()?;
     let mut rng = rand::rngs::StdRng::from_seed(random.random_bytes_32().await);
-    let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
-    let commitment = NonceCommitment {
-        signer: share.identifier,
-        commitment: nonces
-            .commitments()
-            .serialize()
-            .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
-    };
-    Ok((commitment, NonceToken::from(nonces)))
+    FrostNonces::generate_for_share(identifier, &signing_share, &mut rng)
 }
 
 #[cfg(test)]

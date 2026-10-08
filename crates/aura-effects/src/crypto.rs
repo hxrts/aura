@@ -507,18 +507,13 @@ impl CryptoExtendedEffects for RealCryptoHandler {
                 self.ed25519_sign(message, package.signing_key()).await
             }
             SigningMode::Threshold => {
-                // Threshold signing requires the full FROST protocol flow:
-                // 1. frost_generate_nonces()
-                // 2. frost_create_signing_package()
-                // 3. frost_sign_share()
-                // 4. frost_aggregate_signatures()
-                //
-                // This method is for simple single-shot signing, so threshold
-                // mode is not supported here.
+                // Threshold signing requires the full FROST protocol flow;
+                // this method is single-shot, so threshold mode is refused.
                 Err(CryptoError::invalid(
                     "Threshold signing requires the full FROST protocol flow. \
-                     Use frost_generate_nonces(), frost_create_signing_package(), \
-                     frost_sign_share(), and frost_aggregate_signatures() instead.",
+                     Use frost_generate_nonces(), frost_create_public_signing_package(), \
+                     FrostNonces::retire, frost_sign_share_for_message() and \
+                     frost_aggregate_signatures() instead.",
                 ))
             }
         }
@@ -660,52 +655,27 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         })
     }
 
-    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_generate_nonces(
+        &self,
+        key_package: &[u8],
+    ) -> Result<aura_core::effects::crypto::FrostNonces, CryptoError> {
         use frost_ed25519 as frost;
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        // Deserialize the key package using FROST's native deserialize method
-        let key_pkg: frost::keys::KeyPackage = frost::keys::KeyPackage::deserialize(key_package)
-            .map_err(|e| CryptoError::invalid(format!("Failed to deserialize key package: {e}")))?;
-
-        // Extract the signing share from the key package
-        let signing_share = key_pkg.signing_share();
-
-        // Generate nonces using the actual signing share from the key package
-        let (nonces, commitments) = {
-            match self.deterministic_seed(b"frost_generate_nonces", key_package) {
-                Some(seed) => {
-                    let mut rng = ChaCha20Rng::from_seed(seed);
-                    frost::round1::commit(signing_share, &mut rng)
-                }
-                None => {
-                    let mut rng = rand::rngs::OsRng;
-                    frost::round1::commit(signing_share, &mut rng)
-                }
+        let parsed =
+            zeroize::Zeroizing::new(frost::keys::KeyPackage::deserialize(key_package).map_err(
+                |e| CryptoError::invalid(format!("Failed to deserialize key package: {e}")),
+            )?);
+        match self.deterministic_seed(b"frost_generate_nonces", key_package) {
+            Some(seed) => {
+                let mut rng = ChaCha20Rng::from_seed(seed);
+                aura_core::effects::crypto::FrostNonces::generate(&parsed, &mut rng)
             }
-        };
-
-        // Serialize both nonces and commitments using FROST's native method
-        let nonces_bytes = nonces
-            .serialize()
-            .map_err(|e| CryptoError::invalid(format!("Failed to serialize nonces: {e}")))?;
-        let commitments_bytes = commitments
-            .serialize()
-            .map_err(|e| CryptoError::invalid(format!("Failed to serialize commitments: {e}")))?;
-
-        // Use DAG-CBOR for the outer tuple since it's our internal format
-        aura_core::util::serialization::to_vec(&(nonces_bytes, commitments_bytes)).map_err(|e| {
-            CryptoError::invalid(format!("Failed to serialize FROST signing bundle: {e}"))
-        })
-    }
-
-    async fn frost_public_commitment(
-        &self,
-        participant_index: u16,
-        local_nonce_bundle: &[u8],
-    ) -> Result<aura_core::effects::crypto::FrostPublicCommitment, CryptoError> {
-        public_frost::public_commitment(participant_index, local_nonce_bundle)
+            None => {
+                aura_core::effects::crypto::FrostNonces::generate(&parsed, &mut rand::rngs::OsRng)
+            }
+        }
     }
 
     async fn frost_create_public_signing_package(
@@ -722,7 +692,7 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         &self,
         package: &FrostSigningPackage,
         local_key_share: &[u8],
-        local_nonce_bundle: &[u8],
+        nonces: aura_core::effects::crypto::RetiredFrostNonces,
         expected_message: &[u8],
         expected_public_key_package: &[u8],
         expected_threshold: u16,
@@ -730,126 +700,11 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         public_frost::sign_for_message(
             package,
             local_key_share,
-            local_nonce_bundle,
+            nonces,
             expected_message,
             expected_public_key_package,
             expected_threshold,
         )
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        use frost_ed25519 as frost;
-        use std::collections::BTreeMap;
-        use std::collections::HashSet;
-
-        if participants.is_empty() || nonces.is_empty() {
-            return Err(CryptoError::invalid(
-                "Signing package requires at least one participant and nonce",
-            ));
-        }
-
-        if nonces.len() != participants.len() {
-            return Err(CryptoError::invalid(
-                "Each participant must supply matching nonces",
-            ));
-        }
-
-        let mut seen = HashSet::new();
-
-        // Deserialize nonce bundles into commitments
-        let mut commitments = BTreeMap::new();
-        for (i, nonce_bytes) in nonces.iter().enumerate() {
-            let participant_id = participants[i];
-
-            if !seen.insert(participant_id) {
-                return Err(CryptoError::invalid(format!(
-                    "Duplicate participant id {participant_id} in signing package"
-                )));
-            }
-
-            // First deserialize the outer tuple (nonces_bytes, commitments_bytes) using DAG-CBOR
-            let (_nonces_bytes, commitments_bytes): (Vec<u8>, Vec<u8>) =
-                aura_core::util::serialization::from_slice(nonce_bytes).map_err(|e| {
-                    CryptoError::invalid(format!(
-                        "Invalid signing nonces bundle for participant {participant_id}: {e}"
-                    ))
-                })?;
-
-            // Then deserialize the commitments from the inner bytes using FROST's native method
-            let signing_commitments: frost::round1::SigningCommitments =
-                frost::round1::SigningCommitments::deserialize(&commitments_bytes).map_err(
-                    |e| {
-                        CryptoError::invalid(format!(
-                            "Invalid signing commitments for participant {participant_id}: {e}"
-                        ))
-                    },
-                )?;
-
-            let identifier = frost::Identifier::try_from(participant_id)
-                .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {e}")))?;
-            commitments.insert(identifier, signing_commitments);
-        }
-
-        // Create signing package and serialize using FROST's native method
-        let package = frost::SigningPackage::new(commitments, message);
-        let package_bytes = package.serialize().map_err(|e| {
-            CryptoError::invalid(format!("Failed to serialize signing package: {e}"))
-        })?;
-
-        Ok(FrostSigningPackage {
-            message: message.to_vec(),
-            package: package_bytes,
-            participants: participants.to_vec(),
-            public_key_package: public_key_package.to_vec(),
-        })
-    }
-
-    async fn frost_sign_share(
-        &self,
-        package: &FrostSigningPackage,
-        key_share: &[u8],
-        nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        use frost_ed25519 as frost;
-
-        let mut key_share_buf = key_share.to_vec();
-        let mut nonce_buf = nonces.to_vec();
-
-        // Deserialize components using FROST's native methods
-        let signing_package: frost::SigningPackage =
-            frost::SigningPackage::deserialize(&package.package)
-                .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {e}")))?;
-
-        let key_package: frost::keys::KeyPackage =
-            frost::keys::KeyPackage::deserialize(&key_share_buf)
-                .map_err(|e| CryptoError::invalid(format!("Invalid key share: {e}")))?;
-
-        // Outer tuple uses DAG-CBOR, inner nonces use FROST's native method
-        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) =
-            aura_core::util::serialization::from_slice(&nonce_buf)
-                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {e}")))?;
-
-        let signing_nonces: frost::round1::SigningNonces =
-            frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
-                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces format: {e}")))?;
-
-        // Create signature share
-        let signature_share = frost::round2::sign(&signing_package, &signing_nonces, &key_package)
-            .map_err(|e| CryptoError::invalid(format!("FROST signing failed: {e}")))?;
-
-        // Serialize result using FROST's native method (returns fixed-size array)
-        let serialized = signature_share.serialize().to_vec();
-
-        key_share_buf.zeroize();
-        nonce_buf.zeroize();
-
-        Ok(serialized)
     }
 
     async fn frost_aggregate_signatures(
@@ -1128,8 +983,8 @@ mod frost_tests {
             .frost_generate_nonces(&key_gen_result.key_packages[1])
             .await
             .unwrap();
-        assert!(!nonces1.is_empty());
-        assert!(!nonces2.is_empty());
+        assert_eq!(nonces1.participant(), 1);
+        assert_eq!(nonces2.participant(), 2);
 
         // 3. Test that different key generation runs produce different keys
         // Use a distinct deterministic seed to ensure output changes while
@@ -1170,7 +1025,8 @@ mod frost_tests {
             .expect("second nonce generation should succeed");
 
         assert_ne!(
-            first, second,
+            first.commitment(),
+            second.commitment(),
             "seeded FROST nonce generation must not reuse nonces for the same key share"
         );
 
@@ -1184,18 +1040,20 @@ mod frost_tests {
             replay_keys.public_key_package
         );
         assert_eq!(
-            first,
+            first.commitment(),
             replay
                 .frost_generate_nonces(&replay_keys.key_packages[0])
                 .await
                 .unwrap()
+                .commitment()
         );
         assert_eq!(
-            second,
+            second.commitment(),
             replay
                 .frost_generate_nonces(&replay_keys.key_packages[0])
                 .await
                 .unwrap()
+                .commitment()
         );
     }
 

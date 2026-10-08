@@ -1,6 +1,6 @@
 //! Audited public-only FROST package construction and bound-message signing.
 use aura_core::effects::crypto::{CryptoError, FrostPublicCommitment, FrostSigningPackage};
-use aura_core::util::serialization::{from_slice, SerializationError};
+use aura_core::util::serialization::SerializationError;
 use aura_core::AuraError;
 use frost_ed25519 as frost;
 use std::collections::{BTreeMap, BTreeSet};
@@ -88,43 +88,6 @@ fn bounded(bytes: &[u8], limit: usize, stage: &'static str) -> Result<(), Crypto
     }
     Ok(())
 }
-fn local_nonces(bundle: &[u8]) -> Result<Zeroizing<frost::round1::SigningNonces>, CryptoError> {
-    bounded(bundle, MAX_LOCAL_BYTES, "local nonce bundle")?;
-    let (secret, public): (Vec<u8>, Vec<u8>) =
-        from_slice(bundle).map_err(|source| rejected(PublicFrostSigningError::Codec(source)))?;
-    let secret = Zeroizing::new(secret);
-    let nonces = Zeroizing::new(
-        frost::round1::SigningNonces::deserialize(&secret)
-            .map_err(|source| native("local nonces", source))?,
-    );
-    let supplied = frost::round1::SigningCommitments::deserialize(&public)
-        .map_err(|source| native("local public commitments", source))?;
-    // Use the audited library's public conversion for both nonce commitments.
-    // Check its cached commitment and the outer public component independently.
-    let derived =
-        frost::round1::SigningCommitments::new(nonces.hiding().into(), nonces.binding().into());
-    if supplied != derived || frost::round1::SigningCommitments::from(&*nonces) != derived {
-        return Err(rejected(PublicFrostSigningError::CommitmentMismatch));
-    }
-    Ok(nonces)
-}
-
-pub(super) fn public_commitment(
-    participant_index: u16,
-    bundle: &[u8],
-) -> Result<FrostPublicCommitment, CryptoError> {
-    frost::Identifier::try_from(participant_index)
-        .map_err(|source| native("participant index", source))?;
-    let nonces = local_nonces(bundle)?;
-    let commitment_bytes = frost::round1::SigningCommitments::from(&*nonces)
-        .serialize()
-        .map_err(|source| native("public commitment encoding", source))?;
-    Ok(FrostPublicCommitment {
-        participant_index,
-        commitment_bytes,
-    })
-}
-
 fn public_package(bytes: &[u8]) -> Result<frost::keys::PublicKeyPackage, CryptoError> {
     bounded(bytes, MAX_PUBLIC_BYTES, "public key package")?;
     let package = frost::keys::PublicKeyPackage::deserialize(bytes)
@@ -213,7 +176,7 @@ pub(super) fn create_package(
 pub(super) fn sign_for_message(
     outer: &FrostSigningPackage,
     share_bytes: &[u8],
-    nonce_bundle: &[u8],
+    nonces: aura_core::effects::crypto::RetiredFrostNonces,
     expected_message: &[u8],
     expected_public: &[u8],
     expected_threshold: u16,
@@ -283,10 +246,20 @@ pub(super) fn sign_for_message(
     {
         return Err(rejected(PublicFrostSigningError::KeyPackageMismatch));
     }
-    let nonces = local_nonces(nonce_bundle)?;
-    frost::round2::sign(&package, &nonces, &own)
+    // The nonces must be the ones this package committed for this signer;
+    // signing consumes them, so they cannot sign again.
+    let own_commitment = nonces
+        .commitment()
+        .to_frost()
+        .map_err(|_| rejected(PublicFrostSigningError::CommitmentMismatch))?;
+    if nonces.commitment().frost_identifier().ok().as_ref() != Some(own.identifier())
+        || package.signing_commitments().get(own.identifier()) != Some(&own_commitment)
+    {
+        return Err(rejected(PublicFrostSigningError::CommitmentMismatch));
+    }
+    nonces
+        .sign(&package, &own)
         .map(|share| share.serialize().to_vec())
-        .map_err(|source| native("bound message signing", source))
 }
 
 pub(super) fn aggregate(
@@ -357,7 +330,18 @@ pub(super) fn aggregate(
 mod tests {
     use super::*;
     use crate::crypto::RealCryptoHandler;
+    use aura_core::crypto::tree_signing::{ProcessFrostNonceRetirement, RetiredFrostNonces};
     use aura_core::effects::CryptoExtendedEffects;
+
+    async fn retired(
+        crypto: &RealCryptoHandler,
+        key_package: &[u8],
+        log: &ProcessFrostNonceRetirement,
+    ) -> (FrostPublicCommitment, RetiredFrostNonces) {
+        let nonces = crypto.frost_generate_nonces(key_package).await.unwrap();
+        let public = nonces.public_commitment();
+        (public, nonces.retire(log).await.unwrap())
+    }
 
     fn cause(error: &CryptoError) -> &PublicFrostSigningError {
         match error {
@@ -377,16 +361,9 @@ mod tests {
         let keys = dealer.frost_generate_keys(2, 3).await.unwrap();
         let first = RealCryptoHandler::for_simulation_seed([0x92; 32]);
         let third = RealCryptoHandler::for_simulation_seed([0x93; 32]);
-        let nonce1 = first
-            .frost_generate_nonces(&keys.key_packages[0])
-            .await
-            .unwrap();
-        let nonce3 = third
-            .frost_generate_nonces(&keys.key_packages[2])
-            .await
-            .unwrap();
-        let public1 = first.frost_public_commitment(1, &nonce1).await.unwrap();
-        let public3 = third.frost_public_commitment(3, &nonce3).await.unwrap();
+        let log = ProcessFrostNonceRetirement::default();
+        let (public1, nonce1) = retired(&first, &keys.key_packages[0], &log).await;
+        let (public3, nonce3) = retired(&third, &keys.key_packages[2], &log).await;
         let message = b"independently admitted enrollment intent";
         let package = dealer
             .frost_create_public_signing_package(
@@ -402,7 +379,7 @@ mod tests {
             .frost_sign_share_for_message(
                 &package,
                 &keys.key_packages[0],
-                &nonce1,
+                nonce1,
                 message,
                 &keys.public_key_package,
                 2,
@@ -413,7 +390,7 @@ mod tests {
             .frost_sign_share_for_message(
                 &package,
                 &keys.key_packages[2],
-                &nonce3,
+                nonce3,
                 message,
                 &keys.public_key_package,
                 2,
@@ -509,16 +486,15 @@ mod tests {
     async fn public_signing_rejects_substituted_intent_policy_and_inventory() {
         let crypto = RealCryptoHandler::for_simulation_seed([0x94; 32]);
         let keys = crypto.frost_generate_keys(2, 3).await.unwrap();
-        let n1 = crypto
-            .frost_generate_nonces(&keys.key_packages[0])
-            .await
-            .unwrap();
-        let n2 = crypto
-            .frost_generate_nonces(&keys.key_packages[1])
-            .await
-            .unwrap();
-        let c1 = public_commitment(1, &n1).unwrap();
-        let c2 = public_commitment(2, &n2).unwrap();
+        let log = ProcessFrostNonceRetirement::default();
+        let (c1, n1) = retired(&crypto, &keys.key_packages[0], &log).await;
+        let (c2, _) = retired(&crypto, &keys.key_packages[1], &log).await;
+        // Retired nonces are consumed per attempt; every rejection below is
+        // decided before nonce admission, so fresh unrelated nonces suffice.
+        let mut spare = Vec::new();
+        for _ in 0..6 {
+            spare.push(retired(&crypto, &keys.key_packages[0], &log).await.1);
+        }
         let message = b"admitted";
         let package = create_package(
             message,
@@ -559,8 +535,9 @@ mod tests {
             ),
             PublicFrostSigningError::UnknownParticipant(4)
         ));
-        let sign = |p: &FrostSigningPackage, k: &[u8], threshold| {
-            sign_for_message(p, k, &n1, message, &keys.public_key_package, threshold)
+        let mut sign = |p: &FrostSigningPackage, k: &[u8], threshold| {
+            let nonces = spare.pop().expect("spare retired nonces");
+            sign_for_message(p, k, nonces, message, &keys.public_key_package, threshold)
         };
         let mut substituted = package.clone();
         substituted.message = b"substituted".to_vec();
@@ -598,23 +575,30 @@ mod tests {
             cause(&sign(&package, &keys.key_packages[0], 1).unwrap_err()),
             PublicFrostSigningError::KeyPackageMismatch
         ));
-        let wrong_nonce = crypto
-            .frost_generate_nonces(&keys.key_packages[0])
-            .await
-            .unwrap();
+        let (_, wrong_nonce) = retired(&crypto, &keys.key_packages[0], &log).await;
         assert!(matches!(
             cause(
                 &sign_for_message(
                     &package,
                     &keys.key_packages[0],
-                    &wrong_nonce,
+                    wrong_nonce,
                     message,
                     &keys.public_key_package,
                     2
                 )
                 .unwrap_err()
             ),
-            PublicFrostSigningError::Native { .. }
+            PublicFrostSigningError::CommitmentMismatch
         ));
+        // The genuinely committed nonces still sign the admitted package.
+        sign_for_message(
+            &package,
+            &keys.key_packages[0],
+            n1,
+            message,
+            &keys.public_key_package,
+            2,
+        )
+        .unwrap();
     }
 }

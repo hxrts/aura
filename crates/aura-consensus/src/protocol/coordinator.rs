@@ -378,7 +378,7 @@ mod tests {
         witness::{WitnessSet, WitnessTracker},
     };
     use aura_core::{
-        crypto::tree_signing::NonceToken,
+        crypto::tree_signing::FrostNonces,
         frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share},
         types::Epoch,
         ContextId, Hash32, OperationId,
@@ -490,15 +490,13 @@ mod tests {
         .expect("transcript should build");
 
         let sender_signing_share = sender_share.to_frost().expect("sender share should decode");
-        let sender_nonces =
-            frost_ed25519::round1::SigningNonces::new(&sender_signing_share, &mut rng);
-        let sender_commitment = NonceCommitment {
-            signer: sender_share.identifier,
-            commitment: sender_nonces
-                .commitments()
-                .serialize()
-                .expect("sender commitment should serialize"),
-        };
+        let sender_nonces = FrostNonces::generate_for_share(
+            sender_share.frost_identifier().expect("sender identifier"),
+            &sender_signing_share,
+            &mut rng,
+        )
+        .expect("sender nonces");
+        let sender_commitment = sender_nonces.commitment().clone();
 
         let peer_signing_share = peer_share.to_frost().expect("peer share should decode");
         let peer_nonces = frost_ed25519::round1::SigningNonces::new(&peer_signing_share, &mut rng);
@@ -511,15 +509,13 @@ mod tests {
         };
 
         let aggregated_nonces = vec![sender_commitment.clone(), peer_commitment.clone()];
-        let valid_share = protocol
-            .frost_orchestrator
-            .sign_with_nonce(
-                &transcript,
-                &sender_share,
-                &NonceToken::from(sender_nonces),
-                &aggregated_nonces,
-            )
-            .expect("partial signature should be created");
+        let valid_share = futures::executor::block_on(protocol.frost_orchestrator.sign_with_nonce(
+            &transcript,
+            &sender_share,
+            sender_nonces,
+            &aggregated_nonces,
+        ))
+        .expect("partial signature should be created");
         let instance = signing_instance(
             result_id,
             [(sender, sender_commitment), (peer, peer_commitment)],

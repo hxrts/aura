@@ -9,7 +9,6 @@ use aura_core::effects::secure::{ImmutableSecureStoreOutcome, SecureStorageCapab
 use aura_core::effects::{CryptoExtendedEffects, SecureStorageEffects};
 use aura_core::{AuraError, DeviceId};
 use tokio::sync::{mpsc, oneshot, watch};
-use zeroize::Zeroizing;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum EnrollmentTranscriptSigningError {
@@ -236,9 +235,13 @@ pub(super) fn admitted_participant<'tree, 'custody: 'tree, 'owner: 'custody, 'ru
                                 EnrollmentTranscriptSigningError::ApprovalConsumed,
                             ));
                         }
-                        let mut nonces = Some(Zeroizing::new(
-                            effects.frost_generate_nonces(approval.local_share).await?,
-                        ));
+                        // The nonces stay in this task's memory, so the durable
+                        // approval record above plus an in-process retirement
+                        // log bound them to one share.
+                        let nonce_retirement =
+                            aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+                        let mut nonces =
+                            Some(effects.frost_generate_nonces(approval.local_share).await?);
                         let mut published_commitment = false;
                         let mut original_commitment = None;
                         while let Some(request) = receiver.recv().await {
@@ -258,16 +261,14 @@ pub(super) fn admitted_participant<'tree, 'custody: 'tree, 'owner: 'custody, 'ru
                                         let _ = response.send(Err(source.clone()));
                                         return Err(source);
                                     };
-                                    let commitment = match effects
-                                        .frost_public_commitment(approval.index, local)
-                                        .await
-                                    {
-                                        Ok(commitment) => commitment,
-                                        Err(source) => {
-                                            let _ = response.send(Err(source.clone()));
-                                            return Err(source);
-                                        }
-                                    };
+                                    let commitment = local.public_commitment();
+                                    if commitment.participant_index != approval.index {
+                                        let source = rejected(
+                                            EnrollmentTranscriptSigningError::PackageBinding,
+                                        );
+                                        let _ = response.send(Err(source.clone()));
+                                        return Err(source);
+                                    }
                                     original_commitment = Some(commitment.commitment_bytes.clone());
                                     published_commitment = true;
                                     if response.send(Ok(commitment)).is_err() {
@@ -309,11 +310,18 @@ pub(super) fn admitted_participant<'tree, 'custody: 'tree, 'owner: 'custody, 'ru
                                         let _ = response.send(Err(source.clone()));
                                         return Err(source);
                                     };
+                                    let local = match local.retire(&nonce_retirement).await {
+                                        Ok(local) => local,
+                                        Err(source) => {
+                                            let _ = response.send(Err(source.clone()));
+                                            return Err(source);
+                                        }
+                                    };
                                     let share = match effects
                                         .frost_sign_share_for_message(
                                             &package,
                                             approval.local_share,
-                                            &local,
+                                            local,
                                             &domain.message,
                                             &approval.public_package,
                                             approval.threshold,

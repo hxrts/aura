@@ -8,7 +8,7 @@ use crate::{
     witness::WitnessTracker,
     ConsensusId,
 };
-use aura_core::{crypto::tree_signing::NonceToken, frost::Share, AuthorityId, Hash32};
+use aura_core::{crypto::tree_signing::FrostNonces, frost::Share, AuthorityId, Hash32};
 
 /// State for a single protocol instance
 pub(crate) struct ProtocolInstance {
@@ -20,8 +20,8 @@ pub(crate) struct ProtocolInstance {
     pub tracker: WitnessTracker,
     pub phase: ConsensusPhase,
     pub start_time_ms: u64,
-    /// Cached nonce token for signing (slow path)
-    pub nonce_token: Option<NonceToken>,
+    /// Single-use nonces for signing (slow path); moved out to sign
+    pub nonce_token: Option<FrostNonces>,
     /// Pure core state for invariant validation
     /// Quint: protocol_consensus.qnt / Lean: Aura.Consensus.Types
     pub core_state: CoreState,

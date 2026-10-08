@@ -567,24 +567,35 @@ impl AuthHandler {
         public_key_package: &[u8],
         participants: &[u16],
     ) -> AgentResult<AuthResponse> {
-        // Step 1: Generate nonces for each participant using their key package
+        // Step 1: Generate single-use nonces for each participant's key package
         let mut nonces = Vec::new();
+        let mut threshold = None;
         for participant_id in participants {
             // Participant IDs are 1-indexed
             let key_package = key_packages
-                .get(*participant_id as usize - 1)
+                .get((*participant_id as usize).wrapping_sub(1))
                 .ok_or_else(|| {
                     AgentError::effects(format!(
                         "no key package for participant {}",
                         participant_id
                     ))
                 })?;
+            let min_signers = *frost_ed25519::keys::KeyPackage::deserialize(key_package)
+                .map_err(|e| AgentError::effects(format!("invalid key package: {e}")))?
+                .min_signers();
+            if *threshold.get_or_insert(min_signers) != min_signers {
+                return Err(AgentError::effects(
+                    "participant key packages disagree on the signing threshold",
+                ));
+            }
             let nonce = effects
                 .frost_generate_nonces(key_package)
                 .await
                 .map_err(|e| AgentError::effects(format!("failed to generate nonces: {e}")))?;
-            nonces.push(nonce);
+            nonces.push((key_package, nonce));
         }
+        let threshold =
+            threshold.ok_or_else(|| AgentError::effects("no threshold signing participants"))?;
 
         let group_public_key = extract_group_public_key(public_key_package)?;
         let trusted_key = self
@@ -611,41 +622,56 @@ impl AuthHandler {
             AgentError::effects(format!("auth challenge transcript failed: {error}"))
         })?;
 
-        // Step 2: Create signing package
+        // Step 2: Create the signing package from public commitments only
+        let commitments: Vec<_> = nonces
+            .iter()
+            .map(|(_, nonce)| nonce.public_commitment())
+            .collect();
         let signing_package = effects
-            .frost_create_signing_package(
+            .frost_create_public_signing_package(
                 &transcript_bytes,
-                &nonces,
-                participants,
+                &commitments,
                 public_key_package,
+                threshold,
             )
             .await
             .map_err(|e| AgentError::effects(format!("failed to create signing package: {e}")))?;
 
-        // Step 3: Each participant creates their signature share
-        let mut signature_shares = Vec::new();
-        for (i, participant_id) in participants.iter().enumerate() {
-            // Participant IDs are 1-indexed
-            let key_package = key_packages
-                .get(*participant_id as usize - 1)
-                .ok_or_else(|| {
-                    AgentError::effects(format!(
-                        "no key package for participant {}",
-                        participant_id
-                    ))
-                })?;
-
+        // Step 3: Each participant retires its nonces, then signs once. The
+        // nonces never leave this call, so an in-process retirement log holds.
+        let retirement = aura_core::crypto::tree_signing::ProcessFrostNonceRetirement::default();
+        let mut shares_by_participant = std::collections::BTreeMap::new();
+        for (key_package, nonce) in nonces {
+            let participant = nonce.participant();
+            let nonce = nonce
+                .retire(&retirement)
+                .await
+                .map_err(|e| AgentError::effects(format!("failed to retire nonces: {e}")))?;
             let share = effects
-                .frost_sign_share(&signing_package, key_package, &nonces[i])
+                .frost_sign_share_for_message(
+                    &signing_package,
+                    key_package,
+                    nonce,
+                    &transcript_bytes,
+                    public_key_package,
+                    threshold,
+                )
                 .await
                 .map_err(|e| {
-                    AgentError::effects(format!(
-                        "participant {} failed to sign: {e}",
-                        participant_id
-                    ))
+                    AgentError::effects(format!("participant {participant} failed to sign: {e}"))
                 })?;
-            signature_shares.push(share);
+            shares_by_participant.insert(participant, share);
         }
+        // Aggregation follows the package's sorted participant order.
+        let signature_shares: Vec<_> = signing_package
+            .participants
+            .iter()
+            .map(|participant| {
+                shares_by_participant.remove(participant).ok_or_else(|| {
+                    AgentError::effects(format!("missing share for participant {participant}"))
+                })
+            })
+            .collect::<AgentResult<_>>()?;
 
         // Step 4: Aggregate signature shares
         let signature = effects
