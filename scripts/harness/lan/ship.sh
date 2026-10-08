@@ -39,6 +39,15 @@ remote_platform="$(ssh -o BatchMode=yes "$AURA_E2E_REMOTE" 'uname -sm')"
   echo "ship: platform mismatch: local $local_platform, remote $remote_platform" >&2; exit 1;
 }
 
+remote_root="$AURA_E2E_REMOTE_ROOT"
+# A previous run's harness (tool_repl and the aura processes it drives) is a
+# build consumer the budget waits on, and its binaries are about to be
+# replaced: stop it on both hosts first (work/8.md Task 209).
+bash "$here/drv.sh" stop
+ssh -o BatchMode=yes "$AURA_E2E_REMOTE" "cd $remote_root && bash scripts/harness/lan/drv.sh stop"
+# Wait for the volume, the lock and other worktrees' builds instead of failing.
+export AURA_BUILD_WAIT_SECONDS="${AURA_BUILD_WAIT_SECONDS:-3600}"
+
 nix_bin="${AURA_NIX_BIN:-$(command -v nix || printf '/nix/var/nix/profiles/default/bin/nix')}"
 links=.nix-ship
 aura_bin=target/lan/aura
@@ -71,7 +80,6 @@ while IFS= read -r ref; do
   [ -e "$ref" ] && runtime_refs+=("$ref")
 done < <(bash "$here/runtime-refs.sh" "$aura_bin" "$repl_bin")
 
-remote_root="$AURA_E2E_REMOTE_ROOT"
 remote_bin="${AURA_NIX_REMOTE_BIN:-/nix/var/nix/profiles/default/bin}"
 rm -f "$links"/runtime-*
 root_cmds=''

@@ -149,13 +149,22 @@ admit_build() {
   printf '%s\n' $((reserve_gib * 1024 * 1024)) > "$reservation"
   rm -f "$lock/pid"; rmdir "$lock"
 }
+idle_now() {
+  busy="$(active_consumers)"
+  [[ -z "$busy" ]]
+}
+# Wait (AURA_BUILD_WAIT_SECONDS, shared with the lock and admission waits)
+# for this checkout's other builders and harness consumers, e.g. a transient
+# rustc from rust-analyzer, before sweeping or building.
 require_idle() {
-  local found
-  found="$(active_consumers)"
-  if [[ -n "$found" ]]; then
-    echo "build-budget: refusing to sweep/build while another builder or harness consumer is active: $found" >&2
-    return 1
-  fi
+  until idle_now; do
+    if (( ${waited:-0} >= ${wait_seconds:-0} )); then
+      echo "build-budget: refusing to sweep/build while another builder or harness consumer is active: $busy" >&2
+      return 1
+    fi
+    sleep "$poll_seconds"
+    waited=$(( ${waited:-0} + poll_seconds ))
+  done
 }
 target_has_open_files() {
   local open_files
@@ -276,11 +285,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-until require_idle 2>/dev/null; do
-  if (( waited >= wait_seconds )); then require_idle || exit $?; fi
-  sleep "$poll_seconds"
-  waited=$((waited + poll_seconds))
-done
+require_idle || exit $?
 if (( before_target > cap_kib || before_free < min_free_kib )); then
   if (( no_prune == 1 )); then
     echo 'build-budget: no-prune mode cannot recover the required headroom or target cap' >&2
@@ -340,10 +345,12 @@ child_pid=''
 post_build_target="$(target_kib)"
 (( post_build_target > peak_target )) && peak_target="$post_build_target"
 
+# The build is done: its post-build sweep never waits for other builders.
+wait_seconds=0
 if (( status == 0 && no_prune == 1 )); then
   echo 'No-prune mode: post-build cache collection skipped'
 elif (( status == 0 )); then
-  if require_idle; then
+  if idle_now; then
     if sweep apply; then :;
     else
       sweep_status=$?
