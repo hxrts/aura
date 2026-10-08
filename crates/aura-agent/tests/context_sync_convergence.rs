@@ -82,6 +82,65 @@ async fn chat_message_converges_after_dropped_link_heals() -> Result<()> {
     net.finish().await
 }
 
+/// Run 172 (Task 199): Barbara creates a home and invites Alex, then Carol.
+/// Barbara's joins written for Alex and Carol reach each member through
+/// context sync, possibly in a page before Barbara's own join (pages are
+/// digest buckets). A join whose author's standing is not observed yet is
+/// deferred to a later round, never logged as a drop, and membership
+/// converges on all three clients. Without both the self-joins-first page
+/// order and the deferral, Alex logs Barbara's join for him as a drop.
+#[tokio::test(start_paused = true)]
+async fn joins_written_by_the_inviter_converge_without_standing_drops() -> Result<()> {
+    let net = SimNet::new();
+    let barbara = net.peer(81).await?;
+    let alex = net.peer(85).await?;
+    let carol = net.peer(89).await?;
+    link_contacts(&barbara, &alex).await?;
+    link_contacts(&barbara, &carol).await?;
+    let home = context::create_home(&barbara.app, Some("BarbHome".to_string()), None).await?;
+    join_home(&barbara, &alex, home).await?;
+    join_home(&barbara, &carol, home).await?;
+    let context_id = home_view(&barbara.app, home)
+        .await
+        .and_then(|h| h.context_id)
+        .ok_or_else(|| anyhow!("home context missing"))?;
+    let all = [&barbara, &alex, &carol];
+    let members = [barbara.id, alex.id, carol.id];
+    wait_converged(
+        "every client lists all three members",
+        &all,
+        |agent, _| async move {
+            aura_protocol::amp::list_channel_participants(
+                agent.runtime().effects().as_ref(),
+                context_id,
+                home,
+            )
+            .await
+            .is_ok_and(|participants| members.iter().all(|m| participants.contains(m)))
+        },
+    )
+    .await?;
+    wait_membership_converged(&all, context_id).await?;
+
+    for peer in all {
+        let (drops, _) = peer.agent.runtime().effects().message_drops();
+        let standing: Vec<_> = drops
+            .iter()
+            .filter(|drop| {
+                drop.reason
+                    .to_string()
+                    .starts_with("membership_author_without_standing")
+            })
+            .collect();
+        assert!(
+            standing.is_empty(),
+            "{} logged membership facts as author-without-standing: {standing:?}",
+            peer.id
+        );
+    }
+    net.finish().await
+}
+
 /// Alex leaves the home channel while the Alex<->Barbara link is
 /// partitioned. Leaving commits only Alex's own membership fact; Barbara
 /// learns it through context sync once the link heals, so the reduced AMP

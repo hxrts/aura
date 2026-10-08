@@ -215,34 +215,40 @@ pub(super) fn claimed_fact_author(
     })
 }
 
-/// Why the author of an AMP membership event written for another participant
-/// has no standing here, or `None` when it has (or the fact is not such an
-/// event). A join must come from an admitted member (the inviter of an
+/// How an inbound AMP membership event stands against its author's standing.
+pub(super) enum MembershipStanding {
+    /// Not a membership event for someone else, or its author has standing.
+    Admitted,
+    /// The author's own standing (its self-join) is not observed yet. The
+    /// event is neither committed nor dropped; the next sync round offers it
+    /// again, after the author's self-join (Task 199).
+    NotYetObserved,
+    /// Refused: a departure whose author may not kick here.
+    Refused(crate::reactive::MessageDropReason),
+}
+
+/// Check the author of an AMP membership event written for another
+/// participant. A join must come from an admitted member (the inviter of an
 /// accepted invitation, or the creator adding a direct-chat peer); a
 /// departure (a kick) must come from a moderator of the context's home with
-/// the kick capability. An event refused now is offered again by a later
-/// sync round, so standing that arrives later still converges.
-pub(super) async fn membership_standing_refusal(
+/// the kick capability.
+pub(super) async fn membership_standing(
     effects: &AuraEffectSystem,
     envelope: &aura_core::types::facts::FactEnvelope,
-) -> AgentResult<Option<crate::reactive::MessageDropReason>> {
+) -> AgentResult<MembershipStanding> {
     use crate::reactive::MessageDropReason;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_journal::DomainFact;
     if !is_channel_membership_envelope(envelope) {
-        return Ok(None);
+        return Ok(MembershipStanding::Admitted);
     }
     let Some(membership) = aura_amp::ChannelMembershipFact::from_envelope(envelope) else {
-        return Ok(None);
+        return Ok(MembershipStanding::Admitted);
     };
     let author = membership.author();
     if author == membership.participant() {
-        return Ok(None);
+        return Ok(MembershipStanding::Admitted);
     }
-    let refusal = || MessageDropReason::MembershipAuthorWithoutStanding {
-        author,
-        participant: membership.participant(),
-    };
     let observations = aura_amp::channel_membership_observations(
         effects,
         membership.context(),
@@ -251,7 +257,7 @@ pub(super) async fn membership_standing_refusal(
     .await
     .map_err(|error| AgentError::effects(error.to_string()))?;
     if !observations.has_standing(author) {
-        return Ok(Some(refusal()));
+        return Ok(MembershipStanding::NotYetObserved);
     }
     if matches!(membership.event(), aura_amp::ChannelParticipantEvent::Left) {
         let Ok(homes) = effects
@@ -259,7 +265,9 @@ pub(super) async fn membership_standing_refusal(
             .read(&*aura_app::signal_defs::HOMES_SIGNAL)
             .await
         else {
-            return Ok(Some(MessageDropReason::HomesUnavailable));
+            return Ok(MembershipStanding::Refused(
+                MessageDropReason::HomesUnavailable,
+            ));
         };
         let moderates = crate::reactive::app_signal_projection::collect_moderation_homes(
             &homes,
@@ -269,10 +277,27 @@ pub(super) async fn membership_standing_refusal(
         .iter()
         .any(|home| home.actor_may_moderate(&author, "moderate:kick"));
         if !moderates {
-            return Ok(Some(refusal()));
+            return Ok(MembershipStanding::Refused(
+                MessageDropReason::MembershipAuthorWithoutStanding {
+                    author,
+                    participant: membership.participant(),
+                },
+            ));
         }
     }
-    Ok(None)
+    Ok(MembershipStanding::Admitted)
+}
+
+/// Whether `fact` is an AMP membership event its author wrote for itself
+/// (the event that gives the author standing for joins it writes for others).
+fn is_self_membership_fact(fact: &RelationalFact) -> bool {
+    use aura_journal::DomainFact;
+    let RelationalFact::Generic { envelope, .. } = fact else {
+        return false;
+    };
+    is_channel_membership_envelope(envelope)
+        && aura_amp::ChannelMembershipFact::from_envelope(envelope)
+            .is_some_and(|membership| membership.author() == membership.participant())
 }
 
 /// Whether `own_authority` may serve `envelope` to a syncing member: a fact
@@ -702,7 +727,11 @@ impl<'a> InvitationContextSync<'a> {
         include: impl Fn(&RelationalFact, &aura_core::types::facts::FactEnvelope) -> bool,
     ) -> AgentResult<usize> {
         let mut sent = 0usize;
-        for fact in self.context_facts(effects, context_id).await? {
+        let mut facts = self.context_facts(effects, context_id).await?;
+        // Self-joins first: a receiver checks a join written for someone else
+        // against the author's own standing, which its self-join carries.
+        facts.sort_by_key(|fact| !is_self_membership_fact(fact));
+        for fact in facts {
             let RelationalFact::Generic { envelope, .. } = &fact else {
                 continue;
             };
