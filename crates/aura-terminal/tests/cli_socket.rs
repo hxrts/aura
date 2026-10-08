@@ -18,24 +18,41 @@ use std::os::unix::fs::PermissionsExt;
 async fn cli_commands_reach_a_running_node_over_its_socket() -> Result<()> {
     let net = SimNet::new();
     let peer = net.peer(61).await?;
-    let data_dir = tempfile::tempdir()?;
-    let path = rpc_socket::socket_path(data_dir.path());
-    let listener = rpc_socket::bind(&path).await?;
+    // A data directory far deeper than a Unix socket path may be (Task 210:
+    // run 174's harness TUIs could not bind `<data-dir>.sock`).
+    let root = tempfile::tempdir()?;
+    let deep = root
+        .path()
+        .join("a-rather-long-directory-name-for-the-run-artifacts")
+        .join("another-long-component-for-a-scenario-and-instance")
+        .join("and-a-third-component-so-any-temp-root-exceeds-the-limit")
+        .join("data");
+    std::fs::create_dir_all(&deep)?;
+    assert!(deep.as_os_str().len() > 150, "{}", deep.display());
+
+    let hosted = rpc_socket::host(&deep).await?;
+    let path = hosted.path().to_path_buf();
+    assert!(path.as_os_str().len() <= 100, "{}", path.display());
+    assert_eq!(
+        rpc_socket::socket_path(&deep),
+        path,
+        "clients find the socket the node recorded"
+    );
     assert_eq!(
         std::fs::metadata(&path)?.permissions().mode() & 0o777,
         0o600,
         "the socket is owner-only"
     );
     assert!(
-        rpc_socket::bind(&path).await.is_err(),
+        rpc_socket::host(&deep).await.is_err(),
         "a second node must not take the socket"
     );
 
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = rpc_socket::serve(&peer.ctx, listener, &path, async {
+    let server = rpc_socket::serve(&peer.ctx, hosted, async {
         let _ = stopped.await;
     });
-    let dir = data_dir.path().to_path_buf();
+    let dir = deep.clone();
     let client = async move {
         // No account exists in `dir`: only the node can answer.
         let output = tokio::task::spawn_blocking(move || {
@@ -66,6 +83,10 @@ async fn cli_commands_reach_a_running_node_over_its_socket() -> Result<()> {
     assert!(
         !path.exists(),
         "the socket file is removed when the node stops"
+    );
+    assert!(
+        !deep.with_file_name("data.sock-path").exists(),
+        "the recorded socket path is removed when the node stops"
     );
     Ok(())
 }
