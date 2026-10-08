@@ -181,7 +181,9 @@ impl std::error::Error for AuraVmSessionOpenError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A frame received for a blocked VM receive. Not `Clone`: delivery consumes it.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlockedVmReceive {
     pub from_role: String,
     pub to_role: String,
@@ -878,14 +880,7 @@ where
     )
     .await
     {
-        Ok(blocked_receive) => (
-            blocked_receive.clone(),
-            if blocked_receive.is_some() {
-                AuraVmHostWaitStatus::Delivered
-            } else {
-                AuraVmHostWaitStatus::Idle
-            },
-        ),
+        Ok(blocked_receive) => with_wait_status(blocked_receive),
         Err(error) if stop_on_receive_error(&error) => (None, AuraVmHostWaitStatus::Deferred),
         Err(error) if is_receive_cancelled(&error) => (None, AuraVmHostWaitStatus::Cancelled),
         Err(error) if is_receive_timed_out(&error) => (None, AuraVmHostWaitStatus::TimedOut),
@@ -910,7 +905,7 @@ pub fn handle_standard_vm_round(
     context_label: &str,
 ) -> Result<AuraVmRoundDisposition, String> {
     if let Some(blocked) = round.blocked_receive {
-        inject_vm_receive(engine, sid, &blocked)?;
+        inject_vm_receive(engine, sid, blocked)?;
         return Ok(AuraVmRoundDisposition::Continue);
     }
 
@@ -946,14 +941,7 @@ async fn classify_blocked_receive(
     peer_roles: &BTreeMap<String, ChoreographicRole>,
 ) -> Result<(Option<BlockedVmReceive>, AuraVmHostWaitStatus), ChoreographyError> {
     match receive_blocked_vm_message(effects, vm, sid, active_role, peer_roles).await {
-        Ok(blocked_receive) => Ok((
-            blocked_receive.clone(),
-            if blocked_receive.is_some() {
-                AuraVmHostWaitStatus::Delivered
-            } else {
-                AuraVmHostWaitStatus::Idle
-            },
-        )),
+        Ok(blocked_receive) => Ok(with_wait_status(blocked_receive)),
         Err(error) if is_receive_timed_out(&error) => Ok((None, AuraVmHostWaitStatus::TimedOut)),
         Err(error) if is_receive_cancelled(&error) => Ok((None, AuraVmHostWaitStatus::Cancelled)),
         Err(error) => Err(error),
@@ -1036,6 +1024,31 @@ pub async fn receive_blocked_vm_message(
 /// application payload.
 const VM_CHOICE_LABEL_WIRE_PREFIX: &[u8] = b"\0aura-vm-choice-label:";
 
+fn with_wait_status(
+    blocked_receive: Option<BlockedVmReceive>,
+) -> (Option<BlockedVmReceive>, AuraVmHostWaitStatus) {
+    let status = if blocked_receive.is_some() {
+        AuraVmHostWaitStatus::Delivered
+    } else {
+        AuraVmHostWaitStatus::Idle
+    };
+    (blocked_receive, status)
+}
+
+impl BlockedVmReceive {
+    /// The branch-label frame selecting `label` on this frame's edge, for a
+    /// projection that is not offered the choice directly. It is a distinct
+    /// frame with its own sequence when delivered.
+    pub(crate) fn branch_selector(&self, label: &str) -> Self {
+        Self {
+            from_role: self.from_role.clone(),
+            to_role: self.to_role.clone(),
+            peer_role: self.peer_role,
+            payload: encode_choice_label_wire(label),
+        }
+    }
+}
+
 pub(crate) fn encode_choice_label_wire(label: &str) -> Vec<u8> {
     let mut wire = VM_CHOICE_LABEL_WIRE_PREFIX.to_vec();
     wire.extend_from_slice(label.as_bytes());
@@ -1049,20 +1062,18 @@ pub(crate) fn decode_choice_label_wire(payload: &[u8]) -> Option<&str> {
         .and_then(|label| std::str::from_utf8(label).ok())
 }
 
-pub fn inject_vm_receive(
+/// Deliver a received frame into its VM session, consuming it. The engine
+/// assigns the frame's sequence; a frame cannot be delivered twice.
+pub(crate) fn inject_vm_receive(
     engine: &mut AuraChoreoEngine<AuraQueuedVmBridgeHandler>,
     sid: SessionId,
-    receive: &BlockedVmReceive,
+    receive: BlockedVmReceive,
 ) -> Result<(), String> {
     let value = match decode_choice_label_wire(&receive.payload) {
         Some(label) => Value::Str(label.to_string()),
         None => AuraQueuedVmBridgeHandler::bytes_to_value(&receive.payload),
     };
-    engine
-        .vm_mut()
-        .inject_message(sid, &receive.from_role, &receive.to_role, value)
-        .map(|_| ())
-        .map_err(|error| format!("failed to inject VM message: {error}"))
+    engine.deliver_inbound_frame(sid, &receive.from_role, &receive.to_role, value)
 }
 
 pub fn close_and_reap_vm_session(
@@ -1287,7 +1298,7 @@ mod tests {
                     inject_vm_receive(
                         &mut owners[peer].0,
                         sid,
-                        &BlockedVmReceive {
+                        BlockedVmReceive {
                             from_role: send.from_role,
                             to_role: send.to_role,
                             peer_role: authority_device_role(

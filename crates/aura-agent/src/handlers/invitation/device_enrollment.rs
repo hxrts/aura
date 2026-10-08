@@ -564,7 +564,7 @@ impl InvitationDeviceEnrollmentHandler {
                             session.queue_send_bytes(
                                 to_vec(&confirm).map_err(|error| AgentError::Aura(error.into()))?,
                             );
-                            session.inject_blocked_receive(&blocked).map_err(|error| {
+                            session.inject_blocked_receive(blocked).map_err(|error| {
                                 AgentError::Aura(aura_core::AuraError::Internal {
                                     message: "device enrollment VM stage failed".into(),
                                     source: Some(std::sync::Arc::new(error)),
@@ -1009,7 +1009,7 @@ impl InvitationDeviceEnrollmentHandler {
                             );
                             matched_request = Some(request);
                         }
-                        session.inject_blocked_receive(&blocked).map_err(|error| {
+                        session.inject_blocked_receive(blocked).map_err(|error| {
                             AgentError::Aura(aura_core::AuraError::Internal {
                                 message: "device enrollment VM stage failed".into(),
                                 source: Some(std::sync::Arc::new(error)),

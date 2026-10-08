@@ -693,6 +693,28 @@ pub const fn communication_replay_mode_ref(mode: CommunicationReplayMode) -> &'s
     }
 }
 
+/// Replay protection for Aura's replay-enforcing protocol profiles
+/// (docs/122 "Replay Protection", protocol layer): every received frame is
+/// consumed once by its nullifier, and a duplicate faults with a typed
+/// `DuplicateIdentity`.
+///
+/// Telltale rejects nullifier consumption under `DeterminismMode::Full`, so
+/// fully deterministic profiles enforce per-edge sequences instead; the
+/// engine assigns every inbound frame its sequence, so a replayed or
+/// reordered frame faults there as `SequenceMismatch`.
+///
+/// This is the single seam for the nullifier model. Telltale 17 derives the
+/// nullifier with its built-in `DefaultVerificationModel`, which is not a
+/// cryptographic hash, and includes the frame's sequence number in the
+/// identity. When telltale exposes a pluggable verification model (Task
+/// 208), install the crypto-hash model here.
+pub const fn protocol_replay_mode(determinism: DeterminismMode) -> CommunicationReplayMode {
+    match determinism {
+        DeterminismMode::Full => CommunicationReplayMode::Sequence,
+        _ => CommunicationReplayMode::Nullifier,
+    }
+}
+
 /// Canonical execution policy for one stable policy selector.
 ///
 /// # Errors
@@ -720,7 +742,7 @@ pub fn policy_for_ref(
             declared_wave_width_bound: Some(2),
             determinism_mode: DeterminismMode::ModuloCommutativity,
             effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
-            communication_replay_mode: CommunicationReplayMode::Sequence,
+            communication_replay_mode: protocol_replay_mode(DeterminismMode::ModuloCommutativity),
         }),
         AURA_VM_POLICY_CONSENSUS_FAST_PATH => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_CONSENSUS_FAST_PATH,
@@ -730,7 +752,7 @@ pub fn policy_for_ref(
             declared_wave_width_bound: Some(1),
             determinism_mode: DeterminismMode::Full,
             effect_determinism_tier: EffectDeterminismTier::StrictDeterministic,
-            communication_replay_mode: CommunicationReplayMode::Sequence,
+            communication_replay_mode: protocol_replay_mode(DeterminismMode::Full),
         }),
         AURA_VM_POLICY_DKG_CEREMONY => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_DKG_CEREMONY,
@@ -740,7 +762,7 @@ pub fn policy_for_ref(
             declared_wave_width_bound: Some(2),
             determinism_mode: DeterminismMode::Replay,
             effect_determinism_tier: EffectDeterminismTier::ReplayDeterministic,
-            communication_replay_mode: CommunicationReplayMode::Sequence,
+            communication_replay_mode: protocol_replay_mode(DeterminismMode::Replay),
         }),
         AURA_VM_POLICY_RECOVERY_GRANT => Ok(AuraVmProtocolExecutionPolicy {
             policy_ref: AURA_VM_POLICY_RECOVERY_GRANT,
@@ -760,7 +782,7 @@ pub fn policy_for_ref(
             declared_wave_width_bound: Some(4),
             determinism_mode: DeterminismMode::ModuloEffects,
             effect_determinism_tier: EffectDeterminismTier::EnvelopeBoundedNondeterministic,
-            communication_replay_mode: CommunicationReplayMode::Sequence,
+            communication_replay_mode: protocol_replay_mode(DeterminismMode::ModuloEffects),
         }),
         _ => Err(AuraVmDeterminismProfileError::UnknownPolicyRef {
             raw: policy_ref.to_string(),
@@ -1485,6 +1507,27 @@ mod tests {
         assert!(validate_determinism_profile(&config).is_ok());
     }
 
+    /// Task 174: replay-enforcing policies consume frames by nullifier,
+    /// except fully deterministic ones, which Telltale only admits with
+    /// engine-assigned sequences.
+    #[test]
+    fn replay_enforcing_policies_use_nullifiers_where_admissible() {
+        for policy_ref in [
+            AURA_VM_POLICY_CONSENSUS_FALLBACK,
+            AURA_VM_POLICY_CONSENSUS_FAST_PATH,
+            AURA_VM_POLICY_DKG_CEREMONY,
+            AURA_VM_POLICY_SYNC_ANTI_ENTROPY,
+        ] {
+            let policy = policy_for_ref(policy_ref).expect("policy");
+            let expected = if policy.determinism_mode == DeterminismMode::Full {
+                CommunicationReplayMode::Sequence
+            } else {
+                CommunicationReplayMode::Nullifier
+            };
+            assert_eq!(policy.communication_replay_mode, expected, "{policy_ref}");
+        }
+    }
+
     #[test]
     fn protocol_policy_mapping_is_class_driven() {
         let dkg = policy_for_protocol("aura.dkg.ceremony", Some(AURA_VM_POLICY_DKG_CEREMONY))
@@ -1512,7 +1555,7 @@ mod tests {
         );
         assert_eq!(
             dkg.communication_replay_mode,
-            CommunicationReplayMode::Sequence
+            CommunicationReplayMode::Nullifier
         );
         assert_eq!(
             AuraVmRuntimeSelector::for_policy(dkg),

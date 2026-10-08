@@ -430,6 +430,8 @@ When delegation changes ownership, the runtime must also define whether the move
 
 The synchronous callback boundary is `VmBridgeEffects`. `AuraVmEffectHandler` and `AuraQueuedVmBridgeHandler` use it for session-local payload queues, blocked receive snapshots, branch choices, and scheduler signals. Async transport, guard-chain execution, journal coupling, and storage remain outside protocol-machine callbacks in `vm_host_bridge` and service loops.
 
+A received frame (`BlockedVmReceive`) is not `Clone`, and delivering it consumes it. The engine, not the caller, assigns each frame its inbound sequence: `AuraChoreoEngine` keeps one `SequenceOwner` per session edge, and that owner admits exactly the next sequence for each delivered frame. Replay-enforcing protocol profiles run Telltale in `CommunicationReplayMode::Nullifier` through the single seam `protocol_replay_mode`, so a duplicate frame faults as `DuplicateIdentity`. Fully deterministic profiles (which Telltale does not allow with nullifiers) enforce the engine-assigned per-edge sequence instead. Telltale 17 derives that nullifier with its built-in non-cryptographic model; Task 208 tracks a pluggable crypto-hash model.
+
 Dynamic reconfiguration follows the same rule. Runtime code must go through `ReconfigurationManager` for link and delegation so bundle evidence, capability admission, and coherence checks are enforced before any transfer occurs.
 
 Dynamic reconfiguration also carries typed upgrade artifacts end to end. When a delegation also performs a runtime upgrade, Aura persists the delegation fact, records the typed upgrade request/execution pair, and rejects missing source ownership or invalid upgrade evidence rather than repairing state implicitly.

@@ -539,7 +539,7 @@ impl OwnedVmSession {
 
     pub fn inject_blocked_receive(
         &mut self,
-        receive: &BlockedVmReceive,
+        receive: BlockedVmReceive,
     ) -> Result<(), SessionIngressError> {
         log_session_ingress_received(
             &self.owner,
@@ -689,7 +689,7 @@ pub fn handle_owned_vm_round(
     context_label: &str,
 ) -> Result<AuraVmRoundDisposition, SessionIngressError> {
     if let Some(blocked) = round.blocked_receive {
-        session.inject_blocked_receive(&blocked)?;
+        session.inject_blocked_receive(blocked)?;
         return Ok(AuraVmRoundDisposition::Continue);
     }
 
