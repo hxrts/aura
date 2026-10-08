@@ -603,7 +603,22 @@ pub(crate) async fn install_system_refresh_hooks_with_fault(
             "authoritative_chat_readiness_hook",
             Arc::new(|app_core| {
                 Box::pin(async move {
-                    refresh_authoritative_channel_and_recipient_readiness_hook(&app_core).await
+                    // Runtime emissions (inbound messages, membership) land
+                    // only in CHAT_SIGNAL; the render snapshot follows it here.
+                    let mut best_effort = workflow_best_effort();
+                    let _ = best_effort
+                        .capture(
+                            crate::workflows::observed_projection::mirror_chat_signal_into_view(
+                                &app_core,
+                            ),
+                        )
+                        .await;
+                    let _ = best_effort
+                        .capture(refresh_authoritative_channel_and_recipient_readiness_hook(
+                            &app_core,
+                        ))
+                        .await;
+                    best_effort.finish()
                 })
             }),
             (cancel_rx.clone(), health.clone()),

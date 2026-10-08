@@ -6,8 +6,9 @@
 
 use super::request::{ExportFormat, InviteRole, Request};
 use super::response::{
-    AccountView, AmpChannelView, AuthorityView, ChannelView, ContactView, InvitationView,
-    MessageView, NotificationView, OperationView, RecoveryView, Response, SettingsView,
+    AccountView, AmpChannelView, AuthorityView, CeremonyStatusView, ChannelView, ContactView,
+    InvitationView, MessageView, NotificationView, OperationView, RecoveryView, Response,
+    SettingsView,
 };
 use super::{CommandError, ErrorCode};
 use crate::handlers::AuraEffectSystem;
@@ -945,6 +946,26 @@ pub async fn execute(ctx: &CommandContext, request: Request) -> Result<Response,
             )
             .await?;
             Ok(done(format!("Cancelled ceremony {ceremony_id}"), None))
+        }
+        Request::RotationStatus { ceremony_id } => {
+            let (_, s) = ceremonies::observe_key_rotation_ceremony(
+                app,
+                CeremonyId::new(ceremony_id.trim().to_string()),
+            )
+            .await?;
+            Ok(Response::CeremonyStatus(CeremonyStatusView {
+                ceremony_id: s.ceremony_id.to_string(),
+                kind: format!("{:?}", s.kind),
+                accepted: s.accepted_count,
+                total: s.total_count,
+                threshold: s.threshold,
+                complete: s.is_complete,
+                failed: s.has_failed,
+                error: s.error_message,
+                pending_epoch: s.pending_epoch.map(|e| e.value()),
+                agreement_mode: format!("{:?}", s.agreement_mode),
+                reversion_risk: s.reversion_risk,
+            }))
         }
 
         Request::Budget => Ok(Response::Budget {

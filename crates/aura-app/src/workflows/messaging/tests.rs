@@ -18,13 +18,13 @@ async fn register_signals_only(app_core: &Arc<RwLock<AppCore>>) {
 }
 
 #[tokio::test]
-async fn test_get_chat_state_default() {
+async fn test_observed_chat_default() {
     let config = AppConfig::default();
     let core = AppCore::new(config).unwrap();
     let app_core = Arc::new(RwLock::new(core));
     AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
-    let state = get_chat_state(&app_core).await.unwrap();
+    let state = observed_chat(&app_core).await;
     assert!(state.is_empty());
 }
 
@@ -946,7 +946,7 @@ async fn test_join_channel_by_name_local_creates_channel() {
         .await
         .expect("local join should create channel");
 
-    let state = get_chat_state(&app_core).await.unwrap();
+    let state = observed_chat(&app_core).await;
     let found = state
         .all_channels()
         .any(|channel| channel.name.eq_ignore_ascii_case("porch"));
@@ -967,7 +967,7 @@ async fn test_join_channel_by_name_local_is_idempotent() {
         .await
         .expect("second local join should be a no-op");
 
-    let state = get_chat_state(&app_core).await.unwrap();
+    let state = observed_chat(&app_core).await;
     let count = state
         .all_channels()
         .filter(|channel| channel.name.eq_ignore_ascii_case("porch"))
@@ -1007,7 +1007,7 @@ async fn test_join_channel_by_name_local_reuses_existing_channel_id() {
         .await
         .expect("join should reuse existing channel");
 
-    let state = get_chat_state(&app_core).await.unwrap();
+    let state = observed_chat(&app_core).await;
     let count = state
         .all_channels()
         .filter(|channel| channel.name.eq_ignore_ascii_case("slash-lab"))
@@ -1497,9 +1497,8 @@ async fn test_join_channel_success_implies_membership_ready_postcondition() {
 
     assert!(outcome.result.is_ok());
 
-    let channel_id = get_chat_state(&app_core)
+    let channel_id = observed_chat(&app_core)
         .await
-        .expect("chat state")
         .all_channels()
         .find(|channel| channel.name == "porch")
         .map(|channel| channel.id)
@@ -2345,7 +2344,7 @@ async fn test_leave_channel_by_name_uses_state_resolution_locally() {
         .await
         .expect("leave should remove channel by name");
 
-    let state = get_chat_state(&app_core).await.unwrap();
+    let state = observed_chat(&app_core).await;
     assert!(state.channel(&channel_id).is_none());
 }
 
@@ -2832,7 +2831,7 @@ fn invite_authority_handoff_spawns_post_success_followups_off_critical_path() {
         .find("pub async fn invite_authority_to_channel(")
         .expect("handoff invite_authority_to_channel definition");
     let end = source[start..]
-        .find("    }\n}\n\n/// Start a direct chat with a contact")
+        .find("    }\n}\n\n#[cfg(test)]")
         .map(|offset| start + offset)
         .expect("handoff invite_authority_to_channel end");
     let body = &source[start..end];
@@ -3002,7 +3001,7 @@ async fn assert_later_canonical_read_failure(read_number: usize, expected_join_c
         expected_join_calls,
         "a failed required read must not permit an additional join attempt"
     );
-    let chat = get_chat_state(&app_core).await.unwrap();
+    let chat = observed_chat(&app_core).await;
     assert!(
         chat.channel(&channel_id).is_none(),
         "failed required reads cannot project successful membership"
@@ -3073,9 +3072,8 @@ async fn note_to_self_creation_failure_stops_join_and_preserves_runtime_cause() 
     assert_amp_io_failure_source(&error);
     assert_eq!(runtime.amp_create_call_count(), 1);
     assert_eq!(runtime.amp_join_call_count(), 0);
-    assert!(get_chat_state(&app)
+    assert!(observed_chat(&app)
         .await
-        .unwrap()
         .channel(&note_to_self_channel_id(authority))
         .is_none());
 }
@@ -3093,11 +3091,7 @@ async fn note_to_self_join_failure_cannot_publish_canonical_channel() {
     assert_amp_io_failure_source(&error);
     assert_eq!(runtime.amp_create_call_count(), 1);
     assert_eq!(runtime.amp_join_call_count(), 1);
-    assert!(get_chat_state(&app)
-        .await
-        .unwrap()
-        .channel(&channel)
-        .is_none());
+    assert!(observed_chat(&app).await.channel(&channel).is_none());
 }
 
 #[tokio::test]
@@ -3111,9 +3105,8 @@ async fn direct_chat_creation_failure_stops_join_and_preserves_runtime_cause() {
     assert_amp_io_failure_source(&error);
     assert_eq!(runtime.amp_create_call_count(), 1);
     assert_eq!(runtime.amp_join_call_count(), 0);
-    assert!(get_chat_state(&app)
+    assert!(observed_chat(&app)
         .await
-        .unwrap()
         .channel(&pair_dm_channel_id(bridge.authority_id(), contact))
         .is_none());
 }

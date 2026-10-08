@@ -1697,6 +1697,31 @@
             "type": "object"
           },
           {
+            "description": "Progress of a key-rotation ceremony this account runs.",
+            "properties": {
+              "method": {
+                "const": "rotation_status",
+                "type": "string"
+              },
+              "params": {
+                "properties": {
+                  "ceremony_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ceremony_id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "method",
+              "params"
+            ],
+            "type": "object"
+          },
+          {
             "description": "Home storage budget.",
             "properties": {
               "method": {
@@ -2221,6 +2246,75 @@
         ],
         "type": "object"
       },
+      "CeremonyStatusView": {
+        "properties": {
+          "accepted": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "agreement_mode": {
+            "description": "`Provisional`, `CoordinatorSoftSafe` or `ConsensusFinalized`.",
+            "type": "string"
+          },
+          "ceremony_id": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "description": "The runtime's record of the ceremony kind, e.g. `GuardianRotation`.",
+            "type": "string"
+          },
+          "pending_epoch": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reversion_risk": {
+            "description": "Whether the outcome can still be reverted (not consensus-finalized).",
+            "type": "boolean"
+          },
+          "threshold": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ceremony_id",
+          "kind",
+          "accepted",
+          "total",
+          "threshold",
+          "complete",
+          "failed",
+          "agreement_mode",
+          "reversion_risk"
+        ],
+        "type": "object"
+      },
       "ChannelView": {
         "properties": {
           "channel_id": {
@@ -2669,6 +2763,22 @@
               },
               "type": {
                 "const": "ceremony_started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/CeremonyStatusView"
+              },
+              "type": {
+                "const": "ceremony_status",
                 "type": "string"
               }
             },

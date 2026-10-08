@@ -59,7 +59,7 @@ async fn created_home_channel_appears_in_creator_chat() -> Result<()> {
     let creator = net.testing_peer(63).await?;
     let app_core = &creator.app;
     let home_id = context::create_home(app_core, Some("ChatHome".to_string()), None).await?;
-    let chat = aura_app::ui::workflows::messaging::get_chat_state(app_core).await?;
+    let chat = aura_app::ui::workflows::messaging::observed_chat(app_core).await;
     let channel = chat
         .channel(&home_id)
         .expect("the creator's chat must list the created home channel");

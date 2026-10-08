@@ -339,10 +339,16 @@ pub fn guardians_parser() -> impl Parser<Request> {
 #[must_use]
 pub fn rotation_parser() -> impl Parser<Request> {
     let ceremony_id = positional::<String>("CEREMONY").help("Ceremony id");
-    construct!(Request::RotationCancel { ceremony_id })
+    let status = construct!(Request::RotationStatus { ceremony_id })
+        .to_options()
+        .command("status")
+        .help("Show a key-rotation ceremony's progress");
+    let ceremony_id = positional::<String>("CEREMONY").help("Ceremony id");
+    let cancel = construct!(Request::RotationCancel { ceremony_id })
         .to_options()
         .command("cancel")
-        .help("Cancel a key-rotation ceremony")
+        .help("Cancel a key-rotation ceremony");
+    construct!([status, cancel])
 }
 
 #[must_use]

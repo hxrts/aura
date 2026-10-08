@@ -112,6 +112,30 @@ pub fn render(response: &Response) -> CliOutput {
         Response::CeremonyStarted { ceremony_id } => {
             out.kv("Ceremony started", ceremony_id);
         }
+        Response::CeremonyStatus(c) => {
+            out.section("Ceremony");
+            out.kv("Id", &c.ceremony_id);
+            out.kv("Kind", &c.kind);
+            let state = if c.failed {
+                "failed"
+            } else if c.complete {
+                "complete"
+            } else {
+                "in progress"
+            };
+            out.kv("State", state);
+            out.kv(
+                "Accepted",
+                format!("{} of {} (threshold {})", c.accepted, c.total, c.threshold),
+            );
+            out.kv("Agreement", &c.agreement_mode);
+            if let Some(epoch) = c.pending_epoch {
+                out.kv("Pending epoch", epoch.to_string());
+            }
+            if let Some(error) = &c.error {
+                out.kv("Error", error);
+            }
+        }
         Response::NeighborhoodCreated { neighborhood_id } => {
             out.kv("Created neighborhood", neighborhood_id);
         }

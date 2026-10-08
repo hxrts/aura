@@ -283,8 +283,13 @@ async fn test_set_context_flow() {
     assert!(env.ctx.get_current_context().await.is_none());
 }
 
+/// Moderator commands refuse against the seeded HOMES_SIGNAL (already a
+/// moderator, not a moderator, not a member) and commit a valid grant. The
+/// resulting role change comes from the runtime's governance reducer, which
+/// this mock runtime does not run; aura-agent's
+/// `admit_op_deop_succeed_and_the_signal_follows_each_role` covers it.
 #[tokio::test]
-async fn test_moderator_role_flow() {
+async fn test_moderator_role_preconditions() {
     use aura_app::signal_defs::HOMES_SIGNAL;
     use aura_app::views::home::{HomeMember, HomeRole, HomeState};
     use aura_core::effects::reactive::ReactiveEffects;
@@ -312,7 +317,7 @@ async fn test_moderator_role_flow() {
         home.add_member(HomeMember {
             id: member1_id.clone(),
             name: "Alice".to_string(),
-            role: HomeRole::Member,
+            role: HomeRole::Moderator,
             is_online: true,
             joined_at: 0,
             last_seen: None,
@@ -332,67 +337,26 @@ async fn test_moderator_role_flow() {
         let mut homes = aura_app::views::home::HomesState::default();
         super::add_fixture_home(&mut homes, home);
         homes.select_home(Some(home_id));
-        core.views().set_homes(homes.clone());
         core.set_active_home_selection(Some(home_id));
         core.emit(&*HOMES_SIGNAL, homes)
             .await
             .expect("Failed to emit homes state");
     }
-
-    assert!(env
-        .ctx
-        .dispatch(EffectCommand::GrantModerator {
-            channel: None,
-            target: member1_id.to_string(),
-        })
-        .await
-        .is_ok());
-    {
-        let core = env.app_core.read().await;
-        let home = core
-            .views()
-            .get_homes()
-            .current_home()
-            .cloned()
-            .expect("home exists");
-        let member = home.member(&member1_id).expect("member exists");
-        assert!(matches!(member.role, HomeRole::Moderator));
-    }
-
-    assert!(env
-        .ctx
-        .dispatch(EffectCommand::RevokeModerator {
-            channel: None,
-            target: member1_id.to_string(),
-        })
-        .await
-        .is_ok());
-    {
-        let core = env.app_core.read().await;
-        let home = core
-            .views()
-            .get_homes()
-            .current_home()
-            .cloned()
-            .expect("home exists");
-        let member = home.member(&member1_id).expect("member exists");
-        assert!(matches!(member.role, HomeRole::Member));
-    }
-
-    assert!(env
-        .ctx
-        .dispatch(EffectCommand::GrantModerator {
-            channel: None,
-            target: owner_id.to_string(),
-        })
-        .await
-        .is_ok());
+    // The TUI's authorization pre-check reads the render snapshot, which the
+    // homes hook mirrors from HOMES_SIGNAL.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while env.ctx.get_current_role() != Some(HomeRole::Moderator) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the render snapshot follows the seeded HOMES_SIGNAL");
 
     let already_moderator = env
         .ctx
         .dispatch(EffectCommand::GrantModerator {
             channel: None,
-            target: owner_id.to_string(),
+            target: member1_id.to_string(),
         })
         .await
         .expect_err("existing moderator should fail");
@@ -415,7 +379,8 @@ async fn test_moderator_role_flow() {
     assert!(
         non_moderator_text.contains("not a moderator")
             || non_moderator_text.contains("revoke")
-            || non_moderator_text.contains("Moderator")
+            || non_moderator_text.contains("Moderator"),
+        "{non_moderator_text}"
     );
 
     let missing = env
@@ -433,13 +398,24 @@ async fn test_moderator_role_flow() {
             || missing_text_lower.contains("member")
             || missing_text.contains(&missing_id.to_string())
     );
+
+    assert!(env
+        .ctx
+        .dispatch(EffectCommand::GrantModerator {
+            channel: None,
+            target: member2_id.to_string(),
+        })
+        .await
+        .is_ok());
 }
 
 #[tokio::test]
 async fn test_neighborhood_navigation_flow() {
+    use aura_app::signal_defs::NEIGHBORHOOD_SIGNAL;
     use aura_app::views::neighborhood::{
         NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition,
     };
+    use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::types::identifiers::ChannelId;
 
     let env =
@@ -490,7 +466,9 @@ async fn test_neighborhood_navigation_flow() {
         });
         neighborhood.max_depth = 3;
         neighborhood.loading = false;
-        core.views().set_neighborhood(neighborhood);
+        core.emit(&*NEIGHBORHOOD_SIGNAL, neighborhood)
+            .await
+            .expect("Failed to emit neighborhood state");
     }
 
     assert!(env
@@ -511,7 +489,9 @@ async fn test_neighborhood_navigation_flow() {
             .expect("position after navigation");
         assert_eq!(position.current_home_id, alice_home_id);
         assert_eq!(position.current_home_name, "Alice's Home");
-        assert_eq!(position.depth, 2);
+        // A requested Full entry into a 1-hop neighbor the viewer is not a
+        // member of is clamped to Partial (docs/002 access levels; Task 63).
+        assert_eq!(position.depth, 1);
     }
 
     assert!(env

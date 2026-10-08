@@ -8,10 +8,10 @@
 use anyhow::{anyhow, Result};
 use async_lock::RwLock;
 use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, SharedTransport};
-use aura_app::ui::types::{AppConfig, AppCore};
+use aura_app::ui::types::{AppConfig, AppCore, ChatState};
 use aura_core::context::EffectContext;
 use aura_core::effects::ExecutionMode;
-use aura_core::types::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::types::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_terminal::command::CommandContext;
 use aura_terminal::rpc;
 use aura_testkit::time::QuiescentClock;
@@ -90,6 +90,41 @@ impl SimNet {
             ctx,
             id,
         })
+    }
+}
+
+impl Peer {
+    /// Wait until the render snapshot (`AppCore::snapshot`, which the TUI
+    /// draws) holds `content` in `channel`, then require it to agree with
+    /// the chat the workflows read (`messaging::observed_chat`, which reads CHAT_SIGNAL).
+    pub async fn chat_views_agree_on(&self, channel: &str, content: &str) -> Result<()> {
+        use aura_app::ui::workflows::messaging::observed_chat;
+        let channel: ChannelId = channel.parse().map_err(|e| anyhow!("{e:?}"))?;
+        let contents = |chat: &ChatState| -> Vec<String> {
+            chat.messages_for_channel(&channel)
+                .iter()
+                .map(|m| m.content.clone())
+                .collect()
+        };
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let rendered = contents(&self.app.read().await.snapshot().chat);
+            if rendered.iter().any(|c| c == content) {
+                let read = contents(&observed_chat(&self.app).await);
+                if rendered != read {
+                    return Err(anyhow!(
+                        "render snapshot {rendered:?} disagrees with chat state {read:?}"
+                    ));
+                }
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(anyhow!(
+                    "{content:?} never reached the render snapshot; it holds {rendered:?}"
+                ));
+            }
+            tokio::time::sleep(RECHECK).await;
+        }
     }
 }
 
