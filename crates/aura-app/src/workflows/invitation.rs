@@ -2172,6 +2172,112 @@ mod tests {
         }));
     }
 
+    #[cfg(feature = "signals")]
+    async fn device_enrollment_terminal_facts(
+        app_core: &Arc<RwLock<AppCore>>,
+        instance: Option<&OperationInstanceId>,
+    ) -> Vec<SemanticOperationPhase> {
+        read_signal_or_default(app_core, &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL)
+            .await
+            .iter()
+            .filter_map(|fact| match fact {
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id,
+                    status,
+                    ..
+                } if *operation_id == OperationId::device_enrollment()
+                    && instance_id.as_ref() == instance
+                    && matches!(
+                        status.phase,
+                        SemanticOperationPhase::Succeeded
+                            | SemanticOperationPhase::Failed
+                            | SemanticOperationPhase::Cancelled
+                    ) =>
+                {
+                    Some(status.phase)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Task 366: both acceptance entries delegate to the one annotated owner.
+    // The direct entry settles exactly one terminal for its owner, and the
+    // import entry settles exactly one terminal on the supplied instance.
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn direct_and_import_acceptance_entries_each_settle_one_terminal() {
+        let authority = AuthorityId::new_from_entropy([125u8; 32]);
+        let runtime = Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        runtime.set_accept_invitation_result(Err(crate::core::IntentError::service_error(
+            "enrollment acceptance refused",
+        )
+        .into()));
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> = runtime;
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        let invitation = InvitationInfo {
+            invitation_id: InvitationId::new("device-enrollment-direct-terminal"),
+            sender_id: AuthorityId::new_from_entropy([126u8; 32]),
+            receiver_id: authority,
+            invitation_type: InvitationBridgeType::DeviceEnrollment {
+                subject_authority: authority,
+                initiator_device_id: aura_core::DeviceId::new_from_entropy([127u8; 32]),
+                device_id: aura_core::DeviceId::new_from_entropy([128u8; 32]),
+                nickname_suggestion: None,
+                ceremony_id: aura_core::CeremonyId::new("device-enrollment-direct-terminal"),
+                pending_epoch: aura_core::Epoch(1),
+            },
+            status: crate::runtime_bridge::InvitationBridgeStatus::Pending,
+            created_at_ms: 1,
+            expires_at_ms: None,
+            message: None,
+            receiver_nickname: None,
+        };
+
+        accept_device_enrollment_invitation(&app_core, &invitation)
+            .await
+            .expect_err("refused acceptance must fail the direct entry");
+        assert_eq!(
+            device_enrollment_terminal_facts(&app_core, None).await,
+            vec![SemanticOperationPhase::Failed],
+            "direct entry settles exactly one terminal"
+        );
+
+        let instance = OperationInstanceId("device-enrollment-import-terminal".to_string());
+        let outcome = device_enrollment::import_device_enrollment_with_terminal_status(
+            &app_core,
+            "not-an-enrollment-code".to_string(),
+            None,
+            Some(instance.clone()),
+        )
+        .await;
+        assert!(
+            outcome.result.is_err(),
+            "missing manifest pin must fail import"
+        );
+        let terminal = outcome
+            .terminal
+            .expect("import entry publishes its terminal");
+        assert_eq!(terminal.status.phase, SemanticOperationPhase::Failed);
+        assert_eq!(
+            terminal.status.kind,
+            SemanticOperationKind::ImportDeviceEnrollmentCode
+        );
+        assert_eq!(
+            device_enrollment_terminal_facts(&app_core, Some(&instance)).await,
+            vec![SemanticOperationPhase::Failed],
+            "import entry settles exactly one terminal on the supplied instance"
+        );
+    }
     #[tokio::test]
     async fn authoritative_pending_home_invitation_prefers_received_pending_channel_invite() {
         let our_authority = AuthorityId::new_from_entropy([64u8; 32]);

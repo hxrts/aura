@@ -1645,4 +1645,75 @@ mod tests {
             &IntentError::validation_failed("bad input")
         ));
     }
+
+    // Task 1052: invalid setup input settles on the supplied handoff instance
+    // with exactly one terminal failure and no issuance success.
+    #[cfg(feature = "signals")]
+    #[tokio::test]
+    async fn invalid_setup_code_settles_once_on_the_supplied_instance() {
+        use crate::signal_defs::AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL;
+        use crate::ui_contract::AuthoritativeSemanticFact;
+        use crate::{AppConfig, AppCore};
+        let authority = AuthorityId::new_from_entropy([131u8; 32]);
+        let runtime: Arc<dyn crate::runtime_bridge::RuntimeBridge> =
+            Arc::new(crate::runtime_bridge::OfflineRuntimeBridge::new(authority));
+        let app_core = Arc::new(RwLock::new(
+            AppCore::with_runtime(AppConfig::default(), runtime).unwrap(),
+        ));
+        {
+            let core = app_core.read().await;
+            crate::signal_defs::register_app_signals(&*core)
+                .await
+                .unwrap();
+        }
+        let instance = OperationInstanceId("device-enrollment-setup-handoff".to_string());
+        let outcome = start_device_enrollment_ceremony_from_setup_code_with_terminal_status(
+            &app_core,
+            "Laptop".to_string(),
+            "not-a-setup-code".to_string(),
+            Some(instance.clone()),
+        )
+        .await;
+        assert!(outcome.result.is_err(), "invalid setup cannot issue a code");
+        let terminal = outcome
+            .terminal
+            .expect("invalid setup publishes a terminal");
+        assert_eq!(terminal.status.phase, SemanticOperationPhase::Failed);
+        assert_eq!(
+            terminal.status.kind,
+            SemanticOperationKind::StartDeviceEnrollment
+        );
+        assert!(
+            terminal.status.error.is_some(),
+            "failure carries a typed code"
+        );
+        let facts = crate::workflows::signals::read_signal_or_default(
+            &app_core,
+            &*AUTHORITATIVE_SEMANTIC_FACTS_SIGNAL,
+        )
+        .await;
+        let terminals: Vec<_> = facts
+            .iter()
+            .filter_map(|fact| match fact {
+                AuthoritativeSemanticFact::OperationStatus {
+                    operation_id,
+                    instance_id,
+                    status,
+                    ..
+                } if *operation_id == OperationId::device_enrollment()
+                    && instance_id.as_ref() == Some(&instance)
+                    && matches!(
+                        status.phase,
+                        SemanticOperationPhase::Succeeded
+                            | SemanticOperationPhase::Failed
+                            | SemanticOperationPhase::Cancelled
+                    ) =>
+                {
+                    Some(status.phase)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(terminals, vec![SemanticOperationPhase::Failed]);
+    }
 }
