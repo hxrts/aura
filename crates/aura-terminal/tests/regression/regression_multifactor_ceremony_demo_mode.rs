@@ -1,21 +1,14 @@
-//! Regression test: Multifactor ceremony fails when adding mobile device in demo mode.
+//! Regression test: a multifactor ceremony with a device that is not enrolled
+//! in the account fails at once with a clear reason (work/8.md Task 200).
 //!
-//! This test replicates the bug where the TUI shows:
-//! "Multifactor ceremony failed: Internal error: failed to st..."
-//!
-//! The issue occurs when:
-//! 1. User runs TUI in demo mode
-//! 2. User adds a mobile device (creates contact via DemoSimulator)
-//! 3. User initiates multifactor authority setup with that mobile device
-//! 4. The mobile device authority exists but doesn't have shared transport set up
-//!
-//! The ceremony fails because `send_envelope()` cannot deliver key packages to the
-//! mobile device authority. The error message is truncated and unclear.
-//!
-//! This test should FAIL (panic) until the bug is fixed. The fix should either:
-//! - Properly set up shared transport for mobile devices in demo mode
-//! - Provide a clear error message explaining that the device is unreachable
-//! - Gracefully handle the case when devices exist as contacts but aren't online
+//! The TUI demo once let a user add a contact's "mobile device" (a separate
+//! authority) and start a multifactor ceremony with it, which failed later with
+//! a truncated internal error. A multifactor ceremony re-keys the account's own
+//! enrolled devices, whose tree leaves authenticate the rotation; another
+//! authority's device joins through device enrollment first. Starting the
+//! ceremony with an unenrolled device is now refused before any key material is
+//! prepared. Rotation among enrolled devices is covered by the agent's
+//! `two_runtime_two_of_two_rotation_signs_with_both_device_shares`.
 
 #![cfg(feature = "development")]
 #![allow(
@@ -28,7 +21,6 @@
 
 use async_lock::RwLock;
 use std::sync::Arc;
-use std::time::Duration;
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::EffectContext;
@@ -46,382 +38,90 @@ use aura_terminal::tui::context::InitializedAppCore;
 #[path = "../support/mod.rs"]
 mod support;
 
-/// Regression test: Multifactor ceremony should fail gracefully when mobile device lacks transport.
-///
-/// This replicates the TUI bug where starting a multifactor ceremony with a mobile device
-/// contact (created in demo mode but without shared transport) results in:
-/// "Multifactor ceremony failed: Internal error: failed to st..."
-///
-/// Expected behavior: The ceremony should either:
-/// 1. Properly set up transport for mobile devices (preferred for demo mode)
-/// 2. Fail with a clear error about unreachable devices
-/// 3. Start but timeout waiting for device responses
-///
-/// Current behavior: Fails immediately with truncated "failed to st..." message.
 #[tokio::test]
-async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport() {
+async fn multifactor_ceremony_refuses_a_contacts_unenrolled_device() {
     let seed = 3024u64;
-    let test_dir = support::unique_test_dir("aura-multifactor-mobile-no-transport");
-
-    // === Setup: Create Bob's authority/context matching demo pattern ===
-    let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
-
-    // === Setup: Create mobile device authority (as demo would) ===
-    // In demo mode, DemoSimulator creates a mobile device authority but the TUI user
-    // adds it via contact fact without setting up shared transport for that device
-    let mobile_device_id_str = "demo:bob-mobile";
-    let mobile_authority_entropy =
-        hash::hash(format!("authority:{mobile_device_id_str}").as_bytes());
-    let mobile_authority = AuthorityId::new_from_entropy(mobile_authority_entropy);
-
-    let agent_config = AgentConfig {
-        device_id: ids::device_id(bob_device_id_str),
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-
-    // CRITICAL: Using build_simulation_async WITHOUT shared_transport
-    // This means the mobile device authority won't have a running agent
-    // This replicates the exact scenario from the TUI bug report
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async(seed, &effect_ctx)
-        .await
-        .expect("Failed to build simulation agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("Failed to create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-
-    let _initialized = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
-
-    // === Phase 1: Add mobile device as contact (mimicking TUI "add device" flow) ===
-    // In the TUI, user would see the mobile device and add it as a contact
-    // But the mobile device doesn't have shared transport set up
-    let contact_facts = vec![ContactFact::added_ms(
-        ContextId::new_from_entropy([3u8; 32]),
-        bob_authority,
-        mobile_authority,
-        "Bob's Mobile".to_string(),
-        1,
-        aura_relational::contacts::test_support::fresh(1),
-    )
-    .to_generic()];
-
-    agent
-        .clone()
-        .as_runtime_bridge()
-        .commit_relational_facts(&contact_facts)
-        .await
-        .expect("commit contact facts");
-
-    // Give signal time to update
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // === Phase 2: Get current device ID and Bob's device ID ===
-    // For multifactor, we need the DeviceId, not AuthorityId
-    // The current device (Bob's laptop) should be participating
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    let mobile_device_id = ids::device_id(mobile_device_id_str);
-
-    // === Phase 3: Attempt multifactor ceremony (THIS IS WHERE THE BUG MANIFESTS) ===
-    // The TUI calls initiate_device_threshold_ceremony with device IDs
-    // Since the mobile device authority exists but has no running agent with shared transport,
-    // the send_envelope() call at line 1519 in runtime_bridge/mod.rs fails
-
-    let threshold = FrostThreshold::new(2).expect("valid threshold");
-    let device_ids = vec![bob_device_id.to_string(), mobile_device_id.to_string()];
-
-    let result = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
-        &app_core, threshold, 2, device_ids,
-    )
-    .await
-    .map(|handle| handle.status_handle());
-
-    // === Phase 4: Assert on the result ===
-    // The ceremony should either succeed with proper transport setup
-    // OR fail with a clear, helpful error message
-
-    match result {
-        Ok(status_handle) => {
-            // If ceremony starts, check its status
-            println!(
-                "Multifactor ceremony started with ID: {}",
-                status_handle.ceremony_id()
-            );
-
-            // Wait a bit and check status
-            tokio::time::sleep(Duration::from_millis(500)).await;
-
-            let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-                &app_core,
-                &status_handle,
-            )
-            .await;
-
-            match status {
-                Ok(s) => {
-                    println!(
-                        "Ceremony status: complete={}, failed={}, error={:?}",
-                        s.is_complete, s.has_failed, s.error_message
-                    );
-
-                    if s.has_failed {
-                        let error_msg = s.error_message.unwrap_or_default();
-
-                        // Check if we got the improved error message
-                        if error_msg.contains("device is not reachable")
-                            || error_msg.contains("no running agent for device")
-                        {
-                            println!("SUCCESS: Clear error message about unreachable device");
-                        } else {
-                            panic!("REGRESSION: Ceremony failed with unclear error: {error_msg}");
-                        }
-                    } else if !s.is_complete {
-                        println!("Ceremony pending (acceptable - waiting for device responses)");
-                    }
-                }
-                Err(e) => {
-                    println!("Could not get ceremony status: {e}");
-                }
-            }
-        }
-        Err(e) => {
-            let error_str = e.to_string();
-
-            // Check for improved error message (this is what we want after the fix)
-            let has_improved_message = error_str.contains("device is not reachable")
-                || error_str.contains("Ensure the device is online and connected");
-
-            if has_improved_message {
-                println!(
-                    "SUCCESS: Multifactor ceremony failed with clear error message:\n{error_str}"
-                );
-                // Test passes - the improved error message is present
-            } else {
-                // This test should FAIL until we fix the underlying issue
-                panic!(
-                    "REGRESSION: Multifactor ceremony failed with unclear error message.\n\n\
-                     Error: {error_str}\n\n\
-                     Expected: Clear message like 'Device demo:bob-mobile is not reachable. \
-                     Ensure the device is online and connected to the network before starting \
-                     the multifactor ceremony.'\n\n\
-                     This test will pass once the fix is implemented to either:\n\
-                     1. Properly set up mobile devices with shared transport in demo mode, OR\n\
-                     2. Detect unreachable devices early and provide a clear error message\n\n\
-                     User-reported error: 'Multifactor ceremony failed: Internal error: failed to st...'"
-                );
-            }
-        }
-    }
-
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&test_dir);
-}
-
-/// Control test: Multifactor ceremony should work when mobile device has shared transport.
-///
-/// This test verifies that when the mobile device is properly set up with shared transport
-/// (as it should be in demo mode), the multifactor ceremony completes successfully.
-///
-/// The implementation now supports cross-authority device addition:
-/// - Each device has its own authority derived from its device_id
-/// - Key package envelopes are sent to the device's own authority
-/// - The target authority (for threshold signing) is passed via metadata
-/// - After ceremony completion, the device gains access to the target authority
-#[test]
-fn control_multifactor_ceremony_works_with_shared_transport() {
-    support::run_with_terminal_stack(|| {
-        control_multifactor_ceremony_works_with_shared_transport_body()
-    });
-}
-
-async fn control_multifactor_ceremony_works_with_shared_transport_body() {
-    use aura_terminal::demo::DemoSimulator;
-
-    let seed = 3025u64;
-    let test_dir = support::unique_test_dir("aura-multifactor-with-transport");
+    let test_dir = support::unique_test_dir("aura-multifactor-unenrolled-device");
 
     let bob_device_id_str = "demo:bob";
-    let bob_authority_entropy = hash::hash(format!("authority:{bob_device_id_str}").as_bytes());
-    let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
-    let bob_context_entropy = hash::hash(format!("context:{bob_device_id_str}").as_bytes());
-    let bob_context = ContextId::new_from_entropy(bob_context_entropy);
+    let bob_authority = AuthorityId::new_from_entropy(hash::hash(
+        format!("authority:{bob_device_id_str}").as_bytes(),
+    ));
+    let bob_context = ContextId::new_from_entropy(hash::hash(
+        format!("context:{bob_device_id_str}").as_bytes(),
+    ));
 
-    // Start demo simulator WITH shared transport
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
-        .await
-        .expect("create demo simulator");
-    simulator.start().await.expect("start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
-    let agent_config = AgentConfig {
-        device_id: ids::device_id(bob_device_id_str),
-        storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.clone(),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    let effect_ctx = EffectContext::new(
-        bob_authority,
-        bob_context,
-        ExecutionMode::Simulation { seed },
-    );
-
-    // Build WITH shared transport
-    let agent = AgentBuilder::new()
-        .with_config(agent_config)
-        .with_authority(bob_authority)
-        .build_simulation_async_with_shared_transport(seed, &effect_ctx, shared_transport.clone())
-        .await
-        .expect("build bob agent");
-    let agent = Arc::new(agent);
-
-    let app_config = AppConfig {
-        data_dir: test_dir.to_string_lossy().to_string(),
-        ..AppConfig::default()
-    };
-    let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .expect("create AppCore with runtime");
-    let app_core = Arc::new(RwLock::new(app_core));
-
-    let _initialized = InitializedAppCore::new(app_core.clone())
-        .await
-        .expect("init signals");
-
-    // Create a mobile device agent with shared transport
-    // IMPORTANT: The mobile device starts with its OWN authority (mobile_authority).
-    // It will gain access to bob_authority AFTER the multifactor ceremony completes.
-    // Devices can have multiple authorities - the ceremony adds bob_authority to the mobile device.
+    // The contact's device belongs to its own authority, not to Bob's account.
     let mobile_device_id_str = "demo:bob-mobile";
-    let mobile_device_id = ids::device_id(mobile_device_id_str);
-
-    // CRITICAL: The mobile device's authority MUST match what participant_identity_to_authority_id derives.
     let mobile_authority = AuthorityId::new_from_entropy(hash::hash(
         format!("authority:{mobile_device_id_str}").as_bytes(),
     ));
 
-    let mobile_context_entropy = hash::hash(format!("context:{mobile_device_id_str}").as_bytes());
-    let mobile_context = ContextId::new_from_entropy(mobile_context_entropy);
-
-    let mobile_agent_config = AgentConfig {
-        device_id: mobile_device_id,
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(bob_device_id_str),
         storage: aura_agent::core::config::StorageConfig {
-            base_path: test_dir.join("mobile"),
+            base_path: test_dir.clone(),
             ..Default::default()
         },
         ..Default::default()
     };
-
-    let mobile_effect_ctx = EffectContext::new(
-        mobile_authority, // Mobile device has its own authority initially
-        mobile_context,   // Mobile device has its own context
-        ExecutionMode::Simulation { seed: seed + 1 },
-    );
-
-    let mobile_agent = AgentBuilder::new()
-        .with_config(mobile_agent_config)
-        .with_authority(mobile_authority) // Starts with mobile_authority
-        .build_simulation_async_with_shared_transport(
-            seed + 1,
-            &mobile_effect_ctx,
-            shared_transport,
-        )
-        .await
-        .expect("build mobile agent");
-    let _mobile_agent = Arc::new(mobile_agent);
-
-    // Add mobile device as a contact so Bob can communicate with it
-    let contact_facts = vec![ContactFact::added_ms(
-        ContextId::new_from_entropy([4u8; 32]),
+    let effect_ctx = EffectContext::new(
         bob_authority,
-        mobile_authority,
-        "Bob's Mobile".to_string(),
-        1,
-        aura_relational::contacts::test_support::fresh(1),
-    )
-    .to_generic()];
+        bob_context,
+        ExecutionMode::Simulation { seed },
+    );
+    let agent = Arc::new(
+        AgentBuilder::new()
+            .with_config(agent_config)
+            .with_authority(bob_authority)
+            .build_simulation_async(seed, &effect_ctx)
+            .await
+            .expect("build simulation agent"),
+    );
+    let app_config = AppConfig {
+        data_dir: test_dir.to_string_lossy().to_string(),
+        ..AppConfig::default()
+    };
+    let app_core = Arc::new(RwLock::new(
+        AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
+            .expect("create AppCore with runtime"),
+    ));
+    let _initialized = InitializedAppCore::new(app_core.clone())
+        .await
+        .expect("init signals");
 
     agent
         .clone()
         .as_runtime_bridge()
-        .commit_relational_facts(&contact_facts)
+        .commit_relational_facts(&[ContactFact::added_ms(
+            ContextId::new_from_entropy([3u8; 32]),
+            bob_authority,
+            mobile_authority,
+            "Bob's Mobile".to_string(),
+            1,
+            aura_relational::contacts::test_support::fresh(1),
+        )
+        .to_generic()])
         .await
         .expect("commit contact facts");
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Start multifactor ceremony with both devices
-    let bob_device_id = ids::device_id(bob_device_id_str);
-    // mobile_device_id already defined above
-
-    let status_handle = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
+    let error = aura_app::ui::workflows::ceremonies::start_device_threshold_ceremony(
         &app_core,
         FrostThreshold::new(2).expect("valid threshold"),
         2,
-        vec![bob_device_id.to_string(), mobile_device_id.to_string()],
+        vec![
+            ids::device_id(bob_device_id_str).to_string(),
+            ids::device_id(mobile_device_id_str).to_string(),
+        ],
     )
     .await
-    .expect("device threshold ceremony should start with shared transport")
-    .status_handle();
-
-    println!(
-        "Control test: Multifactor ceremony started with ID: {}",
-        status_handle.ceremony_id()
+    .map(|handle| handle.status_handle())
+    .expect_err("a contact's device is not one of this account's enrolled devices");
+    let message = error.to_string();
+    assert!(
+        message.contains("is not enrolled in this account"),
+        "the refusal names the unenrolled device: {message}"
     );
 
-    // Wait for completion
-    let start = tokio::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
-        let status = aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-            &app_core,
-            &status_handle,
-        )
-        .await
-        .expect("get ceremony status");
-
-        if status.has_failed {
-            let error_signal = support::read_error_signal(&app_core).await;
-            panic!(
-                "Control test failed: {:?}, error_signal={error_signal:?}",
-                status.error_message
-            );
-        }
-
-        if status.is_complete {
-            println!("Control test: Multifactor ceremony completed successfully");
-            break;
-        }
-
-        if start.elapsed() > Duration::from_secs(20) {
-            panic!("Control test: Timed out waiting for multifactor ceremony completion")
-        }
-    }
-    simulator.stop().await.expect("stop demo simulator");
     let _ = std::fs::remove_dir_all(&test_dir);
 }
