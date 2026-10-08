@@ -56,6 +56,7 @@ fn cli_opens_a_created_account_in_production_and_routes_to_a_running_node() {
         .unwrap()
         .block_on(aura_terminal::handlers::tui::create_account(
             data.path(),
+            aura_terminal::handlers::tui::TuiMode::Production,
             "Alex",
         ))
         .unwrap();

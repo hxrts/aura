@@ -9,6 +9,7 @@ use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_core::effects::ExecutionMode;
 use aura_core::DeviceId;
+use aura_terminal::handlers::tui::{create_account, TuiMode};
 
 pub async fn provisional_invitee_setup(
     storage_path: &Path,
@@ -16,8 +17,10 @@ pub async fn provisional_invitee_setup(
     seed: u64,
     shared_transport: SharedTransport,
 ) -> (Arc<AuraAgent>, String) {
+    // Staged in the demo store, as `aura --demo` does, which this simulation
+    // runtime then opens.
     let (authority, context) =
-        aura_terminal::handlers::tui::create_account(storage_path, "EnrollmentInvitee")
+        create_account(storage_path, TuiMode::Demo { seed }, "EnrollmentInvitee")
             .await
             .expect("create actual provisional invitee account");
     let effects = EffectContext::new(authority, context, ExecutionMode::Simulation { seed });
