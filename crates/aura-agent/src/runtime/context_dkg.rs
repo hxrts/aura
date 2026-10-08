@@ -60,6 +60,9 @@ pub(crate) struct LocalDeviceKeys {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct ScopedDkgMessage {
     scope: ChannelKeyScope,
+    /// The ceremony attempt (`DkgConfig::operation_hash`): a retried
+    /// ceremony for the same epoch never mixes with an earlier attempt.
+    ceremony: aura_core::Hash32,
     message: ContextDkgMessage,
 }
 
@@ -111,12 +114,17 @@ impl DkgSealer for DeviceSealer<'_> {
 async fn send(
     effects: &AuraEffectSystem,
     scope: ChannelKeyScope,
+    ceremony: aura_core::Hash32,
     peers: &BTreeMap<AuthorityId, ContextDkgPeer>,
     to: &[AuthorityId],
     message: ContextDkgMessage,
 ) -> Result<(), AuraError> {
-    let bytes = aura_core::util::serialization::to_vec(&ScopedDkgMessage { scope, message })
-        .map_err(|error| AuraError::serialization(error.to_string()))?;
+    let bytes = aura_core::util::serialization::to_vec(&ScopedDkgMessage {
+        scope,
+        ceremony,
+        message,
+    })
+    .map_err(|error| AuraError::serialization(error.to_string()))?;
     for recipient in to {
         let peer = peers
             .get(recipient)
@@ -134,6 +142,7 @@ async fn send(
 fn decode_dkg_envelope(
     envelope: &TransportEnvelope,
     scope: ChannelKeyScope,
+    ceremony: aura_core::Hash32,
     epoch: u64,
     peers: &BTreeMap<AuthorityId, ContextDkgPeer>,
 ) -> Option<ContextDkgMessage> {
@@ -144,7 +153,8 @@ fn decode_dkg_envelope(
     }
     let scoped: ScopedDkgMessage =
         aura_core::util::serialization::from_slice(&envelope.payload).ok()?;
-    (scoped.scope == scope && scoped.message.epoch == epoch).then_some(scoped.message)
+    (scoped.scope == scope && scoped.ceremony == ceremony && scoped.message.epoch == epoch)
+        .then_some(scoped.message)
 }
 
 /// Run this device's side of a channel key DKG to completion (or until
@@ -160,6 +170,7 @@ pub(crate) async fn run_context_dkg(
     use aura_core::effects::RandomCoreEffects;
     let me = aura_guards::GuardContextProvider::authority_id(effects);
     let epoch = config.epoch;
+    let ceremony = config.operation_hash;
     let peers: BTreeMap<AuthorityId, ContextDkgPeer> = peers
         .iter()
         .filter(|peer| peer.authority != me)
@@ -174,13 +185,22 @@ pub(crate) async fn run_context_dkg(
     };
     let mut rng = rand::rngs::StdRng::from_seed(effects.random_bytes_32().await);
     let (mut session, broadcast) = ContextDkgSession::start(config, me, &mut rng)?;
-    send(effects, scope, &peers, &broadcast.to, broadcast.message).await?;
+    send(
+        effects,
+        scope,
+        ceremony,
+        &peers,
+        &broadcast.to,
+        broadcast.message,
+    )
+    .await?;
 
     for _ in 0..max_polls {
-        while let Ok(envelope) = effects
-            .take_inbound_envelope(|env| decode_dkg_envelope(env, scope, epoch, &peers).is_some())
-        {
-            let Some(message) = decode_dkg_envelope(&envelope, scope, epoch, &peers) else {
+        while let Ok(envelope) = effects.take_inbound_envelope(|env| {
+            decode_dkg_envelope(env, scope, ceremony, epoch, &peers).is_some()
+        }) {
+            let Some(message) = decode_dkg_envelope(&envelope, scope, ceremony, epoch, &peers)
+            else {
                 continue;
             };
             // The transport authenticated the envelope's source; a message
@@ -195,12 +215,17 @@ pub(crate) async fn run_context_dkg(
             }
             let (outgoing, output) = session.receive(message, &sealer).await?;
             for out in outgoing {
-                send(effects, scope, &peers, &out.to, out.message).await?;
+                send(effects, scope, ceremony, &peers, &out.to, out.message).await?;
             }
             if let Some(output) = output {
                 return Ok(output);
             }
         }
+        // Members still fetching device keys may be waiting on ours.
+        super::device_key_exchange::process_device_key_messages(effects, |peer, scope| {
+            super::device_key_exchange::runtime_known_peer(effects, peer, scope)
+        })
+        .await?;
         aura_core::effects::time::PhysicalTimeEffects::sleep_ms(effects, RECEIVE_POLL_MS)
             .await
             .map_err(|error| AuraError::internal(error.to_string()))?;

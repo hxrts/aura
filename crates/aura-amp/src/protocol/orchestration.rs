@@ -262,21 +262,30 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
         .secure_retrieve(&location, &[SecureStorageCapability::Read])
         .await
         .map_err(|e| AuraError::internal(format!("Failed to read AMP bootstrap key: {e}")))?;
+    message_key_from_master(&key_bytes, context, channel, header, sender)
+}
 
-    if key_bytes.len() != 32 {
+/// The message key under `master` (an epoch's channel key), bound to the
+/// sender: generations are per-sender and the AEAD nonce comes from the
+/// header, so two senders sharing a generation must never share a key.
+fn message_key_from_master(
+    master: &[u8],
+    context: ContextId,
+    channel: ChannelId,
+    header: &AmpHeader,
+    sender: AuthorityId,
+) -> Result<aura_core::Hash32> {
+    if master.len() != 32 {
         return Err(AuraError::invalid(format!(
-            "AMP bootstrap key has invalid length: {}",
-            key_bytes.len()
+            "AMP channel key has invalid length: {}",
+            master.len()
         )));
     }
 
     let mut key = [0u8; 32];
-    key.copy_from_slice(&key_bytes);
+    key.copy_from_slice(master);
     let master_key = aura_core::Hash32::new(key);
 
-    // Bind the key to the sender: generations are per-sender, and the AEAD nonce
-    // is derived from the header, so two senders sharing a generation must never
-    // share a key.
     let mut key_context = Vec::with_capacity(32 + 16);
     key_context.extend_from_slice(context.as_bytes());
     key_context.extend_from_slice(&sender.to_bytes());
@@ -288,9 +297,12 @@ async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
         header.chan_epoch,
         header.ratchet_gen,
     )
-    .map_err(|e| AuraError::crypto(format!("AMP bootstrap KDF failed: {e}")))
+    .map_err(|e| AuraError::crypto(format!("AMP message KDF failed: {e}")))
 }
 
+/// The message key of `header`: epoch 0 uses the bootstrap dealer key;
+/// every later epoch uses that epoch's channel key from the members' key
+/// ceremony (docs/112 §4), which only members of that epoch hold.
 async fn derive_channel_message_key<E: SecureStorageEffects>(
     effects: &E,
     context: ContextId,
@@ -299,6 +311,21 @@ async fn derive_channel_message_key<E: SecureStorageEffects>(
     header: &AmpHeader,
     sender: AuthorityId,
 ) -> Result<aura_core::Hash32> {
+    if header.chan_epoch >= 1 {
+        let location =
+            SecureStorageLocation::amp_channel_base_key(&context, &channel, header.chan_epoch);
+        let key = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .map_err(|e| AuraError::PermissionDenied {
+                message: format!(
+                    "no channel key for epoch {} of {channel}",
+                    header.chan_epoch
+                ),
+                source: Some(std::sync::Arc::new(e)),
+            })?;
+        return message_key_from_master(&key, context, channel, header, sender);
+    }
     let bootstrap = state.bootstrap.as_ref().ok_or_else(|| {
         AuraError::invalid(format!(
             "AMP channel {} missing bootstrap key material for epoch {}",
@@ -338,6 +365,21 @@ pub fn validate_header(
     state: &ChannelEpochState,
     header: AmpHeader,
 ) -> Result<(RatchetDerivation, (u64, u64))> {
+    // An earlier epoch: a member that holds that epoch's key still reads its
+    // messages (history); the key lookup decides, and replay markers guard
+    // duplicates. Its generation window is anchored at the header itself.
+    if header.chan_epoch < state.chan_epoch {
+        let historical = aura_transport::amp::AmpRatchetState {
+            chan_epoch: header.chan_epoch,
+            last_checkpoint_gen: header.ratchet_gen,
+            skip_window: u64::from(state.skip_window),
+            pending_epoch: None,
+        };
+        let bounds = aura_transport::amp::window_bounds(header.ratchet_gen, historical.skip_window);
+        return derive_for_recv(&historical, header)
+            .map(|deriv| (deriv, bounds))
+            .map_err(map_amp_error);
+    }
     let ratchet_state = ratchet_from_epoch_state(state);
     let bounds = aura_transport::amp::window_bounds(
         ratchet_state.last_checkpoint_gen,
@@ -775,7 +817,7 @@ mod tests {
     ) -> ChannelEpochState {
         ChannelEpochState {
             canonical_checkpoint: None,
-            chan_epoch: 1,
+            chan_epoch: 0,
             pending_bump: None,
             bootstrap: Some(ChannelBootstrap {
                 context,
@@ -938,7 +980,7 @@ mod tests {
         let header = AmpHeader {
             context,
             channel,
-            chan_epoch: 1,
+            chan_epoch: 0,
             ratchet_gen: 7,
         };
         let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
@@ -990,6 +1032,66 @@ mod tests {
             .aes_gcm_decrypt_with_aad(&ciphertext, &key.0, &nonce, &wrong_aad)
             .await
             .is_err());
+    }
+
+    /// Task 164: an epoch >= 1 message key comes from that epoch's channel
+    /// key, which only its members hold; the bootstrap key never opens it,
+    /// and a member still validates an earlier epoch's header (history).
+    #[tokio::test]
+    async fn later_epochs_need_their_epoch_key_and_earlier_epochs_stay_readable() {
+        let storage = ProductionSecureStorageHandler::filesystem_fallback_for_non_production(
+            test_paths("epoch-keys"),
+        );
+        let context = ContextId::new_from_entropy([31; 32]);
+        let channel = ChannelId::from_bytes([32; 32]);
+        let sender = AuthorityId::new_from_entropy([33; 32]);
+        let bootstrap_key = [34u8; 32];
+        let bootstrap_id = aura_core::Hash32::from_bytes(&bootstrap_key);
+        let mut state = bootstrap_state(context, channel, sender, vec![], bootstrap_id);
+        storage
+            .secure_store(
+                &SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id),
+                &bootstrap_key,
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .unwrap();
+        let header = |chan_epoch| AmpHeader {
+            context,
+            channel,
+            chan_epoch,
+            ratchet_gen: 3,
+        };
+        assert!(
+            derive_channel_message_key(&storage, context, channel, &state, &header(1), sender)
+                .await
+                .is_err(),
+            "without the epoch-1 key, the bootstrap key does not open epoch 1"
+        );
+        storage
+            .secure_store(
+                &SecureStorageLocation::amp_channel_base_key(&context, &channel, 1),
+                &[35u8; 32],
+                &[SecureStorageCapability::Write],
+            )
+            .await
+            .unwrap();
+        let epoch_one =
+            derive_channel_message_key(&storage, context, channel, &state, &header(1), sender)
+                .await
+                .unwrap();
+        let epoch_zero =
+            derive_channel_message_key(&storage, context, channel, &state, &header(0), sender)
+                .await
+                .unwrap();
+        assert_ne!(epoch_one, epoch_zero);
+
+        state.chan_epoch = 2;
+        assert!(
+            validate_header(&state, header(1)).is_ok(),
+            "an earlier epoch's header stays valid for a member holding its key"
+        );
+        assert!(validate_header(&state, header(3)).is_err());
     }
 
     #[tokio::test]

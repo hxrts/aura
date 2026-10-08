@@ -1125,6 +1125,21 @@ impl<'a> InvitationContactHandler<'a> {
                                 continue;
                             }
                         }
+                        // An epoch commit must verify against the group key
+                        // this member holds for that epoch.
+                        if let Some(detail) =
+                            InvitationContextSync::epoch_commit_refusal(effects.as_ref(), inner)
+                                .await
+                        {
+                            effects.record_message_drop(MessageDrop::inbound_intake(
+                                sender,
+                                context,
+                                Some(fact),
+                                MessageDropReason::PeerFactRejected { detail },
+                            ));
+                            in_flight_envelope = None;
+                            continue;
+                        }
                         // A membership event written for someone else needs
                         // an author with standing (inviter or moderator).
                         if let Some(reason) =

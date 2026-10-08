@@ -15,10 +15,6 @@
 //! if the coordinator has standing in the channel and the participant is on
 //! the roster; nothing in the invite selects a device key.
 
-// The coordinator entry point is driven by the membership-change trigger
-// (Task 164 step 5); until then only tests and the participant loop call in.
-#![allow(dead_code)]
-
 use super::context_dkg::{
     derive_channel_base_key, run_context_dkg, store_context_dkg_output, ChannelKeyScope,
     ContextDkgPeer, LocalDeviceKeys,
@@ -51,6 +47,8 @@ pub(crate) struct ChannelKeyInvite {
     /// The roster, in FROST identifier order.
     pub participants: Vec<AuthorityId>,
     pub coordinator: AuthorityId,
+    /// This attempt of the ceremony; a retry gets a fresh one.
+    pub ceremony: Hash32,
 }
 
 impl ChannelKeyInvite {
@@ -81,7 +79,15 @@ impl ChannelKeyInvite {
             threshold: (n / 2 + 1).max(2),
             participants,
             coordinator,
+            ceremony: Hash32::default(),
         })
+    }
+
+    /// This invitation as attempt `ceremony` (a retry needs a fresh one).
+    #[must_use]
+    pub(crate) fn with_ceremony(mut self, ceremony: Hash32) -> Self {
+        self.ceremony = ceremony;
+        self
     }
 
     fn validate(&self) -> Result<(), AuraError> {
@@ -111,7 +117,7 @@ impl ChannelKeyInvite {
             membership_hash: Hash32::from_bytes(&roster),
             cutoff: 0,
             prestate_hash: Hash32::default(),
-            operation_hash: Hash32::default(),
+            operation_hash: self.ceremony,
             participants: self.participants.clone(),
         })
     }
@@ -213,7 +219,18 @@ pub(crate) async fn record_verified_device_key(
 async fn ceremony_peers(
     effects: &AuraEffectSystem,
     invite: &ChannelKeyInvite,
+    max_polls: u32,
 ) -> Result<Vec<ContextDkgPeer>, AuraError> {
+    // Fetch any member's device key not yet held, over the authenticated
+    // transport, from members with standing in this channel.
+    super::device_key_exchange::ensure_device_keys(
+        effects,
+        &invite.participants,
+        Some(invite.scope),
+        |peer, scope| super::device_key_exchange::runtime_known_peer(effects, peer, scope),
+        max_polls,
+    )
+    .await?;
     let mut peers = Vec::with_capacity(invite.participants.len());
     for authority in &invite.participants {
         let entry = verified_device_key(effects, *authority)
@@ -240,7 +257,7 @@ pub(crate) async fn run_channel_key_ceremony(
     max_polls: u32,
 ) -> Result<[u8; 32], AuraError> {
     invite.validate()?;
-    let peers = ceremony_peers(effects, invite).await?;
+    let peers = ceremony_peers(effects, invite, max_polls).await?;
     let local = local_ceremony_keys(effects).await?;
     let config = invite.dkg_config()?;
     let output = run_context_dkg(
@@ -277,7 +294,7 @@ pub(crate) async fn coordinate_channel_key_ceremony(
             "only the coordinator sends channel key invites",
         ));
     }
-    let peers = ceremony_peers(effects, invite).await?;
+    let peers = ceremony_peers(effects, invite, max_polls).await?;
     let bytes = aura_core::util::serialization::to_vec(invite)
         .map_err(|error| AuraError::serialization(error.to_string()))?;
     for peer in peers.iter().filter(|peer| peer.authority != me) {

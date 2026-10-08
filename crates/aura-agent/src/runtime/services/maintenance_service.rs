@@ -366,10 +366,49 @@ impl RuntimeMaintenanceService {
         // (Task 164): a coordinator needs standing in the channel.
         let ceremony_effects = self.effects.clone();
         let ceremony_service = self.clone();
+        let consensus_witness =
+            crate::runtime::channel_consensus::ChannelConsensusWitness::default();
         let ceremony_round = move || {
             let effects = ceremony_effects.clone();
             let service = ceremony_service.clone();
+            let witness = consensus_witness.clone();
             async move {
+                // Witness channel epoch consensus rounds of coordinators with
+                // standing in the channel.
+                if let Err(error) = witness
+                    .process(effects.as_ref(), |scope, coordinator| {
+                        let effects = effects.clone();
+                        async move {
+                            aura_amp::channel_membership_observations(
+                                effects.as_ref(),
+                                scope.context,
+                                scope.channel,
+                            )
+                            .await
+                            .map(|observed| observed.has_standing(coordinator))
+                        }
+                    })
+                    .await
+                {
+                    tracing::warn!(%error, "channel consensus witness failed");
+                }
+                // Answer device-key requests and admit announcements first:
+                // another member's ceremony may be waiting for this key.
+                if let Err(error) =
+                    crate::runtime::device_key_exchange::process_device_key_messages(
+                        effects.as_ref(),
+                        |peer, scope| {
+                            crate::runtime::device_key_exchange::runtime_known_peer(
+                                effects.as_ref(),
+                                peer,
+                                scope,
+                            )
+                        },
+                    )
+                    .await
+                {
+                    tracing::warn!(%error, "device key exchange failed");
+                }
                 let standing_effects = effects.clone();
                 let standing =
                     move |invite: crate::runtime::channel_key_ceremony::ChannelKeyInvite| {
@@ -430,6 +469,68 @@ impl RuntimeMaintenanceService {
                     time_effects.clone(),
                     Duration::from_millis(500),
                     ceremony_round,
+                );
+            }
+        }
+
+        // Rekey channels whose members changed, as their coordinator
+        // (Task 164): the key follows membership by ceremony and consensus.
+        let rekey_effects = self.effects.clone();
+        let rekey_round = move || {
+            let effects = rekey_effects.clone();
+            async move {
+                use aura_core::effects::reactive::ReactiveEffects;
+                let Ok(chat) = effects
+                    .reactive_handler()
+                    .read(&*aura_app::signal_defs::CHAT_SIGNAL)
+                    .await
+                else {
+                    return true;
+                };
+                let scopes: Vec<crate::runtime::context_dkg::ChannelKeyScope> = chat
+                    .all_channels()
+                    .filter_map(|channel| {
+                        channel.context_id.map(|context| {
+                            crate::runtime::context_dkg::ChannelKeyScope {
+                                context,
+                                channel: channel.id,
+                            }
+                        })
+                    })
+                    .collect();
+                for scope in scopes {
+                    if let Err(error) = crate::runtime::channel_rekey::rekey_channel_if_changed(
+                        effects.as_ref(),
+                        scope,
+                        crate::runtime::channel_rekey::REKEY_MAX_POLLS,
+                    )
+                    .await
+                    {
+                        tracing::debug!(
+                            context = %scope.context,
+                            channel = %scope.channel,
+                            %error,
+                            "channel rekey not completed"
+                        );
+                    }
+                }
+                true
+            }
+        };
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _rekey_task_handle = tasks.spawn_local_interval_until_named(
+                    "channel_rekey",
+                    time_effects.clone(),
+                    Duration::from_secs(1),
+                    rekey_round,
+                );
+            } else {
+                let _rekey_task_handle = tasks.spawn_interval_until_named(
+                    "channel_rekey",
+                    time_effects.clone(),
+                    Duration::from_secs(1),
+                    rekey_round,
                 );
             }
         }

@@ -190,18 +190,6 @@ async fn seed_authority_route_descriptor_if_needed(
 
 #[aura_macros::capability_boundary(
     category = "capability_gated",
-    capability = "secure_storage_bootstrap",
-    capability_type = SecureStorageCapability,
-    family = "runtime_helper"
-)]
-fn secure_storage_bootstrap_boundary(
-    capabilities: &[SecureStorageCapability],
-) -> &[SecureStorageCapability] {
-    capabilities
-}
-
-#[aura_macros::capability_boundary(
-    category = "capability_gated",
     capability = "secure_storage_bootstrap_read_write",
     capability_type = SecureStorageCapability,
     family = "runtime_helper"
@@ -870,7 +858,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         context: ContextId,
         channel: ChannelId,
         recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError> {
+    ) -> Result<Option<ChannelBootstrapPackage>, RuntimeBridgeError> {
         if recipients.is_empty() {
             return Err(bridge_validation_message("bootstrap recipients cannot be empty").into());
         }
@@ -904,38 +892,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             requested_recipients.insert(recipient);
         }
 
-        // A late joiner receives the existing epoch-0 key: the channel
-        // invitation carries it to the recipient (docs/112 §1.2). The
-        // bootstrap fact keeps listing the dealer's initial recipients.
-        if let Some(existing) = existing_bootstrap {
-            let location = SecureStorageLocation::amp_bootstrap_key(
-                &context,
-                &channel,
-                &existing.bootstrap_id,
-            );
-            let read_capabilities =
-                secure_storage_bootstrap_boundary(&[SecureStorageCapability::Read]);
-            let key = effects
-                .secure_retrieve(&location, read_capabilities)
-                .await
-                .map_err(|e| {
-                    RuntimeBridgeError::with_source(
-                        IntentError::storage_error("Load AMP bootstrap key failed"),
-                        e,
-                    )
-                })?;
-            if key.len() != 32 {
-                return Err(IntentError::validation_failed(format!(
-                    "AMP bootstrap key has invalid length: {}",
-                    key.len()
-                ))
-                .into());
-            }
-
-            return Ok(ChannelBootstrapPackage {
-                bootstrap_id: existing.bootstrap_id,
-                key,
-            });
+        // A later member never receives the existing epoch-0 key: it reads
+        // only messages sent after it joins, under the epoch its join's key
+        // ceremony starts (docs/112 §1.2.1).
+        if existing_bootstrap.is_some() {
+            return Ok(None);
         }
 
         let key_bytes = effects.random_bytes_32().await;
@@ -977,10 +938,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| map_amp_error(aura_core::effects::amp::AmpChannelError::Effect(e)))?;
 
-        Ok(ChannelBootstrapPackage {
+        Ok(Some(ChannelBootstrapPackage {
             bootstrap_id,
             key: key_bytes.to_vec(),
-        })
+        }))
     }
 
     async fn amp_channel_state_exists(

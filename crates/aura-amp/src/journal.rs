@@ -132,6 +132,32 @@ impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> 
 pub async fn list_channel_bootstraps<A: AmpJournalEffects>(
     effects: &A,
 ) -> Result<Vec<(ContextId, ChannelId, aura_core::Hash32)>> {
+    Ok(reduce_all_channels(effects)
+        .await?
+        .into_iter()
+        .filter_map(|(context, channel, state)| {
+            state
+                .bootstrap
+                .map(|bootstrap| (context, channel, bootstrap.bootstrap_id))
+        })
+        .collect())
+}
+
+/// Every channel in this journal with its reduced epoch, as
+/// `(context, channel, chan_epoch)`.
+pub async fn list_channel_epochs<A: AmpJournalEffects>(
+    effects: &A,
+) -> Result<Vec<(ContextId, ChannelId, u64)>> {
+    Ok(reduce_all_channels(effects)
+        .await?
+        .into_iter()
+        .map(|(context, channel, state)| (context, channel, state.chan_epoch))
+        .collect())
+}
+
+async fn reduce_all_channels<A: AmpJournalEffects>(
+    effects: &A,
+) -> Result<Vec<(ContextId, ChannelId, aura_journal::ChannelEpochState)>> {
     let journal = effects.get_journal().await?;
     let contents = extract_fact_contents(&journal);
     let mut contexts: Vec<ContextId> = contents
@@ -143,7 +169,7 @@ pub async fn list_channel_bootstraps<A: AmpJournalEffects>(
         .collect();
     contexts.sort();
     contexts.dedup();
-    let mut bootstraps = Vec::new();
+    let mut channels = Vec::new();
     for context in contexts {
         let state =
             reduce_context(&build_context_journal(context, contents.clone())).map_err(|error| {
@@ -153,12 +179,10 @@ pub async fn list_channel_bootstraps<A: AmpJournalEffects>(
                 }
             })?;
         for (channel, epoch_state) in state.channel_epochs {
-            if let Some(bootstrap) = epoch_state.bootstrap {
-                bootstraps.push((context, channel, bootstrap.bootstrap_id));
-            }
+            channels.push((context, channel, epoch_state));
         }
     }
-    Ok(bootstraps)
+    Ok(channels)
 }
 
 /// Reduce to AMP channel state for a (context, channel) pair.

@@ -40,6 +40,7 @@ pub mod choreography;
 pub mod config;
 pub mod consensus;
 pub mod core;
+pub mod epoch_commit;
 pub mod epoch_transition_choreography;
 pub mod evidence;
 pub mod journal;
@@ -53,8 +54,8 @@ pub mod wire;
 
 pub use journal::{
     channel_membership_observations, get_channel_state, get_reduced_channel_state,
-    list_channel_bootstraps, list_channel_participants, AmpContextStore, AmpJournalEffects,
-    ChannelStateUnavailable,
+    list_channel_bootstraps, list_channel_epochs, list_channel_participants, AmpContextStore,
+    AmpJournalEffects, ChannelStateUnavailable,
 };
 
 // ============================================================================
@@ -72,6 +73,9 @@ pub use evidence::{
 pub use channel::{
     AmpChannelCoordinator, ChannelMembershipFact, ChannelMembershipFactReducer,
     ChannelMembershipObservations, ChannelParticipantEvent, CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
+};
+pub use epoch_commit::{
+    ChannelEpochCommitFact, ChannelEpochCommitFactReducer, CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID,
 };
 
 // ============================================================================

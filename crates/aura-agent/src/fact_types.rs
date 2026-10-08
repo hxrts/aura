@@ -44,6 +44,7 @@ pub static FACT_TYPE_IDS: Lazy<Vec<&'static str>> = Lazy::new(|| {
         RENDEZVOUS_FACT_TYPE_ID,
         RECOVERY_FACT_TYPE_ID,
         aura_amp::CHANNEL_MEMBERSHIP_FACT_TYPE_ID,
+        aura_amp::CHANNEL_EPOCH_COMMIT_FACT_TYPE_ID,
         SOCIAL_FACT_TYPE_ID,
         HOME_MUTE_FACT_TYPE_ID,
         HOME_UNMUTE_FACT_TYPE_ID,

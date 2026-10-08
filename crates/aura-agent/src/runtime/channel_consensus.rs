@@ -12,10 +12,6 @@
 //! the key ceremony produced that key (the DKG transcript is finalized by the
 //! same consensus). No witness share leaves its runtime.
 
-// The coordinator entry point is driven by the membership-change trigger
-// (Task 164 step 5); until then only tests and the witness loop call in.
-#![allow(dead_code)]
-
 use super::channel_key_ceremony::verified_device_key;
 use super::context_dkg::{load_context_key_package, load_roster, ChannelKeyScope};
 use super::AuraEffectSystem;

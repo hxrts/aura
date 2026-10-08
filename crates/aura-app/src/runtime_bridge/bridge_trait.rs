@@ -166,13 +166,16 @@ pub trait RuntimeBridge: Send + Sync {
         params: ChannelCreateParams,
     ) -> Result<ChannelId, crate::runtime_bridge::RuntimeBridgeError>;
 
-    /// Create or retrieve a bootstrap key for provisional AMP messaging.
+    /// Create the bootstrap key for provisional AMP messaging (epoch 0) for a
+    /// new channel. For a channel that already has one it returns `None`: a
+    /// later member never receives the epoch-0 key, so it reads only what is
+    /// sent after it joins (docs/112 §1.2.1).
     async fn amp_create_channel_bootstrap(
         &self,
         context: ContextId,
         channel: ChannelId,
         recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError>;
+    ) -> Result<Option<ChannelBootstrapPackage>, RuntimeBridgeError>;
 
     /// Return whether canonical AMP state is materialized for the given channel.
     ///

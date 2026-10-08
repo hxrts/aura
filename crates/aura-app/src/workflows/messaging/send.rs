@@ -1291,7 +1291,7 @@ pub async fn start_direct_chat_with_authority(
             channel_id.to_string(),
             Some(context_id),
             Some(channel_name.clone()),
-            Some(bootstrap),
+            bootstrap,
             None,
             None,
             None,

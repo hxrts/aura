@@ -140,11 +140,11 @@ pub(crate) async fn exchange_facts_with_sibling(
         .map_err(|error| sibling_codec_error("encode journal facts", error))?;
     // Held bootstrap keys are part of the digest, so a sibling missing a key
     // still runs the full exchange after the channel facts have converged.
-    let held_keys = held_bootstrap_keys(effects).await?;
+    let held_keys = held_amp_keys(effects).await?;
     let held_ids = aura_core::util::serialization::to_vec(
         &held_keys
             .iter()
-            .map(|key| (key.context, key.channel, key.bootstrap_id))
+            .map(|key| (key.context, key.channel, key.kind))
             .collect::<Vec<_>>(),
     )
     .map_err(|error| sibling_codec_error("encode held key ids", error))?;
@@ -199,7 +199,7 @@ pub(crate) async fn exchange_facts_with_sibling(
     // AMP bootstrap keys never enter the journal (docs/112_amp.md §1.2.1); they
     // travel sealed to the sibling device's leaf key. They go first so the
     // chat view can open messages as soon as their facts arrive.
-    let sealed = seal_bootstrap_keys(effects, authority, peer, &held_keys).await?;
+    let sealed = seal_amp_keys(effects, authority, peer, &held_keys).await?;
     send_frame(effects, peer, &SiblingFactsFrame::AmpKeys(sealed)).await?;
     let SiblingFactsFrame::AmpKeys(peer_sealed) = receive_expected(
         effects,
@@ -218,7 +218,7 @@ pub(crate) async fn exchange_facts_with_sibling(
         "sibling bootstrap key step"
     );
     if let (Some(peer_sealed), Some(secret)) = (peer_sealed, key_agreement_secret) {
-        store_bootstrap_keys(effects, authority, &peer_sealed, &secret).await?;
+        store_amp_keys(effects, authority, &peer_sealed, &secret).await?;
     }
 
     send_frame(
@@ -323,44 +323,74 @@ async fn exchange_fact_batches(
     Ok(imported)
 }
 
-/// One AMP channel bootstrap key, as held in this device's secure storage.
+/// Which AMP channel key: the epoch-0 bootstrap key, or a later epoch's
+/// channel key from the members' key ceremony.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+enum SiblingAmpKeyKind {
+    Bootstrap(aura_core::Hash32),
+    Epoch(u64),
+}
+
+/// One AMP channel key, as held in this device's secure storage.
 #[derive(Serialize, Deserialize)]
-struct SiblingBootstrapKey {
+struct SiblingAmpKey {
     context: aura_core::types::identifiers::ContextId,
     channel: aura_core::types::identifiers::ChannelId,
-    bootstrap_id: aura_core::Hash32,
+    kind: SiblingAmpKeyKind,
     key: Vec<u8>,
 }
 
-const SIBLING_AMP_KEYS_PURPOSE: &str = "aura.sibling.amp-bootstrap-keys";
+const SIBLING_AMP_KEYS_PURPOSE: &str = "aura.sibling.amp-channel-keys";
 
-fn bootstrap_key_location(key: &SiblingBootstrapKey) -> aura_core::effects::SecureStorageLocation {
-    aura_core::effects::SecureStorageLocation::amp_bootstrap_key(
-        &key.context,
-        &key.channel,
-        &key.bootstrap_id,
-    )
-}
-
-async fn held_bootstrap_keys(
-    effects: &AuraEffectSystem,
-) -> Result<Vec<SiblingBootstrapKey>, AuraError> {
-    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
-    let mut held = Vec::new();
-    for (context, channel, bootstrap_id) in aura_amp::list_channel_bootstraps(effects).await? {
-        let location = aura_core::effects::SecureStorageLocation::amp_bootstrap_key(
-            &context,
-            &channel,
-            &bootstrap_id,
-        );
-        if let Ok(key) = effects
-            .secure_retrieve(&location, &[SecureStorageCapability::Read])
-            .await
-        {
-            held.push(SiblingBootstrapKey {
+fn amp_key_location(
+    context: &aura_core::types::identifiers::ContextId,
+    channel: &aura_core::types::identifiers::ChannelId,
+    kind: SiblingAmpKeyKind,
+) -> aura_core::effects::SecureStorageLocation {
+    match kind {
+        SiblingAmpKeyKind::Bootstrap(bootstrap_id) => {
+            aura_core::effects::SecureStorageLocation::amp_bootstrap_key(
                 context,
                 channel,
-                bootstrap_id,
+                &bootstrap_id,
+            )
+        }
+        SiblingAmpKeyKind::Epoch(epoch) => {
+            aura_core::effects::SecureStorageLocation::amp_channel_base_key(context, channel, epoch)
+        }
+    }
+}
+
+/// Every AMP channel key this device holds: bootstrap keys of its channels
+/// and the channel key of each consensus-committed epoch (Task 164), so a
+/// sibling device of this authority reads the same epochs.
+async fn held_amp_keys(effects: &AuraEffectSystem) -> Result<Vec<SiblingAmpKey>, AuraError> {
+    use aura_core::effects::{SecureStorageCapability, SecureStorageEffects};
+    let mut wanted: Vec<(_, _, SiblingAmpKeyKind)> = aura_amp::list_channel_bootstraps(effects)
+        .await?
+        .into_iter()
+        .map(|(context, channel, bootstrap_id)| {
+            (context, channel, SiblingAmpKeyKind::Bootstrap(bootstrap_id))
+        })
+        .collect();
+    for (context, channel, chan_epoch) in aura_amp::list_channel_epochs(effects).await? {
+        wanted.extend(
+            (1..=chan_epoch).map(|epoch| (context, channel, SiblingAmpKeyKind::Epoch(epoch))),
+        );
+    }
+    let mut held = Vec::new();
+    for (context, channel, kind) in wanted {
+        if let Ok(key) = effects
+            .secure_retrieve(
+                &amp_key_location(&context, &channel, kind),
+                &[SecureStorageCapability::Read],
+            )
+            .await
+        {
+            held.push(SiblingAmpKey {
+                context,
+                channel,
+                kind,
                 key,
             });
         }
@@ -380,11 +410,11 @@ async fn device_leaf_public_key(
         .map(|leaf| Vec::from(&leaf.public_key)))
 }
 
-async fn seal_bootstrap_keys(
+async fn seal_amp_keys(
     effects: &AuraEffectSystem,
     authority: aura_core::AuthorityId,
     peer: DeviceId,
-    held: &[SiblingBootstrapKey],
+    held: &[SiblingAmpKey],
 ) -> Result<Option<aura_sync::protocols::device_sealed::DeviceSealedPayload>, AuraError> {
     // A sibling not yet in the tree has no verified key to seal to.
     let peer_public_key = device_leaf_public_key(effects, peer).await?;
@@ -414,7 +444,7 @@ async fn seal_bootstrap_keys(
     .map(Some)
 }
 
-async fn store_bootstrap_keys(
+async fn store_amp_keys(
     effects: &AuraEffectSystem,
     authority: aura_core::AuthorityId,
     sealed: &aura_sync::protocols::device_sealed::DeviceSealedPayload,
@@ -436,12 +466,12 @@ async fn store_bootstrap_keys(
         sealed,
     )
     .await?;
-    let keys: Vec<SiblingBootstrapKey> = aura_core::util::serialization::from_slice(&bundle)
+    let keys: Vec<SiblingAmpKey> = aura_core::util::serialization::from_slice(&bundle)
         .map_err(|error| sibling_codec_error("decode bootstrap keys", error))?;
     let mut newly_keyed = std::collections::BTreeSet::new();
     tracing::debug!(received = keys.len(), "opened bootstrap keys from sibling");
     for key in keys {
-        let location = bootstrap_key_location(&key);
+        let location = amp_key_location(&key.context, &key.channel, key.kind);
         if effects.secure_exists(&location).await.unwrap_or(false) {
             continue;
         }

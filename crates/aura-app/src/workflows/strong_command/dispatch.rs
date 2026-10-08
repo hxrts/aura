@@ -239,7 +239,8 @@ pub(super) async fn execute_general(
                 Ok(runtime) => runtime
                     .amp_create_channel_bootstrap(home_context, home_id, vec![target.0])
                     .await
-                    .ok(),
+                    .ok()
+                    .flatten(),
                 Err(_) => None,
             };
             invitation::create_channel_invitation(

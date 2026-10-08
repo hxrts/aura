@@ -533,7 +533,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _context: ContextId,
         _channel: ChannelId,
         _recipients: Vec<AuthorityId>,
-    ) -> Result<ChannelBootstrapPackage, RuntimeBridgeError> {
+    ) -> Result<Option<ChannelBootstrapPackage>, RuntimeBridgeError> {
         Err(IntentError::no_agent("AMP bootstrap not available in offline mode").into())
     }
 
