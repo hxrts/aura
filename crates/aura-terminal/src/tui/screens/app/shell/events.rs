@@ -412,12 +412,14 @@ mod tests {
     fn slash_command_dispatch_uses_shared_typed_execution_and_owner_metadata() {
         let source = read_repo_source("crates/aura-terminal/src/tui/callbacks/factories/chat.rs");
 
-        assert!(source.contains("ui::workflows::slash_commands::prepare("));
-        assert!(source.contains("ui::workflows::strong_command::execute_planned("));
+        assert!(source.contains("ui::workflows::slash_commands::prepare_and_execute("));
         assert!(source.contains("let report ="));
         assert!(source.contains(".and_then(|metadata| metadata.semantic_operation.clone())"));
         assert!(source.contains("submit_local_terminal_operation("));
-        assert!(!source.contains("ui::workflows::slash_commands::prepare_and_execute("));
+        assert!(!source.contains("ui::workflows::strong_command::execute_planned("));
+        let workflow = read_repo_source("crates/aura-app/src/workflows/slash_commands.rs");
+        assert!(workflow.contains(".plan("));
+        assert!(workflow.contains("execute_planned("));
         assert!(!source.contains("parse_chat_command(trimmed)"));
     }
 
