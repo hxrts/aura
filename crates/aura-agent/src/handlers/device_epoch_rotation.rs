@@ -268,7 +268,7 @@ impl DeviceEpochRotationService {
                     .await
                     .map_err(map_internal_error)?;
                 session
-                    .inject_blocked_receive(&blocked)
+                    .inject_blocked_receive(blocked)
                     .map_err(map_internal_error)?;
 
                 let commit = if threshold_reached {
@@ -717,10 +717,12 @@ impl DeviceEpochRotationService {
                         from_slice(&blocked.payload).map_err(map_decode_error)?;
                     self.apply_commit(proposal, &commit).await?;
                     self.record_native_session(session_uuid).await;
-                    // The commit is the participant's final protocol step;
-                    // the verified, applied commit completes its session.
-                    let _ = session.close().await;
-                    return Ok(true);
+                    // Deliver the commit to the VM; the session completes
+                    // through its own protocol end.
+                    session
+                        .inject_blocked_receive(blocked)
+                        .map_err(map_internal_error)?;
+                    continue;
                 }
                 let proposal: DeviceEpochProposal =
                     from_slice(&blocked.payload).map_err(map_decode_error)?;
@@ -736,7 +738,7 @@ impl DeviceEpochRotationService {
                 self.stage_proposal(&proposal).await?;
                 let acceptance = self.build_signed_acceptance(&proposal).await?;
                 session
-                    .inject_blocked_receive(&blocked)
+                    .inject_blocked_receive(blocked)
                     .map_err(map_internal_error)?;
                 session.queue_send_bytes(to_vec(&acceptance).map_err(map_encode_error)?);
                 staged_proposal = Some(proposal);

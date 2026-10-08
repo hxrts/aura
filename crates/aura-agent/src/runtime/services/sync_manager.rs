@@ -1176,7 +1176,7 @@ impl SyncServiceManager {
                         commit_queued = true;
                     }
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| SyncManagerError::VmRoundHandling(error.to_string()))?;
                     continue;
                 }

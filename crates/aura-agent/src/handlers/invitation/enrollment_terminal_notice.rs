@@ -601,7 +601,7 @@ pub(super) async fn receive_cancelled_notice(
                     window
                         .map_run_error("verified terminal notice", TimeoutRunError::Timeout(source))
                 })?;
-            session.inject_blocked_receive(&blocked).map_err(stage)?;
+            session.inject_blocked_receive(blocked).map_err(stage)?;
             // Signed evidence is returned only after this finite VM finishes.
             loop {
                 let round = session

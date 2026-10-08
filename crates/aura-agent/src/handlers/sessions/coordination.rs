@@ -646,7 +646,7 @@ impl SessionOperations {
                         branch_queued = true;
                     }
                     session
-                        .inject_blocked_receive(&blocked)
+                        .inject_blocked_receive(blocked)
                         .map_err(|error| AgentError::internal(error.to_string()))?;
                     continue;
                 }
