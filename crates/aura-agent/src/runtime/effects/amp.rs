@@ -11,12 +11,6 @@ use aura_journal::DomainFact;
 use aura_protocol::amp::{AmpJournalEffects, ChannelParticipantEvent};
 use aura_protocol::effects::TreeEffects;
 
-impl aura_protocol::amp::AmpSendSequencerProvider for AuraEffectSystem {
-    fn amp_send_sequencer(&self) -> &aura_protocol::amp::AmpSendSequencer {
-        &self.amp_send_sequencer
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl AmpChannelEffects for AuraEffectSystem {

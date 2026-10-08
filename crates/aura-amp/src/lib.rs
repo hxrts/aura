@@ -85,8 +85,7 @@ pub use epoch_commit::{
 pub use protocol::{
     amp_open_committed, amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus,
     emit_proposed_bump, emit_soft_safe_bump, prepare_send, validate_header, AmpDelivery,
-    AmpReceipt, AmpSendGeneration, AmpSendSequencer, AmpSendSequencerProvider, AmpTelemetry,
-    WindowValidationResult, AMP_TELEMETRY,
+    AmpReceipt, AmpTelemetry, WindowValidationResult, AMP_TELEMETRY,
 };
 
 // ============================================================================

@@ -447,10 +447,9 @@ verified nullifier, never only by a caller convention. Two layers apply.
   `#[must_use]`. It names exactly the next sequence, and admitting a frame
   consumes it. Delivered frames are not `Clone`, so delivery consumes them
   too. Re-injecting or forging an admission does not compile.
-- `DurableSequenceOwner<D>` reserves and persists its `SequenceStore` counter
-  under its own lock before handing out an admission. Concurrent callers never
-  share a value, and a restart never reissues one. The owner serves one store
-  identity; AMP send generations use one owner per sender cursor.
+- `DurableSequenceOwner<D, S>` reserves and persists the counter under its
+  owner before handing out an admission. Concurrent callers therefore never
+  share a generation, and a restart never reissues one.
 - `NonceOwner<K>` builds every AEAD nonce for key `K` itself. Raw-nonce AEAD
   entry points are private to the effect implementation.
 - `FrostNonces` is not `Clone` or serializable, and it is zeroized on drop.

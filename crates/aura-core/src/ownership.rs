@@ -1272,8 +1272,6 @@ impl<OperationId, InstanceId, Trace, Phase> OwnerPublication
     }
 }
 
-pub mod sequence;
-
 /// Explicit actor-owned ownership surface.
 pub mod actor_owned {
     pub use super::{
