@@ -252,25 +252,36 @@ wait_seconds="${AURA_BUILD_WAIT_SECONDS:-0}"
 waited=0
 lock_dir="$root/target/.aura-build-budget.lock"
 mkdir -p "$root/target"
-until mkdir "$lock_dir" 2>/dev/null; do
-  # A holder killed before its EXIT trap leaves its lock behind (Task 216):
-  # reclaim a lock whose recorded pid is no longer alive, as the admission
-  # lock does. A lock without a pid yet may be a holder starting up.
-  holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
-  if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
-    echo "build-budget: reclaiming $lock_dir from dead holder pid $holder" >&2
-    rm -f "$lock_dir/pid"
-    rmdir "$lock_dir" 2>/dev/null || true
-    continue
-  fi
-  if (( waited >= wait_seconds )); then
-    echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
-    exit 1
-  fi
-  sleep "$poll_seconds"
-  waited=$((waited + poll_seconds))
-done
-printf '%s\n' "$$" > "$lock_dir/pid"
+holds_lock=0
+acquire_checkout_lock() {
+  until mkdir "$lock_dir" 2>/dev/null; do
+    # A holder killed before its EXIT trap leaves its lock behind (Task 216):
+    # reclaim a lock whose recorded pid is no longer alive, as the admission
+    # lock does. A lock without a pid yet may be a holder starting up.
+    holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [[ "$holder" =~ ^[0-9]+$ ]] && ! kill -0 "$holder" 2>/dev/null; then
+      echo "build-budget: reclaiming $lock_dir from dead holder pid $holder" >&2
+      rm -f "$lock_dir/pid"
+      rmdir "$lock_dir" 2>/dev/null || true
+      continue
+    fi
+    if (( waited >= wait_seconds )); then
+      echo "build-budget: another budgeted build holds $lock_dir (or a stale lock needs review)" >&2
+      exit 1
+    fi
+    sleep "$poll_seconds"
+    waited=$((waited + poll_seconds))
+  done
+  printf '%s\n' "$$" > "$lock_dir/pid"
+  holds_lock=1
+}
+release_checkout_lock() {
+  (( holds_lock == 1 )) || return 0
+  rm -f "$lock_dir/pid"
+  rmdir "$lock_dir" 2>/dev/null || true
+  holds_lock=0
+}
+acquire_checkout_lock
 child_pid=''
 stop_owned_group() {
   local pid="$1" attempt
@@ -288,8 +299,7 @@ cleanup() {
     wait "$child_pid" 2>/dev/null || true
   fi
   [[ -z "$reservation" ]] || rm -f "$reservation"
-  rm -f "$lock_dir/pid"
-  rmdir "$lock_dir" 2>/dev/null || true
+  release_checkout_lock
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -314,8 +324,13 @@ pre_target="$(target_kib strict)"
 printf 'Pre-build: free=%s KiB target=%s KiB\n' "$pre_free" "$pre_target"
 until admit_build; do
   (( waited < wait_seconds )) || exit 1
+  # Free space comes from prune-inactive-lane, which needs this checkout's
+  # lock; release it while waiting for admission (Task 218: run 175's ship
+  # held it and deadlocked the prune that would have admitted it).
+  release_checkout_lock
   sleep "$poll_seconds"
   waited=$((waited + poll_seconds))
+  acquire_checkout_lock
 done
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

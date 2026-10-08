@@ -391,6 +391,28 @@ reset_case
 mkdir "$project/target/.aura-build-budget.lock"
 expect_status 1 run_budget --no-prune -- sh -c 'touch "$FREE_FILE.nopid-ran"'
 [[ ! -e "$FREE_FILE.nopid-ran" ]]
+# Task 218: a build waiting for volume admission releases the checkout lock,
+# so a prune (which needs that lock) can free space; the build then admits.
+reset_case
+printf '%s\n' $((14 * 1024 * 1024)) > "$FREE_FILE"
+(
+  for _ in $(seq 1 150); do
+    if mkdir "$project/target/.aura-build-budget.lock" 2>/dev/null; then
+      printf '%s\n' $((20 * 1024 * 1024)) > "$FREE_FILE"
+      touch "$FREE_FILE.pruned"
+      rmdir "$project/target/.aura-build-budget.lock"
+      exit 0
+    fi
+    sleep 0.2
+  done
+  exit 1
+) &
+pruner=$!
+expect_status 0 env AURA_BUILD_POLL_SECONDS=1 AURA_BUILD_WAIT_SECONDS=30 bash "$repo_root/scripts/dev/build-budget.sh" \
+  --root "$project" --lane test -- sh -c 'touch "$FREE_FILE.admitted-after-prune"'
+wait "$pruner"
+[[ -e "$FREE_FILE.pruned" && -e "$FREE_FILE.admitted-after-prune" ]]
+[[ ! -d "$project/target/.aura-build-budget.lock" ]]
 # The gate recipes' cargo goes through the budget.
 for recipe in _policy-check _ownership-lint web-check; do
   awk -v r="$recipe" '$0 ~ "^"r"[ :]" {on=1; next} on && /^[^ \t]/ {on=0} on' "$repo_root/justfile" \
